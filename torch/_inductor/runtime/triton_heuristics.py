@@ -1867,7 +1867,7 @@ def grid_combo_kernels(
         numels_agg = list(numels)
         for i in range(len(numels_agg)):
             if isinstance(numels_agg[i], (list, tuple)):
-                numels_agg[i] = max(max(numels_agg[i]), 0)
+                numels_agg[i] = max(max(numels_agg[i]), 0)  # noqa: PLW3301
         kernel_grid_fn = grid(*numels_agg)
 
         if isinstance(numels[-1], (list, tuple)):

@@ -3,7 +3,18 @@ import logging
 import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Type, Union, Iterable
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+    Iterable,
+)
 
 from sympy import Integer, Symbol
 
@@ -321,10 +332,10 @@ class ComboKernel(Kernel):
             dynamic_shape: bool,
         ) -> Tuple[Any, ...]:
             xnumel = list(x_blocks_list)
-            ynumel: Optional[Union[List[Any], int]] = [
+            ynumel: Any = [
                 e[-2] if len(e) > 1 else None for e in sub_kernel_numels
             ]
-            znumel: Optional[Union[List[Any], int]] = [
+            znumel: Any = [
                 e[-3] if len(e) > 2 else None for e in sub_kernel_numels
             ]
 
@@ -396,21 +407,21 @@ class ComboKernel(Kernel):
                 if any(e is None for e in xnumel)
                 else xnumel
                 if dynamic_shape
-                else max(xnumel_x_dim)
+                else max(cast(Iterable[int], xnumel_x_dim))
             )
             ynumel = (
                 None
                 if any(e is None for e in ynumel)
                 else ynumel
                 if dynamic_shape
-                else max(cast(List[int], ynumel))
+                else max(cast(Iterable[int], ynumel))
             )
             znumel = (
                 None
                 if any(e is None for e in znumel)
                 else znumel
                 if dynamic_shape
-                else max(cast(List[int], znumel))
+                else max(cast(Iterable[int], znumel))
             )
 
             numels = (
@@ -792,7 +803,7 @@ class ComboKernel(Kernel):
                     arg_types.append(type(expr))
 
     def add_numel_to_call_args_and_grid_benchmark(
-        self, extra_args: List[Any], grid: List[Any]
+        self, extra_args: List[Any], grid: Union[List[Any], Tuple[Any, ...]]
     ) -> None:
         for num, sub_kernel in enumerate(self.sub_kernels):
             for i, tree in enumerate(sub_kernel.range_trees):
