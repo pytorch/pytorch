@@ -10,12 +10,11 @@
 #pragma once
 
 #include <ATen/cuda/tunable/GemmCommon.h>
-#ifdef USE_CUDA
-#include <ATen/cuda/tunable/GemmCublasLt.h>
-#endif
 #ifdef USE_ROCM
 #include <ATen/cuda/tunable/GemmHipblaslt.h>
 #include <ATen/cuda/tunable/GemmRocblas.h>
+#elifdef USE_CUDA
+#include <ATen/cuda/tunable/GemmCublasLt.h>
 #endif
 #include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/tunable/TunableOp.h>
@@ -193,19 +192,6 @@ inline std::string TypeName(c10::complex<float> v) {
   return "c10::complex<float>";
 }
 
-#ifdef USE_CUDA
-static void AddCudaValidator() {
-  auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
-  if (validators.find("CUDA_VERSION") == validators.end()) {
-    std::string cuda_version = c10::str(CUDA_VERSION);
-    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
-        "CUDA_VERSION",
-        [cuda_version]() { return cuda_version; },
-        [cuda_version](auto&& k) { return cuda_version == k ? OK : FAIL; });
-  }
-}
-#endif
-
 #ifdef USE_ROCM
 static void AddRocblasValidator() {
   auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
@@ -255,6 +241,17 @@ static void AddRocmValidator() {
         [gcn_arch_name](auto&& k) { return gcn_arch_name == k ? OK : FAIL; });
   }
 }
+#elifdef USE_CUDA
+static void AddCudaValidator() {
+  auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
+  if (validators.find("CUDA_VERSION") == validators.end()) {
+    std::string cuda_version = c10::str(CUDA_VERSION);
+    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
+        "CUDA_VERSION",
+        [cuda_version]() { return cuda_version; },
+        [cuda_version](auto&& k) { return cuda_version == k ? OK : FAIL; });
+  }
+}
 #endif
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
@@ -262,22 +259,6 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
  public:
   GemmTunableOp(const GemmParams<T>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
-
-#ifdef USE_CUDA
-    bool cuda_validators = false;
-
-    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
-    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
-      cuda_validators = true;
-      for (auto&& [name, op] : GetCublasLtGemmTypeStringAndOps<T, ALayout, BLayout>(params)) {
-        this->RegisterOp(std::move(name), std::move(op));
-      }
-    }
-
-    if (cuda_validators) {
-      AddCudaValidator();
-    }
-#endif
 
 #ifdef USE_ROCM
     static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
@@ -298,6 +279,20 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
         }
       }
     }
+#elifdef USE_CUDA
+    bool cuda_validators = false;
+
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      cuda_validators = true;
+      for (auto&& [name, op] : GetCublasLtGemmTypeStringAndOps<T, ALayout, BLayout>(params)) {
+        this->RegisterOp(std::move(name), std::move(op));
+      }
+    }
+
+    if (cuda_validators) {
+      AddCudaValidator();
+    }
 #endif
   }
 
@@ -309,7 +304,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer> {
  public:
-  GemmAndBiasTunableOp() {
+  GemmAndBiasTunableOp(const GemmAndBiasParams<T>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
 
 #ifdef USE_ROCM
@@ -324,6 +319,17 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
         }
       }
     }
+#elifdef USE_CUDA
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      if constexpr (
+          !std::is_same_v<T, c10::complex<float>> &&
+          !std::is_same_v<T, c10::complex<double>>) {
+        for (auto&& [name, op] : GetCublasLtGemmAndBiasTypeStringAndOps<T, ALayout, BLayout>(params)) {
+          this->RegisterOp(std::move(name), std::move(op));
+        }
+      }
+   }
 #endif
   }
 
@@ -337,22 +343,6 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
  public:
   GemmStridedBatchedTunableOp(const GemmStridedBatchedParams<T>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
-
-#ifdef USE_CUDA
-    bool cuda_validators = false;
-
-    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
-    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
-      cuda_validators = true;
-      for (auto&& [name, op] : GetCublasLtStridedBatchedGemmTypeStringAndOps<T, ALayout, BLayout>(params)) {
-        this->RegisterOp(std::move(name), std::move(op));
-      }
-    }
-
-    if (cuda_validators) {
-      AddCudaValidator();
-    }
-#endif
 
 #ifdef USE_ROCM
     static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
@@ -373,6 +363,20 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
         }
       }
     }
+#elifdef USE_CUDA
+    bool cuda_validators = false;
+
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      cuda_validators = true;
+      for (auto&& [name, op] : GetCublasLtStridedBatchedGemmTypeStringAndOps<T, ALayout, BLayout>(params)) {
+        this->RegisterOp(std::move(name), std::move(op));
+      }
+    }
+
+    if (cuda_validators) {
+      AddCudaValidator();
+    }
 #endif
   }
 
@@ -389,7 +393,11 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
 
     auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
 
-#ifdef USE_CUDA
+#if defined(USE_ROCM)
+    for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
+      this->RegisterOp(std::move(name), std::move(op));
+    }
+#elifdef USE_CUDA
     bool cuda_validators = false;
 
     static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
@@ -402,12 +410,6 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
 
     if (cuda_validators) {
       AddCudaValidator();
-    }
-#endif
-
-#if defined(USE_ROCM)
-    for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
-      this->RegisterOp(std::move(name), std::move(op));
     }
 #endif
   }

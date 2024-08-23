@@ -16,6 +16,11 @@ int GetBatchFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+int GetBatchFromParams(const GemmAndBiasParams<T>* params) {
+    return 1;
+}
+
+template <typename T>
 int GetBatchFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->batch;
 }
@@ -27,6 +32,11 @@ int GetBatchFromParams(const ScaledGemmParams<T>* params) {
 
 template <typename T>
 int GetStrideAFromParams(const GemmParams<T>* params) {
+    return 1;
+}
+
+template <typename T>
+int GetStrideAFromParams(const GemmAndBiasParams<T>* params) {
     return 1;
 }
 
@@ -46,6 +56,11 @@ int GetStrideBFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+int GetStrideBFromParams(const GemmAndBiasParams<T>* params) {
+    return 1;
+}
+
+template <typename T>
 int GetStrideBFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->stride_a;
 }
@@ -57,6 +72,11 @@ int GetStrideBFromParams(const ScaledGemmParams<T>* params) {
 
 template <typename T>
 int GetStrideCFromParams(const GemmParams<T>* params) {
+    return 1;
+}
+
+template <typename T>
+int GetStrideCFromParams(const GemmAndBiasParams<T>* params) {
     return 1;
 }
 
@@ -76,6 +96,11 @@ at::opmath_type<T> GetAlphaFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+at::opmath_type<T> GetAlphaFromParams(const GemmAndBiasParams<T>* params) {
+    return params->alpha;
+}
+
+template <typename T>
 at::opmath_type<T> GetAlphaFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->alpha;
 }
@@ -91,6 +116,11 @@ at::opmath_type<T> GetBetaFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+at::opmath_type<T> GetBetaFromParams(const GemmAndBiasParams<T>* params) {
+    return 0.0;
+}
+
+template <typename T>
 at::opmath_type<T> GetBetaFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->beta;
 }
@@ -102,6 +132,11 @@ at::opmath_type<T> GetBetaFromParams(const ScaledGemmParams<T>* params) {
 
 template <typename T>
 const void* GetAScalePointerFromParams(const GemmParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
+const void* GetAScalePointerFromParams(const GemmAndBiasParams<T>* params) {
   return nullptr;
 }
 
@@ -121,6 +156,11 @@ const void* GetBScalePointerFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+const void* GetBScalePointerFromParams(const GemmAndBiasParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
 const void* GetBScalePointerFromParams(const GemmStridedBatchedParams<T>* params) {
   return nullptr;
 }
@@ -132,6 +172,11 @@ const void* GetBScalePointerFromParams(const ScaledGemmParams<T>* params) {
 
 template <typename T>
 const void* GetDScalePointerFromParams(const GemmParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
+const void* GetDScalePointerFromParams(const GemmAndBiasParams<T>* params) {
   return nullptr;
 }
 
@@ -151,6 +196,11 @@ const void* GetAmaxPointerFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+const void* GetAmaxPointerFromParams(const GemmAndBiasParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
 const void* GetAmaxPointerFromParams(const GemmStridedBatchedParams<T>* params) {
   return nullptr;
 }
@@ -162,6 +212,11 @@ const void* GetAmaxPointerFromParams(const ScaledGemmParams<T>* params) {
 
 template <typename T>
 int8_t GetFastAccumModeFromParams(const GemmParams<T>* params) {
+  return 0;
+}
+
+template <typename T>
+int8_t GetFastAccumModeFromParams(const GemmAndBiasParams<T>* params) {
   return 0;
 }
 
@@ -188,6 +243,11 @@ const void* GetBiasPointerFromParams(const GemmParams<T>*params) {
 }
 
 template <typename T>
+const void* GetBiasPointerFromParams(const GemmAndBiasParams<T>*params) {
+    return params->bias;
+}
+
+template <typename T>
 const void* GetBiasPointerFromParams(const GemmStridedBatchedParams<T>* params) {
   return nullptr;
 }
@@ -203,6 +263,11 @@ cudaDataType_t GetBiasTypeFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+cudaDataType_t GetBiasTypeFromParams(const GemmAndBiasParams<T>* params) {
+    return at::cuda::ScalarTypeToCudaDataType(params->bias_dtype);
+}
+
+template <typename T>
 cudaDataType_t GetBiasTypeFromParams(const GemmStridedBatchedParams<T>* params) {
     return CUDA_R_32F;
 }
@@ -210,6 +275,26 @@ cudaDataType_t GetBiasTypeFromParams(const GemmStridedBatchedParams<T>* params) 
 template <typename T>
 cudaDataType_t GetBiasTypeFromParams(const ScaledGemmParams<T>* params) {
   return at::cuda::ScalarTypeToCudaDataType(params->bias_dtype);
+}
+
+template <typename T>
+at::cuda::blas::GEMMAndBiasActivationEpilogue GetActivationFromParams(const GemmParams<T>* params) {
+  return at::cuda::blas::GEMMAndBiasActivationEpilogue::None;
+}
+
+template <typename T>
+at::cuda::blas::GEMMAndBiasActivationEpilogue GetActivationFromParams(const GemmAndBiasParams<T>* params) {
+  return params->activation;
+}
+
+template <typename T>
+at::cuda::blas::GEMMAndBiasActivationEpilogue GetActivationFromParams(const GemmStridedBatchedParams<T>* params) {
+  return at::cuda::blas::GEMMAndBiasActivationEpilogue::None;
+}
+
+template <typename T>
+at::cuda::blas::GEMMAndBiasActivationEpilogue GetActivationFromParams(const ScaledGemmParams<T>* params) {
+  return at::cuda::blas::GEMMAndBiasActivationEpilogue::None;
 }
 
 static char _charFromcublasOp(cublasOperation_t op) {
@@ -297,22 +382,34 @@ class CublasltGemmOp : public Callable<ParamsT> {
             const void* mat3_scale_ptr = GetDScalePointerFromParams<T>(params);
             const void* amax_ptr = GetAmaxPointerFromParams<T>(params);
             const int8_t fast_accum_mode = GetFastAccumModeFromParams<T>(params);
-            if (mat1_scale_ptr && mat2_scale_ptr && mat3_scale_ptr) {
+            if (mat1_scale_ptr && mat2_scale_ptr) {
                 computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
                 computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
-                computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, mat3_scale_ptr);
 
                 if (amax_ptr) {
                     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
                 }
 
                 computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fast_accum_mode);
-                const void* bias_ptr = GetBiasPointerFromParams<T>(params);
-                if (bias_ptr) {
-                    auto bias_datatype = GetBiasTypeFromParams<T>(params);
+            }
+
+            if (mat3_scale_ptr) {
+                computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, mat3_scale_ptr);
+            }
+
+            const void* bias_ptr = GetBiasPointerFromParams<T>(params);
+            auto bias_datatype = GetBiasTypeFromParams<T>(params);
+            if (bias_ptr) {
+                computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
+                computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, bias_datatype);
+
+                auto activation = GetActivationFromParams<T>(params);
+                if (activation == at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU) {
+                    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_RELU_BIAS);
+                } else if (activation == at::cuda::blas::GEMMAndBiasActivationEpilogue::GELU) {
+                    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_GELU_BIAS);
+                } else {
                     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_BIAS);
-                    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
-                    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, bias_datatype);
                 }
             }
 
@@ -577,6 +674,11 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 auto GetCublasLtGemmTypeStringAndOps(const GemmParams<T>* params) {
     return GetCublasLtTypeStringAndOps<T, ALayout, BLayout, GemmParams<T>>(params);
+}
+
+template <typename T, BlasOp ALayout, BlasOp BLayout>
+auto GetCublasLtGemmAndBiasTypeStringAndOps(const GemmParams<T>* params) {
+    return GetCublasLtTypeStringAndOps<T, ALayout, BLayout, GemmAndBiasParams<T>>(params);
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
