@@ -1,9 +1,7 @@
 # Owner(s): ["module: masked operators"]
 
 import torch
-import unittest
 from torch.testing._internal.common_utils import (
-    decorateIf,
     TestCase,
     run_tests,
     make_tensor,
