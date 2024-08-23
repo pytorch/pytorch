@@ -184,6 +184,7 @@ jobs:
         id: test
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
