@@ -472,9 +472,6 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
-    # Traced graph contains a WrapWithSetGradEnabled hop but
-    # dynamo doesn't support the hop yet so the test fails in strict_mode when re-tracing.
-    @testing.expectedFailureRetraceability
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
