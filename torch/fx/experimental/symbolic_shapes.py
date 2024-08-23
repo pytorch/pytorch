@@ -1676,13 +1676,12 @@ class DimConstraints:
         # symbols that are marked dynamic
         self._marked_dynamic = marked_dynamic
 
-        # track unsupported sympy functions
+        # track supported sympy functions and subtract from list of all sympy functions
         self._supported_sympy_functions: Set[sympy.Function] = {
             Mod,
             PythonMod,
             FloorDiv,
         }
-        self._unsupported_sympy_functions: Set[sympy.Function] = {}
         self._enumerate_sympy_functions()
 
     def rewrite_with_congruences(self, s, expr):
@@ -1753,7 +1752,10 @@ class DimConstraints:
 
     def _enumerate_sympy_functions(self):
         module = torch.utils._sympy.functions
-        all_functions = {getattr(module, func) for func in module.__all__}
+        all_functions = set()
+        for attr in dir(module):
+            if isinstance(func := getattr(module, attr), sympy.FunctionClass):
+                all_functions.add(func)
         self._unsupported_sympy_functions = all_functions.difference(self._supported_sympy_functions)
 
     def _has_unsupported_sympy_function(self, expr) -> bool:
