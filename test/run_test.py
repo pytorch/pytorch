@@ -1422,9 +1422,10 @@ def get_selected_tests(options) -> List[str]:
             "test_metal",
             "test_modules",
             "nn/test_convolution",
-            "nn/test_dropout.py",
-            "nn/test_pooling.py",
-            "test_view_ops.py",
+            "nn/test_dropout",
+            "nn/test_pooling",
+            "test_view_ops",
+            "test_nn"
         ]
     else:
         # Exclude all mps tests otherwise
