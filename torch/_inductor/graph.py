@@ -1394,7 +1394,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 for s in strides
                             ]
                             result = ir.ExternKernel.require_exact_strides(
-                                result, new_strides, allow_padding=allow_padding
+                                result, strides, allow_padding=allow_padding
                             )
 
             # Realize if (1) any user need inputs realized, or (2) there is
