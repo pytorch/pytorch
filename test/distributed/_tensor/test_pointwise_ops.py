@@ -281,16 +281,11 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     def test_dtensor_isinf(self):
         device_mesh = self.build_device_mesh()
-        test_tensor = DTensor.from_local(torch.ones(2, 2), device_mesh, [Shard(0)])
-        print(test_tensor)
-        prev_isinf_result = torch.isinf(test_tensor)
-        torch.distributed.breakpoint()
-        self.assertFalse(input_tensor[0][0].item())
-        if dist.get_rank() == 0:
-            test_tensor._local_tensor[0,0].fill_(float("inf"))
-        if dist.get_rank() == 1:
-            test_tensor._local_tensor[1,1].fill_(float("inf"))  
-        after_isinf_result = test_tensor.isinf()
+        input_tensor = torch.tensor([1, 1, -float("inf"), float("inf")])
+        input_result = DTensor.from_local(input_tensor, device_mesh, [Shard(0)]).isinf()
+        expected_tensor = torch.tensor([False, False, True, True])
+        expected_result = DTensor.from_local(expected_tensor, device_mesh, [Shard(0)])
+        self.assertEqual(input_result, expected_result)
 
 
 
