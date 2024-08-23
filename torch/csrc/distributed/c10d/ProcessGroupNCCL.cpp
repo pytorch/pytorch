@@ -3503,6 +3503,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
         "Tensor input and output of _broadcast_oop must have the same number of elements ");
   }
 
+  const auto root = opts.rootRank + opts.rootTensor;
+  bool nanCheck = (root == rank_);
+
   return collective(
       inputTensor,
       outputTensor,
@@ -3510,7 +3513,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        const auto root = opts.rootRank + opts.rootTensor;
         return ncclBroadcast(
             input.data_ptr(),
             output.data_ptr(),
@@ -3521,7 +3523,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
             stream.stream());
       },
       OpType::BROADCAST,
-      "nccl:_broadcast_oop");
+      "nccl:_broadcast_oop",
+      /*avoidRecordStreams=*/false,
+      nanCheck);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
