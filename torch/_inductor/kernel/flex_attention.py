@@ -231,6 +231,7 @@ compute_flex_attention = r"""
     kv_indices = KV_IDX + sparse_kv_idx_offset
     kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
+    block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
 
     K_block_ptr = tl.make_block_ptr(
         base=K,
@@ -256,7 +257,7 @@ compute_flex_attention = r"""
         acc, l_i, m_i,
         off_z, off_hq, offs_m[:, None], offs_n[None, :],
         kv_indices, kv_num_blocks,
-        0, kv_num_blocks * SPARSE_KV_MULTIPLE,
+        0, block_n_end,
         MATMUL_PRECISION,
         IS_FULL_BLOCKS=False,
     )
@@ -269,6 +270,7 @@ compute_flex_attention = r"""
         kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+        block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
 
         K_block_ptr = tl.make_block_ptr(
             base=K,
@@ -294,7 +296,7 @@ compute_flex_attention = r"""
             acc, l_i, m_i,
             off_z, off_hq, offs_m[:, None], offs_n[None, :],
             kv_indices, kv_num_blocks,
-            0, kv_num_blocks * SPARSE_KV_MULTIPLE,
+            0, block_n_end,
             MATMUL_PRECISION,
             IS_FULL_BLOCKS=True,
         )
@@ -345,9 +347,6 @@ def forward_inner(
     {{gen_defines() | indent_except_first(1)}}
 
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
-
-    # initialize offsets
-
     RCP_LN2: tl.constexpr = 1.44269504
 
     if PRESCALE_QK:
@@ -1145,7 +1144,7 @@ def bwd_dq_inner(
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
-    hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
+    hi = tl.minimum(sparse_kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N2, 1))
     if not IS_DIVISIBLE:
         if hi >= 1:
             for start_n in range(0, hi - 1):
@@ -1325,7 +1324,7 @@ def bwd_dkdv_inner(
     do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
-    hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
+    hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(Q_LEN // BLOCK_M1, 1))
 
     if not IS_DIVISIBLE:
         if hi >= 1:

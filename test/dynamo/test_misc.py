@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import abc
 import collections
+import collections.abc
 import copy
 import dataclasses
 import dis
@@ -91,6 +92,10 @@ if HAS_OPTREE:
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
+
+
+# Defined in CPython's Include/object.h
+TPFLAGS_MAPPING = 1 << 6
 
 
 # Specializes a test to run only if translation validation is set.
@@ -312,6 +317,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         )
 
     @skipIfNNModuleInlined("fails internal CI")
+    @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
     def test_cpp_extension_recommends_custom_ops(self):
         cpp_source = """
         #include <torch/extension.h>
@@ -3279,6 +3285,41 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dunder_new_function_inlining3(self):
+        class Foo:
+            def __new__(cls):
+                instance = object.__new__(cls)
+                instance.a = 3
+                return instance
+
+            def __init__(self):
+                self.a = 5
+
+            def run(self, x):
+                return torch.sin(x) * self.a
+
+        class Bar:
+            def __new__(cls):
+                instance = object.__new__(Foo)  # not returning a new instance of Bar
+                instance.a = 7
+                return instance
+
+            def __init__(self):
+                self.a = 11  # not called in Bar()
+
+            def run(self, x):
+                return torch.sin(x) * self.a
+
+        def fn(x):
+            bar = Bar()
+            return bar.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_dunder_new_function_inlining4(self):
         class Mock(object):
             def __new__(cls, *args):
@@ -3377,6 +3418,37 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.rand(2, 3)
         mod = ModuleB()
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        ref = fn(x, mod)
+        res = opt_fn(x, mod)
+        self.assertTrue(same(ref, res))
+
+    def test_class_duner_flags(self):
+        class ModuleA(torch.nn.ModuleDict, collections.abc.MutableMapping):
+            def __hash__(self):
+                return id(self)
+
+        def fn(x, mod_class):
+            if mod_class.__flags__ & TPFLAGS_MAPPING:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(2, 3)
+        mod_class = ModuleA
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        ref = fn(x, mod_class)
+        res = opt_fn(x, mod_class)
+        self.assertTrue(same(ref, res))
+
+        def fn(x, mod):
+            if type(mod).__flags__ & TPFLAGS_MAPPING:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(2, 3)
+        mod = ModuleA()
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         ref = fn(x, mod)
         res = opt_fn(x, mod)

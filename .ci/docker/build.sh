@@ -92,7 +92,7 @@ _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
 # from scratch
 case "$image" in
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -120,7 +120,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -165,7 +165,7 @@ case "$image" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
@@ -194,7 +194,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -222,7 +222,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9

@@ -141,6 +141,7 @@ def noop_mask(
 
 
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
+_LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
 def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
@@ -816,12 +817,10 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     of the query and key tensors.
     """
     device = query.device
-    kv_len = _round_up_to_multiple(key.size()[-2], 128)
-    q_len = _round_up_to_multiple(query.size()[-2], 128)
     return BlockMask.from_kv_blocks(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
-        BLOCK_SIZE=(kv_len, q_len),
+        BLOCK_SIZE=_LARGE_SPARSE_BLOCK_SIZE,
     )
 
 

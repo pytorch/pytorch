@@ -205,7 +205,7 @@ inline at::DeviceIndex getIndexFromDeviceKey(const std::string& deviceKey) {
   try {
     index = std::stoi(deviceKey);
   } catch (const std::invalid_argument& e) {
-    LOG(WARNING) << c10::str(
+    LOG(ERROR) << c10::str(
         "Invalid deviceKey: ", deviceKey, ",", e.what(), ".");
   } catch (const std::out_of_range& e) {
     LOG(ERROR) << "Out of range: " << e.what();
@@ -548,8 +548,8 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
   if (exception_) {
-    LOG(ERROR) << logPrefix()
-               << "found async exception when checking for NCCL errors: "
+    LOG(ERROR) << logPrefix() << "Collective " << *this
+               << " raised the following async exception: "
                << getExceptionMsgFromExceptionPtr(exception_);
   }
 }
@@ -819,6 +819,12 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+
+  // getNcclVersion needs to get called before launching threads which can
+  // potentially call getenv. getNcclVersion internally calls setenv to set some
+  // environment variables from config file, which can race with getenv from
+  // other threads and cause segfaults.
+  const auto ncclVersion = getNcclVersion();
   this->setGroupUid(options_->group_name);
   this->localDeviceCount_ = at::cuda::getNumGPUs();
   logPrefix_ = createLogPrefix();
@@ -831,7 +837,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
   // or change its name to reflect that dump happens on exception including
   // both timeout and other errors.
-  dumpOnException_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
+  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
@@ -911,9 +917,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", PG Name: " << options_->group_name;
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
-            << "NCCL version: " << getNcclVersion()
+            << "NCCL version: " << ncclVersion
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnException_
+            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
             << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
             << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1292,7 +1298,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitMsg;
-  bool checkDumpSignal = (dumpOnException_ && local_id_ == 0);
+  bool checkDumpSignal = (dumpOnTimeoutOrEx_ && local_id_ == 0);
   int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
                                             : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
@@ -1447,15 +1453,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             " seconds without making progress in monitoring enqueued collectives. ",
             "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
             "and could be triggered by another thread holding the GIL inside a ",
-            "CUDA api, or other deadlock-prone behaviors.",
+            "CUDA api (for example, CudaEventDestroy), or other deadlock-prone behaviors.",
             "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
             "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
             "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
             "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
-            "or false positive abort; otherwise, please attempt to debug the hang. "
-            "workMetaList_.size() = ",
-            workMetaList_.size(),
-            "");
+            "or false positive abort; otherwise, please attempt to debug the hang. ");
         break;
       }
     }
@@ -1772,9 +1775,10 @@ void ProcessGroupNCCL::watchdogHandler() {
             ", last completed NCCL work: ",
             pgStatus_->lastCompletedSeq,
             ".");
-        // try to dump flight records if exception happens.
-        // Flight recorder behavior should be independent of desync Debug
-        if (dumpOnException_) {
+        // try to notify other ranks via global TCPStore to dump the flight
+        // recorder when a collective timeout or exception happens. Flight
+        // recorder behavior is independent of desync Debug.
+        if (dumpOnTimeoutOrEx_) {
           try {
             auto rank = globalRank();
             auto vec = std::vector<uint8_t>(
@@ -1782,8 +1786,9 @@ void ProcessGroupNCCL::watchdogHandler() {
                 reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
             globalStore_->set(std::string(EXCEPTION_DUMP), vec);
             if (!shouldDump_.load()) {
-              LOG(ERROR) << logPrefix()
-                         << "First watchdog to set the dump signal.";
+              LOG(ERROR)
+                  << logPrefix()
+                  << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
             }
             // signal the monitor thread to start dumping
             shouldDump_.store(true);
