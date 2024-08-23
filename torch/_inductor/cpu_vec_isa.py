@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import os
 import platform
-
 import re
 import subprocess
 import sys
@@ -11,6 +10,7 @@ from typing import Any, Callable, Dict, List
 
 import torch
 from torch._inductor import config
+
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -128,6 +128,7 @@ cdll.LoadLibrary("__lib_path__")
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
+                    cwd=output_dir,
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
@@ -338,7 +339,7 @@ def valid_vec_isa_list() -> List[VecISA]:
 
 
 def pick_vec_isa() -> VecISA:
-    if config.is_fbcode():
+    if config.is_fbcode() and (platform.machine() in ["x86_64", "AMD64"]):
         return VecAVX2()
 
     _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()

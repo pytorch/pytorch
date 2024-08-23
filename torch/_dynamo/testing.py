@@ -12,12 +12,6 @@ import unittest
 from typing import List, Optional, Sequence, Union
 from unittest.mock import patch
 
-np: Optional[types.ModuleType] = None
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch
 from torch import fx
 from torch._dynamo.output_graph import OutputGraph
@@ -31,6 +25,14 @@ from .bytecode_transformation import (
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
 from .utils import same
+
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 
 unsupported = eval_frame.unsupported
 three = 3

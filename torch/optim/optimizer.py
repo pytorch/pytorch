@@ -1,7 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """Base optimizer."""
 import functools
-import math
 import warnings
 from collections import defaultdict, OrderedDict
 from copy import deepcopy
@@ -32,13 +32,14 @@ from torch.utils._foreach_utils import (
     _get_fused_kernels_supported_devices,
     _group_tensors_by_device_and_dtype,
     Indices,
+    TensorListList,
 )
 from torch.utils.hooks import RemovableHandle
+
 
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
-TensorListList: TypeAlias = List[List[torch.Tensor]]
 DeviceDict = Dict[Optional[torch.device], torch.Tensor]
 
 
@@ -110,15 +111,6 @@ def _stack_if_compiling(x):
         return torch.stack(x)
     else:
         return x
-
-
-def _dispatch_sqrt(
-    x: float,
-):  # float annotation is needed because of torchscript type inference
-    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
-        return x.sqrt()
-    else:
-        return math.sqrt(x)
 
 
 def _disable_dynamo_if_unsupported(single_tensor_fn=None):
@@ -200,6 +192,19 @@ def _default_to_fused_or_foreach(
     return fused, foreach
 
 
+def _device_dtype_check_for_fused(
+    p: torch.Tensor, cuda_unsupported: bool = False
+) -> None:
+    fused_supported_devices = _get_fused_kernels_supported_devices()
+    if cuda_unsupported:
+        fused_supported_devices.remove("cuda")
+    if not (p.device.type in fused_supported_devices and torch.is_floating_point(p)):
+        raise RuntimeError(
+            "`fused=True` requires all the params to be floating point Tensors of "
+            f"supported devices: {fused_supported_devices} but {p.dtype} and {p.device.type}"
+        )
+
+
 def _view_as_real(params, *state_and_grads):
     for i, p in enumerate(params):
         if torch.is_complex(p):
@@ -218,7 +223,7 @@ def _get_scalar_dtype(is_fused=None):
 
 def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
     r"""Return the device type list that supports capturable optimizer."""
-    capturable_supported_devices = ["cuda"]
+    capturable_supported_devices = ["cuda", "xpu", "hpu"]
     if not torch.jit.is_scripting():
         capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
     if supports_xla:
@@ -460,7 +465,6 @@ class Optimizer:
         This is a workaround due to lack of a proper step hook on the optimizer,
         and will be removed if it exists.
         """
-        pass
 
     @staticmethod
     def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:  # noqa: D102

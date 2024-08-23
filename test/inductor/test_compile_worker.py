@@ -7,7 +7,6 @@ from torch._inductor.compile_worker.subproc_pool import (
     SubprocException,
     SubprocPool,
 )
-
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU
 

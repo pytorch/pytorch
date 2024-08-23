@@ -1154,6 +1154,8 @@ class TestMeta(TestCase):
     @suppress_warnings
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_meta_outplace(self, device, dtype, op):
+        if "_scaled_mm" in op.name:
+            raise unittest.SkipTest("_scaled_mm dose not support meta device")
         skip_op_names = (
             "fft.ihfft",
             "fft.ihfft2",
@@ -1217,6 +1219,8 @@ class TestMeta(TestCase):
                 expected = func(*args, **kwargs)
 
     def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace, all_stride_variants=False):
+        if "_scaled_mm" in op.name:
+            raise unittest.SkipTest("_scaled_mm dose not support meta device")
         if inplace:
             func = op.get_inplace()
             if not func:

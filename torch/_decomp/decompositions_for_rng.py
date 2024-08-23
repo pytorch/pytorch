@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 from collections import defaultdict
@@ -7,6 +8,7 @@ import torch
 import torch._decomp as decomp
 from torch._decomp import get_decompositions
 from torch._ops import OpOverload
+
 
 aten = torch.ops.aten
 
@@ -69,7 +71,7 @@ class PhiloxState:
     trace time.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.reset()
 
     def reset(self):

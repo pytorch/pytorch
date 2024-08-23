@@ -10,8 +10,8 @@ __all__ = ["ChannelShuffle"]
 class ChannelShuffle(Module):
     r"""Divides and rearranges the channels in a tensor.
 
-    This operation divides the channels in a tensor of shape :math:`(*, C , H, W)`
-    into g groups as :math:`(*, \frac{C}{g}, g, H, W)` and shuffles them,
+    This operation divides the channels in a tensor of shape :math:`(N, C, *)`
+    into g groups as :math:`(N, \frac{C}{g}, g, *)` and shuffles them,
     while retaining the original tensor shape in the final output.
 
     Args:

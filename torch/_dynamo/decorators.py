@@ -1,15 +1,19 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
+import functools
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
+from .utils import is_function
+
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
@@ -24,6 +28,9 @@ else:
         if name.startswith("__"):
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 def run(fn=None):
@@ -140,7 +147,6 @@ def disallow_in_graph(fn):
 @_disallow_in_graph_helper(throw_if_not_allowed=False)
 def graph_break():
     """Force a graph break"""
-    pass
 
 
 def forbid_in_graph(fn):
@@ -156,6 +162,106 @@ def forbid_in_graph(fn):
     assert callable(fn), "forbid_in_graph applies only to callables"
     fn._dynamo_forbidden = True
     return fn
+
+
+def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
+    """
+    Register a polyfill handler for a function, usually a C function from the C extension, to be
+    used in place of the original function when inlining the original function in the graph.
+
+    .. note::
+
+        The polyfill handler is only used when inlining the original function. It is not used when
+        the original function is called directly. In the eager mode, the decorated function calls
+        the performant C function rather than the polyfill handler.
+
+    The polyfill handler is a function that will be called in place of the original function when
+    inlining the original function. The polyfill handler should have the same signature and the same
+    behavior as the original function.
+
+    Args:
+        original_fn (callable): The original function, usually a C function, to register a polyfill
+            handler for.
+
+    Returns:
+        A decorator that registers the polyfill handler for the original function.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("conflict with the tests: duplicate polyfill handlers")
+        >>> import operator
+        >>> operator.indexOf([1, 2, 3, 4, 5], 3)
+        2
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        Traceback (most recent call last):
+        ...
+        torch._dynamo.exc.Unsupported: ...
+
+        >>> @torch.compiler.substitute_in_graph(operator.indexOf)
+        ... def indexOf(a, b, /):
+        ...     for i, item in enumerate(a):
+        ...         if item is b or item == b:
+        ...             return i
+        ...     raise ValueError("sequence.index(x): x not in sequence")
+        >>>
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        2
+    """
+    if not is_function(original_fn):
+        raise TypeError(
+            f"substitute_in_graph expects a function but got {type(original_fn)!r}"
+        )
+
+    def wrapper(traceable_fn: _F) -> _F:
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.trace_rules import get_torch_obj_rule_map
+        from torch._dynamo.variables import PolyfilledFunctionVariable
+        from torch._dynamo.variables.builder import VariableBuilder
+
+        id_dispatch_map = VariableBuilder._id_dispatch()
+        if id(original_fn) in id_dispatch_map:
+            raise ValueError(
+                f"Duplicate dispatch rule for {original_fn}: "
+                "already registered in VariableBuilder's id dispatch map"
+            )
+
+        rule_map = get_torch_obj_rule_map()
+        if original_fn in rule_map:
+            raise ValueError(
+                f"Duplicate object {original_fn} with different rules: "
+                f"{PolyfilledFunctionVariable}, {rule_map[original_fn]}"
+            )
+
+        polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
+        if original_fn in polyfill_handlers:
+            raise ValueError(
+                f"Duplicate polyfill handlers for {original_fn}: "
+                f"already handled by {polyfill_handlers[original_fn]}"
+            )
+
+        # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
+        # C++ function.
+        @functools.wraps(traceable_fn)
+        def wrapped(*args, **kwargs):
+            return original_fn(*args, **kwargs)
+
+        def dispatch_fn(self, value):
+            return PolyfilledFunctionVariable(
+                value,
+                source=self.source,
+                **self.install_guards(GuardBuilder.CLOSURE_MATCH),
+            )
+
+        id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
+        rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
+        polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = traceable_fn
+
+        wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
+        wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
+
+        return wrapped  # type: ignore[return-value]
+
+    return wrapper
 
 
 # Helper function to flatten a tensor subclass and apply a function to
@@ -346,7 +452,6 @@ def _allow_in_graph_einops():
         )
 
         # einops > 0.6.1 will call the op registration logic as it is imported.
-        pass
     except ImportError:
         # einops <= 0.6.1
         allow_in_graph(einops.rearrange)

@@ -82,6 +82,10 @@ def compile_time_strobelight_meta(phase_name):
         def wrapper_function(*args, **kwargs):
             if "skip" in kwargs:
                 kwargs["skip"] = kwargs["skip"] + 1
+
+            if not StrobelightCompileTimeProfiler.enabled:
+                return function(*args, **kwargs)
+
             return StrobelightCompileTimeProfiler.profile_compile_time(
                 function, phase_name, *args, **kwargs
             )
@@ -121,6 +125,10 @@ def set_pytorch_distributed_envs_from_justknobs():
 
 
 def log_export_usage(**kwargs):
+    pass
+
+
+def log_trace_structured_event(*args, **kwargs) -> None:
     pass
 
 
@@ -178,6 +186,10 @@ def justknobs_getval_int(name: str) -> int:
     Read warning on justknobs_check
     """
     return 0
+
+
+def is_fb_unit_test() -> bool:
+    return False
 
 
 @functools.lru_cache(None)

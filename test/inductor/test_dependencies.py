@@ -3,13 +3,11 @@ import contextlib
 
 import torch
 from torch._inductor.dependencies import MemoryDep
-
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout, Pointwise
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
-
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 

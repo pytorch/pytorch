@@ -1404,6 +1404,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.copy_: lambda self, src, non_blocking=False: -1,
         Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cuda: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.mtia: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.xpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.ipu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.data_ptr: lambda self: -1,
@@ -1502,18 +1503,16 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__dlpack__: lambda self, stream=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
-    }
+    }  # fmt: skip
 
     privateuse1_backend_name = (
         torch.utils.backend_registration._privateuse1_backend_name
     )
     if hasattr(Tensor, privateuse1_backend_name):
-        ret[
-            getattr(Tensor, privateuse1_backend_name)
-        ] = lambda self, device=None, non_blocking=False, **kwargs: -1
-        ret[
-            getattr(Tensor, f"is_{privateuse1_backend_name}").__get__
-        ] = lambda self: -1  # noqa: B009
+        ret[getattr(Tensor, privateuse1_backend_name)] = (
+            lambda self, device=None, non_blocking=False, **kwargs: -1
+        )
+        ret[getattr(Tensor, f"is_{privateuse1_backend_name}").__get__] = lambda self: -1
 
     ret2 = {}
     ignored = get_ignored_functions()
@@ -1562,10 +1561,10 @@ def wrap_torch_function(dispatcher: Callable):
 
     Examples
     --------
-    >>> def dispatcher(a): # Must have the same signature as func
+    >>> def dispatcher(a):  # Must have the same signature as func
     ...     return (a,)
     >>> @torch.overrides.wrap_torch_function(dispatcher)
-    >>> def func(a): # This will make func dispatchable by __torch_function__
+    >>> def func(a):  # This will make func dispatchable by __torch_function__
     ...     return a + 0
     """
 
@@ -2024,7 +2023,7 @@ class TorchFunctionMode:
     inner: "TorchFunctionMode"
 
     # Force metaclass to generate constructor at the base of the hierarchy
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def __torch_function__(self, func, types, args=(), kwargs=None):

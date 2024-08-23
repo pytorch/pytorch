@@ -580,7 +580,7 @@ class TestCppExtensionJIT(common.TestCase):
 
         # Create a torch.nn.Module which uses the C++ module as a submodule.
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.nn.Parameter(torch.tensor(1.0))
                 self.net = extension.Net(3, 5)

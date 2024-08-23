@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from ._IR import Pipe, pipe_split, pipeline, SplitPoint
 from .schedules import (
+    _ScheduleForwardOnly,
     Schedule1F1B,
     ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,

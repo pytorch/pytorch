@@ -647,10 +647,7 @@ TEST(ExternalCall, BinaryFloat) {
   tests.push_back(
       Test{{100, 200}, {200, 300}, {100, 300}, at::mm, "nnc_aten_mm"});
   for (auto curTest : tests) {
-    std::vector<int64_t> aShape, bShape, resShape;
-    TensorFunc torchFunc;
-    std::string externCallName;
-    std::tie(aShape, bShape, resShape, torchFunc, externCallName) = curTest;
+    auto [aShape, bShape, resShape, torchFunc, externCallName] = curTest;
     auto toExprHandleVec = [](std::vector<int64_t> v) {
       auto intV = std::vector<int>(v.begin(), v.end());
       return std::vector<ExprHandle>(intV.begin(), intV.end());
@@ -730,11 +727,7 @@ TEST(ExternalCall, UnaryFloat) {
                        "nnc_aten_mean",
                        toExprHandleVec({1, /*keepdim=*/0})});
   for (auto curTest : tests) {
-    std::vector<int64_t> aShape, resShape;
-    TensorFunc torchFunc;
-    std::string externCallName;
-    std::vector<ExprHandle> externCallArgs;
-    std::tie(aShape, resShape, torchFunc, externCallName, externCallArgs) =
+    auto [aShape, resShape, torchFunc, externCallName, externCallArgs] =
         curTest;
     BufHandle A("A", toExprHandleVec(aShape), kFloat);
     BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);
