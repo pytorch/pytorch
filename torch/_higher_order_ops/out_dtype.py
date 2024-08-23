@@ -69,7 +69,7 @@ class OutDtypeOperator(HigherOrderOperator):
                 f"out_dtype only allows the following operators: {ALLOWABLE_OPS}."
             )
 
-        res = super().__call__(op, output_dtype, *args)
+        res = self.call_dispatch(op, output_dtype, *args)
 
         return res
 

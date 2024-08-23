@@ -42,7 +42,7 @@ class AssociativeScanOp(HigherOrderOperator):
         super().__init__("associative_scan")
 
     def __call__(self, combine_fn, input, dim):
-        return super().__call__(combine_fn, input, dim)
+        return self.call_dispatch(combine_fn, input, dim)
 
 
 associative_scan_op = AssociativeScanOp()

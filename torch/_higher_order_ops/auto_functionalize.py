@@ -65,7 +65,7 @@ class AutoFunctionalized(HigherOrderOperator):
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
-        return super().__call__(_mutable_op, **kwargs)
+        return self.call_dispatch(_mutable_op, **kwargs)
 
 
 auto_functionalized = AutoFunctionalized()

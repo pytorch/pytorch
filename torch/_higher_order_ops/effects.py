@@ -77,7 +77,7 @@ class WithEffects(HigherOrderOperator):
         assert not has_aliasing(op), "Ops with aliasing is not supported"
         assert has_effects(op, args, kwargs)
         assert isinstance(kwargs, dict)
-        return super().__call__(token, op, *args, **kwargs)
+        return self.call_dispatch(token, op, *args, **kwargs)
 
 
 with_effects = WithEffects()
