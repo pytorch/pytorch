@@ -15789,8 +15789,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
@@ -15814,8 +15813,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool2d',
            aten_name='max_unpool2d',
@@ -15824,8 +15822,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
@@ -15851,8 +15848,7 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool3d',
            aten_name='max_unpool3d',
@@ -15862,8 +15858,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
@@ -15886,8 +15881,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.linear',
            aten_name='linear',
@@ -16110,9 +16104,6 @@ op_db: List[OpInfo] = [
         decorators=[],
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
         ),
     ),
     OpInfo(
