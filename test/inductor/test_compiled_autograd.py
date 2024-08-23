@@ -2483,6 +2483,18 @@ known_graph_breaks_tests = {
     "test_save_none_for_backward",  # assertIsNone
     "test_saved_variables_deprecated",  # warnings.warn
     "test_autograd_node_isinstance",  # assertIsInstance
+    "test_set_materialize_non_diff_grads",  # assertIsNone
+    "test_backward_dict_grad_for_nontensor",  # torch/_custom_op/autograd.py in skip files
+    "test_backward_dict_invalid_keys",  # torch/_custom_op/autograd.py in skip files
+    "test_backward_dict_requires_keys_for_input_optional_tensors",  # torch/_custom_op/autograd.py in skip files
+    "test_backward_dict_requires_keys_for_input_tensors",  # torch/_custom_op/autograd.py in skip files
+    "test_backward_grads_are_tensor_or_none",  # torch/_custom_op/autograd.py in skip files
+    "test_backward_impl_on_existing_op",  # torch/_custom_op/autograd.py in skip files
+    "test_backward_returns_dict",  # torch/_custom_op/autograd.py in skip files
+    "test_backward_tensorlist_input_requires_list_grads",  # torch/_custom_op/autograd.py in skip files
+    "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # torch/_custom_op/autograd.py in skip files
+    "test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # torch/_custom_op/autograd.py in skip files
+    "test_save_for_backward_inputs_are_namedtuple",  # torch/_custom_op/autograd.py in skip files
 }
 
 test_contexts = {
@@ -2523,7 +2535,7 @@ known_failing_tests = {
     "test_reentrant_child_error",  # hangs when enabled with graph breaks
     "test_accumulate_grad",  # create_graph
     "test_anomaly_assign_parent_cleanup",  # create_graph
-    "test_anomaly_mode_no_check_nan",  # AnomalyMode
+    "test_anomaly_mode_no_check_nan",  # anomaly mode
     "test_backward_create_graph_warns",  # create_graph
     "test_backward_with_nonleaf_inputs",  # create_graph
     "test_create_graph_and_full_backward_hook_cycle",  # create_graph
@@ -2568,6 +2580,11 @@ known_failing_tests = {
     "test_reentrant_with_callbacks_depth_0",  # probably hangs with graph breaks
     "test_reentrant_with_callbacks_depth_1",  # probably hangs with graph breaks
     "test_save_output_nr",  # output_nr grad passed as None
+    "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
+    "test_simple_reentrant",  # hangs with graph breaks
+    "test_lobpcg",  # create_graph
+    "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+    "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
     # Category: Dynamo
     "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
     "test_custom_function_exception",  # torch.no_grad(), torch._dynamo.exc.Unsupported: missing: WITH_EXCEPT_START
@@ -2579,6 +2596,7 @@ known_failing_tests = {
     "test_custom_function_non_tensor_inputs_outputs",  # gradient batching rule not implemented for aten::sym_size.int
     "test_return_duplicate",  # gradient batching rule not implemented for aten::sym_size.int
     "test_return_duplicate_inplace",  # gradient batching rule not implemented for aten::sym_size.int
+    "test_setitem",  # CopySlices accuracy error
     # Category: Inductor
     "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
     "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
@@ -2586,30 +2604,12 @@ known_failing_tests = {
     "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
     "test_wrapped_number_saved_variable_hooks",  # Proxy tensor should carryover is_wrapped_number_ of its original
     "test_grad_batched_grad",  # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
+    "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
     # Category: Divergence from eager
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
+    "test_unpack_hooks_exec_count",  # saved tensor packed twice
     # Uncategorized
-    "test_set_materialize_non_diff_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
-    "test_setup_context_when_forward_has_default_args",  # torch._dynamo.exc.Unsupported: call_function args
-    "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFunctionVariable() sum [] {}
-    "test_lobpcg",  # torch._dynamo.exc.Unsupported: 'call_function LOBPCGAutogradFunction.backward in skip_files
-    "test_backward_dict_grad_for_nontensor",  # AssertionError: "non-Tensor-like types" does not match "'skip function
-    "test_backward_dict_invalid_keys",  # AssertionError: "to have keys {'x'}" does not match "'skip function
-    "test_backward_dict_requires_keys_for_input_optional_tensors",  # AssertionError: "to have keys {.*'y'.*}"
-    "test_backward_dict_requires_keys_for_input_tensors",  # AssertionError: "to have keys {.*'y'.*}" does not
-    "test_backward_grads_are_tensor_or_none",  # AssertionError: "either None or a Tensor" does not match "'
-    "test_backward_impl_on_existing_op",  # torch._dynamo.exc.Unsupported: 'skip function
-    "test_backward_returns_dict",  # AssertionError: "to be a dict" does not match "'skip function
-    "test_backward_tensorlist_input_requires_list_grads",  # AssertionError: "list of gradients" does not
-    "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # AssertionError: "None or Tensor"
-    "test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # AssertionError: "3 gradients
-    "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
-    "test_setitem",  # AssertionError: Tensor-likes are not close!
-    "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
-    "test_unpack_hooks_exec_count",  # pack/unpack saved tensor hooks firing more than once
-    "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
-    "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
 }
 
 if not HAS_CUDA:
