@@ -56,14 +56,17 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
   tensor_lists.emplace_back(std::move(vec_res));
 
   using opmath_t = typename at::opmath_type<scalar_t>;
-  multi_tensor_apply<2>(
-      tensor_lists,
-      UnaryOpFunctor<
-          scalar_t,
-          /* depth */ 2,
-          /* r_args_depth */ 1,
-          /* res_arg_index */ 1>(),
-      Op<opmath_t>());
+  DISPATCH_MULTI_TENSOR_APPLY([&]() {
+    multi_tensor_apply<2>(
+        tensor_lists,
+        UnaryOpFunctor<
+            scalar_t,
+            /* depth */ 2,
+            /* r_args_depth */ 1,
+            /* res_arg_index */ 1,
+            large_kernel_arg>(),
+        Op<opmath_t>());
+  });
 
   return tensor_lists[1];
 }
@@ -73,14 +76,17 @@ void foreach_unary_op_(TensorList tensors) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
   using opmath_t = typename at::opmath_type<scalar_t>;
-  multi_tensor_apply<1>(
-      tensor_lists,
-      UnaryOpFunctor<
-          scalar_t,
-          /* depth */ 1,
-          /* r_args_depth */ 1,
-          /* res_arg_index */ 0>(),
-      Op<opmath_t>());
+  DISPATCH_MULTI_TENSOR_APPLY([&]() {
+    multi_tensor_apply<1>(
+        tensor_lists,
+        UnaryOpFunctor<
+            scalar_t,
+            /* depth */ 1,
+            /* r_args_depth */ 1,
+            /* res_arg_index */ 0,
+            large_kernel_arg>(),
+        Op<opmath_t>());
+  });
   increment_version(tensors);
 }
 
@@ -395,13 +401,16 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
       tensors[0].scalar_type(),
       "foreach_zero_cuda_",
       [&]() {
-        multi_tensor_apply<1>(
-            tensor_lists,
-            ZeroFunctor<
-                scalar_t,
-                /* depth */ 1,
-                /* r_args_depth */ 1,
-                /* res_arg_index */ 0>());
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<1>(
+              tensor_lists,
+              ZeroFunctor<
+                  scalar_t,
+                  /* depth */ 1,
+                  /* r_args_depth */ 1,
+                  /* res_arg_index */ 0,
+                  large_kernel_arg>());
+        });
       });
 }
 

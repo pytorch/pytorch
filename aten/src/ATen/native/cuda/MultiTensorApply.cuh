@@ -23,6 +23,56 @@ static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
     72,
     60};
 
+bool supports_large_kernel_arg() {
+#if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
+  static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
+  if (!supports_large_kernel_arg_.has_value()) {
+    static int driver_ver = 0;
+    cudaDriverGetVersion(&driver_ver);
+    *supports_large_kernel_arg_ = (driver_ver >= 12010);
+  }
+  return *supports_large_kernel_arg_;
+#else
+  return false;
+#endif
+}
+
+#define DISPATCH_MULTI_TENSOR_APPLY(lambda)             \
+  if (supports_large_kernel_arg()) {                    \
+    constexpr bool large_kernel_arg C10_UNUSED = true;  \
+    lambda();                                           \
+  } else {                                              \
+    constexpr bool large_kernel_arg C10_UNUSED = false; \
+    lambda();                                           \
+  }
+
+template <bool large_kernel_arg>
+struct DepthToMaxConfig;
+
+template <>
+struct DepthToMaxConfig<false> {
+  static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
+  static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
+  static constexpr int depth_to_max_tensors_scalarlist[5] =
+      {96, 64, 48, 36, 30};
+  static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
+      72,
+      60};
+};
+
+template <>
+struct DepthToMaxConfig<true> {
+  // TODO(yifu): These values are not yet optimally tuned. I simply multiplied
+  // the values for 4KB kernel argument by 7.
+  static constexpr int depth_to_max_tensors[5] = {770, 448, 336, 252, 210};
+  static constexpr int depth_to_max_blocks[5] = {2240, 2240, 2240, 2240, 2240};
+  static constexpr int depth_to_max_tensors_scalarlist[5] =
+      {672, 448, 336, 252, 210};
+  static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
+      4032,
+      3360};
+};
+
 template <typename T>
 __device__ __forceinline__ bool is_aligned(T* p) {
   return ((uint64_t)p) % (kILP * sizeof(T)) == 0;
@@ -38,12 +88,16 @@ __device__ __forceinline__ void load_store(
   ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
 }
 
-template <int n>
+template <int n, bool large_kernel_arg>
 struct TensorListMetadata {
-  const void* addresses[n][depth_to_max_tensors[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
+  using Conf = DepthToMaxConfig<large_kernel_arg>;
+  using BlockToTensorType = typename std::
+      conditional<large_kernel_arg, uint32_t, unsigned char>::type;
+
+  const void* addresses[n][Conf::depth_to_max_tensors[n - 1]];
+  int64_t numel_for_tensor[Conf::depth_to_max_tensors[n - 1]];
+  BlockToTensorType block_to_tensor[Conf::depth_to_max_blocks[n - 1]];
+  int block_to_chunk[Conf::depth_to_max_blocks[n - 1]];
   int start_tensor_this_launch;
 };
 
@@ -223,8 +277,10 @@ void multi_tensor_apply(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
-  TensorListMetadata<depth> tensorListMeta;
+  TensorListMetadata<depth, T::use_large_kernel_arg> tensorListMeta;
   tensorListMeta.start_tensor_this_launch = 0;
+
+  using Conf = DepthToMaxConfig<T::use_large_kernel_arg>;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -250,10 +306,10 @@ void multi_tensor_apply(
       loc_block_info++;
 
       const bool tensors_full =
-          (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
+          (loc_tensor_info == Conf::depth_to_max_tensors[depth - 1] &&
            chunk == chunks - 1);
       const bool blocks_full =
-          (loc_block_info == depth_to_max_blocks[depth - 1]);
+          (loc_block_info == Conf::depth_to_max_blocks[depth - 1]);
 
       if (tensors_full || blocks_full) {
         multi_tensor_apply_kernel<<<
