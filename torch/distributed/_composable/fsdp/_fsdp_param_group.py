@@ -280,15 +280,18 @@ class FSDPParamGroup:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
-        logger.info("calling reshard")
+        logger.debug("%s", self._with_fqn("FSDP::reshard enter"))
         if self._training_state == TrainingState.FORWARD:
             if not self._reshard_after_forward:
+                logger.debug("%s", self._with_fqn(f"FSDP::reshard early return {self._reshard_after_forward=}"))
                 return
             if self._use_post_forward_mesh:
                 self._to_sharded_post_forward()
                 self._reshard_after_forward_event = torch.cuda.Event()
                 self._reshard_after_forward_event.record()
+                logger.debug("%s", self._with_fqn(f"FSDP::reshard early return {self._use_post_forward_mesh=}"))
                 return
+        logger.debug("%s", self._with_fqn("FSDP::_to_sharded"))
         self._to_sharded()
 
     def pre_forward(
@@ -342,6 +345,8 @@ class FSDPParamGroup:
             if not self.reduce_grads:
                 if self.reshard_after_backward:
                     self.reshard()
+                else:
+                    logger.debug("%s", self._with_fqn(f"FSDP::post_backward skip reshard {self.reduce_grads=} {self.reshard_after_backward=}"))
                 for fsdp_param in self.fsdp_params:
                     fsdp_param.to_accumulated_grad_if_needed()
                 return
@@ -362,9 +367,10 @@ class FSDPParamGroup:
                     fsdp_param.unsharded_param.grad = None
             if self.reshard_after_backward:
                 self.reshard()
+            else:
+                logger.debug("%s", self._with_fqn(f"FSDP::post_backward  skip reshard {self.reshard_after_backward=}"))
         if len(fsdp_params_with_grad) == 0:
             return
-        print(f"{self._with_fqn('post backward')}")
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
             if self.comm_ctx.reduce_scatter_state is not None:
                 torch.cuda.current_stream().wait_event(
