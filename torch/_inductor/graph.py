@@ -186,7 +186,9 @@ def getattr_recursive(
     return attr_itr
 
 
-def mark_nodes_dislike_padding(g: Graph) -> None:
+def mark_nodes_dislike_padding(
+    g: Graph, user_visible_outputs: Optional[Dict[str, None]]
+) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
     If we pad their inputs, we result in extra calls to copy kernels!  On the other hand, padding usually helps reduction.
@@ -233,7 +235,7 @@ def mark_nodes_dislike_padding(g: Graph) -> None:
         op = _get_overload_packet(cur)
         if not op:
             continue
-        if op in ops_dislike_padding:
+        if op in ops_dislike_padding or cur.name in user_visible_outputs:
             cur.meta["dislike_padding"] = True
 
         if cur.meta.get("dislike_padding", False):
@@ -415,11 +417,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
-        mark_nodes_dislike_padding(gm.graph)
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = (
             user_visible_outputs if user_visible_outputs is not None else {}
         )
+        mark_nodes_dislike_padding(gm.graph, user_visible_outputs)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -1382,7 +1384,9 @@ class GraphLowering(torch.fx.Interpreter):
                         # To avoid converting possible view ops to a copy kernel, we use the previous
                         # require_exact_strides to handle views. But ultimately it's better to require
                         # the right strides at the tensor definition.
-                        if n.meta["val"]._is_view():
+                        if n.meta["val"]._is_view() or isinstance(
+                            result.data, ir.BaseView
+                        ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(strides),
