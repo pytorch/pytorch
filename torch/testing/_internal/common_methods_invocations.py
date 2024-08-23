@@ -28,7 +28,7 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FUSED_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
     _get_torch_rocm_version,
 )
@@ -16273,7 +16273,18 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('test_fake_crossref_backward_no_amp does not work with efficient attention on ROCM'),
                          'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
                          device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
-                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),),
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+            # for element 1, was torch.Size([4, 4, 0]) but real shape was torch.Size([16, 3, 0])
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16, torch.float32],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16, torch.float32],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         device_type="cuda", dtypes=[torch.float32],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),),
     ),
     OpInfo(
         'torch.ops.aten._flash_attention_forward',
@@ -16289,11 +16300,14 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
         skips=(
-            # ROCM fails stride order
-            DecorateInfo(unittest.expectedFailure, "TestFakeTensor", "test_fake_autocast", device_type="cuda",
+            # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", device_type="cuda",
                          dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestFakeTensor", "test_fake", device_type="cuda",
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
                          dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            # Checking the scalar value of the philox seed and offset
             # Checking the scalar value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
@@ -16321,6 +16335,14 @@ op_db: List[OpInfo] = [
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
             skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2")],
         skips=(
+            # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16, torch.float32],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
