@@ -652,6 +652,12 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
+
+        # Tell compiler we need to link with the non-mangled symbols
+        for kernel in self.initialized_kernels.values():
+            signature = kernel.get_signature()
+            self.prefix.writeline(f"extern \"C\" {signature};")
+
         self.prefix.writeline(
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
@@ -671,7 +677,7 @@ class CppWrapperCpu(WrapperCodeGen):
         for name, kernel in self.initialized_kernels.items():
             kernel_ptr = f"(*{name})"
             signature = kernel.get_signature().replace(name, kernel_ptr)
-            self.prefix.writeline(f"    {signature} = ::{name};")
+            self.prefix.writeline(f"    {signature} = {name};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
 
