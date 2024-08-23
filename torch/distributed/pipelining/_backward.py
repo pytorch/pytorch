@@ -240,6 +240,7 @@ def stage_backward_weight(
             grad_outputs=sum(param_group["grads"], tuple()),
         )
         for grad_acc, dw in zip(param_group["params"], dweights):
+            # torch.distributed.debug()
             weight, index = grad_acc_to_weight[grad_acc]
             if weight.grad is None:
                 weight.grad = dw
