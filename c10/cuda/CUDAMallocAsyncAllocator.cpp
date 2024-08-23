@@ -494,11 +494,11 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
 
-  void enable(bool) {
+  void enable(bool) override {
     // cannot disable
   }
 
-  bool isEnabled() const {
+  bool isEnabled() const override {
     return true;
   }
 
