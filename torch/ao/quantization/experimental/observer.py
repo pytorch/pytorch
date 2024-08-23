@@ -83,7 +83,7 @@ class APoTObserver(ObserverBase):
 
             if signed:
                 # sort tensor in reverse order before adding to list if signed
-                sorted, indices = torch.sort(p_curr, descending=True)
+                sorted, _ = torch.sort(p_curr, descending=True)
                 p_all.append(sorted)
             else:
                 p_all.append(p_curr)
@@ -148,9 +148,7 @@ class APoTObserver(ObserverBase):
     """
 
     def quant_levels_visualization(self, signed=False):
-        alpha, gamma, quantization_levels, level_indices = self.calculate_qparams(
-            signed
-        )
+        alpha, _, quantization_levels, level_indices = self.calculate_qparams(signed)
 
         xs = [float(x) / 1000.0 for x in range(1000)]
         ys = [
@@ -162,7 +160,7 @@ class APoTObserver(ObserverBase):
             for x in xs
         ]
 
-        f = plt.figure(figsize=(15, 10))
+        plt.figure(figsize=(15, 10))
 
         plt.plot(xs, ys)
         plt.title("APoT Quantization Plot")

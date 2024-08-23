@@ -207,8 +207,8 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 
 
 def is_valid_mm_plus_mm(match: Match):
-    *b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
-    *b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    *_, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
+    *_, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
     if k1 != k2:
         return False
 
@@ -819,7 +819,7 @@ def decompose_auto_functionalized(graph):
         match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
-    for node in graph.find_nodes(
+    for _ in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
     ):
         raise AssertionError("auto_functionalized was not removed")
@@ -1033,7 +1033,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     # if the value we are putting is a cpu scalar.
     # Therefore, when inductor sees an index_put_ with byte tensor indices,
     # it should *not* convert the cpu scalar value into a gpu tensor.
-    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)
+    args_, _ = normalize_function(node.target, node.args, node.kwargs)
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:

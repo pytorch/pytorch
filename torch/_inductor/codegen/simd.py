@@ -472,7 +472,7 @@ class SIMDKernel(Kernel):
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _ = V.graph.sizevars._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
@@ -864,7 +864,7 @@ class SIMDKernel(Kernel):
             # the mix layouts.
             return
 
-        argdefs, call_args, signature, _ = self.args.python_argdefs()
+        argdefs, call_args, _, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
@@ -1064,7 +1064,6 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
-        current_loop_writes: OrderedSet[str] = OrderedSet()
 
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
@@ -1491,7 +1490,7 @@ class SIMDScheduling(BaseScheduling):
 
         If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
         """
-        _, (numel, rnumel) = template_node.group
+        _, (_, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
         with kernel:
@@ -1755,7 +1754,7 @@ class SIMDScheduling(BaseScheduling):
             # Add one 3D tiling choice
             for i in range(1, len(ranked_tilings)):
                 a0, a1 = ranked_tilings[0]
-                b0, b1 = ranked_tilings[i]
+                _, b1 = ranked_tilings[i]
                 if V.graph.sizevars.size_hint(a1 - b1) == 0:
                     continue
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:

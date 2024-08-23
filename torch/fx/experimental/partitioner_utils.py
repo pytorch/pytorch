@@ -279,10 +279,8 @@ def get_latency_of_partitioned_graph(
     def dfs_helper(partition: Partition, latency_so_far_sec: float) -> float:
         """This function helps to recursively get the latency of a path of partitions"""
         # Update latency by adding current partition's latency
-        latency_so_far_sec += partition_to_latency_mapping[
-            partition
-        ].overall_latency_sec
-        children = partition.children
+        latency_so_far_sec += partition_to_latency_mapping[partition].overall_latency_sec
+
         if partition.children:
             max_latency_sec = 0.0
             for child in partition.children:

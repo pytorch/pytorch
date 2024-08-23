@@ -103,8 +103,6 @@ class SuperVariable(VariableTracker):
             type_to_use_source = self.objvar.source
 
         source = None
-        resolved_class = None
-        resolved_attr = None
         search_mro = type_to_use.__mro__
         start_index = search_mro.index(search_type) + 1
         for index in range(start_index, len(search_mro)):

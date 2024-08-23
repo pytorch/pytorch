@@ -75,8 +75,8 @@ def check_tensor_metadata_matches(nv, rv, desc):
 
 def check_metadata_matches(n, r, desc):
     assert callable(desc)
-    n_vals, n_spec = pytree.tree_flatten(n)
-    r_vals, r_spec = pytree.tree_flatten(r)
+    n_vals, _ = pytree.tree_flatten(n)
+    r_vals, _ = pytree.tree_flatten(r)
     # TODO: test the specs match; empirically  sometimes we have a tuple
     # on one side and a list on the other
     assert len(n_vals) == len(r_vals), f"{len(n_vals)} != {len(r_vals)}"

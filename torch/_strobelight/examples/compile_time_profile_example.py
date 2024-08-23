@@ -12,8 +12,8 @@ if __name__ == "__main__":
 
     @torch.compile()
     def work(n):
-        for i in range(3):
-            for j in range(5):
+        for _ in range(3):
+            for _ in range(5):
                 fn(torch.rand(n, n), torch.rand(n, n), torch.rand(n, n))
 
     # Strobelight will be called only 3 times because dynamo will be disabled after

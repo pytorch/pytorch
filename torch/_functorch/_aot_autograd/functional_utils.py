@@ -45,7 +45,7 @@ def to_fun(t):
 
 def sync_functional_tensor(t):
     if is_traceable_wrapper_subclass(t):
-        attrs, ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
+        attrs, _ = t.__tensor_flatten__()  # type: ignore[attr-defined]
         for attr in attrs:
             sync_functional_tensor(getattr(t, attr))
     else:
@@ -418,7 +418,6 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target in allowed_mutation_ops:
-                suffix = True
                 # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
