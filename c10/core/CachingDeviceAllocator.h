@@ -97,11 +97,11 @@ struct DeviceStats {
   int64_t num_sync_all_streams = 0;
 
   // COUNT: total number of device memory allocation calls. This includes both
-  // cuMemMap and cudaMalloc.
+  // mapped and malloced memory.
   int64_t num_device_alloc = 0;
 
   // COUNT: total number of device memory deallocation calls. This includes both
-  // cuMemUnmap and cudaFree.
+  // un-mapped and free memory.
   int64_t num_device_free = 0;
 
   // SIZE: maximum block size that is allowed to be split.
