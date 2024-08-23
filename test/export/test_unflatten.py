@@ -368,6 +368,7 @@ class TestUnflatten(TestCase):
         ):
             unflattened(torch.randn(6, 6))
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     def test_unflatten_with_inplace_compile(self):
         class NestedChild(torch.nn.Module):
             def forward(self, x):
@@ -413,10 +414,13 @@ class TestUnflatten(TestCase):
         unflattened = unflatten(export_module)
 
         # in-place compilation should work. Pass fullgraph to ensure no graph breaks.
-        unflattened.foo.compile(fullgraph=True)
+        from torch._dynamo.backends.debugging import ExplainWithBackend
 
-        inputs = (torch.rand(2, 3),)
+        eb = ExplainWithBackend("inductor")
+        unflattened.foo.compile(backend=eb, fullgraph=True)
+        inputs = (torch.randn(2, 3),)
         self.compare_outputs(orig_eager, unflattened, inputs)
+        self.assertEqual(len(eb.graphs), 1)
 
     def test_fx_trace(self):
         class MyModule(torch.nn.Module):

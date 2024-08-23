@@ -108,6 +108,7 @@ select = [
     "NPY",
     "PERF",
     "PGH004",
+    "PIE790",
     "PIE794",
     "PIE800",
     "PIE804",

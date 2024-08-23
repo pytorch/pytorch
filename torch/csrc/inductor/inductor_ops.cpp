@@ -10,7 +10,8 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 
-namespace torch::inductor {
+namespace torch {
+namespace inductor {
 using namespace at;
 
 Tensor _mm_plus_mm_out(
@@ -110,4 +111,5 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       {at::Tag::pt2_compliant_tag});
 }
 
-} // namespace torch::inductor
+} // namespace inductor
+} // namespace torch
