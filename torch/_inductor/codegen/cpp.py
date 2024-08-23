@@ -110,6 +110,26 @@ VECTORIZABLE_RTYPES = {
     "any",
 }
 
+VECTORIZABLE_DTYPES: List[torch.dtype] = [
+    torch.float64,
+    torch.float,
+    torch.bfloat16,
+    torch.float16,
+    torch.bool,
+    torch.uint8,
+    torch.int8,
+    torch.int32,
+    torch.int64,
+]
+
+MASKED_VECTORIZABLE_DTYPES: List[torch.dtype] = [
+    torch.float,
+    torch.bfloat16,
+    torch.float16,
+    torch.uint8,
+    torch.int8,
+]
+
 PYTHON_TO_CPP = {
     "Tensor": "at::Tensor",
     "int": "long",
@@ -1535,6 +1555,22 @@ class CppVecOverrides(CppOverrides):
 
 CppVecOverrides._initialize_pointwise_overrides("cppvec")
 
+FASTVECOP = [
+    "load",
+    "store",
+    "reduction",
+    "store_reduction",
+    "check_bounds",
+    "constant",
+    "index_expr",
+    "indirect_indexing",
+    "masked",
+    "to_dtype",
+]
+
+for k, v in CppVecOverrides.__dict__.items():
+    if isinstance(v, staticmethod):
+        FASTVECOP.append(k)
 
 class CppTile2DOverrides(CppVecOverrides):
     @staticmethod
@@ -3721,30 +3757,88 @@ class CppKernelProxy(CppKernel):
                 fn_list, var_sizes_list
             )
             assert len(tiling_factors) == len(tiling_indices)
-            # <TODO> This should be removed after full support for vectorization is implemented.
-            could_vec = True
             could_masked_vec = True
+
+            # TODO: We expected all dtypes are supported for vec/vecmask and
+            # remove all dtype check functions
+            def dtype_not_support(self, supported_dtype):
+                # check dtype in self.kernel_group.args
+                check_buf = ("input_buffers", "output_buffers", "inplace_buffers")
+                for buf_name in check_buf:
+                    buf = getattr(self.kernel_group.args, buf_name)
+                    for input_name in buf.keys():
+                        dtype = V.graph.get_dtype(input_name)
+                        if dtype not in supported_dtype:
+                            return True
+                if dtype_not_support_for_op(supported_dtype, "constant"):
+                    return True
+                if dtype_not_support_for_op(supported_dtype, "to_dtype"):
+                    return True
+                return False
+
+            def dtype_not_support_for_op(supported_dtype, target):
+                # check every scheduler nodes to see whether
+                # "constant" nodes' dtype are supported
+                def get_loop_body(fn):
+                    if isinstance(fn, ir.LoopBody):
+                        return fn
+                    if hasattr(fn, "original_fn"):
+                        fn = fn.original_fn
+                    return fn.args[0]._body
+
+                loop_bodies = [get_loop_body(fn) for fn in fn_list]
+                for loop_body in loop_bodies:
+                    graphs = [loop_body.root_block.graph] + [body.graph for body in list(loop_body.subblocks.values())]
+                    for graph in graphs:
+                        constant_nodes = [node for node in graph.nodes if node.target == target]
+                        dtypes = [n.meta[OptimizationContext.key].dtype for n in constant_nodes]
+                        if any(dtype not in supported_dtype for dtype in dtypes):
+                            return True
+                return False
+
+            def not_a_loop(self):
+                # check self.itervars
+                return not self.itervars
+
+            # TODO: remove this after vec mask support dynamic ranges
+            def dynamic_ranges(self):
+                return has_free_symbols(self.ranges)
+
+            def op_not_support():
+                def get_loop_body(fn):
+                    if isinstance(fn, ir.LoopBody):
+                        return fn
+                    if hasattr(fn, "original_fn"):
+                        fn = fn.original_fn
+                    return fn.args[0]._body
+
+                loop_bodies = [get_loop_body(fn) for fn in fn_list]
+                for loop_body in loop_bodies:
+                    graphs = [loop_body.root_block.graph] + [body.graph for body in list(loop_body.subblocks.values())]
+                    for graph in graphs:
+                        for node in graph.nodes:
+                            if node.op != "call_method":
+                                continue
+                            if node.target not in FASTVECOP:
+                                return True
+                return False
+
             if tiling_factors and tiling_indices:
                 tiling_factor = tiling_factors[0]
                 assert all(
                     _tiling_factor == tiling_factor for _tiling_factor in tiling_factors
                 )
-                for tiling_indice in tiling_indices:
-                    with CppVecKernelChecker(
-                        deepcopy(self.kernel_group.args),
-                        parallel_num_threads(),
-                        tiling_factor,
-                        tiling_indice,
-                    ) as vec_checker:
-                        run(vec_checker)
-                        could_vec = could_vec and vec_checker.simd_vec
-                        could_masked_vec = (
-                            could_masked_vec and vec_checker.simd_masked_vec
-                        )
-                        if not could_vec:
-                            tiling_factors = []
-                            tiling_indices = []
-                            break
+                if op_not_support():
+                    tiling_factors, tiling_indices = [], []
+                    could_masked_vec = False
+                if dtype_not_support(self, VECTORIZABLE_DTYPES):
+                    tiling_factors, tiling_indices = [], []
+                elif dtype_not_support(self, MASKED_VECTORIZABLE_DTYPES):
+                    could_masked_vec = False
+                if not_a_loop(self):
+                    tiling_factors, tiling_indices = [], []
+                if dynamic_ranges(self):
+                    could_masked_vec = False
 
             if len(tiling_indices) == 1:
                 vec_kernel = codegen_kernel(
