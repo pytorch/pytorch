@@ -7,6 +7,7 @@
 #include <c10/util/irange.h>
 
 namespace at::vec {
+
 // slow path
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(
