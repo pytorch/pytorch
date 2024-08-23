@@ -292,7 +292,7 @@ class Unpickler:
                         inst.__dict__.update(state)
                 else:
                     raise UnpicklingError(
-                        "Can only build Tensor, Parameter, OrderedDict or objects allowlisted "
+                        "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
                         f"via `add_safe_globals`, but got {type(inst)}"
                     )
             # Stack manipulation
