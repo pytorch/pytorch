@@ -16,7 +16,7 @@ import torch
 from torch import sym_float, sym_int
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, polyfills, variables
+from .. import config, variables
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -92,19 +92,6 @@ IN_PLACE_DESUGARING_MAP = {
     operator.ior: operator.or_,
     operator.ixor: operator.xor,
 }
-
-
-def _polyfill_call_impl(name):
-    """Create a BuiltinVariable.call_{name} method that inlines through polyfill.{name}"""
-
-    def call_fn(self, tx: "InstructionTranslator", *args, **kwargs):
-        return tx.inline_user_function_return(
-            variables.UserFunctionVariable(fn), args, kwargs
-        )
-
-    fn = getattr(polyfills, name)
-    call_fn.__name__ = f"call_{name}"
-    return call_fn
 
 
 class BuiltinVariable(VariableTracker):
@@ -1619,7 +1606,10 @@ class BuiltinVariable(VariableTracker):
             if start is self._SENTINEL:
                 start = variables.ConstantVariable.create(0)
             items = seq.unpack_var_sequence(tx)
-            return BuiltinVariable(functools.reduce).call_function(
+
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder.create(tx, functools.reduce).call_function(
                 tx,
                 [
                     BuiltinVariable(operator.add),
@@ -1628,19 +1618,6 @@ class BuiltinVariable(VariableTracker):
                 ],
                 {},
             )
-
-    def call_reduce(
-        self, tx: "InstructionTranslator", function, iterable, initial=_SENTINEL
-    ):
-        if iterable.has_unpack_var_sequence(tx):
-            items = iterable.unpack_var_sequence(tx)
-            if initial is self._SENTINEL:
-                value, items = items[0], items[1:]
-            else:
-                value = initial
-            for element in items:
-                value = function.call_function(tx, [value, element], {})
-            return value
 
     def call_getattr(
         self,
@@ -2123,9 +2100,6 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ):
         return a.call_method(tx, "__contains__", [b], {})
-
-    call_all = _polyfill_call_impl("all")
-    call_any = _polyfill_call_impl("any")
 
 
 @contextlib.contextmanager
