@@ -28,6 +28,8 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     skipCUDAIfRocm,
     TEST_WITH_ROCM,
+    dtypesIfMPS,
+    expectedFailureMPS,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_nn import (
@@ -818,6 +820,7 @@ torch.cuda.synchronize()
             inp = torch.randn(16, 0, 20, 32, device=device)
             avgpool(inp)
 
+    @skipIfMps  # max_pool3d_with_indices not supported on MPS
     def test_pooling_shape(self, device):
         """Test the output shape calculation for pooling functions"""
 
@@ -1328,6 +1331,8 @@ torch.cuda.synchronize()
         helper(1, 19, 20, 10, 8, 2, torch.channels_last)
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
+    @expectedFailureMPS  # test_adaptive_pooling_max_nhwc currently fails on MPS - ISSUE #
     def test_adaptive_pooling_max_nhwc(self, device, dtype):
         def helper(input_size, output_plane_size, contig):
             n_plane_dims = len(output_plane_size)
@@ -1379,6 +1384,8 @@ torch.cuda.synchronize()
             helper((2, 1, 3, 3, 3), (1, 1, 1), contig)
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
+    @expectedFailureMPS  # test_pooling_max_nhwc currently fails on MPS - ISSUE #
     def test_pooling_max_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
             output_height = math.floor(
@@ -1926,6 +1933,7 @@ torch.cuda.synchronize()
             prec=0.05,
         )
 
+    @expectedFailureMPS  # max_pool3d_with_indices not supported on MPS device
     def test_maxpool3d_non_square_backward(self, device):
         # previous CUDA routine of this backward calculates kernel launch grid size
         # with last two dimensions interchanged, so the tailing along the longer dim
@@ -1950,7 +1958,7 @@ torch.cuda.synchronize()
         imgs_ = F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 
-instantiate_device_type_tests(TestPoolingNNDeviceType, globals())
+instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestPoolingNN)
 
 if __name__ == "__main__":

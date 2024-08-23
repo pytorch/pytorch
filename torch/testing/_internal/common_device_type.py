@@ -1658,6 +1658,10 @@ def expectedFailureHPU(fn):
     return expectedFailure("hpu")(fn)
 
 
+def expectedFailureMPS(fn):
+    return expectedFailure("mps")(fn)
+
+
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
     return skipCPUIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)

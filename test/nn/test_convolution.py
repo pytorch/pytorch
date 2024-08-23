@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     disableMkldnn,
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
@@ -36,6 +37,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNotMiopenSuggestNHWC,
     skipCUDAIfRocm,
     skipCUDAIfRocmVersionLessThan,
+    skipMPS,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import (
@@ -1855,6 +1857,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
 
     @dtypes(torch.double, torch.cdouble)
+    @skipMPS  # Double, complex double not supported on MPS
     def test_conv3d_same_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != "xla"
 
@@ -2075,6 +2078,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, gy_actual)
 
     @dtypes(torch.double, torch.cdouble)
+    @skipMPS  # Double, complex double not supported on MPS
     def test_conv3d_valid_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != "xla"
 
@@ -2102,6 +2106,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         )
 
     @parametrize_test("N", range(2, 4), name_fn=lambda N: f"ConvTranspose{N}d")
+    @skipMPS  # ConvTranspose 3D not supported on MPS
     def test_conv_transpose_with_output_size_and_no_batch_dim(self, device, N):
         # For inputs with no batch dim, verify output is the correct shape when output_size is set.
         # See https://github.com/pytorch/pytorch/issues/75889
@@ -3067,6 +3072,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         input_large = torch.randn(1, 1, 2048, 1024, dtype=dtype, device=device)
         conv2(input_large)
 
+    @skipMPS  # ConvTranspose 3D is not supported on MPS
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
             for grouped in (False, True):
@@ -3383,6 +3389,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         )
 
     @dtypes(torch.double, torch.cdouble)
+    @skipMPS # Double, complex double not supported on MPS
     def test_Conv2d_backward_depthwise(self, device, dtype):
         x = torch.randn(2, 2, 4, 20, device=device, dtype=dtype, requires_grad=True)
         weight = torch.randn(2, 1, 3, 5, device=device, dtype=dtype, requires_grad=True)
@@ -4032,7 +4039,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(yref, y)
 
 
-instantiate_device_type_tests(TestConvolutionNNDeviceType, globals())
+instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestConvolutionNN)
 
 if __name__ == "__main__":
