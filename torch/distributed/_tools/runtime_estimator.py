@@ -1,6 +1,10 @@
+# Owner(s): ["module: unknown"]
+import math
+import os
 import time
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Set
+from typing_extensions import Self
 
 import torch
 import torch.utils._pytree as pytree
@@ -11,9 +15,15 @@ from torch.distributed._tools.mod_tracker import ModTracker
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.flop_counter import flop_registry
-from typing_extensions import Self
+
 
 aten = torch.ops.aten
+
+# This value is hard-coded here:
+# https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
+_PYTORCH_MIN_ALLOCATE = (
+    2**9 if int(os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING", 0)) == 0 else 1
+)
 
 # No fall-back kernel needed/exists for view ops
 _VIEW_OPS = {
@@ -89,7 +99,7 @@ class RuntimeEstimator(TorchDispatchMode):
 
     Note:
         1) The benchmarking estimate mode will execute kernels on GPU and assumes that every operation can run in
-            isolation with causing an OOM. It is also designed to be used under ``FakeTensorMode``.
+            isolation without causing an OOM error. It is also designed to be used only under ``FakeTensorMode``.
         2) Currently wrapper tensor sub-classes such as ``DTensor`` won't produce correct estimates. We plan to support
             them in future PRs.
         3) We only estimate the compute time, if your code has communication, it will not be considered. Again, we will
@@ -136,7 +146,7 @@ class RuntimeEstimator(TorchDispatchMode):
         self.mod_bw_post_order: List[str] = []
         self.total_runtime: float = 0.0
 
-    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969  # noqa
+    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969  # noqa: PGH004,B950
     # NB: returns fake tensors
     @classmethod
     def _maybe_run_and_benchmark_fallback_kernel(  # type: ignore[no-untyped-def]
@@ -157,7 +167,8 @@ class RuntimeEstimator(TorchDispatchMode):
                 is not implemented.
 
         Returns:
-            Tuple[Any, float]: A tuple containing the result of the function and the mean operation time.
+            Tuple[Any, float]: A tuple containing the result of the function and
+                the mean operation time in milliseconds.
         """
         # these should all be supported, just to be safe
         # avoid fallback for operators which inplace modify metadata
@@ -171,7 +182,7 @@ class RuntimeEstimator(TorchDispatchMode):
         # REAL compute (not with meta device)
         with no_dispatch():
 
-            def to_real_tensor(e):
+            def to_real_tensor(e):  # type: ignore[no-untyped-def]
                 if cls.fake_mode.is_our_fake(e):
                     if e.dtype in cls._float_types:
                         out = torch.rand_like(e, device=e.fake_device)
@@ -186,28 +197,37 @@ class RuntimeEstimator(TorchDispatchMode):
             flat_args = [to_real_tensor(a) for a in flat_args]
             args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
             r = func(*args, **kwargs)
-            num_iters = 5
+            warmup_iters, total_iters = 2, 5
             start_events = [
-                torch.cuda.Event(enable_timing=True) for _ in range(num_iters)
+                torch.cuda.Event(enable_timing=True) for _ in range(total_iters)
             ]
             end_events = [
-                torch.cuda.Event(enable_timing=True) for _ in range(num_iters)
+                torch.cuda.Event(enable_timing=True) for _ in range(total_iters)
             ]
-            cpu_start = time.time()
-            for i in range(num_iters):
+            cpu_start_times: List[float] = []
+            cpu_end_times: List[float] = []
+
+            for i in range(total_iters):
+                cpu_start_times[i] = time.time()
                 start_events[i].record(torch.cuda.current_stream())
                 func(*args, **kwargs)
                 end_events[i].record(torch.cuda.current_stream())
-            cpu_end = time.time()
+                cpu_end_times[i] = time.time()
             torch.cuda.synchronize()
-            cpu_time = (cpu_end - cpu_start) / 1000
-            total_op_time = sum(
-                (
-                    start_events[i].elapsed_time(end_events[i])
-                    for i in range(2, num_iters)
-                )
+            # We skip the time for warmup iterations
+            total_cuda_time = sum(
+                start_events[i].elapsed_time(end_events[i])
+                for i in range(warmup_iters, total_iters)
             )
-            mean_op_time = (total_op_time - cpu_time) / num_iters
+            total_cpu_time = sum(
+                cpu_end_times[i] - cpu_start_times[i]
+                for i in range(warmup_iters, total_iters)
+            )
+            measured_iters = total_iters - warmup_iters
+            mean_cuda_time = total_cuda_time / measured_iters
+            # cpu times are in seconds so multiply by 1000 to get time in milliseconds
+            mean_cpu_time = (total_cpu_time / measured_iters) * 1e3
+            mean_op_time = mean_cuda_time - mean_cpu_time
 
         storages = set()
 
@@ -221,7 +241,7 @@ class RuntimeEstimator(TorchDispatchMode):
         # not be set up, bc of conversion to device, unless we can reuse an
         # input impl
 
-        def map_out(e):
+        def map_out(e):  # type: ignore[no-untyped-def]
             if id(e) not in inp_impls and (
                 isinstance(e, torch.Tensor)
                 and not e.is_sparse
@@ -253,7 +273,7 @@ class RuntimeEstimator(TorchDispatchMode):
             res: The result of the function.
 
         Returns:
-            float: The estimated runtime of the function in seconds.
+            float: The estimated runtime of the function in milliseconds.
         """
         assert isinstance(
             cls.fake_mode, FakeTensorMode
@@ -272,7 +292,7 @@ class RuntimeEstimator(TorchDispatchMode):
                 cls._no_fallback_kernel.add(func._overloadpacket)
         return mean_op_time
 
-    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589  # noqa
+    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589  # noqa: PGH004,B950
     @classmethod
     def _roofline_estimate(cls, func, args, kwargs, out) -> float:  # type: ignore[no-untyped-def]
         """
@@ -285,35 +305,68 @@ class RuntimeEstimator(TorchDispatchMode):
             out: The output of the function.
 
         Returns:
-            float: The estimated runtime of the function in seconds.
+            float: The estimated runtime of the function in milliseconds.
         """
 
         def get_num_bytes(t: torch.Tensor) -> int:
-            st = t.untyped_storage()
-            num_bytes = st.size() * st.element_size()
-            return num_bytes
+            """
+            Calculates the memory consumption of a tensor.
 
-        def get_compute_time(func_packet, args, kwargs, out, out_dtypes):
+            Args:
+                t (torch.Tensor): The input tensor.
+
+            Returns:
+                int: The memory consumption of the tensor in bytes.
+            """
+            num_bytes = t.untyped_storage().nbytes()
+            mem_consumed = (
+                math.ceil(num_bytes / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
+            )
+            return mem_consumed
+
+        def get_compute_time(func_packet, args, kwargs, out, out_dtypes) -> float:  # type: ignore[no-untyped-def]
+            """
+            Estimates the compute time of an aten operator.
+
+            Args:
+                func_packet: The operator overload packet.
+                args: The arguments to the operator.
+                kwargs: The keyword arguments to the operator.
+                out: The output of the operator.
+                out_dtypes: The output data types.
+
+            Returns:
+                float: The estimated compute time in nanoseconds.
+            """
             if func_packet in flop_registry:
                 assert (
                     len(out_dtypes) == 1
                 ), f"Only support single out dtype got {out_dtypes} for {func_packet}"
                 dtype = out_dtypes.pop()
+                # This actually gives peta-FLOPs/s hence multiply by 1e15 to get the FLOPs/s
+                peak_gpu_flops = get_device_tflops(dtype) * 1e15
                 # We can expect to achieve 75% of theoretical peak flops
                 factor = 0.75
-                # This actually gives peta-FLOPs/s hence multiply by 1e15
-                # instead of 1e12 to get the FLOPs/s
-                gpu_flops = get_device_tflops(dtype) * 1e15
+                peak_empirical_flops = factor * peak_gpu_flops
                 flop_count_func = flop_registry[func_packet]
-                # We divide by a factor of 2 to get the MACs
-                # (multiply and accumulate)
+                # We divide by a factor of 2 to get the MACs (multiply and accumulate)
                 flop_count = flop_count_func(*args, **kwargs, out_val=out) / 2
                 # We multiply by 1e9 to get the time in nano seconds
-                compute_time = (flop_count / (factor * gpu_flops)) * 1e9
+                compute_time = (flop_count / peak_empirical_flops) * 1e9
                 return compute_time
             return 0.0
 
-        def get_transfer_time(flat_args_kwargs, flat_outs):
+        def get_transfer_time(flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-untyped-def]
+            """
+            Estimates the memory transfer time of input and output tensors.
+
+            Args:
+                flat_args_kwargs (List[torch.Tensor]): The flat list of arguments and keyword arguments.
+                flat_outs (List[torch.Tensor]): The flat list of outputs.
+
+            Returns:
+                float: The estimated memory transfer time in nanoseconds.
+            """
             read_bytes = sum(
                 get_num_bytes(t)
                 for t in flat_args_kwargs
@@ -323,15 +376,37 @@ class RuntimeEstimator(TorchDispatchMode):
                 get_num_bytes(t) for t in flat_outs if isinstance(t, torch.Tensor)
             )
             counted_bytes = read_bytes + write_bytes
-            # The GPU memory bandwidth is in GB/s so the transfer time
-            # is in nano seconds
+            # The GPU memory bandwidth is in GB/s so the transfer time is in nanoseconds
             transfer_time = counted_bytes / cls._gpu_memory_bandwidth
             return transfer_time
+
+        # Roofline Cost Model Explanation
+
+        # The roofline cost model estimates the execution time of an operator based on
+        # the device's empirical maximum FLOPs/sec (pi) and device DRAM bandwidth (beta).
+
+        # Variables:
+        # - pi: Maximum empirical FLOPs/sec of the device
+        # - beta: Maximum empirical device DRAM bandwidth (bytes/sec) of the device
+        # - I: Arithmetic intensity of the operator (FLOPs/bytes)
+        # - op_flops: FLOPs required by the operator
+        # - op_bytes: Bytes transferred to and from DRAM for the operator
+
+        # Calculation Steps:
+        # 1. Calculate arithmetic intensity: I = op_flops / op_bytes
+        # 2. Calculate estimated FLOPs/sec: est_flops_sec = min(pi, beta * I)
+        # 3. Calculate estimated operator time: estimated_op_time = op_flops / est_flops_sec
+        #    This simplifies to: estimated_op_time = max(op_flops / pi, op_flops / (beta * I))
+        #    Further simplifying: estimated_op_time = max(op_flops / pi, op_bytes / beta)
+
+        # Simplified Formulas:
+        # - compute_time = op_flops / pi
+        # - transfer_time = op_bytes / beta
+        # - estimated_op_time = max(compute_time, transfer_time)
 
         op_time = 0.0
         func_packet = func._overloadpacket
         if func_packet not in _VIEW_OPS:
-
             flat_args_kwargs, args_spec = pytree.tree_flatten((args, kwargs))
             flat_outs, out_spec = pytree.tree_flatten(out)
             transfer_time = get_transfer_time(flat_args_kwargs, flat_outs)
@@ -352,7 +427,7 @@ class RuntimeEstimator(TorchDispatchMode):
 
         return op_time
 
-    def display_modulewise_stats(self, depth: int = 2):
+    def display_modulewise_stats(self, depth: int = 2) -> None:
         """
         Displays module-wise statistics collected by ``RuntimeEstimator``.
 
@@ -384,7 +459,8 @@ class RuntimeEstimator(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):  # type: ignore[no-untyped-def]
         res = func(*args, **kwargs or {})
-        # FIXME: @sanketpurandare: flatten tensors by desugaring the tensor subclasses
+        # TODO: @sanketpurandare: Flatten tensors by desugaring the tensor subclasses
+        # TODO: @sanketpurandare: Add logic for incorporating communication time
         op_time = self._estimate(func, args, kwargs, res)
         for par in self._mod_tracker.parents:
             if self._mod_tracker.is_bw:
