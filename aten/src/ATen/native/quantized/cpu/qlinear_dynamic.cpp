@@ -532,7 +532,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   }
 #endif
 
-#if defined(__aarch64__)
+:#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
   // oneDNN+ACL has optimized kernels for s8s8 matmul, so input is signed
     using input_qtype = int8_t;
 #else
