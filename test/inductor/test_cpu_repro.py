@@ -4217,7 +4217,6 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_full_bits_lowp(self):
         from torch._dynamo.utils import detect_fake_mode
-        from torch._inductor.codegen.cpp import CppKernelProxy, KernelGroup
         from torch._inductor.compile_fx import shape_env_from_inputs
         from torch._inductor.debug import DebugContext
         from torch._inductor.graph import GraphLowering
