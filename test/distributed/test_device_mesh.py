@@ -561,10 +561,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Check on the current dp_local_rank, whether the cp mesh tensor is the same.
         self.assertEqual(dp_cp_mesh.mesh[dp_local_rank], cp_mesh.mesh)
 
-        mesh_dim_names = ("cp", "dp")
         with self.assertRaisesRegex(
             KeyError,
-            "Invalid slice",
+            "Invalid mesh_dim_names",
         ):
             cp_dp_mesh = mesh_3d["cp", "dp"]
 
