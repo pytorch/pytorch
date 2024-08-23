@@ -302,7 +302,7 @@ class TestFullyShardCompile(FSDPTest):
         file_check = file_check.check("torch.ops.fsdp.split_with_sizes_copy.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
         file_check = file_check.check_count(
-            "torch.ops.aten.copy_.", num_copy, exactly=True
+            "triton_poi_fused_copy__", num_copy, exactly=True
         )
         if not last_all_gather:
             # Checks that there is no compute op between this AGWait and next AG.
