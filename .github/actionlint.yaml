@@ -16,6 +16,16 @@ self-hosted-runner:
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
     - linux.g5.4xlarge.nvidia.gpu
+    - am2.linux.large
+    - am2.linux.2xlarge
+    - am2.linux.4xlarge
+    - am2.linux.12xlarge
+    - am2.linux.24xlarge
+    - am2.linux.arm64.2xlarge
+    - am2.linux.4xlarge.nvidia.gpu
+    - am2.linux.8xlarge.nvidia.gpu
+    - am2.linux.16xlarge.nvidia.gpu
+    - am2.linux.g5.4xlarge.nvidia.gpu
     # Organization-wide AWS Linux Runners on Linux Foundation account
     - lf.linux.large
     - lf.linux.2xlarge
