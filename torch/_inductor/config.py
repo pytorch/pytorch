@@ -210,11 +210,6 @@ force_fuse_int_mm_with_mul = False
 # Autotune will compare perf with normal cast->then->mm option
 use_mixed_mm = True
 
-# FlexAttention uses flex_attention kernel for query's seqlen >= 128
-# or flex_decoding kernel for query's seqlen < 128. Turn on this flag
-# to forcely use flex_attention for all seqlen.
-force_use_flex_attention = False
-
 # enable runtime numeric check for pre/post grad fx passes
 # floating point provides limited accuracy (about 7 decimal digits for single precision
 # floating point numbers,about 16 decimal digits for double precision floating point numbers)
@@ -746,6 +741,11 @@ class cpp:
     enable_floating_point_contract_flag = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
         == "1"
+    )
+
+    # Disable the tiling select heuristic
+    enable_tiling_heuristics = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC", "1") == "1"
     )
 
     # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls

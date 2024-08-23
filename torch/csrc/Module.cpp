@@ -213,11 +213,6 @@ static PyObject* THPModule_initExtension(
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
 
-  // The main thread usually launches CPU/GPU/Accelerator kernels and therefore
-  // becomes latency sensitive. If the thread is named, we can debug performance
-  // issues easier.
-  c10::setThreadName("pt_main_thread");
-
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module)
     throw python_error();
@@ -1530,6 +1525,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_isEnabledTorchFunction,
      METH_NOARGS,
      nullptr},
+    {"_is_torch_function_all_disabled",
+     THPModule_isAllDisabledTorchFunction,
+     METH_NOARGS,
+     nullptr},
     {"_disabled_torch_function_impl",
      THPModule_disable_torch_function,
      METH_VARARGS,
@@ -1740,6 +1739,13 @@ PyObject* initModule() {
   PyObject* has_cudnn = Py_False;
 #endif
   ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
+
+#if defined(USE_CUSPARSELT)
+  PyObject* has_cusparselt = Py_True;
+#else
+  PyObject* has_cusparselt = Py_False;
+#endif
+  ASSERT_TRUE(set_module_attr("_has_cusparselt", has_cusparselt));
 
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;

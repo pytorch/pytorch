@@ -4740,6 +4740,8 @@ class ExternKernel(InputsKernel):
                 return cls.require_stride_order(x, order, allow_padding=allow_padding)
             except NotImplementedError:
                 pass
+        # Although this is a clone, inductor is good about fusing clones into previous
+        # operations if they weren't realized and their layouts were flexible.
         x = cls.copy_input(x)
         as_storage_and_layout(
             x,
@@ -6666,7 +6668,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
-        self.fetch_attr = submodules.__getitem__
+        self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
