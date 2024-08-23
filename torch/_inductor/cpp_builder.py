@@ -759,6 +759,12 @@ def _get_openmp_args(
     libs: List[str] = []
     passthough_args: List[str] = []
     if _IS_MACOS:
+        cflags.append("framework Metal")
+        cflags.append("framework Foundation")
+        libs.append("dl")
+        libs.append("pthread")
+        libs.append("Halide")
+    elif False and _IS_MACOS:
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         cflags.append("Xclang")
         cflags.append("fopenmp")
@@ -1366,6 +1372,8 @@ class CppBuilder:
 
         build_cmd = self.get_command_line()
 
+        if os.getenv("PRINT_BUILD_CMDS", "0") == "1":
+            print(f"{build_cmd}\n", file=sys.stderr)
         status = run_command_line(build_cmd, cwd=_build_tmp_dir)
 
         _remove_dir(_build_tmp_dir)
