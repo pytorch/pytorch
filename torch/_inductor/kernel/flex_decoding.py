@@ -18,6 +18,7 @@ from .flex_attention import (
     compute_next_offset_func,
     create_indices_fake,
     create_num_blocks_fake_generator,
+    nullable_realize,
 )
 
 
@@ -361,7 +362,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             empty(0, device=query.get_device()) for _ in range(2)
         )
 
-    for buf in [
+    (
         query,
         key,
         value,
@@ -369,8 +370,17 @@ def create_flex_decoding_kernel(*args, **kwargs):
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-    ]:
-        buf.realize()
+    ) = nullable_realize(
+        [
+            query,
+            key,
+            value,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ]
+    )
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
