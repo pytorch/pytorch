@@ -1142,7 +1142,6 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
-        'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows" and platform_machine != "ARM64"',
     ]
 
     if sys.version_info >= (3, 12, 0):
