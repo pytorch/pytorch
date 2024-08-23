@@ -284,8 +284,6 @@ def unlift_tokens(fw_module, fw_metadata):
 
     # This is sad, but we need to update the metadata to get rid of
     # the tokens.
-    fw_metadata.num_forward_returns -= num_tokens
-    fw_metadata.num_forward -= num_tokens
     fw_metadata.tokens = {}
 
 

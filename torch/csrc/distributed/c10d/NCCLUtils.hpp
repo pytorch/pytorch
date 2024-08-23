@@ -272,7 +272,7 @@ class NCCLComm {
     // Add lock in this destructor, as aborted_ needs to be read after memory
     // barrier here.
     std::unique_lock<std::mutex> lock(mutex_);
-    if (ncclComm_ && !aborted_) {
+    if (ncclComm_ && initialized_ && !aborted_) {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
       // Use ncclCommAbort instead of ncclCommDestroy here since
       // ncclCommDestroy could block forever waiting for work to complete on
@@ -381,7 +381,7 @@ class NCCLComm {
       std::optional<std::string> commFailureReason = std::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-    if (aborted_) {
+    if (aborted_ && !initialized_) {
       // Should not abort twice.
       return;
     }

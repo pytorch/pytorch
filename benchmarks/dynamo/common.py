@@ -1391,7 +1391,7 @@ def export(model, example_inputs):
 
     def opt_export(_, example_inputs):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return ep(*example_args, **example_kwargs)
+        return ep.module()(*example_args, **example_kwargs)
 
     return opt_export
 

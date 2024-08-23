@@ -17,6 +17,7 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     run,
+    substitute_in_graph,
 )
 from .eval_frame import (
     _reset_guarded_backend_cache,
@@ -39,6 +40,7 @@ __all__ = [
     "assume_constant_result",
     "disallow_in_graph",
     "forbid_in_graph",
+    "substitute_in_graph",
     "graph_break",
     "mark_dynamic",
     "maybe_mark_dynamic",
@@ -87,6 +89,7 @@ def reset() -> None:
         callback_handler.clear()
         GenerationTracker.clear()
         torch._dynamo.utils.warn_once_cache.clear()
+        torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
 
 

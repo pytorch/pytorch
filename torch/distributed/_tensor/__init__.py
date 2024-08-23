@@ -3,7 +3,10 @@
 
 import torch
 import torch.distributed._tensor.ops as _ops  # force import all built-in dtensor ops
-from torch.distributed._tensor._tensor_constructors import (
+from torch.distributed._tensor.api import (
+    distribute_module,
+    distribute_tensor,
+    DTensor,
     empty,
     full,
     ones,
@@ -11,8 +14,12 @@ from torch.distributed._tensor._tensor_constructors import (
     randn,
     zeros,
 )
-from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
-from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
+from torch.distributed._tensor.placement_types import (
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.optim.optimizer import (
     _foreach_supported_types as _optim_foreach_supported_types,
@@ -32,6 +39,7 @@ __all__ = [
     "Shard",
     "Replicate",
     "Partial",
+    "Placement",
     "ones",
     "empty",
     "full",

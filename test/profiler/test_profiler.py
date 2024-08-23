@@ -509,6 +509,9 @@ class TestProfiler(TestCase):
         # rerun to avoid initial start overhead
         with _profile(use_cuda=use_cuda, use_kineto=True) as p:
             self.payload(use_cuda=use_cuda)
+
+        self.assertTrue("aten::mm" in str(p))
+
         output = p.key_averages().table(
             sort_by="self_cuda_time_total" if use_cuda else "self_cpu_time_total",
             row_limit=-1,
@@ -1856,6 +1859,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             for i in range(100):
                 torch.add(1, 2)
                 prof.step()
+        # print(prof.key_averages())
         for ev in prof.key_averages():
             if ev.key == "aten::add":
                 return ev.count

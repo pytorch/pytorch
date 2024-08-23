@@ -2772,49 +2772,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(num_compiles, 1)
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-    def test_mark_static_nn_module_tensor(self):
-        # This test verifies that dynamo will mark
-        # the nn module tensor attributes as static
-        num_compiles = 0
-
-        def debug_compiler(gm, _):
-            nonlocal num_compiles
-            num_compiles += 1
-
-            input_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "placeholder" and n.name == "l_mod_buf"
-            ]
-
-            self.assertGreater(len(input_nodes), 0)
-            for input_node in input_nodes:
-                self.assertEqual(
-                    input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
-                    "unguarded",
-                )
-
-            return gm
-
-        class TestModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.buf = torch.ones(2, 2)
-
-            def forward(self, x):
-                return self.buf * x
-
-        mod = TestModule()
-
-        @torch._dynamo.optimize(backend=debug_compiler)
-        def fn(x):
-            return x * mod(x)
-
-        inp = torch.ones(2)
-        fn(inp)
-        self.assertEqual(num_compiles, 1)
-
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @torch._inductor.config.patch("freezing", True)
     @torch.no_grad()
     def test_mark_static_with_freezing(self):
