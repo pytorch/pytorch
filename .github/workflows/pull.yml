@@ -628,6 +628,9 @@ jobs:
     name: cuda12.1-py3.10-gcc9-sm75
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm75
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
