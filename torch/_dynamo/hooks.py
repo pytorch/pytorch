@@ -55,10 +55,7 @@ def skip_guards_on_nn_module_attributes(guards: GuardsSet) -> GuardsSet:
     new_guards = GuardsSet()
 
     for g in guards:
-        if (
-            g.guard_source.is_unspecialized_nn_module()
-            or g.guards_source.is_specialized_nn_module()
-        ):
+        if g.source.is_unspecialized_nn_module() or g.source.is_specialized_nn_module():
             guards_log.debug("%s", f"Skipping guard: {g}")
         else:
             new_guards.add(g)

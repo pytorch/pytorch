@@ -2409,6 +2409,8 @@ def compile(
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
 
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
+
+       dynamo_options(dict): A dictionary of options to pass on to TorchDynamo mostly for experimentation (e.g., guard_filter_fn)
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
