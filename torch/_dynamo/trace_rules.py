@@ -2980,6 +2980,7 @@ def _disallowed_callable_ids() -> Dict[int, str]:
 
 @FunctionIdSet
 def _builtin_function_ids() -> Dict[int, str]:
+    # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
         id(v): f"builtins.{k}"
         for k, v in builtins.__dict__.items()
@@ -2998,7 +2999,6 @@ def _builtin_function_ids() -> Dict[int, str]:
     rv.update(
         {
             id(cast): "typing.cast",
-            id(functools.reduce): "functools.reduce",
             id(copy.deepcopy): "copy.deepcopy",
         }
     )
@@ -3072,6 +3072,7 @@ def is_forbidden(obj) -> bool:
 
 
 def is_builtin_callable(obj) -> bool:
+    # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     return id(obj) in _builtin_function_ids
 
 

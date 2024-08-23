@@ -698,11 +698,14 @@ test_inductor_get_core_number() {
 
 test_inductor_set_cpu_affinity(){
   #set jemalloc
+  JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
+  export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
+  export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
+
   if [[ "${TEST_CONFIG}" != *aarch64* ]]; then
-    JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
+    # Use Intel OpenMP for x86
     IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
-    export LD_PRELOAD="$JEMALLOC_LIB":"$IOMP_LIB":"$LD_PRELOAD"
-    export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
+    export LD_PRELOAD="$IOMP_LIB":"$LD_PRELOAD"
     export KMP_AFFINITY=granularity=fine,compact,1,0
     export KMP_BLOCKTIME=1
   fi
