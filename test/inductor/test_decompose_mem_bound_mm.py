@@ -183,7 +183,7 @@ class TestDecomposeMemMM(TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose else 0
+            expected_val = 1 if should_decompose and HAS_CUDA else 0
             if has_bias:
                 self.assertEqual(
                     counters["inductor"]["decompose_addmm"],
