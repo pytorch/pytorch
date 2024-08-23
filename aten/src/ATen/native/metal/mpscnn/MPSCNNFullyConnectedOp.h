@@ -3,7 +3,6 @@
 #import <ATen/native/metal/mpscnn/MPSCNNConvOp.h>
 #import <Foundation/Foundation.h>
 
-using namespace at::native::metal;
 API_AVAILABLE(ios(11.0), macos(10.13))
 @interface MPSCNNFullyConnectedOp : NSObject<MPSCNNOp>
 + (MPSCNNFullyConnectedOp*)linear:(const Conv2DParams&)params

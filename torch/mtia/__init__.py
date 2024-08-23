@@ -306,7 +306,6 @@ def set_rng_state(
         UserWarning,
         stacklevel=2,
     )
-    pass
 
 
 __all__ = [

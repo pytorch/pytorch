@@ -2746,7 +2746,9 @@ def native_layer_norm(
     # mean and normalized, so we need to Cast it back
     if is_type_half:
         denominator = g.op(
-            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()  # type: ignore[possibly-undefined]
+            "Cast",
+            denominator,  # type: ignore[possibly-undefined]
+            to_i=_type_utils.JitScalarType(input_dtype).onnx_type(),
         )
         rdenominator = g.op("Reciprocal", denominator)
     else:
@@ -4368,7 +4370,8 @@ def _generic_rnn(
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
             )
         return tuple(
-            symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)  # type: ignore[possibly-undefined]
+            symbolic_helper._unsqueeze_helper(g, x, [0])
+            for x in (weight_ih, weight_hh)  # type: ignore[possibly-undefined]
         )
 
     def transform_weights(layer_index):
@@ -4498,9 +4501,10 @@ def _lstm_full(
     bidirectional,
     batch_first,
 ):
-    hidden, weight = symbolic_helper._unpack_list(
-        hidden_v
-    ), symbolic_helper._unpack_list(weight_v)
+    hidden, weight = (
+        symbolic_helper._unpack_list(hidden_v),
+        symbolic_helper._unpack_list(weight_v),
+    )
     return _generic_rnn(
         g,
         "LSTM",
@@ -4529,9 +4533,10 @@ def _lstm_packed(
     train,
     bidirectional,
 ):
-    hidden, weight = symbolic_helper._unpack_list(
-        hidden_v
-    ), symbolic_helper._unpack_list(weight_v)
+    hidden, weight = (
+        symbolic_helper._unpack_list(hidden_v),
+        symbolic_helper._unpack_list(weight_v),
+    )
     return _generic_rnn(
         g,
         "LSTM",
@@ -5372,9 +5377,7 @@ def index(g: jit_utils.GraphContext, self, index):
             if rank is None:
                 return symbolic_helper._unimplemented(
                     "aten::index",
-                    "operator of advanced indexing on tensor of unknown rank. "
-                    "Try turning on shape inference during export: "
-                    "torch.onnx._export(..., onnx_shape_inference=True).",
+                    "operator of advanced indexing on tensor of unknown rank. ",
                     self,
                 )
             # TODO: If indexing is supported natively in ONNX in future opsets,

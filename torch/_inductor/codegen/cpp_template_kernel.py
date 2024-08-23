@@ -140,7 +140,7 @@ class CppTemplateKernel(CppKernel):
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.
         """
-        assert len(ranges) == len(node.get_size())
+        assert len(ranges) == len(node.get_size()), f"{ranges=}, {node=}"
         sliced = wrap_with_tensorbox(node)
         for dim, _range in enumerate(ranges):
             if len(_range) == 0:
@@ -324,7 +324,12 @@ class CppTemplateCaller(ir.ChoiceCaller):
         input_nodes: List[ir.Buffer],
         layout: ir.Layout,
         make_kernel_render: Callable[
-            [ir.CppTemplateBuffer, Optional[List[ir.IRNode]]], str
+            [
+                ir.CppTemplateBuffer,
+                bool,
+                Optional[List[ir.IRNode]],
+            ],
+            str,
         ],
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821

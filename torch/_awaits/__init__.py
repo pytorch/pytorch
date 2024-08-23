@@ -51,4 +51,3 @@ class _Await(torch._C._Await, Generic[W], metaclass=_PyAwaitMeta):
     In eager mode ``Await[W]`` can be used as ``W`` i.e. attributes of W can be called on ``Await[W]``,
     ``_awaitable_wait()`` call will be transparently added.
     """
-    pass

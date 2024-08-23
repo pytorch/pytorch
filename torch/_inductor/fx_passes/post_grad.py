@@ -42,7 +42,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
-from ..utils import decode_device, is_pointwise_use
+from ..utils import decode_device, get_gpu_type, is_pointwise_use
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
@@ -132,7 +132,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     stable_topological_sort(gm.graph)
 
-    move_constructors_to_cuda(gm.graph)
+    move_constructors_to_gpu(gm.graph)
 
     fake_tensor_updater.incremental_update()
 
@@ -1018,7 +1018,7 @@ def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
     return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)
 
 
-def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
+def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     from torch.fx.operator_schemas import normalize_function
 
     if node.target not in [
@@ -1032,7 +1032,7 @@ def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
     # However, it will short-circuit this H2D sync and run mask_fill_
     # if the value we are putting is a cpu scalar.
     # Therefore, when inductor sees an index_put_ with byte tensor indices,
-    # it should *not* convert the cpu scalar value into a cuda tensor.
+    # it should *not* convert the cpu scalar value into a gpu tensor.
     args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)
     any_byte_bool_indices = False
     indices = args_[1]
@@ -1043,7 +1043,7 @@ def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
     val = args_[2].meta["val"]
     val_is_cpu_scalar = val.device.type == "cpu" and val.numel() == 1
     # If both these conditions hold, then converting the val
-    # to a cuda tensor will incur a H2D sync when inductor calls aten.index_put_
+    # to a gpu tensor will incur a H2D sync when inductor calls aten.index_put_
     return any_byte_bool_indices and val_is_cpu_scalar
 
 
@@ -1100,7 +1100,7 @@ class ConstructorMoverPass:
             and node.target.namespace in ("prims", "aten")
         ):
             return True
-        if is_index_put_and_requires_h2d_sync_for_cuda_value(node):
+        if is_index_put_and_requires_h2d_sync_for_gpu_value(node):
             return True
 
         return False
@@ -1176,14 +1176,14 @@ class ConstructorMoverPass:
         """
         cpu_indeg: Dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
 
-        # which constructors cannot be moved to cuda
-        cannot_move_to_cuda: Set[fx.Node] = set()
+        # which constructors cannot be moved to gpu
+        cannot_move_to_gpu: Set[fx.Node] = set()
 
         # For any node in the graph, which constructors does it have a dependency on
         constructor_dependencies: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
 
         # if a cpu node has a dependency on two different cpu constructors,
-        # then if either constructor cannot be moved to cuda, the other cannot as well.
+        # then if either constructor cannot be moved to gpu, the other cannot as well.
         # In this case any node with a dependency on one will have a dependency on the other
         equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {
             c: {c} for c in constructors
@@ -1209,11 +1209,11 @@ class ConstructorMoverPass:
 
             for user in node.users:
                 if self.cannot_be_moved(user):
-                    cannot_move_to_cuda.update(dependencies)
+                    cannot_move_to_gpu.update(dependencies)
                     break
 
-                # this node was used on a op which takes in multiple devices and output a cuda
-                # tensor. we can convert its cpu input to cuda without making further changes
+                # this node was used on a op which takes in multiple devices and output a gpu
+                # tensor. we can convert its cpu input to gpu without making further changes
                 node_device = self.get_node_device(user)
                 if (
                     self.allow_cpu_device(user)
@@ -1235,17 +1235,17 @@ class ConstructorMoverPass:
 
         for node in cpu_indeg:
             if constructor_dependencies[node]:
-                cannot_move_to_cuda.update(constructor_dependencies[node])
+                cannot_move_to_gpu.update(constructor_dependencies[node])
 
-        all_cannot_move_to_cuda = cannot_move_to_cuda.copy()
-        for constructor in cannot_move_to_cuda:
-            all_cannot_move_to_cuda.update(equal_constructor_sets[constructor])
+        all_cannot_move_to_gpu = cannot_move_to_gpu.copy()
+        for constructor in cannot_move_to_gpu:
+            all_cannot_move_to_gpu.update(equal_constructor_sets[constructor])
 
-        return set(constructors) - all_cannot_move_to_cuda
+        return set(constructors) - all_cannot_move_to_gpu
 
 
-def move_constructors_to_cuda(graph: fx.Graph) -> None:
+def move_constructors_to_gpu(graph: fx.Graph) -> None:
     """
-    Moves intermediary tensors which are constructed on the cpu to cuda when safe
+    Moves intermediary tensors which are constructed on the cpu to gpu when safe
     """
-    ConstructorMoverPass("cuda")(graph)
+    ConstructorMoverPass(get_gpu_type())(graph)

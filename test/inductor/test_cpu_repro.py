@@ -405,6 +405,17 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": True, "assume_static_by_default": False}
+    )
+    def test_full_boolean_dynamic_shape(self):
+        def fn(n):
+            x = torch.full((1024,), n >= 1024)
+            return x, x + 1
+
+        self.common(fn, (1024,))
+        self.common(fn, (1023,))
+
     @config.patch(freezing=True)
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @torch._dynamo.config.patch(dynamic_shapes=True)
@@ -2007,6 +2018,7 @@ class CPUReproTests(TestCase):
     @slowTest
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test__adaptive_avg_pool2d(self):
         def wrap_fn(oh, ow):
             def fn(x):
@@ -2115,35 +2127,51 @@ class CPUReproTests(TestCase):
                 check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
-    def test_vec_remainder(self):
-        for dtype in [
+    def test_vec_randn(self):
+        funcs = [torch.randn, torch.rand, torch.randint]
+        float_dtypes = [
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+        ]
+        int_dtypes = [
             torch.int8,
             torch.uint8,
             torch.int32,
             torch.int64,
-            torch.bfloat16,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-        ]:
-            if is_float_dtype(dtype):
-                x = torch.randn(64, dtype=dtype)
-                y = torch.randn(64, dtype=dtype)
-            else:
-                lower = 1 if dtype == torch.uint8 else -100
-                x = torch.randint(lower, 100, (64,), dtype=dtype)
-                y = torch.randint(lower, 100, (64,), dtype=dtype)
-                y = torch.where(
-                    y == torch.zeros_like(y),
-                    torch.ones_like(y),
-                    y,
-                )
+        ]
+        dtypes = float_dtypes + int_dtypes
+        for rand_func, dtype in itertools.product(funcs, dtypes):
+            if (rand_func == torch.randint and dtype not in int_dtypes) or (
+                rand_func != torch.randint and dtype not in float_dtypes
+            ):
+                # Skip the invalid combination
+                continue
+            with config.patch(
+                {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+            ):
+                torch._dynamo.reset()
+                metrics.reset()
 
-            torch._dynamo.reset()
-            metrics.reset()
-            _args = (x, y)
-            self.common(torch.remainder, _args)
-            check_metrics_vec_kernel_count(1)
+                def func(seed):
+                    torch.manual_seed(seed)
+                    if rand_func == torch.randint:
+                        return rand_func(0, 64, (64,), dtype=dtype)
+                    else:
+                        return rand_func(64, dtype=dtype)
+
+                cfn = torch.compile(func)
+                # Check the result is deterministic with mauanl seed
+                self.assertEqual(cfn(2024), cfn(2024))
+                check_metrics_vec_kernel_count(1)
+                res_vec = cfn(2024)
+
+                torch._dynamo.reset()
+                metrics.reset()
+                with config.patch({"cpp.simdlen": 0}):
+                    res_scalar = torch.compile(func)(2024)
+                    # Check the same result between scalar and vec
+                    self.assertEqual(res_vec, res_scalar)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -2187,6 +2215,37 @@ class CPUReproTests(TestCase):
                     metrics.generated_kernel_count
                     - metrics.generated_cpp_vec_kernel_count
                 ) == 0
+
+    @requires_vectorization
+    def test_vec_remainder(self):
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]:
+            if is_float_dtype(dtype):
+                x = torch.randn(64, dtype=dtype)
+                y = torch.randn(64, dtype=dtype)
+            else:
+                lower = 1 if dtype == torch.uint8 else -100
+                x = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.where(
+                    y == torch.zeros_like(y),
+                    torch.ones_like(y),
+                    y,
+                )
+
+            torch._dynamo.reset()
+            metrics.reset()
+            _args = (x, y)
+            self.common(torch.remainder, _args)
+            check_metrics_vec_kernel_count(1)
 
     def test_skip_cpp_codegen(self):
         with config.patch({"disable_cpp_codegen": True}):
@@ -2497,7 +2556,7 @@ class CPUReproTests(TestCase):
                 vec_checker.itervars = itervars
                 vec_checker.ranges = ranges
                 InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
             # Most inner loop variable irrevalant but min value is greater than
             # the min value of INT32
@@ -2512,7 +2571,7 @@ class CPUReproTests(TestCase):
                 vec_checker.itervars = itervars
                 vec_checker.ranges = ranges
                 InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -2534,6 +2593,7 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_maxpool2d_with_pre_loop_collapse_cpu_only(self):
         x1 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
         x2 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
@@ -2962,6 +3022,7 @@ class CPUReproTests(TestCase):
                         check_metrics_vec_kernel_count(8)
 
     @requires_vectorization
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_copy(self):
         def fn(a):
             return a.t().contiguous()
@@ -3067,6 +3128,7 @@ class CPUReproTests(TestCase):
             assert metrics.cpp_to_dtype_count == 0
             check_metrics_vec_kernel_count(1)
 
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_non_contiguous(self):
         def fn(a):
             # From part of timm HaloAttn:
@@ -3218,6 +3280,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(2)
 
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_sum_outer(self):
         # https://github.com/pytorch/pytorch/issues/98573
         def fn(a):
@@ -3557,6 +3620,7 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -3681,6 +3745,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(3)
 
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_expr_vec_non_contiguous(self):
         def fn(x):
             # the pattern from sebotnet33ts_256
@@ -4095,6 +4160,21 @@ class CPUReproTests(TestCase):
             4,
             exactly=True,
         ).run(code)
+
+    def test_load_half(self):
+        def fn(arg0_1, arg0_2):
+            return arg0_1.copy_(arg0_2)
+
+        with config.patch({"cpp.simdlen": 0}):
+            x1 = torch.randn(2, 10).to(torch.half)
+            x2 = torch.randn(2, 10).to(torch.half)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            _, code = run_and_get_cpp_code(opt_fn, x1, x2)
+            FileCheck().check_count(
+                "static_cast<float>",
+                0,
+                exactly=True,
+            ).run(code)
 
     def test_repeated_exp(self):
         def fn(x):
