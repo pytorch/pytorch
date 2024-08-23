@@ -24,7 +24,7 @@ from torch.distributed._tensor._tp_conv import (
     convolution_handler,
 )
 from torch.distributed._tensor._utils import try_find_mesh_from_args
-from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, TensorMeta
+from torch.distributed._tensor.placement_types import DTensorSpec, Partial, Replicate, TensorMeta
 from torch.distributed._tensor.random import is_rng_supported_mesh
 
 
@@ -231,6 +231,12 @@ class OpDispatcher:
             if output_sharding.output_spec is not None:
                 return args[0]
             else:
+                if op_call == aten._amp_foreach_non_finite_check_and_unscale_.default:
+                    found_inf_dtensor = dtensor.DTensor.from_local(args[1], mesh, [Partial("max")])
+                    found_inf = found_inf_dtensor.max().full_tensor()
+                    arg_list = list(args)
+                    arg_list[1].copy_(found_inf)
+                    args = tuple(arg_list)
                 return None
         elif _is_out_variant_op(op_call):
             # out variant could possibly have multiple out args (i.e. lu_unpack.out)
