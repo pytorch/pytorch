@@ -10,7 +10,7 @@ AOTIModelContainerRunnerCpu::AOTIModelContainerRunnerCpu(
     size_t num_models)
     : AOTIModelContainerRunner(model_so_path, num_models, "cpu", "") {}
 
-AOTIModelContainerRunnerCpu::~AOTIModelContainerRunnerCpu() = default;
+AOTIModelContainerRunnerCpu::~AOTIModelContainerRunnerCpu() {}
 
 std::vector<at::Tensor> AOTIModelContainerRunnerCpu::run(
     std::vector<at::Tensor>& inputs) {

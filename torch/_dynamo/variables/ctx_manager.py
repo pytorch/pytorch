@@ -559,6 +559,56 @@ class InferenceModeVariable(ContextWrappingVariable):
         return "inference_mode"
 
 
+class CUDADeviceVariable(ContextWrappingVariable):
+    """represents torch.cuda.device"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", device, **kwargs):
+        var = CUDADeviceVariable(
+            target_values=[torch.cuda._get_device_index(device, optional=True)],
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values,
+        initial_values=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.target_values = target_values
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup_assert()
+        tx.output.create_node(
+            "call_function",
+            torch.cuda._maybe_exchange_device,
+            (self.state.proxy,),
+            {},
+        )
+        return variables.ConstantVariable.create(False)
+
+    def enter(self, tx):
+        prev_idx = torch.cuda._exchange_device(*self.target_values)
+        self.set_cleanup_hook(tx, lambda: torch.cuda._maybe_exchange_device(prev_idx))
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch.cuda._exchange_device,
+            (*self.target_values,),
+            {},
+        )
+
+    def module_name(self):
+        return "torch.cuda"
+
+    def fn_name(self):
+        return "device"
+
+
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 

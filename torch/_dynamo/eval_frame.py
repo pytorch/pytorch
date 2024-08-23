@@ -1489,7 +1489,6 @@ def export(
             and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
-            dim_constraints.remove_redundant_dynamic_results()
             forced_specializations = dim_constraints.forced_specializations()
             msg = dim_constraints.prettify_results(
                 original_signature,
@@ -1579,7 +1578,7 @@ def export(
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args):
                 with torch.fx.traceback.preserve_node_meta():
-                    return torch.fx.Interpreter(graph).run(*args)
+                    return torch.fx.Interpreter(graph).run(*args)  # type: ignore[arg-type]
 
             with unset_fake_temporarily(), enable_python_dispatcher(), fake_mode:
                 try:
@@ -1601,14 +1600,14 @@ def export(
 
             assert graph is not None
             for node in graph.graph.find_nodes(op="get_attr"):
-                if isinstance(getattr(graph, node.target), torch.Tensor):
+                if isinstance(getattr(graph, node.target), torch.Tensor):  # type: ignore[arg-type]
                     node.meta["val"] = fake_mode.from_tensor(
-                        getattr(graph, node.target), static_shapes=True
+                        getattr(graph, node.target), static_shapes=True  # type: ignore[arg-type]
                     )
 
         if same_signature:
             flat_args_dynamic_dims = [
-                {c.dim for c in (constraints or ()) if c.w_tensor() is x}
+                {c.dim for c in (constraints or ()) if c.t_id == id(x)}
                 for x in flat_args
             ]
             graph = rewrite_signature(

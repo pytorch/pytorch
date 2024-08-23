@@ -72,7 +72,12 @@ from .simd import (
     SIMDKernel,
     SIMDScheduling,
 )
-from .triton_utils import config_of, signature_of, signature_to_meta
+from .triton_utils import (
+    config_of,
+    should_unwrap_unspec_arg,
+    signature_of,
+    signature_to_meta,
+)
 
 
 if TYPE_CHECKING:
@@ -431,6 +436,13 @@ class TritonPrinter(PythonPrinter):
 
     def _helper_sqrt(self, expr):
         return f"libdevice.sqrt({self._print(expr)}.to(tl.float32))"
+
+    def _print_FloatPow(self, expr):
+        return (
+            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
+        )
+
+    _print_PowByNatural = _print_FloatPow
 
     def _print_Where(self, expr):
         c = self.doprint(expr.args[0])
@@ -1057,7 +1069,7 @@ class TritonKernelOverrides(TritonOverrides):
         need_where = False
         for node in nodes:
             for arg in node.args:
-                if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
+                if arg.target != "load" or should_unwrap_unspec_arg(arg.args[0]):
                     need_where = True
 
         value = None if need_where else other
@@ -1748,7 +1760,7 @@ class TritonKernel(SIMDKernel):
 
         advance_block_ptr = None
         append_broadcast = None
-        if V.graph.is_unspec_arg(name):
+        if should_unwrap_unspec_arg(name):
             line = var
         else:
             if isinstance(indexing, BlockPtrOptions):
