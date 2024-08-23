@@ -886,7 +886,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 
-  std::string getNCCLWatchdogTimeoutExitMsg();
+  std::string getNCCLWatchdogTimeoutExitMsg(const std::string& exitReason);
 
   static const int64_t kWatchdogThreadSleepMillis;
 

@@ -1311,10 +1311,13 @@ std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutErrorMsg(
       "bugs in the communications library (e.g. NCCL), etc. ");
 }
 
-std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutExitMsg() {
+std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutExitMsg(
+    const std::string& exitReason) {
   return c10::str(
       logPrefix(),
-      "Exit processGroupNCCL after attempting to dump debug info, due to collective timeout or exception.");
+      "Terminating the process after attempting to dump debug info, due to ",
+      exitReason,
+      ".");
 }
 
 void ProcessGroupNCCL::heartbeatMonitor() {
@@ -1322,7 +1325,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
-  std::string exitMsg;
+  std::string exitReason;
   bool checkDumpSignal = (dumpOnTimeoutOrEx_ && local_id_ == 0);
   int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
                                             : heartbeatTimeoutInSec_ * 1000;
@@ -1366,7 +1369,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       // heartbeat or dumpPipe is not empty.
       if (shouldDump_.load()) {
         errorMsg = getNCCLWatchdogTimeoutErrorMsg("this local rank");
-        exitMsg = getNCCLWatchdogTimeoutExitMsg();
+        exitReason = "collective timeout or exception";
         break;
       }
       // We poll store to see if some ranks have flagged a timeout when
@@ -1415,7 +1418,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           }
           errorMsg =
               getNCCLWatchdogTimeoutErrorMsg(c10::str(" rank ", timeOutRank));
-          exitMsg = getNCCLWatchdogTimeoutExitMsg();
+          exitReason = "collective timeout or exception";
           break;
         }
       }
@@ -1444,9 +1447,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
             "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
             "or false positive abort; otherwise, please attempt to debug the hang. ");
-        exitMsg = c10::str(
-            logPrefix(),
-            "Exit processGroupNCCL with best-effort debug info dump after watchdog stuck.");
+        exitReason = "ProcessGroupNCCL watchdog hang";
         break;
       }
     }
@@ -1530,11 +1531,16 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
     if (monitorThreadEnabled_.load()) {
-      terminateProcess(exitMsg);
+      terminateProcess(getNCCLWatchdogTimeoutExitMsg(exitReason));
     } else {
+      // Ideally we want to merge this one with the above one, but we are going
+      // to remove the kill switch for monitor thread soon, so we keep this one
+      // for now.
       LOG(ERROR)
-          << "ProcessGroupNCCL monitor thread is disabled, but would have killed this job:\n"
-          << exitMsg;
+          << logPrefix()
+          << "ProcessGroupNCCL monitor thread is disabled, but would have terminated the process"
+          << "after attempting to dump debug info, due to " << exitReason
+          << ".";
     }
   }
 }
