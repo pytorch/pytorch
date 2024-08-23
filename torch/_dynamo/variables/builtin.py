@@ -1606,7 +1606,10 @@ class BuiltinVariable(VariableTracker):
             if start is self._SENTINEL:
                 start = variables.ConstantVariable.create(0)
             items = seq.unpack_var_sequence(tx)
-            return BuiltinVariable(functools.reduce).call_function(
+
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder.create(tx, functools.reduce).call_function(
                 tx,
                 [
                     BuiltinVariable(operator.add),
@@ -1615,19 +1618,6 @@ class BuiltinVariable(VariableTracker):
                 ],
                 {},
             )
-
-    def call_reduce(
-        self, tx: "InstructionTranslator", function, iterable, initial=_SENTINEL
-    ):
-        if iterable.has_unpack_var_sequence(tx):
-            items = iterable.unpack_var_sequence(tx)
-            if initial is self._SENTINEL:
-                value, items = items[0], items[1:]
-            else:
-                value = initial
-            for element in items:
-                value = function.call_function(tx, [value, element], {})
-            return value
 
     def call_getattr(
         self,
