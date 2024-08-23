@@ -1808,8 +1808,7 @@ void scatter_impl(
   if (index.numel() == 0) return;
 
   auto op = ReductionType::SUM;
-  bool deterministic = globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA;
-
+  bool deterministic = globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU);
   if (reduce.has_value()) {
     op = get_operator_enum(reduce.value(), use_new_options);
     if (!reduce_includes_self) {
