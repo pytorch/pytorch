@@ -370,10 +370,13 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    if len(example_inputs) > 1:
+    num_example_inputs = len(example_inputs)
+    ref_inputs = None
+    if num_example_inputs != 1:
         ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
     else:
         ref_inputs = [clone_preserve_strides(example_inputs[0])]
+
     ref_kwargs = kwargs
     has_lowp_args = False
 

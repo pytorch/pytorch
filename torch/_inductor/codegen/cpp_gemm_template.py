@@ -835,6 +835,7 @@ class CppPackedGemmTemplate(CppTemplate):
         else:
             X, W = self.input_nodes[0], self.input_nodes[1]
             inp = self.input_nodes[2] if self.has_bias else None
+        Y = self.output_node
 
         template_buffer_has_other_users = None
 
