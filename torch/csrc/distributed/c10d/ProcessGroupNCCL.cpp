@@ -1374,7 +1374,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           checkExceptionDump =
               globalStore_->check({std::string(EXCEPTION_DUMP)});
         } catch (const std::exception& e) {
-          LOG(ERROR)
+          LOG(WARNING)
               << logPrefix()
               << "Failed to get exception dump flag from the global store."
               << e.what();
