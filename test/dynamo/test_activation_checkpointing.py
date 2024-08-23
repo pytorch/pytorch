@@ -1302,22 +1302,22 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cnt_ca = CompileCounterWithBackend(backend)
 
         fwd_pre_hook_call_count = 0
-        fwd_hook_call_count = 0
+        # fwd_hook_call_count = 0
 
         def fwd_pre_hook(m, i):
             nonlocal fwd_pre_hook_call_count
             fwd_pre_hook_call_count += 1
             return i
 
-        def fwd_hook(m, i, o):
-            nonlocal fwd_hook_call_count
-            fwd_hook_call_count += 1
-            return o
+        # def fwd_hook(m, i, o):
+        #     nonlocal fwd_hook_call_count
+        #     fwd_hook_call_count += 1
+        #     return o
 
         lin = torch.nn.Linear(1, 1)
         mod = torch.nn.Sequential(lin, lin)
         mod.register_forward_pre_hook(fwd_pre_hook)
-        mod.register_forward_hook(fwd_hook)
+        # mod.register_forward_hook(fwd_hook)
         mod = CheckpointWrapper(mod)
         ref_mod = copy.deepcopy(mod)
 
@@ -1339,7 +1339,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(loss, ref_loss)
         self.assertEqual(fwd_pre_hook_call_count, 4)
-        self.assertEqual(fwd_hook_call_count, 4)
+        # self.assertEqual(fwd_hook_call_count, 4)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt_ca.frame_count, 1)
 

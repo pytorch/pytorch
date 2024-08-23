@@ -557,7 +557,7 @@ class OutputGraph:
         return self.current_tracer.remove_node(*args, **kwargs)
 
     @contextlib.contextmanager
-    def subtracer(self, source_target, prior_tracer):
+    def subtracer(self, source_target, prior_tracer, *, under_checkpoint=False):
         new_scope_ctx = enter_new_scope()
         try:
             if prior_tracer:
@@ -568,7 +568,7 @@ class OutputGraph:
                 prior_tracer
                 if prior_tracer
                 else SubgraphTracer(
-                    self, parent=self.current_tracer, source_target=source_target
+                    self, parent=self.current_tracer, source_target=source_target, under_checkpoint=under_checkpoint,
                 )
             )
             self.tracers.append(tracer)
@@ -1797,7 +1797,7 @@ class SubgraphTracer(fx.Tracer):
     """
 
     def __init__(
-        self, output_graph, parent=None, export_root=False, source_target=None
+        self, output_graph, parent=None, export_root=False, source_target=None, under_checkpoint=False
     ):
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
@@ -1832,6 +1832,7 @@ class SubgraphTracer(fx.Tracer):
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
         self.prev_inst = None
+        self.under_checkpoint = under_checkpoint
 
         self._cur_code = None
         self._orig_gm_meta = None

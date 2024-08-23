@@ -140,6 +140,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
 
     def __init__(self, fn, is_constant=False, **kwargs) -> None:
+        import traceback
+        print("\n".join(traceback.format_stack()) + f"created UserFunctionVariable id: {id(self)}")
         super().__init__(**kwargs)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
@@ -318,8 +320,32 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
+        if tx.output.current_tracer.under_checkpoint:
+            mod_var = args[0]
+            assert isinstance(mod_var, variables.UnspecializedNNModuleVariable)
+            mod = mod_var.value
+            if self.fn in (
+                *torch.nn.modules.module._global_forward_pre_hooks.values(),
+                *mod._forward_pre_hooks.values(),
+            ):
+                return variables.ForwardPreHookUnderCheckpoint.create(tx, mod, self.fn).call_function(
+                    tx, args, kwargs
+                )
+            # elif fn in (
+            #     *torch.nn.modules.module._global_forward_hooks.values(),
+            #     *mod._forward_hooks.values(),
+            # ):
+            #     return variables.ForwardHookUnderCheckpoint(fn, source=source).call_function(
+            #         tx, [self] + list(args), kwargs
+            #     )
+        try:
+            ret = super().call_function(tx, args, kwargs)
+            return ret
+        except Exception as e:
+            print(f"self.fn: {self.fn}, args: {args}, kwargs: {kwargs}")
+            print(f"UserFunctionVariable.call_function called, id: {id(self)}")
+            raise
 
-        return super().call_function(tx, args, kwargs)
 
 
 class UserMethodVariable(UserFunctionVariable):

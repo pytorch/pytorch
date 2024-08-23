@@ -66,6 +66,18 @@ def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
         GradModeVariable.create(tx, org_value, initialized=True)
 
 
+# is_under_checkpoint = False
+
+# @contextlib.contextmanager
+# def dynamo_under_checkpoint(tx: "InstructionTranslator"):
+#     global is_under_checkpoint
+#     try:
+#         is_under_checkpoint = True
+#         yield
+#     finally:
+#         is_under_checkpoint = False
+
+
 def only_consist_of(var, types, allow_none=False):
     if isinstance(var, types):
         return True
@@ -383,6 +395,7 @@ def speculate_subgraph(
     set_subgraph_inputs="automatic",
     restore_side_effects=True,
     should_flatten_outputs=False,
+    under_checkpoint=False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
@@ -407,7 +420,7 @@ def speculate_subgraph(
             (f, sub_args, sub_kwargs),
         )
 
-        with tx.output.subtracer(source_target, tracer) as subtracer:
+        with tx.output.subtracer(source_target, tracer, under_checkpoint=under_checkpoint) as subtracer:
             sub_args_names = maybe_positional_arg_names(f)
             # User mismatch in the number of args. Will eventually lead to an error.
             if sub_args_names is not None and len(sub_args_names) < len(sub_args):
@@ -1291,7 +1304,7 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(
-        self, tx: "InstructionTranslator", args, kwargs, description
+        self, tx: "InstructionTranslator", args, kwargs, description, *, under_checkpoint=False
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
 
@@ -1307,6 +1320,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description,
             source_target=self.value,
             should_flatten_outputs=True,
+            under_checkpoint=under_checkpoint,
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -1496,7 +1510,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             treespec,
             checkpointed_gmod,
         ) = self.create_wrapped_node(
-            tx, args, gmod_kwargs, "torch.utils.checkpoint.checkpoint"
+            tx, args, gmod_kwargs, "torch.utils.checkpoint.checkpoint", under_checkpoint=True
         )
         if context_fn is not None:
             checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
