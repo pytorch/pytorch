@@ -1041,8 +1041,7 @@ cuda_backend = "triton"
 
 class halide:
     # Base halide target to use for CPU devices
-    #cpu_target = "host"
-    cpu_target = "host-metal"
+    cpu_target = "host"
 
     # Base halide target to use for CUDA devices
     gpu_target = "host-cuda"
@@ -1050,8 +1049,7 @@ class halide:
     # Halide autoscheduler to use, choices are:
     # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
     scheduler_cuda = "Anderson2021"
-    #scheduler_cpu = "Adams2019"
-    scheduler_cpu = "Anderson2021"
+    scheduler_cpu = "Adams2019"
 
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
     asserts = False
