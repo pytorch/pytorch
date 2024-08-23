@@ -10626,21 +10626,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 device_type="cuda",
                 dtypes=complex_types(),
             ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_autodiff",
-                device_type="cuda",
-                dtypes=(torch.complex128,),
-            ),
         ),
     ),
     ForeachFuncInfo(
