@@ -702,7 +702,12 @@ test_inductor_set_cpu_affinity(){
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
 
-  if [[ "${TEST_CONFIG}" != *aarch64* ]]; then
+  if [[ "${TEST_CONFIG}" == *aarch64* ]]; then
+    # Set up ACL configs
+    export DNNL_DEFAULT_FPMATH_MODE=BF16
+    export LRU_CACHE_CAPACITY=1024
+    export THP_MEM_ALLOC_ENABLE=1
+  else
     # Use Intel OpenMP for x86
     IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
     export LD_PRELOAD="$IOMP_LIB":"$LD_PRELOAD"
