@@ -31,6 +31,7 @@ __all__ = [
     "caching_allocator_delete",
     "set_per_process_memory_fraction",
     "empty_cache",
+    "enable_cache",
     "memory_stats",
     "memory_stats_as_nested_dict",
     "reset_accumulated_memory_stats",
@@ -177,6 +178,12 @@ def empty_cache() -> None:
     """
     if is_initialized():
         torch._C._cuda_emptyCache()
+
+
+def enable_cache(value: bool = True) -> None:
+    r"""Enable the GPU caching allocator. On by default."""
+    if is_initialized():
+        torch._C._cuda_allocator_enable(value)
 
 
 def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:

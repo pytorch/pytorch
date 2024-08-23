@@ -1585,6 +1585,7 @@ __all__ = [
     "device_count",
     "device_of",
     "empty_cache",
+    "enable_cache",
     "get_allocator_backend",
     "CUDAPluggableAllocator",
     "change_current_allocator",

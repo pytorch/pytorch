@@ -3123,7 +3123,7 @@ class DeviceCachingAllocator {
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
 // errors, since the caching allocator foils cuda-memcheck.
-bool forceUncachedAllocator() {
+static bool forceUncachedAllocator() {
   // Allow either CUDA or HIP name for env var for maximum user comfort
   // break up the name to avoid hipify changing it
   static const char* cuda_env = getenv("PYTORCH_NO_C""UDA_MEMORY_CACHING");
@@ -3162,6 +3162,9 @@ void local_raw_delete(void* ptr);
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
+  // allows this allocator to be turned on and off programmatically
+  bool enable_ = true;
+
   // Shard allocation region to have independent mutexes to reduce contention.
   static constexpr size_t kNumMutexShard = 67;
 
@@ -3336,6 +3339,14 @@ class NativeCachingAllocator : public CUDAAllocator {
       da->emptyCache();
   }
 
+  void enable(bool value) override {
+    enable_ = value;
+  }
+
+  bool isEnabled() const override {
+    return enable_;
+  }
+
   void* getBaseAllocation(void* ptr, size_t* outSize) override {
     Block* block = get_allocated_block(ptr);
     if (!block) {
@@ -3470,7 +3481,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     void (*deleteFunc)(void*) = &local_raw_delete;
     CUDAStream stream = cuda::getCurrentCUDAStream(device);
 
-    if (forceUncachedAllocator()) {
+    if (forceUncachedAllocator() || !isEnabled()) {
       deleteFunc = &uncached_delete;
       devPtr = uncached_allocate(size);
     } else {
@@ -3486,7 +3497,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
-    if (forceUncachedAllocator()) {
+    if (forceUncachedAllocator() || !isEnabled()) {
       return &uncached_delete;
     } else {
       return &local_raw_delete;
@@ -3544,7 +3555,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       return nullptr;
     }
     void* r = nullptr;
-    if (forceUncachedAllocator()) {
+    if (forceUncachedAllocator() || !isEnabled()) {
       r = uncached_allocate(nbytes);
     } else {
       c10::DeviceIndex device = 0;
@@ -3559,7 +3570,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       return nullptr;
     }
     void* r = nullptr;
-    if (forceUncachedAllocator()) {
+    if (forceUncachedAllocator() || !isEnabled()) {
       r = uncached_allocate(nbytes);
     } else {
       c10::DeviceIndex device = 0;
@@ -3610,7 +3621,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void raw_delete(void* ptr) override {
-    if (forceUncachedAllocator()) {
+    if (forceUncachedAllocator() || !isEnabled()) {
       uncached_delete(ptr);
     } else {
       this->free(ptr);

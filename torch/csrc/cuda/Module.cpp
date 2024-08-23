@@ -549,6 +549,18 @@ PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+PyObject* THCPModule_cuda_allocator_enable(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkBool(arg),
+      "cuda_allocator_enable expects a bool, but got ",
+      THPUtils_typename(arg));
+  c10::cuda::CUDACachingAllocator::enable(
+      THPUtils_unpackBool(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
@@ -1812,6 +1824,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_VARARGS,
      nullptr},
     {"_cuda_emptyCache", THCPModule_emptyCache, METH_NOARGS, nullptr},
+    {"_cuda_allocator_enable", THCPModule_cuda_allocator_enable, METH_O, nullptr},
     {"_cuda_memoryStats", THCPModule_memoryStats, METH_O, nullptr},
     {"_cuda_resetAccumulatedMemoryStats",
      THCPModule_resetAccumulatedMemoryStats,
