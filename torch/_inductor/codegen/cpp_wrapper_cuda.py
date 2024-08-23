@@ -174,7 +174,7 @@ class CppWrapperCuda(CppWrapperCpu):
         self.writeline("}")
         return kernel_var_name
 
-    def generate_args_decl(self, call_args, arg_types, use_cuda_ptrs):
+    def generate_args_decl(self, call_args, arg_types):
         new_args = []
         for arg, arg_type in zip(call_args, arg_types):
             var_name = f"var_{next(self.arg_var_id)}"
@@ -305,7 +305,7 @@ class CppWrapperCuda(CppWrapperCpu):
                 call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
                 arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
 
-            call_args = self.generate_args_decl(call_args, arg_types, use_cuda_ptrs=True)
+            call_args = self.generate_args_decl(call_args, arg_types)
             kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
             self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
             grid_name = f"{kernel_name}_grid_{next(self.grid_id)}"
@@ -348,7 +348,7 @@ class CppWrapperCuda(CppWrapperCpu):
                         self.writeline(
                             f"auto* {new_arg} = get_data_ptr_wrapper({arg});"
                         )
-                    else:
+                    
                     # elif arg != "nullptr":
                         new_arg = f"{arg}.data_ptr()"
                 casted.append(f"({arg_type}){new_arg}")
