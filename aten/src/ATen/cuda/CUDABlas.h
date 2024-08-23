@@ -141,7 +141,8 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     void* amax_ptr,
-    bool use_fast_accum);
+    bool use_fast_accum,
+    bool use_rowwise);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
   char transa, char transb, int64_t m, int64_t n, int64_t k, at::opmath_type<Dtype> alpha,    \
