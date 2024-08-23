@@ -1,6 +1,3 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
-
 #pragma once
 
 #include <ATen/cuda/CUDAContext.h>
@@ -233,7 +230,8 @@ class CublasltGemmOp : public Callable<ParamsT> {
     public:
         CublasltGemmOp(cublasLtMatmulAlgo_t algo) : algo_{algo} {}
 
-        TuningStatus Call(const ParamsT* params) override {         
+        TuningStatus Call(const ParamsT* params) override {
+            // Follows `bgemm_internal_cublaslt` and `scaled_gemm` closely, should be kept in sync with the non-tunable code path.
             at::opmath_type<T> alpha = GetAlphaFromParams<T>(params);
             at::opmath_type<T> beta = GetBetaFromParams<T>(params);
 
@@ -277,13 +275,13 @@ class CublasltGemmOp : public Callable<ParamsT> {
 
             globalContext().alertCuBLASConfigNotDeterministic();
             cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
-            
+
             cublasOperation_t transa_outer = MapLayoutToCuBlasLt(ALayout);
             cublasOperation_t transb_outer = MapLayoutToCuBlasLt(BLayout);
             cublasOperation_t opa = at::cuda::blas::_cublasOpFromChar(params->transa);
             cublasOperation_t opb = at::cuda::blas::_cublasOpFromChar(params->transb);
             TORCH_CHECK(transa_outer == opa && transb_outer == opb, "trans mismatch, shouldn't happen");
-            
+
             int64_t lda, ldb, ldc;
             lda = params->lda;
             ldb = params->ldb;
@@ -293,7 +291,7 @@ class CublasltGemmOp : public Callable<ParamsT> {
             at::cuda::blas::CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
             computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
             computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, opb);
-           
+
             const void* mat1_scale_ptr = GetAScalePointerFromParams<T>(params);
             const void* mat2_scale_ptr = GetBScalePointerFromParams<T>(params);
             const void* mat3_scale_ptr = GetDScalePointerFromParams<T>(params);
@@ -303,7 +301,7 @@ class CublasltGemmOp : public Callable<ParamsT> {
                 computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
                 computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
                 computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, mat3_scale_ptr);
-                
+
                 if (amax_ptr) {
                     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
                 }
@@ -316,8 +314,8 @@ class CublasltGemmOp : public Callable<ParamsT> {
                     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
                     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, bias_datatype);
                 }
-            } 
-            
+            }
+
             at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, params->lda, opa == CUBLAS_OP_T);
             at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, params->ldb, opb == CUBLAS_OP_T);
             at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, params->ldc);
@@ -333,7 +331,7 @@ class CublasltGemmOp : public Callable<ParamsT> {
                 Adesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_a);
                 Bdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_b);
                 Cdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_c);
-            }           
+            }
 
             at::cuda::blas::CuBlasLtMatmulPreference preference;
             // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
@@ -367,7 +365,7 @@ class CublasltGemmOp : public Callable<ParamsT> {
             if (status != CUBLAS_STATUS_SUCCESS) {
                 return FAIL;
             }
-          
+
             cublasStatus_t cublasStatus = cublasLtMatmul(
                 ltHandle,
                 computeDesc.descriptor(),
@@ -430,7 +428,6 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
     cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
     cudaDataType_t scaleType = CUDA_R_32F;
 
-
     if constexpr (std::is_same_v<ParamsT, GemmParams<T>> || std::is_same_v<ParamsT, GemmStridedBatchedParams<T>>) {
         cudaDataType_t abcType = CUDA_R_32F;
         if constexpr (std::is_same_v<T, double>) {
@@ -467,13 +464,13 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
 
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
-    
+
     cublasOperation_t transa_outer = MapLayoutToCuBlasLt(ALayout);
     cublasOperation_t transb_outer = MapLayoutToCuBlasLt(BLayout);
     cublasOperation_t opa = at::cuda::blas::_cublasOpFromChar(params->transa);
     cublasOperation_t opb = at::cuda::blas::_cublasOpFromChar(params->transb);
     TORCH_CHECK(transa_outer == opa && transb_outer == opb, "trans mismatch, shouldn't happen");
-    
+
     int64_t lda, ldb, ldc;
     lda = params->lda;
     ldb = params->ldb;
@@ -483,7 +480,7 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
     at::cuda::blas::CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, opb);
-    
+
     const void* mat1_scale_ptr = GetAScalePointerFromParams<T>(params);
     const void* mat2_scale_ptr = GetBScalePointerFromParams<T>(params);
     const void* mat3_scale_ptr = GetDScalePointerFromParams<T>(params);
@@ -495,7 +492,7 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
         computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
         computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
         computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, mat3_scale_ptr);
-        
+
         if (amax_ptr) {
             computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
         }
@@ -506,8 +503,8 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
             computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
             computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, bias_datatype);
         }
-    } 
-    
+    }
+
     at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, params->lda, opa == CUBLAS_OP_T);
     at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, params->ldb, opb == CUBLAS_OP_T);
     at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, params->ldc);
@@ -527,7 +524,7 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
         Adesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_a);
         Bdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_b);
         Cdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_c);
-    }           
+    }
 
     at::cuda::blas::CuBlasLtMatmulPreference preference;
     // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
@@ -560,7 +557,7 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
         8,
         heuristicResults,
         &returnedResults));
-    
+
     if (returnedResults == 0) {
         TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
     }
@@ -592,4 +589,3 @@ auto GetCublasLtScaledGemmTypeStringAndOps(const ScaledGemmParams<T>* params) {
 }
 
 }  // namespace at::cuda::tunable
-
