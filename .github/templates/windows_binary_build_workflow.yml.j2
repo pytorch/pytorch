@@ -67,6 +67,11 @@ jobs:
       !{{ set_runner_specific_vars() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      - name: Setup XPU
+        if: ${{ config["gpu_arch_type"] == "xpu" }}
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/win-test-helpers/installation-helpers/install_xpu.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -92,6 +97,8 @@ jobs:
 {%- else %}
     runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
 {%- endif %}
+{%- elif config["gpu_arch_type"] == "xpu" %}
+    runs-on: windows.mtl.xpu
 {%- else %}
     runs-on: windows.4xlarge.nonephemeral
 {%- endif %}

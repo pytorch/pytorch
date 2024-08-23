@@ -217,7 +217,6 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
 
 FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12"]
 
-
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
     return {
         "cpu": "cpu",
@@ -333,6 +332,9 @@ def generate_wheels_matrix(
 
     if python_versions is None:
         python_versions = FULL_PYTHON_VERSIONS + ["3.13"]
+    
+    if gpu_arch_type == "xpu":
+        python_versions = FULL_PYTHON_VERSIONS + ["3.8"]
 
     if arches is None:
         # Define default compute archivectures
@@ -340,7 +342,7 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += CUDA_ARCHES
+            arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Only want the one arch as the CPU type is different and
             # uses different build/test scripts
@@ -462,7 +464,7 @@ def generate_wheels_matrix(
                         ),
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
-                            if os != "linux"
+                            if os != "linux" and gpu_arch_type != "xpu"
                             else ""
                         ),
                     }
