@@ -763,6 +763,10 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
 
 ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() {}
 
+// CUDA event is used to record the start/end of one Work.
+// Instead of let the CUDA event gets destroyed, we now reuse it after the Work
+// has been erased from workMetaList_.
+// This is to avoid the potential deadlock caused by CudaEventDestroy.
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
   auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
@@ -2158,24 +2162,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
   bool singleP2POp = isP2POp(opType, batchP2P);
-  // For point-to-point communication, lower rank of the two will get unique id.
-  if (rank_ == 0 || (singleP2POp && p2pRank == 0)) {
-    C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
-  }
-
-  if (shouldBroadcastNCCLUniqueID(isSendRecvSelf)) {
-    // Broadcast so that each process can have a unique NCCL ID
-    auto timeStarted = std::chrono::steady_clock::now();
-    broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
-    auto timerDeltaMs =
-        std::chrono::duration_cast<std::chrono::duration<double>>(
-            std::chrono::steady_clock::now() - timeStarted)
-            .count() *
-        1000;
-    LOG(INFO) << logPrefix()
-              << "ProcessGroupNCCL broadcast unique ID through store took "
-              << timerDeltaMs << " ms";
-  }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
@@ -2248,6 +2234,26 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // entry if it hasn't been yet rather than untangling the
   // conditions that might have resulted in a split above.
   if (!ncclComm) {
+    if (getCvarBool(TORCH_NCCL_BCAST_UNIQUEID, true) && !isSendRecvSelf) {
+      // For point-to-point communication, lower rank of the two will get unique
+      // id.
+      if (rank_ == 0 || (singleP2POp && p2pRank == 0)) {
+        C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
+      }
+
+      // Broadcast so that each process can have a unique NCCL ID
+      auto timeStarted = std::chrono::steady_clock::now();
+      broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
+      auto timerDeltaMs =
+          std::chrono::duration_cast<std::chrono::duration<double>>(
+              std::chrono::steady_clock::now() - timeStarted)
+              .count() *
+          1000;
+      LOG(INFO) << logPrefix()
+                << "ProcessGroupNCCL broadcast unique ID through store took "
+                << timerDeltaMs << " ms";
+    }
+
 #ifdef NCCL_HAS_COMM_NONBLOCKING
     ncclComm = NCCLComm::create(numRanks, rank, ncclID, options_->config);
 #else
@@ -2305,9 +2311,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // TODO(kwen2501): is ncclEvents_ used anywhere else?
   ncclEvents_.emplace(deviceKey, at::cuda::CUDAEvent(cudaEventDisableTiming));
 
-  // Record the communicators based on ncclUniqueId.
-  ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComm);
-
   // Move the NCCL resource to cache
   auto it = inInitializationCommMap_.find(deviceKey);
   // A previous thread could've already removed devicesKey from
@@ -2350,7 +2353,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
 
 uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
   uint64_t ret = 0;
-  for (const auto& i : ncclIdToCommMap_) {
+  for (const auto& i : devNCCLCommMap_) {
     auto& ncclComm = i.second;
     ret += ncclComm->getCommSplitCounter();
   }
