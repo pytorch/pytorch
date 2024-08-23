@@ -2429,6 +2429,44 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
+    @unittest.expectedFailure
+    def test_saved_tensor_unpack_hook_ordering(self):
+        # not the correct behaviour, I'm just preventing this from changing silently
+        def f(x, y):
+            return x * y
+
+        pack_count = 0
+        unpack_count = 0
+
+        def pack_hook(x):
+            nonlocal pack_count
+            pack_count += 1
+            return x
+
+        def unpack_hook(x):
+            nonlocal unpack_count
+            unpack_count += 1
+            return x
+
+        def tensor_hook(_):
+            # in eager, tensor_hook is fired before unpack_hook
+            # but in compiled autograd, tensor_hook is lifted whereas unpack_hook is not
+            self.assertEqual(unpack_count, 0)
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=False)
+        with torch.autograd.graph.saved_tensors_hooks(
+            pack_hook, unpack_hook
+        ), compiled_autograd.enable(make_compiler_fn(fullgraph=False)):
+            out_test = f(x, y)
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 0)
+            loss = out_test.sum()
+            loss.register_hook(tensor_hook)
+            loss.backward()
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 1)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
