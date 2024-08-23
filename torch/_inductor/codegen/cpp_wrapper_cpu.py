@@ -18,7 +18,7 @@ from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import IndentedBuffer
+from .common import IndentedBuffer, Kernel
 from .cpp_utils import (
     cexpr,
     DEVICE_TO_ATEN,
@@ -67,6 +67,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
+        self.initialized_kernels: [str, Kernel] = {}
         self.expr_printer = cexpr
 
     def generate_kernel_call(
@@ -655,7 +656,7 @@ class CppWrapperCpu(WrapperCodeGen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        declare_kernel = set(self.src_to_kernel.values())
+        declare_kernel = set(self.src_to_kernel.values()) - set(self.initialized_kernels.keys())
         declare_kernel.update(
             entry[0] for entry in self.user_defined_kernel_cache.values()
         )
@@ -667,6 +668,10 @@ class CppWrapperCpu(WrapperCodeGen):
             self.prefix.writeline(
                 maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
             )
+        for name, kernel in self.initialized_kernels.items():
+            kernel_ptr = f"(*{name})"
+            signature = kernel.get_signature().replace(name, kernel_ptr)
+            self.prefix.writeline(f"    {signature} = ::{name};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
 

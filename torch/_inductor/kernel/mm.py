@@ -180,7 +180,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        # Developing on A100 rn.
+        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        # CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
     if is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])

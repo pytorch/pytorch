@@ -174,7 +174,7 @@ class CppWrapperCuda(CppWrapperCpu):
         self.writeline("}")
         return kernel_var_name
 
-    def generate_args_decl(self, call_args, arg_types):
+    def generate_args_decl(self, call_args, arg_types, use_cuda_ptrs):
         new_args = []
         for arg, arg_type in zip(call_args, arg_types):
             var_name = f"var_{next(self.arg_var_id)}"
@@ -282,58 +282,75 @@ class CppWrapperCuda(CppWrapperCpu):
                 kernel_name, call_args, grid, device_index, cuda, triton, arg_types
             )
 
-        device_index, call_args = self.prepare_triton_kernel_call(
-            device_index, call_args
-        )
-        kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
-
-        # args with value 1 are added into equal_to_1 and constants
-        # in triton_meta (in the Python codegen) which makes them
-        # inlined in the PTX and compiled CUBIN
-        if (
-            triton_meta is not None
-            and "configs" in triton_meta
-            and triton_meta["configs"]
-        ):
-            equal_to_1 = triton_meta["configs"][0].equal_to_1
-            call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
-            arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
-
-        call_args = self.generate_args_decl(call_args, arg_types)
-        kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-        self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
         stream = (
             "stream"
             if V.graph.aot_mode
             else self.write_get_raw_stream(device_index, V.graph)
         )
-        grid_name = f"{kernel_name}_grid_{next(self.grid_id)}"
-        assert isinstance(
-            grid, (list, tuple)
-        ), f"expected grid to be a list or tuple but got: {grid=}"
+        if triton:
+            device_index, call_args = self.prepare_triton_kernel_call(
+                device_index, call_args
+            )
+            kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
 
-        grid = [V.graph.sizevars.simplify(item) for item in grid]
-        grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
-        grid_args = [self.expr_printer(item) for item in grid]
-        grid_args_str = ", ".join(grid_args)
-        self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
+            # args with value 1 are added into equal_to_1 and constants
+            # in triton_meta (in the Python codegen) which makes them
+            # inlined in the PTX and compiled CUBIN
+            if (
+                triton_meta is not None
+                and "configs" in triton_meta
+                and triton_meta["configs"]
+            ):
+                equal_to_1 = triton_meta["configs"][0].equal_to_1
+                call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
+                arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
 
-        if grid_uses_symbolic_shapes:
-            self.writeline(f"if ({grid_name}.is_non_zero()) {{")
-        kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
-        self.writeline(
-            DeferredCudaKernelLine(
-                kernel_name,
-                r"launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
-                    kernel_var_name,
-                    f"{grid_name}.grid_x",
-                    f"{grid_name}.grid_y",
-                    f"{grid_name}.grid_z",
-                    kernel_args_var,
-                    stream,
+            call_args = self.generate_args_decl(call_args, arg_types, use_cuda_ptrs=True)
+            kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
+            self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+            grid_name = f"{kernel_name}_grid_{next(self.grid_id)}"
+            assert isinstance(
+                grid, (list, tuple)
+            ), f"expected grid to be a list or tuple but got: {grid=}"
+
+            grid = [V.graph.sizevars.simplify(item) for item in grid]
+            grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
+            grid_args = [self.expr_printer(item) for item in grid]
+            grid_args_str = ", ".join(grid_args)
+            self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
+
+            if grid_uses_symbolic_shapes:
+                self.writeline(f"if ({grid_name}.is_non_zero()) {{")
+            kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
+            self.writeline(
+                DeferredCudaKernelLine(
+                    kernel_name,
+                    r"launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
+                        kernel_var_name,
+                        f"{grid_name}.grid_x",
+                        f"{grid_name}.grid_y",
+                        f"{grid_name}.grid_z",
+                        kernel_args_var,
+                        stream,
+                    ),
+                    ("num_warps", "shared_mem"),
                 ),
-                ("num_warps", "shared_mem"),
-            ),
-        )
-        if grid_uses_symbolic_shapes:
-            self.writeline("}")
+            )
+            if grid_uses_symbolic_shapes:
+                self.writeline("}")
+        else:
+            casted = []
+            for arg_type, arg in zip(arg_types, call_args):
+                new_arg = arg
+                if arg_type.endswith('*') and arg != "nullptr":
+                    if config.abi_compatible:
+                        new_arg = f"var_{next(self.arg_var_id)}"
+                        self.writeline(
+                            f"auto* {new_arg} = get_data_ptr_wrapper({arg});"
+                        )
+                    else:
+                    # elif arg != "nullptr":
+                        new_arg = f"{arg}.data_ptr()"
+                casted.append(f"({arg_type}){new_arg}")
+            call_args_str = ", ".join(casted)
+            self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")

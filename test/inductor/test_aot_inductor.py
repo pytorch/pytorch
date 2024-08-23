@@ -2650,6 +2650,33 @@ class AOTInductorTestsTemplate:
             example_inputs,
             dynamic_shapes=dynamic_shapes,
         )
+    
+
+    def test_cutlass_backend(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                return x @ w
+        
+        example_inputs = (
+            torch.randn(32, 4, device="cuda", dtype=torch.float),
+            torch.randn(4, 16, device="cuda", dtype=torch.float),
+        )
+
+        _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            self.check_model(Model(), example_inputs)
+        
 
     @skipIfRocm  # USE_MEM_EFF_ATTENTION was not enabled for build.
     def test_scaled_dot_product_efficient_attention(self):
