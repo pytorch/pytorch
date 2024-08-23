@@ -24,7 +24,9 @@ from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
     _process_dynamic_shapes,
+    _transform_shapes_for_default_dynamic,
     _tree_map_with_path,
+    DIM,
 )
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
@@ -85,7 +87,7 @@ def fakify(
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
-        dynamic_sizes=[DimDynamic.STATIC] * n_dims,
+        dynamic_sizes=[DimDynamic.DYNAMIC] * n_dims,
         constraint_sizes=[None] * n_dims,
     )
     t_id = id(t)
@@ -93,7 +95,6 @@ def fakify(
     if t_id in t_constraints:
         for i, constraint in t_constraints[t_id].items():
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
@@ -125,11 +126,12 @@ def make_fake_inputs(
     #   - output_graph.py fakifies inputs.
     #   - [post-tracing] guards.py processes input shape equalities.
 
-    combined_args = _combine_args(
-        nn_module, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
-    )
+    combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
-    constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
+    _dynamic_shapes = _transform_shapes_for_default_dynamic(
+        combined_args, dynamic_shapes
+    )
+    constraints = _process_dynamic_shapes(combined_args, _dynamic_shapes)
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
@@ -138,11 +140,7 @@ def make_fake_inputs(
     if context is not None:
         # This occurs when we are exporting within dynamo. There already exists
         # a toplevel TracingContext with a fake mode, so we do not want to
-        # create another fake mode. In this scenario, we also shouldn't have any
-        # constraints since the toplevel tracing context should handle it.
-        assert (
-            len(constraints) == 0
-        ), "Found constraints when tracing with a toplevel tracing context."
+        # create another fake mode.
         fake_mode = context.fake_mode
     elif not _is_torch_jit_trace:
         code = nn_module.forward.__code__
@@ -338,21 +336,21 @@ def make_constraints(
             continue
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
         for i, d in enumerate(node.meta["val"].shape):
-            if isinstance(d, torch.SymInt):
+            if isinstance(d, torch.SymInt) and not d.node.expr.is_number:
                 # Look up the range constraint for the symbol corresponding to this shape dimension
                 # and store it indexed by the symbolic expression corresponding to it.
                 # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
                 dim = shape_spec[i] if shape_spec else None
-                if dim:
-                    range_constraints[d.node.expr] = ValueRanges(
-                        lower=dim.min, upper=dim.max
-                    )
-                else:
+                if dim is None or isinstance(dim, DIM):
                     range_constraints[d.node.expr] = shape_env.var_to_range[
                         d.node._expr
                     ]
+                else:
+                    range_constraints[d.node.expr] = ValueRanges(
+                        lower=dim.min, upper=dim.max
+                    )
                 input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
                 free_symbols.update(d.node.expr.free_symbols)
 
