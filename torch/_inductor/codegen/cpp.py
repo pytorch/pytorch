@@ -1587,7 +1587,7 @@ class CppKernel(Kernel):
         )
         self.parallel_reduction_prefix.writeline(
             f"{acc_per_thread_unique_ptr_decl};"
-            if cpp_builder._is_msvc_cl()
+            if cpp_builder.is_msvc_cl()
             else f"{acc_type} {acc_per_thread_vla_decl};"
         )
         self.parallel_reduction_prefix.writelines(
