@@ -1314,7 +1314,7 @@ std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutErrorMsg(
 std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutExitMsg() {
   return c10::str(
       logPrefix(),
-      "Exit processGroupNCCL with debug info dump after a collective timeout.");
+      "Exit processGroupNCCL after attempting to dump debug info, due to collective timeout or exception.");
 }
 
 void ProcessGroupNCCL::heartbeatMonitor() {
@@ -1533,7 +1533,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       terminateProcess(exitMsg);
     } else {
       LOG(ERROR)
-          << "processGroupNCCL Monitor Thread is disabled, but would have killed this job:\n"
+          << "ProcessGroupNCCL monitor thread is disabled, but would have killed this job:\n"
           << exitMsg;
     }
   }
