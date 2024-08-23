@@ -69,7 +69,7 @@ def _gen_transform_infos(
     # Handle multi-dim device mesh placement redistribution
     # First, we need to build the logical shape for each mesh dim
     # for correct allgathering uneven shards on each mesh dim (with dynamic padding)
-    for i, (src, dst) in enumerate(zip(src_spec.placements, dst_spec.placements)):
+    for i, src in enumerate(src_spec.placements):
         current_logical_shape = mesh_dims_to_logical_shape[i]
         if isinstance(src, Shard):
             if i < device_mesh.ndim - 1:
@@ -180,7 +180,7 @@ def redistribute_local_tensor(
     for transform_info in transform_infos:
         i = transform_info.mesh_dim
         current, target = transform_info.src_dst_placements
-        num_chunks = device_mesh.size(mesh_dim=i)
+        device_mesh.size(mesh_dim=i)
 
         if current == target:
             # short cut, just use the original local tensor
@@ -208,7 +208,6 @@ def redistribute_local_tensor(
         elif target.is_shard():
             # Case 2: target is Shard
             target_placement = cast(Shard, target)
-            target_dim = target_placement.dim
             if current.is_partial():
                 partial_spec = cast(Partial, current)
                 new_local_tensor = partial_spec._reduce_shard_value(

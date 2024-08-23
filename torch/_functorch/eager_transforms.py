@@ -407,7 +407,7 @@ def _vjp_with_argnums(
                 primals_out, aux = primals_out
                 aux = _undo_create_differentiable(aux, level)
 
-            flat_primals_out, primals_out_spec = tree_flatten(primals_out)
+            flat_primals_out, _ = tree_flatten(primals_out)
             assert_non_empty_tensor_output(flat_primals_out, "vjp(f, *primals)")
             flat_diff_primals, primals_spec = tree_flatten(diff_primals)
             results = _undo_create_differentiable(primals_out, level)
@@ -425,7 +425,7 @@ def _vjp_with_argnums(
         def wrapper(cotangents, retain_graph=True, create_graph=None):
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
-            flat_cotangents, cotangents_spec = tree_flatten(cotangents)
+            flat_cotangents, _ = tree_flatten(cotangents)
             _vjp_treespec_compare(primals_out, cotangents)
             result = _autograd_grad(
                 flat_primals_out,
@@ -1115,7 +1115,7 @@ def _jvp_with_argnums(
         )
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args)
-    flat_tangents, tangents_spec = tree_flatten(tangents)
+    flat_tangents, _ = tree_flatten(tangents)
     _jvp_treespec_compare(diff_args, tangents)
     assert_non_empty_list_of_tensors(flat_primals, jvp_str, "primals")
     assert_non_empty_list_of_tensors(flat_tangents, jvp_str, "tangents")
@@ -1689,7 +1689,7 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
             outputs = _unwrap_all_tensors_from_functional(
                 func_outputs, reapply_views=reapply_views
             )
-            flat_outputs, func_out_spec = tree_flatten(outputs)
+            tree_flatten(outputs)
 
             for a in flattened_wrapped_args + flattened_wrapped_kwargs:
                 if isinstance(a, torch.Tensor):
@@ -1826,7 +1826,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
     #   It takes care of checking the argspec of tangents,
     #   calling the folded fx graph and unflattening fx graph output
     def jvp_fn(*tangents):
-        flat_tangents, tangent_argspec = tree_flatten(tangents)
+        flat_tangents, _ = tree_flatten(tangents)
         _linearize_treespec_compare(primals, tangents)
 
         forward_ad_checks(flat_tangents)

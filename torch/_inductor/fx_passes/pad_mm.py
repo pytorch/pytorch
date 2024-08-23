@@ -373,7 +373,6 @@ def should_pad_bench(
     )
     m_padded_length = 0
     n_padded_length = 0
-    batchsize = 1
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m = mat1.shape[0]

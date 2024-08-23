@@ -58,7 +58,6 @@ def main():
 
     for i, (tensors, tensor_properties, _) in enumerate(add_fuzzer.take(n=n)):
         x = tensors["x"]
-        y = tensors["y"]
         shape = ", ".join(tuple(f'{i:>4}' for i in x.shape))
         x_tensor_properties = tensor_properties["x"]
         description = "".join([
