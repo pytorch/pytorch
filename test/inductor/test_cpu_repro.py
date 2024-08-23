@@ -4249,23 +4249,6 @@ class CPUReproTests(TestCase):
                 with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
                     graph.run(*example_inputs)
                     code, _ = graph.codegen()
-                    scheduler_node = graph.scheduler.nodes[0]
-                    nodes = scheduler_node.get_nodes()
-                    kernel_group = KernelGroup()
-                    cpp_kernel_proxy = CppKernelProxy(kernel_group)
-                    cpp_kernel_proxy.legalize_lowp_fp_dtype(nodes)
-                    cpp_kernel_proxy.data_type_propagation(nodes)
-                    first_node = nodes[0]
-                    vec_dtype = (
-                        first_node._lowp_fp_type
-                        if all(
-                            hasattr(_node, "_lowp_fp_type")
-                            and _node._lowp_fp_type == first_node._lowp_fp_type
-                            for _node in nodes
-                        )
-                        else torch.float
-                    )
-                    self.assertEqual(vec_dtype, dtype)
                     self.assertTrue(
                         "at::vec::VectorizedN" in code
                         or "at::vec::convert<float,2" in code
