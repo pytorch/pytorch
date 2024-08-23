@@ -212,7 +212,7 @@ class TritonTemplateKernel(TritonKernel):
         if self.use_jit:
             return "@triton.jit"
 
-        argdefs, _, signature, _ = self.args.python_argdefs()
+        _, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": DeviceProperties.create(self.output_node.get_device()),
@@ -1388,7 +1388,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return choices[0].output_node()
 
         selected_key = builtins.min(timings, key=timings.__getitem__)
-        selected_time = timings[selected_key]
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
@@ -1446,6 +1445,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
+        # Not used?
         def debug_str(example_inputs, out):
             def tensor_repr(x):
                 return (
@@ -1479,7 +1479,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark_in_current_process(choices):
             inputs = get_inputs()
-            example_inputs, _, out, _, _ = inputs
+            _, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
                 try:
