@@ -821,22 +821,13 @@ class SchedulerNode(BaseSchedulerNode):
     def _compute_attrs(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
-        extra_size_and_var_constraints: Optional[
-            Tuple[Tuple[Any, ...], List[Any]]
-        ] = None,
+        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
-        if extra_size_and_var_constraints:
-            assert isinstance(self.node, (ir.ComputedBuffer))
-            self._sizes, new_args = extra_size_and_var_constraints
-            _, new_var_ranges = dependencies.index_vars_no_squeeze(
-                *self._sizes, prefix="z"
-            )
-            self._body: ir.LoopBody = ir.LoopBody(self._body, new_args, new_var_ranges)
-        else:
-            assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-            self._sizes, self._body = self.node.simplify_and_reorder(
-                extra_indexing_constraints=extra_indexing_constraints
-            )
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+        self._sizes, self._body = self.node.simplify_and_reorder(
+            extra_indexing_constraints=extra_indexing_constraints,
+            recompute_sizes_body_func=recompute_sizes_body_func,
+        )
 
         group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
         self.group = (self.node.get_device(), group_fn(self._sizes))
@@ -853,13 +844,11 @@ class SchedulerNode(BaseSchedulerNode):
     def recompute_size_and_body(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
-        extra_size_and_var_constraints: Optional[
-            Tuple[Tuple[Any, ...], List[Any]]
-        ] = None,
+        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         self._compute_attrs(
             extra_indexing_constraints=extra_indexing_constraints,
-            extra_size_and_var_constraints=extra_size_and_var_constraints,
+            recompute_sizes_body_func=recompute_sizes_body_func,
         )
 
     def debug_str_extra(self) -> str:

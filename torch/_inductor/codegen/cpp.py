@@ -4048,16 +4048,15 @@ class CppScheduling(BaseScheduling):
         split_var = None
         split_number = None
         divide_index_name = None
+        num_div = 0
+        match_div = False
 
-        def has_one_div(node):
-            num_div = 0
+        for node in nodes:
             expr_matched = False
-            for name, expr in node._body.indexing_exprs.items():
+            _, original_body, _ = node.node.get_default_sizes_body()
+            for name, expr in original_body.indexing_exprs.items():
                 num_div += expr.count(FloorDiv)
                 if expr.count(FloorDiv) == 1:
-                    nonlocal split_var
-                    nonlocal split_number
-                    nonlocal divide_index_name
                     div_expr = expr.find(FloorDiv).pop()
                     split_var = div_expr.args[0]
                     split_number = div_expr.args[1]
@@ -4068,47 +4067,44 @@ class CppScheduling(BaseScheduling):
                         and divide_index_name is not None
                     )
 
-            return num_div == 1 and expr_matched
+            match_div = expr_matched and all(
+                stride_at_vec_range(
+                    expr, split_var, cpu_vec_isa.pick_vec_isa().nelements(torch.float32)
+                )
+                == 1
+                for name, expr in original_body.indexing_exprs.items()
+                if name != divide_index_name
+            )
 
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
-        nodes_have_div = [node for node in nodes if has_one_div(node)]
-        if len(nodes_have_div) != 1 or any(
-            stride_at_vec_range(
-                expr, split_var, cpu_vec_isa.pick_vec_isa().nelements(torch.float32)
-            )
-            != 1
-            for name, expr in nodes_have_div[0]._body.indexing_exprs.items()
-            if name != divide_index_name
-        ):
+        if not match_div or num_div != 1:
             return nodes
 
         for node in nodes:
-            iter_ranges = [*node._body.var_ranges.values()]
-            iter_vars = [*node._body.var_ranges.keys()]
-            split_idx = iter_vars.index(split_var)
-            assert split_idx < len(iter_vars)
-            new_iter_ranges: Tuple[sympy.Expr, ...] = ()
-            for idx in range(len(iter_ranges)):
-                if idx != split_idx:
-                    new_iter_ranges += (iter_ranges[idx],)
-                else:
-                    val_to_split = iter_ranges[idx]
-                    new_iter_ranges += (val_to_split // split_number, split_number)
 
-            new_index = sympy.core.symbol.Symbol(
-                "z" + str(len(iter_ranges)), integer=True, nonnegative=True
-            )
-            new_iter_vars = [
-                var * split_number + new_index if var == split_var else var
-                for var in iter_vars
-            ]
+            def recompute_sizes_body_func(sizes, body, vars):
+                index_size, reduce_size = sizes
+                index_vars, reduce_vars = vars
+                split_idx = index_vars.index(split_var)
+                new_index_size = index_size.copy()
+                new_index_size[split_idx] = index_size[split_idx] // split_number
+                new_index_size.insert(split_idx + 1, split_number)
+                (new_index_vars, _), var_ranges = dependencies.index_vars_no_squeeze(
+                    new_index_size, reduce_size, prefix="y"
+                )
+                iter_vars = new_index_vars.copy()
+                divisor_var = iter_vars.pop(split_idx + 1)
+                iter_vars[split_idx] = split_number * iter_vars[split_idx] + divisor_var
+                body = ir.LoopBody(body, [iter_vars, []], var_ranges)
+                return (
+                    (new_index_size, reduce_size),
+                    body,
+                    (new_index_vars, reduce_vars),
+                )
 
             # Here decide the final loop order
             node.recompute_size_and_body(
-                extra_size_and_var_constraints=(
-                    (new_iter_ranges, ()),
-                    [new_iter_vars, []],
-                )
+                recompute_sizes_body_func=recompute_sizes_body_func
             )
 
         return nodes

@@ -3697,6 +3697,7 @@ class ComputedBuffer(OperationBuffer):
     def simplify_and_reorder(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ):
         """
         This is a main place where we do loop transformations in a
@@ -3718,6 +3719,15 @@ class ComputedBuffer(OperationBuffer):
             body,
             (index_vars, reduce_vars),
         ) = self.get_default_sizes_body()
+
+        if recompute_sizes_body_func:
+            (
+                (index_size, reduce_size),
+                body,
+                (index_vars, reduce_vars),
+            ) = recompute_sizes_body_func(
+                (index_size, reduce_size), body, (index_vars, reduce_vars)
+            )
 
         index_formulas = [*body.indexing_exprs.values()]
         if extra_indexing_constraints is not None:
@@ -3876,6 +3886,7 @@ class TemplateBuffer(OperationBuffer):
     def simplify_and_reorder(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ):
         return (
             (
@@ -6769,7 +6780,7 @@ class LoopBody:
     def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        # assert all(v not in self.var_ranges for v in index)
+        assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)
