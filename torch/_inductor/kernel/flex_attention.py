@@ -50,15 +50,9 @@ def create_placeholder(
     return TensorBox.create(input_buffer)
 
 
-def nullable_realize(args: List[Optional[IRNode]]):
+def maybe_realize(args: List[Optional[IRNode]]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
-    outs = []  # type: ignore[var-annotated]
-    for arg in args:
-        if arg is None:
-            outs.append(None)
-        else:
-            outs.append(realize_inputs(arg))
-    return outs
+    return tree_map(lambda x: realize_inputs(x) if x is not None else None, args)
 
 
 def build_subgraph_buffer(
@@ -711,7 +705,7 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-    ) = nullable_realize(
+    ) = maybe_realize(
         [
             query,
             key,
@@ -1562,7 +1556,7 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-    ) = nullable_realize(
+    ) = maybe_realize(
         [
             query,
             key,
@@ -1633,7 +1627,7 @@ def flex_attention_backward(*args, **kwargs):
     delta = lowerings[aten.sub](delta, grad_lse_exp2)
     delta = ExternKernel.require_contiguous(delta)
 
-    grad_lse_exp2, delta = nullable_realize([grad_lse_exp2, delta])
+    grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
 
     # see NOTE:[TritonTemplates with multiple outputs]
     grad_query = empty_strided(

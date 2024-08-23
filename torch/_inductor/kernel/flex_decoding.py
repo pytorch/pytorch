@@ -18,7 +18,7 @@ from .flex_attention import (
     compute_next_offset_func,
     create_indices_fake,
     create_num_blocks_fake_generator,
-    nullable_realize,
+    maybe_realize,
 )
 
 
@@ -370,7 +370,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-    ) = nullable_realize(
+    ) = maybe_realize(
         [
             query,
             key,
