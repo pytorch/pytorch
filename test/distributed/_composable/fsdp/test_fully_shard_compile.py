@@ -286,6 +286,7 @@ class TestFullyShardCompile(FSDPTest):
         self,
         file_check,
         overlapped_compute_op_str,
+        num_resize,
         num_copy,
         last_all_gather=False,
         is_fwd=True,
@@ -298,6 +299,10 @@ class TestFullyShardCompile(FSDPTest):
         # Checks that AGWait is delayed, making the AG overlap with some compute op.
         if overlapped_compute_op_str is not None:
             file_check = file_check.check(f"{overlapped_compute_op_str}")
+        # TODO(yf225): we will remove .resize_ usage in the next PR
+        # file_check = file_check.check_count(
+        #     "inductor_ops.resize_storage_bytes_(", num_resize, exactly=True
+        # )
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
         file_check = file_check.check("torch.ops.fsdp.split_with_sizes_copy.")
@@ -565,37 +570,45 @@ class TestFullyShardCompile(FSDPTest):
                 fwd_code = triton_codes[0]
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None, num_copy=2),
+                    dict(overlapped_compute_op_str=None, num_resize=0, num_copy=2),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
                         num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
                         num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
                         num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
                         num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
                         num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
                         num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
                         num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
                         num_copy=2,
                         last_all_gather=True,
                     ),
@@ -604,18 +617,24 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **fwd_ag_block_info
                     )
-                file_check.run(fwd_code)
+                try:
+                    file_check.run(fwd_code)
+                except:
+                    print(f"fwd_code: {fwd_code}")
+                    raise
 
                 bwd_code = triton_codes[1]
                 file_check = FileCheck().check("def call(args):")
                 for bwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None, num_copy=2),
+                    dict(overlapped_compute_op_str=None, num_resize=0, num_copy=2),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
                         num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
                         num_copy=2,
                         last_all_gather=True,
                     ),
@@ -634,7 +653,11 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_reduce_scatter(
                         file_check, **bwd_rs_block_info
                     )
-                file_check.run(bwd_code)
+                try:
+                    file_check.run(bwd_code)
+                except:
+                    print(f"bwd_code: {bwd_code}")
+                    raise
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.
@@ -765,18 +788,22 @@ class TestFullyShardCompile(FSDPTest):
                         overlapped_compute_op_str="triton_"
                         if all_requires_grad
                         else None,
+                        num_resize=0,
                         num_copy=4,
                     ),
                     dict(
                         overlapped_compute_op_str="aten.native_dropout.",
+                        num_resize=0,
                         num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        num_resize=12,
                         num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        num_resize=12,
                         num_copy=12,
                         last_all_gather=True,
                     ),
@@ -785,21 +812,28 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **fwd_ag_block_info
                     )
-                file_check.run(fwd_code)
+                try:
+                    file_check.run(fwd_code)
+                except:
+                    print(f"fwd_code: {fwd_code}")
+                    raise
 
                 bwd_code = triton_codes[1]
                 file_check = FileCheck().check("def call(args):")
                 for bwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
                         num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        num_resize=0,
                         num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        num_resize=0,
                         num_copy=12,
                         last_all_gather=True,
                     ),
@@ -827,7 +861,11 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_reduce_scatter(
                         file_check, **bwd_rs_block_info
                     )
-                file_check.run(bwd_code)
+                try:
+                    file_check.run(bwd_code)
+                except:
+                    print(f"bwd_code: {bwd_code}")
+                    raise
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.
