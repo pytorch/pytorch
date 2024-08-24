@@ -1497,6 +1497,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(noop_mod, torch.float32, B, H, S, D, B, H, S, D, block_mask)
 
     @supported_platform
+    def test_kernel_options_argument_is_respected(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        # Ensure we respect user's input kernel options.
+        _, code = run_and_get_code(
+            torch.compile(flex_attention), q, k, v, kernel_options={"BLOCK_M": 16}
+        )
+        FileCheck().check("BLOCK_M : tl.constexpr = 16").run(code[0])
+
+    @supported_platform
     def test_comparison_vs_sdpa(self):
         def causal(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))
