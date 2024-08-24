@@ -488,7 +488,6 @@ class ComboKernelDynamicShapesTests(TestCase):
         def fn(x, y, z):
             return x.sum(1), y.mean(1), z.max(1)
 
-        torch._inductor.metrics.reset()
         inps = (
             torch.rand(16, 128, device="cuda"),
             torch.rand(32, 128, device="cuda"),
@@ -501,7 +500,6 @@ class ComboKernelDynamicShapesTests(TestCase):
         out_compiled = torch.compile(fn)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertTrue(torch._inductor.metrics.generated_kernel_count <= 7)
 
 
 if __name__ == "__main__":

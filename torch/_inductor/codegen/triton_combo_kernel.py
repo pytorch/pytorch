@@ -8,12 +8,12 @@ from typing import (
     Callable,
     cast,
     Dict,
+    Iterable,
     List,
     Optional,
     Tuple,
     Type,
     Union,
-    Iterable,
 )
 
 from sympy import Integer, Symbol
@@ -332,12 +332,8 @@ class ComboKernel(Kernel):
             dynamic_shape: bool,
         ) -> Tuple[Any, ...]:
             xnumel = list(x_blocks_list)
-            ynumel: Any = [
-                e[-2] if len(e) > 1 else None for e in sub_kernel_numels
-            ]
-            znumel: Any = [
-                e[-3] if len(e) > 2 else None for e in sub_kernel_numels
-            ]
+            ynumel: Any = [e[-2] if len(e) > 1 else None for e in sub_kernel_numels]
+            znumel: Any = [e[-3] if len(e) > 2 else None for e in sub_kernel_numels]
 
             if dynamic_shape:
                 ynumel = None if None in ynumel else ynumel
@@ -407,21 +403,21 @@ class ComboKernel(Kernel):
                 if any(e is None for e in xnumel)
                 else xnumel
                 if dynamic_shape
-                else max(cast(Iterable[int], xnumel_x_dim))
+                else max(xnumel_x_dim)  # type: ignore[arg-type]
             )
             ynumel = (
                 None
                 if any(e is None for e in ynumel)
                 else ynumel
                 if dynamic_shape
-                else max(cast(Iterable[int], ynumel))
+                else max(ynumel)  # type: ignore[arg-type]
             )
             znumel = (
                 None
                 if any(e is None for e in znumel)
                 else znumel
                 if dynamic_shape
-                else max(cast(Iterable[int], znumel))
+                else max(znumel)  # type: ignore[arg-type]
             )
 
             numels = (
