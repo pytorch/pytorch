@@ -43,14 +43,14 @@ jobs:
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "am2.linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "am2.linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "am2.linux.2xlarge" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "am2.linux.2xlarge" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "am2.linux.2xlarge" },
         ]}
 
   linux-jammy-py3_8-gcc11-test:
@@ -156,14 +156,14 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.8-clang10
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "am2.linux.2xlarge" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "am2.linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "am2.linux.2xlarge" },
         ]}
   linux-focal-py3_8-clang10-test:
     name: linux-focal-py3.8-clang10
@@ -184,14 +184,14 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.11-clang10
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "am2.linux.2xlarge" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "am2.linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "am2.linux.2xlarge" },
         ]}
 
 
@@ -214,12 +214,12 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.12-clang10
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "am2.linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "am2.linux.2xlarge" },
         ]}
 
   linux-focal-py3_12-clang10-test:
@@ -240,9 +240,9 @@ jobs:
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "am2.linux.8xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "am2.linux.8xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "am2.linux.8xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda11_8-py3_10-gcc9-test:
@@ -265,12 +265,12 @@ jobs:
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "am2.linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "am2.linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "am2.linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "am2.linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "am2.linux.4xlarge.nvidia.gpu" },
+          { config: "deploy", shard: 1, num_shards: 1, runner: "am2.linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_1-py3_10-gcc9-test:
@@ -328,7 +328,7 @@ jobs:
       docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.1-lite
       test-matrix: |
         { include: [
-          { config: "xla", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+          { config: "xla", shard: 1, num_shards: 1, runner: "am2.linux.12xlarge" },
         ]}
 
   linux-focal-py3_8-clang9-xla-test:
