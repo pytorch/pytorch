@@ -1210,6 +1210,7 @@ class TritonKernel(SIMDKernel):
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
+        self.reverse_loop_order = False
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
@@ -2365,7 +2366,15 @@ class TritonKernel(SIMDKernel):
             return
 
         if self.inside_reduction and self.range_trees[-1].is_loop:
-            self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
+            if self.reverse_loop_order:
+                self.body.writeline(
+                    "for roffset in range(rnumel//RBLOCK*RBLOCK, -1, -RBLOCK):"
+                )
+            else:
+                self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
+            # alternate order of loops to improve cache behavior
+            # the end of loop N is likely in cache when we start loop N+1
+            self.reverse_loop_order = not self.reverse_loop_order
             with self.body.indent():
                 # last range tree is always reduction
                 self.iteration_ranges_codegen_header(self.range_trees[-1], self.body)
