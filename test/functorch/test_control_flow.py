@@ -1328,10 +1328,9 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_scan_RNN(self, device):
+    def test_pointwise_scan_RNN(self):
         dim = 1
+        device = torch.device("cuda")
 
         rnn = torch.nn.RNN(
             input_size=5,
@@ -1372,6 +1371,59 @@ def forward(self, pred_1, x_1):
 
         self.assertEqual(result_out, expected_result_out)
 
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_pointwise_scan_compile_cnt(self, reverse, device):
+        import random
+        
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        dim = 1
+        
+        torch.compiler.reset()
+        from torch._dynamo.testing import CompileCounter
+
+        # Tests rely on automatic_dynamic = True
+        with torch._dynamo.config.patch(automatic_dynamic_shapes=True):
+            cnt = CompileCounter()
+            x = torch.randn(3, 2, 5, device=device)
+            torch.compile(scan, backend=cnt)(add, x, dim)
+            self.assertEqual(cnt.frame_count, 1)
+
+            x = torch.randn(3, 20, 5, device=device)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim)
+            self.assertEqual(cnt.frame_count, 2)
+            
+            x = torch.randn(3, 40, 5, device=device)
+            # No recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim)
+            self.assertEqual(cnt.frame_count, 2)
+            
+            x = torch.randn(3, 40, 5, device=device)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, 2)
+            self.assertEqual(cnt.frame_count, 3)
+            
+            x = torch.randn(3, 40, 20, device=device)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, 2)
+            self.assertEqual(cnt.frame_count, 4)
+            
+            x = torch.randn(3, 40, 40, device=device)
+            # No recompilation
+            torch.compile(scan, backend=cnt)(add, x, 2)
+            self.assertEqual(cnt.frame_count, 4)
+            
+            x = torch.randn(3, 60, 40, device=device)
+            # No recompilation
+            torch.compile(scan, backend=cnt)(add, x, 1)
+            self.assertEqual(cnt.frame_count, 4)
+            
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport

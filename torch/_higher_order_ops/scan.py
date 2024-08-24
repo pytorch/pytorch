@@ -21,7 +21,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-
+from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 aten = torch._ops.ops.aten
 
@@ -34,24 +34,6 @@ def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
     combined_leaves = pytree.tree_leaves(combined)
     assert num_leaves == len(combined_leaves)
     return combined_leaves
-
-
-def _interleave(a, b, dim):
-    # https://stackoverflow.com/questions/60869537/how-can-i-interleave-5-pytorch-tensors
-    if b_trunc := (a.shape[dim] == b.shape[dim] + 1):
-        pad = (
-            [0] * ((b.ndim - dim - 1) * 2 + 1)
-            + [1]
-            + [0] * (b.ndim * 2 - ((b.ndim - dim - 1) * 2 + 2))
-        )
-        b = torch.nn.functional.pad(b, pad)
-
-    stacked = torch.stack([a, b], dim=dim + 1)
-    interleaved = torch.flatten(stacked, start_dim=dim, end_dim=dim + 1)
-    if b_trunc:
-        # TODO: find torch alternative for slice_along dim for torch.jit.script to work
-        interleaved = aten.slice(interleaved, dim, 0, b.shape[dim] + a.shape[dim] - 1)
-    return interleaved
 
 
 def safe_map(f, *args):
@@ -161,15 +143,24 @@ def generic_scan(operator, elems_flat, dim=0):
 
     def _scan(elems):
         """Perform scan on `elems`."""
-        num_elems = elems[0].shape[dim]
+        # num_elems = elems[0].shape[dim]
+        
+        def cond_fn(ind):
+            xs_new = [aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems]
+            if xs_new[0].shape[dim] == 0:
+                return False
+            else:
+                return xs_new
 
         ind = 1
         xs = [aten.slice(elem, dim, 0, 1, 1) for elem in elems]
         outs = xs
-        while ind < num_elems:
+        # while ind < num_elems:
+        while xs_new := cond_fn(ind):
             xs = operator(
                 *xs,
-                *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems],
+                # *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems],
+                *xs_new,
             )
             ind += 1
 
@@ -185,8 +176,6 @@ def generic_scan(operator, elems_flat, dim=0):
 def trace_scan(
     proxy_mode, func_overload, combine_fn: Callable, input: List[torch.Tensor], dim: int
 ):
-    from torch.fx.experimental.proxy_tensor import maybe_handle_decomp
-
     with disable_proxy_modes_tracing():
         sample_inputs = [
             torch.empty_like(
@@ -211,14 +200,14 @@ def trace_scan(
         input
     ), f"expected combine_fn to return {len(input)} results but got {len(outputs)}"
 
-    for i, o in zip(input, outputs):
+    for i, si, o in zip(input, sample_inputs, outputs):
         o_meta = o.meta["tensor_meta"]
         assert o_meta.dtype == i.dtype, (
             f"combine_fn output type mismatch, expected {i.dtype} "
             + f"but got {o_meta.dtype}"
         )
         assert (
-            i.shape == o.shape
+            si.shape == o_meta.shape
         ), "The pytree of the out of the operator needs to match the input pytree"
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
@@ -226,11 +215,6 @@ def trace_scan(
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
     args = (combine_graph, input, dim)
-
-    out = maybe_handle_decomp(proxy_mode, scan_op, args, {})
-    if out is not NotImplemented:
-        return out
-
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="scan"
@@ -244,7 +228,9 @@ def trace_scan(
 
 @scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def scan_op_dense(combine_fn, input, dim):
-    raise NotImplementedError("scan is not implemented for eager")
+    mode = _get_current_dispatch_mode()
+    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+    return generic_scan(combine_fn, input, dim)
 
 
 scan_op.py_impl(DispatchKey.Autograd)(

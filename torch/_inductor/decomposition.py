@@ -22,7 +22,6 @@ from torch._decomp.decompositions import (
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.out_dtype import out_dtype
-from torch._higher_order_ops.scan import generic_scan, scan_op
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
@@ -949,11 +948,3 @@ def max_pool2d_with_indices(
         padding,
     )
     return vals, indices
-
-
-@register_decomposition([scan_op])
-def scan_op_decomp(
-    combine_fn: torch.fx.GraphModule, leaves: List[torch.Tensor], dim: int
-) -> List[torch.Tensor]:
-    # Don't decompose and directly utilize generic_scann
-    return generic_scan(combine_fn, leaves, dim)

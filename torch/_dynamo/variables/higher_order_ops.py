@@ -1134,11 +1134,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=(
                     SourcelessBuilder.create(
                         tx,
-                        leaf.size
+                        # leaf.size
+                        tuple([s if n != dim.as_proxy() else 1 for n, s in enumerate(leaf.size)])
                         if leaf.size is not None
-                        else BuiltinVariable(getattr)
-                        .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
-                        .items,
+                        # else BuiltinVariable(getattr)
+                        # .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
+                        # .items,
+                        else tuple([s if n != dim.as_proxy() else 1 for n, s in enumerate(BuiltinVariable(getattr).call_function(tx, [leaf, ConstantVariable.create("shape")], {}).items)]),
                     ),
                 ),
                 kwargs={
@@ -1174,9 +1176,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         input_proxy = input.as_proxy()
         combine_result_proxy = combine_result.as_proxy()
-        for result, inp_proxy in zip(combine_result_proxy, input_proxy):
+        for result, inp_proxy, s_args in zip(combine_result_proxy, input_proxy, sub_args):
             inp_meta = inp_proxy.node.meta["example_value"]
             combine_result_meta = result.node.meta["example_value"]
+            s_args = s_args.as_proxy().node.meta["example_value"]
             if combine_result_meta.device != inp_meta.device:
                 unimplemented(
                     f"Expected combine_fn to return a tensor on device {inp_meta.device} but "
@@ -1186,6 +1189,11 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 unimplemented(
                     f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
                     + f"got {combine_result_meta.dtype}"
+                )
+            if combine_result_meta.shape != s_args.shape:
+                unimplemented(
+                    f"Expected shape of input with {s_args.shape} to be the same as "
+                    + f"combine_result with {combine_result_meta.shape}"
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
