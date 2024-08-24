@@ -85,8 +85,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
-_IS_WINDOWS = sys.platform == "win32"
-
 
 HAS_OPTREE = importlib.util.find_spec("optree")
 if HAS_OPTREE:
@@ -7192,11 +7190,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         )
         from torch import package
 
-        if _IS_WINDOWS:
-            tmp_root = tempfile.gettempdir()
-            path = os.path.join(tmp_root, "MyPickledModule.pt")
-        else:
-            path = "/tmp/MyPickledModule.pt"
+        tmp_root = tempfile.gettempdir()
+        path = os.path.join(tmp_root, "MyPickledModule.pt")
         package_name = "MyPickledModule"
         resource_name = "MyPickledModule.pkl"
 
