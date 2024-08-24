@@ -214,8 +214,7 @@ def _schedule_for_comm(
 
     for snode, deps in unmet_deps.items():
         assert len(deps) == 0, (
-            "Detected unscheduled nodes. "
-            f"Nodes with unmet dependencies: {unmet_deps}"
+            f"Detected unscheduled nodes. {unmet_deps}"
         )
     return scheduled
 
@@ -509,12 +508,11 @@ def enforce_comm_ordering_for_fsdp(
                 name_to_fused_node,
             )
 
-            # Find the "all_gather + all_gather_wait_tensor + copy_out + set_" code block
+            # Find the "all_gather + all_gather_wait_tensor + copy_out + resize_ + copy_" code block
             allowed_ops = {
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
                 torch.ops._c10d_functional.wait_tensor.default,
                 torch.ops.fsdp.split_with_sizes_copy.default,
-                torch.ops.aten.copy_.default,
             }
             find_recursive_users_of_node(
                 ag_snode,
@@ -526,6 +524,10 @@ def enforce_comm_ordering_for_fsdp(
                     or (
                         isinstance(x, scheduler.ExternKernelSchedulerNode)
                         and x.node.op_overload in allowed_ops  # type: ignore[union-attr]
+                    )
+                    or (
+                        isinstance(x, scheduler.SchedulerNode) and isinstance(x.node, ir.ComputedBuffer) and isinstance(x.node.data, ir.Pointwise)
+                        and len(x.node.data.origins) == 1 and list(x.node.data.origins)[0].target is torch.ops.fsdp.copy_.default
                     )
                 ),
             )
@@ -550,6 +552,42 @@ def enforce_comm_ordering_for_fsdp(
                     break
 
             ag_related_snodes = ag_related_snodes[:end_idx_of_current_ag_block]
+
+            # Find split_with_sizes_copy op's other deps (e.g. out= buffers allocation)
+            split_with_sizes_copy_snode = None
+            for cur_snode in ag_related_snodes:
+                if is_fallback_op(
+                    cur_snode.node, torch.ops.fsdp.split_with_sizes_copy.default
+                ):
+                    split_with_sizes_copy_snode = cur_snode
+                    break
+            ag_related_snode_set = set(ag_related_snodes)
+            find_recursive_deps_of_node(
+                split_with_sizes_copy_snode,
+                ag_related_snode_set,
+                name_to_buf,
+                name_to_fused_node,
+            )
+
+            # Find unsharded_param.copy_ op's other deps (e.g. unsharded_param.resize_)
+            unsharded_param_copy_snodes = []
+            for cur_snode in list(ag_related_snode_set):
+                if is_fallback_op(
+                    cur_snode.node, torch.ops.aten.copy_.default
+                ):
+                    unsharded_param_copy_snodes.append(cur_snode)
+            for copy_snode in unsharded_param_copy_snodes:
+                find_recursive_deps_of_node(
+                    copy_snode,
+                    ag_related_snode_set,
+                    name_to_buf,
+                    name_to_fused_node,
+                )
+
+            # sort nodes by original operation order
+            ag_related_snodes = sorted(
+                ag_related_snode_set, key=lambda x: get_op_idx(x)
+            )
 
             # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
             wait_node_idx = None
