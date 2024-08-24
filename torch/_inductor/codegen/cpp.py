@@ -3371,7 +3371,11 @@ class TilingSelect:
                     # when needed.
                     return [], []
 
-            if dtype in DTYPE_LOWP_FP and _is_valid_indices(itervars, tiling_indices):
+            if (
+                dtype in DTYPE_LOWP_FP
+                and _is_valid_indices(itervars, tiling_indices)
+                and not has_free_symbols(call_ranges)
+            ):
                 # For lower precision data type, if the call range in tiling_indicices
                 # is less than half of tiling_factor, use tiling_factor // 2 for better performance
                 for tiling_indice in tiling_indices:
