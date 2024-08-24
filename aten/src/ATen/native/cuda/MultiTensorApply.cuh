@@ -14,15 +14,6 @@ static constexpr int64_t kILP = 4;
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kBlockSize = 512;
 
-// TODO(crcrpar): Add `n>5` for `low prec params & their higher prec copy`
-// TensorListMetadata has to be < 4KB - the limit for kernel launch argument
-static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
-static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
-static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
-static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
-    72,
-    60};
-
 // NOTE: [32KB kernel argument size support]
 // 32KB kernel argument size support is available only when CUDART_VERSION >=
 // 12010 and the driver version is >= 530. Only the former condition can be
@@ -44,7 +35,7 @@ bool supports_large_kernel_arg() {
 #if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
   static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
   if (!supports_large_kernel_arg_.has_value()) {
-    static int driver_ver = 0;
+    int driver_ver = 0;
     cudaDriverGetVersion(&driver_ver);
     *supports_large_kernel_arg_ = (driver_ver >= 12010);
   }
@@ -284,10 +275,11 @@ void multi_tensor_apply(
       // a tensor is not considered full unless all its chunks have been
       // processed
       const bool tensors_full =
-          (loc_tensor_info == depth_to_max_tensors_scalarlist[depth - 1] &&
+          (loc_tensor_info ==
+               Conf::depth_to_max_tensors_scalarlist[depth - 1] &&
            chunk == chunks - 1);
       const bool blocks_full =
-          (loc_block_info == depth_to_max_blocks[depth - 1]);
+          (loc_block_info == Conf::depth_to_max_blocks[depth - 1]);
 
       if (tensors_full || blocks_full) {
         multi_tensor_apply_kernel<<<
