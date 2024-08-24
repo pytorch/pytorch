@@ -265,6 +265,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Constructor takes a list of CUDA devices
     WorkNCCL(
+        const std::string& pgUID,
+        const std::string& pgDesc,
         at::Device& device,
         int rank,
         OpType opType,
@@ -333,6 +335,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::vector<at::Tensor> result() override;
 
    protected:
+    // The process group unique id
+    std::string pgUID_;
+
+    // The process group description
+    std::string pgDesc_;
+
     // The cached list of CUDA devices to operate on
     at::Device device_;
 
