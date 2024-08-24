@@ -8,6 +8,7 @@ from generate import run_llama2_7b_bf16, run_llama2_7b_int8, run_mixtral_8x7b_in
 import torch
 import torch.nn as nn
 from torch._inductor.runtime.benchmarking import benchmarker
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.utils.flop_counter import FlopCounterMode
 
 
@@ -212,6 +213,134 @@ def run_gemv(device: str = "cuda"):
     return results
 
 
+def run_flex_attention_causal(device: str = "cuda"):
+    dtype_flops_utilization_map = {
+        torch.bfloat16: "0.46",
+    }
+    B = 128
+    H = 16
+    D = 64
+    q_len = [8192]
+    kv_len = [8192]
+    results = []
+
+    def causal_mask(batch, head, token_q, token_kv):
+        return token_q >= token_kv
+
+    for dtype, expected_flops_utilization in dtype_flops_utilization_map.items():
+        flops_utilization = 0
+        for seqlen_q in q_len:
+            for seqlen_kv in kv_len:
+                query = torch.randn(
+                    (B, H, seqlen_q, D), dtype=dtype, device=device, requires_grad=True
+                )
+                key = torch.randn(
+                    (B, H, seqlen_kv, D), dtype=dtype, device=device, requires_grad=True
+                )
+                value = torch.randn(
+                    (B, H, seqlen_kv, D), dtype=dtype, device=device, requires_grad=True
+                )
+                block_mask = create_block_mask(causal_mask, 1, 1, seqlen_q, seqlen_kv)
+
+                # Calculate FLOPs manually:
+                # - qk = matmul(q, k^T): FLOPs = B * H * seqlen_q * D * seqlen_kv
+                # - sm_qk = softmax(qk): FLOPs = 2 * B * H * seqlen_q * seqlen_kv
+                # - score = matmul(sm_qk, v): FLOPs = B * H * seqlen_q * seqlen_kv * D
+                # - causal mask: only compute the lower triangular part because of block mask, so FLOPs = 0.5 * FLOPs
+                #
+                # Total FLOPs = B * H * seqlen_q * seqlen_kv * (D + 1)
+                flops = 2 * B * H * seqlen_q * seqlen_kv * (D + 1)
+
+                compiled_fn = torch.compile(flex_attention, dynamic=False)
+
+                for _ in range(WARMUP_ITER):
+                    compiled_fn(query, key, value, block_mask=block_mask)
+
+                us_per_iter = (
+                    benchmarker.benchmark_gpu(
+                        lambda: compiled_fn(query, key, value, block_mask=block_mask)
+                    )
+                    * 1000
+                )
+                flops_utilization += flops / us_per_iter / 1e6 / A100_40G_BF16_TFLOPS
+
+        flops_utilization = flops_utilization / (len(q_len) * len(kv_len))
+        dtype_str = str(dtype).replace("torch.", "")
+        results.append(
+            Experiment(
+                "flex_attention_causal",
+                "flops_utilization",
+                expected_flops_utilization,
+                f"{flops_utilization:.02f}",
+                dtype_str,
+                device,
+            )
+        )
+
+    return results
+
+
+def run_sdpa_causal(device: str = "cuda"):
+    dtype_flops_utilization_map = {
+        torch.bfloat16: "1.0",
+    }
+    B = 128
+    H = 16
+    D = 64
+    q_len = [8192]
+    kv_len = [8192]
+    results = []
+
+    def causal_mask(batch, head, token_q, token_kv):
+        return token_q >= token_kv
+
+    for dtype, expected_flops_utilization in dtype_flops_utilization_map.items():
+        flops_utilization = 0
+        for seqlen_q in q_len:
+            for seqlen_kv in kv_len:
+                query = torch.randn(
+                    (B, H, seqlen_q, D), dtype=dtype, device=device, requires_grad=True
+                )
+                key = torch.randn(
+                    (B, H, seqlen_kv, D), dtype=dtype, device=device, requires_grad=True
+                )
+                value = torch.randn(
+                    (B, H, seqlen_kv, D), dtype=dtype, device=device, requires_grad=True
+                )
+
+                with FlopCounterMode(display=False) as mode:
+                    torch.nn.functional.scaled_dot_product_attention(
+                        query, key, value, is_causal=True, dropout_p=0.0
+                    )
+
+                flops = mode.get_total_flops()
+
+                us_per_iter = (
+                    benchmarker.benchmark_gpu(
+                        lambda: torch.nn.functional.scaled_dot_product_attention(
+                            query, key, value, is_causal=True, dropout_p=0.0
+                        )
+                    )
+                    * 1000
+                )
+                flops_utilization += flops / us_per_iter / 1e6 / A100_40G_BF16_TFLOPS
+
+        flops_utilization = flops_utilization / (len(q_len) * len(kv_len))
+        dtype_str = str(dtype).replace("torch.", "")
+        results.append(
+            Experiment(
+                "sdpa_causal",
+                "flops_utilization",
+                expected_flops_utilization,
+                f"{flops_utilization:.02f}",
+                dtype_str,
+                device,
+            )
+        )
+
+    return results
+
+
 def output_csv(output_file, headers, row):
     if os.path.exists(output_file):
         with open(output_file) as fd:
@@ -245,6 +374,8 @@ all_experiments = {
     run_layer_norm,
     run_gather_gemv,
     run_gemv,
+    run_flex_attention_causal,
+    run_sdpa_causal,
 }
 
 
