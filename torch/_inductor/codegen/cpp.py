@@ -4082,7 +4082,7 @@ class CppScheduling(BaseScheduling):
 
         for node in nodes:
 
-            def recompute_sizes_body_func(sizes, body, vars):
+            def loop_split(sizes, body, vars):
                 index_size, reduce_size = sizes
                 index_vars, reduce_vars = vars
                 split_idx = index_vars.index(split_var)
