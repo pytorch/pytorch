@@ -615,11 +615,7 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **fwd_ag_block_info
                     )
-                try:
-                    file_check.run(fwd_code)
-                except:
-                    print(f"fwd_code: {fwd_code}")
-                    raise
+                file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
                 file_check = FileCheck().check("def call(args):")
@@ -651,11 +647,7 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_reduce_scatter(
                         file_check, **bwd_rs_block_info
                     )
-                try:
-                    file_check.run(bwd_code)
-                except:
-                    print(f"bwd_code: {bwd_code}")
-                    raise
+                file_check.run(bwd_code)
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.
@@ -808,11 +800,7 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **fwd_ag_block_info
                     )
-                try:
-                    file_check.run(fwd_code)
-                except:
-                    print(f"fwd_code: {fwd_code}")
-                    raise
+                file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
                 file_check = FileCheck().check("def call(args):")
@@ -857,11 +845,7 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_reduce_scatter(
                         file_check, **bwd_rs_block_info
                     )
-                try:
-                    file_check.run(bwd_code)
-                except:
-                    print(f"bwd_code: {bwd_code}")
-                    raise
+                file_check.run(bwd_code)
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.

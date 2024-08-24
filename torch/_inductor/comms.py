@@ -213,9 +213,7 @@ def _schedule_for_comm(
             schedule(snode)
 
     for snode, deps in unmet_deps.items():
-        assert len(deps) == 0, (
-            f"Detected unscheduled nodes. {unmet_deps}"
-        )
+        assert len(deps) == 0, f"Detected unscheduled nodes. {unmet_deps}"
     return scheduled
 
 
@@ -526,8 +524,12 @@ def enforce_comm_ordering_for_fsdp(
                         and x.node.op_overload in allowed_ops  # type: ignore[union-attr]
                     )
                     or (
-                        isinstance(x, scheduler.SchedulerNode) and isinstance(x.node, ir.ComputedBuffer) and isinstance(x.node.data, ir.Pointwise)
-                        and len(x.node.data.origins) == 1 and list(x.node.data.origins)[0].target is torch.ops.fsdp.copy_.default
+                        isinstance(x, scheduler.SchedulerNode)
+                        and isinstance(x.node, ir.ComputedBuffer)
+                        and isinstance(x.node.data, ir.Pointwise)
+                        and len(x.node.data.origins) == 1
+                        and next(iter(x.node.data.origins)).target
+                        is torch.ops.fsdp.copy_.default
                     )
                 ),
             )
