@@ -3713,6 +3713,8 @@ class ComputedBuffer(OperationBuffer):
         to fuse scheduler nodes with compatible ranges, e.g. (s0*s1*...,) and (s0, s1, s2, ...)
         on CPU by preventing indexing simplifications and obtaining index/reduce ranges for
         the scheduler node compatible with other nodes.
+        Optional argument recompute_sizes_body_func can be used to recompute sizes and body
+        at the beginning. This can be useful to append additional loop transformations.
         """
         (
             (index_size, reduce_size),

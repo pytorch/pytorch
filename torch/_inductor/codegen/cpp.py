@@ -4103,9 +4103,7 @@ class CppScheduling(BaseScheduling):
                 )
 
             # Here decide the final loop order
-            node.recompute_size_and_body(
-                recompute_sizes_body_func=recompute_sizes_body_func
-            )
+            node.recompute_size_and_body(recompute_sizes_body_func=loop_split)
 
         return nodes
 
