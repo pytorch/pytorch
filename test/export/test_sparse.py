@@ -200,9 +200,6 @@ class TestSparseProp(TestCase):
     @parametrize("itype", ITYPES)
     @all_sparse_layouts("layout")
     def test_todensenet(self, dtype, itype, layout):
-        if layout is not torch.sparse_coo:
-            self.skipTest("TODO: support non-coo sparsity (#133174)")
-
         net = ToDenseNet()
         for sparse_input in self.generate_simple_inputs(
             layout,
