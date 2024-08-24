@@ -3,6 +3,7 @@ import enum
 import functools
 import pprint
 import re
+import sys
 import unittest
 import warnings
 
@@ -33,6 +34,8 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+
+_IS_WINDOWS = sys.platform == "win32"
 
 
 def check_dynamic_shape_capture():
@@ -3673,9 +3676,20 @@ class GraphModule(torch.nn.Module):
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertExpectedInline(
-                actual,
-                """\
+            expected_win = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
+        l_params_l1_weight_ = L_params_l1_weight_
+        l_params_l1_bias_ = L_params_l1_bias_
+        l_buffers_buffer_ = L_buffers_buffer_
+        l_inputs_ = L_inputs_
+
+        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
+
+        add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
+        return (add,)
+"""
+            expected_posix = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
         l_params_l1_weight_ = L_params_l1_weight_
@@ -3686,7 +3700,12 @@ class GraphModule(torch.nn.Module):
         linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
         add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
         return (add,)
-""",
+"""
+            # print(actual)
+            # print(expected)
+            self.assertExpectedInline(
+                actual,
+                expected_win if _IS_WINDOWS else expected_posix,
             )
         else:
             self.assertExpectedInline(
