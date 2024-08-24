@@ -34,4 +34,20 @@ bool isLogLevelEnabled(LogLevel level) noexcept {
   return false;
 }
 
+void lockWithLogging(
+    std::unique_lock<std::timed_mutex>& lock,
+    std::chrono::milliseconds log_interval,
+    c10::string_view desc,
+    c10::string_view file,
+    int line) {
+  while (!lock.try_lock_for(log_interval)) {
+    C10D_WARNING(
+        "{}:{} {}: waiting for lock for {}ms",
+        file,
+        line,
+        desc,
+        log_interval.count());
+  }
+}
+
 } // namespace c10d::detail
