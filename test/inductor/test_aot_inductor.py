@@ -1003,6 +1003,39 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @skipIfNoFBGEMM
+    def test_quanatized_int8_linear(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+                self.bias = torch.randn(10, device=device)
+                self.input_scale = torch.tensor(0.1)
+                self.input_zero_point = torch.tensor(0)
+                self.weight_scale = torch.tensor(0.1)
+                self.weight_zero_point = torch.tensor(0)
+                self.output_scale = torch.tensor(0.1)
+                self.output_zero_point = torch.tensor(0)
+                self.out_channel = 10
+
+            def forward(self, x):
+                return torch.ops._quantized.wrapped_quantized_linear(
+                    x,
+                    self.input_scale,
+                    self.input_zero_point,
+                    self.weight,
+                    self.weight_scale,
+                    self.weight_zero_point,
+                    self.bias,
+                    self.output_scale,
+                    self.output_zero_point,
+                    self.out_channel,
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
     def test_zero_grid_with_unbacked_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -3525,6 +3558,7 @@ CUDA_TEST_FAILURES = {
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
+    "test_quanatized_int8_linear": fail_cuda(is_skip=True),
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
     # fp8 to be re-enabled for AOTI
     "test_fp8": fail_cuda(is_skip=True),
@@ -3572,6 +3606,9 @@ if not IS_FBCODE:
             ),
             "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
             "test_quantized_linear": fail_minimal_arrayref_interface(is_skip=True),
+            "test_quanatized_int8_linear": fail_minimal_arrayref_interface(
+                is_skip=True
+            ),
             "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
             "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
             "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),
