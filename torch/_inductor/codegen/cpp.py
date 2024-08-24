@@ -3253,22 +3253,31 @@ class TilingSelect:
         tiling_indices = self._select_tiling_indices(
             fn_list, var_sizes_list, tiling_factor
         )
-        
-        group, reduction_group = max(
-            var_sizes_list, key=lambda sizes: len(sizes[1])
-        )
-        call_ranges = tuple(group) + tuple(reduction_group)
-
-
-        if dtype in DTYPE_LOWP_FP:
-            for tiling_indice in tiling_indices:
-                if call_ranges[tiling_indice] <= tiling_factor // 2:
-                    tiling_factor = tiling_factor // 2
-                    break
 
         if tiling_indices:
+            def _is_valid_indices(
+                itervars,
+                tiling_indices,
+            ):
+                return (
+                    len(tiling_indices) == 1
+                    and len(itervars) > 0
+                    and (
+                        tiling_indices[0]
+                        if tiling_indices[0] >= 0
+                        else tiling_indices[0] + len(itervars)
+                    )
+                    < len(itervars)
+                )
+            group, reduction_group = max(
+                    var_sizes_list, key=lambda sizes: len(sizes[1])
+            )
+            call_ranges = tuple(group) + tuple(reduction_group)
+            itervars = [
+                sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
+                for n in range(len(call_ranges))
+            ]
             if config.cpp.enable_tiling_heuristics:
-
                 def _try_get_stride(
                     index,
                     itervars,
@@ -3287,29 +3296,6 @@ class TilingSelect:
                     else:
                         non_contig_indexing_op_counter[node_name] += 1
 
-                def _is_valid_indices(
-                    itervars,
-                    tiling_indices,
-                ):
-                    return (
-                        len(tiling_indices) == 1
-                        and len(itervars) > 0
-                        and (
-                            tiling_indices[0]
-                            if tiling_indices[0] >= 0
-                            else tiling_indices[0] + len(itervars)
-                        )
-                        < len(itervars)
-                    )
-
-                group, reduction_group = max(
-                    var_sizes_list, key=lambda sizes: len(sizes[1])
-                )
-                call_ranges = tuple(group) + tuple(reduction_group)
-                itervars = [
-                    sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
-                    for n in range(len(call_ranges))
-                ]
                 reduction_depth = len(group)
                 vars, reduction_vars = (
                     itervars[:reduction_depth],
@@ -3384,6 +3370,14 @@ class TilingSelect:
                     # than tiling factor and enable `#pragma omp simd simdlen(8)` for scalar kernel
                     # when needed.
                     return [], []
+
+            if dtype in DTYPE_LOWP_FP and _is_valid_indices(itervars, tiling_indices):
+                # For lower precision data type, if the call range in tiling_indicices
+                # is less than half of tiling_factor, use tiling_factor // 2 for better performance
+                for tiling_indice in tiling_indices:
+                    if call_ranges[tiling_indice] <= tiling_factor // 2:
+                        tiling_factor = tiling_factor // 2
+                        break
 
             if len(tiling_indices) == 1:
                 return [tiling_factor], tiling_indices
