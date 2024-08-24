@@ -3,7 +3,6 @@ import enum
 import functools
 import pprint
 import re
-import sys
 import unittest
 import warnings
 
@@ -3646,7 +3645,7 @@ class GraphModule(torch.nn.Module):
     @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call_sequential_params_and_buffers(self):
         def newline_normalizer(code: str) -> str:
-            normal_code = re.sub(r'[\n]+', '\n', code)
+            normal_code = re.sub(r"[\n]+", "\n", code)
             return normal_code
 
         # copied from test/test_stateless.py
