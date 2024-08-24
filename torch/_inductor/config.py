@@ -899,6 +899,9 @@ class triton:
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
+    # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
+    codegen_upcast_to_fp32 = True
+
 
 class aot_inductor:
     # AOTInductor output path
@@ -922,7 +925,9 @@ class aot_inductor:
     )
 
     # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
-    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
+    filtered_kernel_names = os.environ.get(
+        "AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "default"
+    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""

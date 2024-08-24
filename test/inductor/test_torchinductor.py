@@ -2878,6 +2878,32 @@ class CommonTemplate:
         y = torch.tensor([[[0.6331]], [[1.6358]], [[-0.3459]], [[1.0196]]])
         self.common(forward, (x, y))
 
+    def test_div_softmax_symfloat(self):
+        def forward(x, y):
+            z = x.div(y * x.shape[-1])
+            return F.softmax(z, dim=-1)
+
+        query = torch.randn(1, 10, 40)
+        key = torch.randn(1, 2, 40)
+        x = torch.matmul(query, key.transpose(-2, -1))
+
+        cf = torch.compile(forward, dynamic=True)
+        cf(x, 1e-5)
+        cf(x, 1e-6)
+
+    def test_mul_softmax_symfloat(self):
+        def forward(x, y):
+            z = x.mul(y * x.shape[-1])
+            return F.softmax(z, dim=-1)
+
+        query = torch.randn(1, 10, 40)
+        key = torch.randn(1, 2, 40)
+        x = torch.matmul(query, key.transpose(-2, -1))
+
+        cf = torch.compile(forward, dynamic=True)
+        cf(x, 1e-5)
+        cf(x, 1e-6)
+
     def test_div_by_zero(self):
         def fn(x, runtime_zero, runtime_neg_zero):
             zero = torch.zeros_like(x)
@@ -11370,6 +11396,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
+    @instantiate_parametrized_tests
     class TritonCodeGenTests(TestCase):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -11873,6 +11900,20 @@ if HAS_GPU and not TEST_WITH_ASAN:
             # we are asserting that when inductor allocates this tensor,
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
+
+        @requires_gpu()
+        @parametrize("upcast_to_fp32", [False, True])
+        def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
+            @torch.compile
+            def func(a, b):
+                return a * b
+
+            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 2
+            with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                fp32_cast_in_code = "float32" in code
+                self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
