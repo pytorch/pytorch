@@ -213,7 +213,10 @@ def _schedule_for_comm(
             schedule(snode)
 
     for snode, deps in unmet_deps.items():
-        assert len(deps) == 0, f"Detected unscheduled nodes. {unmet_deps}"
+        assert len(deps) == 0, (
+            "Detected unscheduled nodes. "
+            f"Nodes with unmet dependencies: {unmet_deps}"
+        )
     return scheduled
 
 
@@ -506,7 +509,7 @@ def enforce_comm_ordering_for_fsdp(
                 name_to_fused_node,
             )
 
-            # Find the "all_gather + all_gather_wait_tensor + copy_out + resize_ + copy_" code block
+            # Find the "all_gather + all_gather_wait_tensor + copy_out + copy_" code block
             allowed_ops = {
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
                 torch.ops._c10d_functional.wait_tensor.default,
@@ -554,11 +557,6 @@ def enforce_comm_ordering_for_fsdp(
                     break
 
             ag_related_snodes = ag_related_snodes[:end_idx_of_current_ag_block]
-
-            # sort nodes by original operation order
-            ag_related_snodes = sorted(
-                ag_related_snode_set, key=lambda x: get_op_idx(x)
-            )
 
             # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
             wait_node_idx = None
