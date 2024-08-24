@@ -17,6 +17,7 @@ try:
     try:
         from . import (
             test_combo_kernels,
+
             test_foreach,
             test_pattern_matcher,
             test_select_algorithm,
@@ -194,7 +195,7 @@ if RUN_CUDA:
             tests=test_foreach.ForeachTests(),
         ),  # test foreach
         BaseTest(
-            "test_enable_dynamic_shapes",
+            "test_enable_dynamic_shapes_cpp_wrapper",
             tests=test_foreach.ForeachTests(),
         ),
         BaseTest(

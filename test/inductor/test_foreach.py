@@ -491,7 +491,7 @@ class ForeachTests(TestCase):
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
-    def test_enable_dynamic_shapes_cuda(self, op=torch._foreach_add):
+    def test_enable_dynamic_shapes_python_wrapper(self, op=torch._foreach_add):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 
@@ -505,6 +505,24 @@ class ForeachTests(TestCase):
         self.check_model_cuda(fn, inputs)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_enable_dynamic_shapes_cpp_wrapper_cuda(self, op=torch._foreach_add):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        inputs = (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+
+        self.check_model_cuda(fn, inputs)
 
     @unittest.skipIf(IS_FBCODE, "cpp compile not supported in fbcode")
     @bin_ops
