@@ -23,6 +23,23 @@ static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
     72,
     60};
 
+// NOTE: [32KB kernel argument size support]
+// 32KB kernel argument size support is available only when CUDART_VERSION >=
+// 12010 and the driver version is >= 530. Only the former condition can be
+// checked at compile time. This implies:
+//
+// - If CUDART_VERSION < 12010, kernels for the 32KB kernel argument size will
+// not be built.
+//
+// - If CUDART_VERSION >= 12010, kernels for both 4KB and 32KB kernel argument
+// sizes will be built. However, due to CUDA's minor version compatibility,
+// even when CUDART_VERSION >= 12010, the driver may not support 32KB.
+// Therefore, a runtime check is necessary to determine the appropriate kernel
+// to dispatch.
+//
+// - TODO(yifu): once there's a CUDART version that is not compatible with any
+// driver version below 530, we can determine at compile time to not compile
+// the kernels for 4KB kernel argument size.
 bool supports_large_kernel_arg() {
 #if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
   static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
@@ -37,6 +54,7 @@ bool supports_large_kernel_arg() {
 #endif
 }
 
+#if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
 #define DISPATCH_MULTI_TENSOR_APPLY(...)                \
   if (supports_large_kernel_arg()) {                    \
     constexpr bool large_kernel_arg C10_UNUSED = true;  \
@@ -45,6 +63,13 @@ bool supports_large_kernel_arg() {
     constexpr bool large_kernel_arg C10_UNUSED = false; \
     __VA_ARGS__();                                      \
   }
+#else
+#define DISPATCH_MULTI_TENSOR_APPLY(...)                \
+  do {                                                  \
+    constexpr bool large_kernel_arg C10_UNUSED = false; \
+    __VA_ARGS__();                                      \
+  } while (0);
+#endif
 
 template <bool large_kernel_arg>
 struct DepthToMaxConfig;
