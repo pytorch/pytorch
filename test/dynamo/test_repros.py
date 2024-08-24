@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.two_tensor import TwoTensor
@@ -1925,6 +1926,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(b(y), y.sin().cos()))
 
+    @skipIfWindows(
+        msg="torch._dynamo.exc.TorchRuntimeError: Failed running call_function <class 'torch.LongTensor'>(*(FakeTensor(..., size=(10,), dtype=torch.int32),), **{}):"  # noqa: B950
+    )
     def test_longtensor_list(self):
         for partition in [0, 5, 10]:
 
