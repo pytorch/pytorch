@@ -403,21 +403,21 @@ class ComboKernel(Kernel):
                 if any(e is None for e in xnumel)
                 else xnumel
                 if dynamic_shape
-                else max(xnumel_x_dim)  # type: ignore[arg-type]
+                else max(xnumel_x_dim)  # type: ignore[type-var]
             )
             ynumel = (
                 None
                 if any(e is None for e in ynumel)
                 else ynumel
                 if dynamic_shape
-                else max(ynumel)  # type: ignore[arg-type]
+                else max(ynumel)  # type: ignore[type-var]
             )
             znumel = (
                 None
                 if any(e is None for e in znumel)
                 else znumel
                 if dynamic_shape
-                else max(znumel)  # type: ignore[arg-type]
+                else max(znumel)  # type: ignore[type-var]
             )
 
             numels = (
