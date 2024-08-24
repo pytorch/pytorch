@@ -2368,7 +2368,7 @@ class TritonKernel(SIMDKernel):
         if self.inside_reduction and self.range_trees[-1].is_loop:
             if self.reverse_loop_order:
                 self.body.writeline(
-                    "for roffset in range(rnumel//RBLOCK*RBLOCK, -1, -RBLOCK):"
+                    "for roffset in range((rnumel-1)//RBLOCK*RBLOCK, -1, -RBLOCK):"
                 )
             else:
                 self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
