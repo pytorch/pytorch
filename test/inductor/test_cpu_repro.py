@@ -2017,6 +2017,7 @@ class CPUReproTests(TestCase):
     @slowTest
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test__adaptive_avg_pool2d(self):
         def wrap_fn(oh, ow):
             def fn(x):
@@ -4121,6 +4122,21 @@ class CPUReproTests(TestCase):
             4,
             exactly=True,
         ).run(code)
+
+    def test_load_half(self):
+        def fn(arg0_1, arg0_2):
+            return arg0_1.copy_(arg0_2)
+
+        with config.patch({"cpp.simdlen": 0}):
+            x1 = torch.randn(2, 10).to(torch.half)
+            x2 = torch.randn(2, 10).to(torch.half)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            _, code = run_and_get_cpp_code(opt_fn, x1, x2)
+            FileCheck().check_count(
+                "static_cast<float>",
+                0,
+                exactly=True,
+            ).run(code)
 
     def test_repeated_exp(self):
         def fn(x):

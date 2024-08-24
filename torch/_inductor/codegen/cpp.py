@@ -646,7 +646,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def signbit(x):
-        return f"std::signbit({x})"
+        """
+        On windows std::signbit only support float type.
+        Ref: https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/signbit?view=msvc-170
+        """
+        return (
+            f"std::signbit(static_cast<float>({x}))"
+            if _IS_WINDOWS
+            else f"std::signbit({x})"
+        )
 
     @staticmethod
     def pow(a, b):
@@ -1570,12 +1578,26 @@ class CppKernel(Kernel):
         num_threads = (
             "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
         )
-        acc_per_thread = f"{acc}_arr[{num_threads}]"
+        acc_per_thread_var_name = f"{acc}_arr"
+        acc_per_thread = f"{acc_per_thread_var_name}[{num_threads}]"
+        """
+        MSVC don't support dynamic array(VLA). Please use std::unique_ptr to instead of it.
+        Ref: https://stackoverflow.com/questions/56555406/creating-dynamic-sized-array-using-msvc-c-compiler
+        MSVC is the only one compiler, which not support VLA. And MSVC can't get good inductor performance.
+        So, we can use unique_ptr make it works on MSVC.
+        For other compilers, we continue to use VLA to get best performence.
+        """
+        acc_per_thread_unique_ptr_decl = f"auto {acc_per_thread_var_name} = std::make_unique<{acc_type}[]>({num_threads})"
+        acc_per_thread_vla_decl = f"{acc_per_thread_var_name}[{num_threads}]"
         acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
         self.local_reduction_init.writeline(
             f"{acc_type} {acc_local} = {reduction_init_fn(reduction_type, dtype)};"
         )
-        self.parallel_reduction_prefix.writeline(f"{acc_type} {acc_per_thread};")
+        self.parallel_reduction_prefix.writeline(
+            f"{acc_per_thread_unique_ptr_decl};"
+            if cpp_builder.is_msvc_cl()
+            else f"{acc_type} {acc_per_thread_vla_decl};"
+        )
         self.parallel_reduction_prefix.writelines(
             [
                 f"for (int tid = 0; tid < {num_threads}; tid++)",
@@ -1698,8 +1720,6 @@ class CppKernel(Kernel):
         var = self.args.input(name)
         index = self.rename_indexing(index)
         line = f"{var}[{cexpr_index(index)}]"
-        if V.graph.get_dtype(name) in [torch.float16]:
-            line = f"static_cast<float>({line})"
         csevar = self.cse.generate(self.loads, line)
         csevar.update_on_args("load", (self, name, index), {})
         return csevar

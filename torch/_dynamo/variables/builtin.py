@@ -16,7 +16,7 @@ import torch
 from torch import sym_float, sym_int
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, polyfill, variables
+from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -102,7 +102,7 @@ def _polyfill_call_impl(name):
             variables.UserFunctionVariable(fn), args, kwargs
         )
 
-    fn = getattr(polyfill, name)
+    fn = getattr(polyfills, name)
     call_fn.__name__ = f"call_{name}"
     return call_fn
 
@@ -1002,16 +1002,8 @@ class BuiltinVariable(VariableTracker):
         if self.fn is object and name == "__new__":
             assert len(args) == 1
             assert len(kwargs) == 0
-            user_defined_class_variable = args[0]
-            source = user_defined_class_variable.source
-            value = user_defined_class_variable.value
-            return tx.output.side_effects.track_object_new(
-                source,
-                value,
-                variables.UnspecializedNNModuleVariable
-                if issubclass(value, torch.nn.Module)
-                else UserDefinedObjectVariable,
-                {},
+            return tx.output.side_effects.track_object_new_from_user_defined_class(
+                args[0]
             )
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
@@ -1706,20 +1698,29 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if name == "__bases__":
+        if name in {"__bases__", "__base__", "__flags__"}:
             try:
                 value = obj.as_python_constant()
                 if isinstance(value, type):
-                    bases = value.__bases__
-                    if source is not None:
-                        tuple_args = [
-                            VariableBuilder(tx, GetItemSource(source, i))(b)
-                            for i, b in enumerate(bases)
-                        ]
-                    else:
-                        tuple_args = [SourcelessBuilder.create(tx, b) for b in bases]
-
-                    return variables.TupleVariable(tuple_args, **options)
+                    if name == "__bases__":
+                        bases = value.__bases__
+                        if source is not None:
+                            tuple_args = [
+                                VariableBuilder(tx, GetItemSource(source, i))(b)
+                                for i, b in enumerate(bases)
+                            ]
+                        else:
+                            tuple_args = [
+                                SourcelessBuilder.create(tx, b) for b in bases
+                            ]
+                        return variables.TupleVariable(tuple_args, **options)
+                    if name == "__base__":
+                        base = value.__base__
+                        if source is not None:
+                            return VariableBuilder(tx, source)(base)
+                        return SourcelessBuilder.create(tx, base)
+                    if name == "__flags__":
+                        return ConstantVariable.create(value.__flags__)
             except NotImplementedError:
                 pass
 
