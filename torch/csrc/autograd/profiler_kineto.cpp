@@ -631,6 +631,9 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
     }
   }
 }
+
+// Set this function to be unused as profiler implementation needs more
+// refactoring to support Python ops collection dynamic toggling
 #ifdef _MSC_VER
 #define UNUSED
 #else

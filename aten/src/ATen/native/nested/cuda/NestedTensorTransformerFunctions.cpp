@@ -21,8 +21,8 @@
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 int64_t padded_tensor_numel(const Tensor& sizes) {
   const auto sizes_num_rows = sizes.sizes()[0];
@@ -383,5 +383,4 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   return std::make_tuple(grad_q, grad_k, grad_v);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
