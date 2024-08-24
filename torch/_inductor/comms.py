@@ -591,37 +591,6 @@ def enforce_comm_ordering_for_fsdp(
 
             ag_related_snodes = ag_related_snodes[:end_idx_of_current_ag_block]
 
-            # Find split_with_sizes_copy op's other deps (e.g. out= buffers allocation)
-            split_with_sizes_copy_snode = None
-            for cur_snode in ag_related_snodes:
-                if is_fallback_op(
-                    cur_snode.node, torch.ops.fsdp.split_with_sizes_copy.default
-                ):
-                    split_with_sizes_copy_snode = cur_snode
-                    break
-            ag_related_snode_set = set(ag_related_snodes)
-            find_recursive_deps_of_node(
-                split_with_sizes_copy_snode,
-                ag_related_snode_set,
-                name_to_buf,
-                name_to_fused_node,
-            )
-
-            # Find unsharded_param.copy_ op's other deps (e.g. unsharded_param.resize_)
-            unsharded_param_copy_snodes = []
-            for cur_snode in list(ag_related_snode_set):
-                if is_fallback_op(
-                    cur_snode.node, torch.ops.aten.copy_.default
-                ):
-                    unsharded_param_copy_snodes.append(cur_snode)
-            for copy_snode in unsharded_param_copy_snodes:
-                find_recursive_deps_of_node(
-                    copy_snode,
-                    ag_related_snode_set,
-                    name_to_buf,
-                    name_to_fused_node,
-                )
-
             # sort nodes by original operation order
             ag_related_snodes = sorted(
                 ag_related_snode_set, key=lambda x: get_op_idx(x)
