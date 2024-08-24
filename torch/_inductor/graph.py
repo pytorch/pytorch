@@ -235,7 +235,9 @@ def mark_nodes_dislike_padding(
         op = _get_overload_packet(cur)
         if not op:
             continue
-        if op in ops_dislike_padding or cur.name in user_visible_outputs:
+        if op in ops_dislike_padding or (
+            user_visible_outputs and cur.name in user_visible_outputs
+        ):
             cur.meta["dislike_padding"] = True
 
         if cur.meta.get("dislike_padding", False):
