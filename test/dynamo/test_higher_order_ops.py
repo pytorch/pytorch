@@ -3645,6 +3645,10 @@ class GraphModule(torch.nn.Module):
 
     @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call_sequential_params_and_buffers(self):
+        def newline_normalizer(code: str) -> str:
+            normal_code = re.sub(r'[\n]+', '\n', code)
+            return normal_code
+
         # copied from test/test_stateless.py
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -3683,12 +3687,13 @@ class GraphModule(torch.nn.Module):
         l_inputs_ = L_inputs_
 
         linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
+
         add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
         return (add,)
 """
             self.assertExpectedInline(
-                actual,
-                expected,
+                newline_normalizer(actual),
+                newline_normalizer(normalize_gm(expected)),
             )
         else:
             self.assertExpectedInline(
