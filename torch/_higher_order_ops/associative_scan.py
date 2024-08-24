@@ -67,6 +67,8 @@ def safe_map(f, *args):
         return f(*a)
 
     return list(map(nf, zip(*args)))
+
+
 class AssociativeScanOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("associative_scan")
