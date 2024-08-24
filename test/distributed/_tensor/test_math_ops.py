@@ -26,6 +26,10 @@ class DistMathOpsTest(DTensorTestBase):
         shard_spec = [Shard(0)]
 
         tensor = torch.randn(12, 8, 8)
+        # TODO: check `all` correctness and test `all` on a bool tensor
+        if op_str in ("any"):
+            # test out a bool tensor for any
+            tensor = tensor < 0
         dtensor = distribute_tensor(tensor, device_mesh, shard_spec)
 
         op = getattr(tensor, op_str)
@@ -51,7 +55,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     def test_linear_op_reductions(self):
-        for op_str in ("all", "sum", "prod", "max", "min"):
+        for op_str in ("all", "sum", "prod", "max", "min", "any"):
             self.linear_op_reductions(op_str)
 
     @with_comms
