@@ -1067,7 +1067,7 @@ class SIMDScheduling(BaseScheduling):
         done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        current_loop_reduced_writes: OrderedSet[str] = OrderedSet()
+        not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1090,35 +1090,27 @@ class SIMDScheduling(BaseScheduling):
                 and isinstance(n.node, ir.ComputedBuffer)
                 and not isinstance(n.node.data, ir.Scan)
             ):
-                current_loop_reduced_writes.add(n.get_name())
+                not_ready_yet_nodes.add(n.get_name())
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
             else:
-                # flush out any other runnable nodes to reduce number of loops
-                for other_node in nodes[index + 1 :]:
-                    if (
-                        other_node not in done
-                        and fits_in_main_body(other_node)
-                        and not (current_loop_reduced_writes & other_node.ancestors)
-                    ):
-                        schedule_node_in_loop(other_node)
                 node_schedule.append(DisableReduction)
             yield
             node_schedule.append(EnableReduction)
-            current_loop_reduced_writes.clear()
+            not_ready_yet_nodes.clear()
 
         def requires_closing_previous_reduction(node, node_schedule):
             if rnumel == 1:
                 return False
-            if not current_loop_reduced_writes & node.ancestors:
+            if not not_ready_yet_nodes & node.ancestors:
                 return False
             assert node_schedule and not isinstance(
                 node_schedule[-1], (EnableReduction, DisableReduction)
             )
-            return bool(current_loop_reduced_writes)
+            return bool(not_ready_yet_nodes)
 
         for index, node in enumerate(nodes):
             if node in done:
