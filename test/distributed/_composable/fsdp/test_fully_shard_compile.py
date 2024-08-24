@@ -274,12 +274,10 @@ class TestFullyShardCompile(FSDPTest):
             .check_not(" = extern_kernels.")
             .check_not(" = triton_")
             .check_not(" = torch.ops.")
-            .check_not(" = inductor_ops.")
             .check_not("    aten.")
             .check_not("    extern_kernels.")
             .check_not("    triton_")
             .check_not("    torch.ops.")
-            .check_not("    inductor_ops.")
         )
 
     def inductor_code_check_fsdp_all_gather(
@@ -644,7 +642,7 @@ class TestFullyShardCompile(FSDPTest):
                         file_check, **bwd_ag_block_info
                     )
                 for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.mm("),
+                    dict(overlapped_compute_op_str="extern_kernels.addmm("),
                     dict(
                         overlapped_compute_op_str=None
                     ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
@@ -756,8 +754,7 @@ class TestFullyShardCompile(FSDPTest):
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
         for fullgraph, all_requires_grad in itertools.product(
-            [True], [True]
-            # [True, False], [True, False]
+            [True, False], [True, False]
         ):
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
