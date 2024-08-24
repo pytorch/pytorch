@@ -245,8 +245,7 @@ def _schedule_for_comm(
 
     for snode, deps in unmet_deps.items():
         assert len(deps) == 0, (
-            "Detected unscheduled nodes. "
-            f"Nodes with unmet dependencies: {unmet_deps}"
+            f"Detected unscheduled nodes. {unmet_deps}"
         )
 
     # HACK(yf225): remove resize-0 ops at beginning of graph, because they might be secret aliases
@@ -552,7 +551,6 @@ def enforce_comm_ordering_for_fsdp(
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
                 torch.ops._c10d_functional.wait_tensor.default,
                 torch.ops.fsdp.split_with_sizes_copy.default,
-                torch.ops.aten.copy_.default,
             }
             find_recursive_users_of_node(
                 ag_snode,
@@ -564,6 +562,10 @@ def enforce_comm_ordering_for_fsdp(
                     or (
                         isinstance(x, scheduler.ExternKernelSchedulerNode)
                         and x.node.op_overload in allowed_ops  # type: ignore[union-attr]
+                    )
+                    or (
+                        isinstance(x, scheduler.SchedulerNode) and isinstance(x.node, ir.ComputedBuffer) and isinstance(x.node.data, ir.Pointwise)
+                        and len(x.node.data.origins) == 1 and list(x.node.data.origins)[0].target is torch.ops.fsdp.copy_.default
                     )
                 ),
             )
