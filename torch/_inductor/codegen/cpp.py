@@ -4067,14 +4067,15 @@ class CppScheduling(BaseScheduling):
                         and divide_index_name is not None
                     )
 
-            match_div = expr_matched and all(
+            if expr_matched and all(
                 stride_at_vec_range(
                     expr, split_var, cpu_vec_isa.pick_vec_isa().nelements(torch.float32)
                 )
                 == 1
                 for name, expr in original_body.indexing_exprs.items()
                 if name != divide_index_name
-            )
+            ):
+                match_div = True
 
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
         if not match_div or num_div != 1:
