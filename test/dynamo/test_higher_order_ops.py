@@ -19,6 +19,7 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    empty_line_normalizer,
     normalize_gm,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
@@ -3644,10 +3645,6 @@ class GraphModule(torch.nn.Module):
 
     @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call_sequential_params_and_buffers(self):
-        def newline_normalizer(code: str) -> str:
-            normal_code = re.sub(r"[\n]+", "\n", code)
-            return normal_code
-
         # copied from test/test_stateless.py
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -3690,9 +3687,10 @@ class GraphModule(torch.nn.Module):
         add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
         return (add,)
 """
+            # We found Windows/Linux have some empty line difference, empty_line_normalizer will help fix it.
             self.assertExpectedInline(
-                newline_normalizer(actual),
-                newline_normalizer(normalize_gm(expected)),
+                empty_line_normalizer(actual),
+                empty_line_normalizer(normalize_gm(expected)),
             )
         else:
             self.assertExpectedInline(
