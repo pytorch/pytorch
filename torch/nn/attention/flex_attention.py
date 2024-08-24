@@ -827,10 +827,8 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
 def _apply_kernel_options(query, key, value, kernel_options):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
-    if "ROWS_GUARANTEED_SAFE" not in kernel_options:
-        kernel_options["ROWS_GUARANTEED_SAFE"] = False
-    if "PRESCALE_QK" not in kernel_options:
-        kernel_options["PRESCALE_QK"] = False
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("PRESCALE_QK", False)
 
     # If foward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
@@ -838,12 +836,12 @@ def _apply_kernel_options(query, key, value, kernel_options):
         query.requires_grad or key.requires_grad or value.requires_grad
     )
     output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
-    kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
+    kernel_options.setdefault("OUTPUT_LOGSUMEXP", output_logsumexp)
 
     if query.size(-2) >= 128 and (query.size(-2) % 128 != 0 or key.size(-2) % 128 != 0):
-        kernel_options["IS_DIVISIBLE"] = False
+        kernel_options.setdefault("IS_DIVISIBLE", False)
     else:
-        kernel_options["IS_DIVISIBLE"] = True
+        kernel_options.setdefault("IS_DIVISIBLE", True)
 
     return kernel_options
 
