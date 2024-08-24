@@ -3255,6 +3255,7 @@ class TilingSelect:
         )
 
         if tiling_indices:
+
             def _is_valid_indices(
                 itervars,
                 tiling_indices,
@@ -3270,7 +3271,7 @@ class TilingSelect:
                     < len(itervars)
                 )
             group, reduction_group = max(
-                    var_sizes_list, key=lambda sizes: len(sizes[1])
+                var_sizes_list, key=lambda sizes: len(sizes[1])
             )
             call_ranges = tuple(group) + tuple(reduction_group)
             itervars = [
@@ -3278,6 +3279,7 @@ class TilingSelect:
                 for n in range(len(call_ranges))
             ]
             if config.cpp.enable_tiling_heuristics:
+
                 def _try_get_stride(
                     index,
                     itervars,
