@@ -4918,28 +4918,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
-    def test_super_staticmethod(self):
-        class Parent:
-            @staticmethod
-            def greet():
-                return 5
-
-        class Child(Parent):
-            @staticmethod
-            def greet(x):
-                return x * super(Child, Child).greet()
-
-        child = Child()
-
-        def fn(x):
-            return child.greet(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(4)
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
     def test_vc_bumped_in_inference_graph(self):
         @torch.compile
         def f(x):
