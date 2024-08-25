@@ -23,6 +23,7 @@ from torch._export.db.logging import (
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
+    _NonStrictTorchFunctionHandler,
     make_constraints,
     make_fake_inputs,
     produce_guards_and_solve_constraints,
@@ -62,7 +63,6 @@ from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
-    _DataDependentErrorHandlerNonStrict,
     ConstraintViolationError,
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
@@ -1703,7 +1703,7 @@ def _non_strict_export(
             _is_torch_jit_trace=_is_torch_jit_trace,
         )
 
-    with fake_mode, _DataDependentErrorHandlerNonStrict(), torch._dynamo.config.patch(
+    with fake_mode, _NonStrictTorchFunctionHandler(), torch._dynamo.config.patch(
         assume_static_by_default=False
     ):
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (

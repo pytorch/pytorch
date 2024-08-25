@@ -5482,6 +5482,17 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         return result
 
 
+def _find_user_code_frame():
+    frame = inspect.currentframe()
+    while frame is not None:
+        if not frame.f_code.co_filename.startswith(
+            os.path.dirname(inspect.getfile(torch)) + os.path.sep
+        ):
+            break
+        frame = frame.f_back
+    return frame
+
+
 def _blame_user_code(e, frame):
     frame_summary = traceback.FrameSummary(
         frame.f_code.co_filename,
@@ -5550,54 +5561,25 @@ def _suggest_fixes_for_data_dependent_error_non_strict(e):
     2. suggested fixes for the error in terms of live variables at that location.
     """
 
-    frame = inspect.currentframe()
-    while frame is not None:
-        # walk the stack up from the data-dependent error until a non-torch frame is found
-        if not frame.f_code.co_filename.startswith(os.path.dirname(inspect.getfile(torch))):
-            # add frame info to error message
-            _blame_user_code(e, frame)
+    # walk the stack up from the data-dependent error until a non-torch frame is found
+    frame = _find_user_code_frame()
+    if frame is not None:
+        # add frame info to error message
+        _blame_user_code(e, frame)
 
-            # map symbol names reachable via frame locals to their source-level names
-            src_map = defaultdict(list)
-            for var, val in frame.f_locals.items():
-                # figure out how to access any symbol inside `val` through `var`
-                for path, leaf in pytree.tree_leaves_with_path(val):
-                    name = var + pytree.keystr(path)
-                    if isinstance(leaf, torch.SymInt):
-                        src_map[str(leaf.node.expr)].append(name)
-                    elif isinstance(leaf, torch.Tensor):
-                        for i, dim in enumerate(leaf.shape):
-                            if isinstance(dim, torch.SymInt):
-                                src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")
+        # map symbol names reachable via frame locals to their source-level names
+        src_map = defaultdict(list)
+        for var, val in frame.f_locals.items():
+            # figure out how to access any symbol inside `val` through `var`
+            for path, leaf in pytree.tree_leaves_with_path(val):
+                name = var + pytree.keystr(path)
+                if isinstance(leaf, torch.SymInt):
+                    src_map[str(leaf.node.expr)].append(name)
+                elif isinstance(leaf, torch.Tensor):
+                    for i, dim in enumerate(leaf.shape):
+                        if isinstance(dim, torch.SymInt):
+                            src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")
 
-            # add suggested torch.check()s based on `src_map` to the error message
-            # replacing unbacked symints in the unresolved condition in the error
-            _suggest_torch_checks(e, src_map)
-            break
-        frame = frame.f_back
-
-
-class _DataDependentErrorHandlerNonStrict(torch.overrides.TorchFunctionMode):
-    """
-    Handles data-dependent errors raised by torch function calls.
-
-    Any data-dependent error is due to some condition on unbacked symints
-    that cannot be resolved. A mechanical way of fixing the error is to use
-    a torch._check() call to assert either that condition or its negation.
-    The handler suggests these options as code and points to the location
-    of the torch function call that raised the error as part of the error
-    message shown to the user, who can then simply select and copy-paste
-    a suggested fix at that location.
-
-    NOTE: Not all data-dependent errors are raised by torch function calls.
-    In particular, conditions on unbacked symints can appear outside such
-    calls, and as such are not handled here.
-    """
-
-    def __torch_function__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
-        try:
-            return func(*args, **kwargs)
-        except GuardOnDataDependentSymNode as e:
-            _suggest_fixes_for_data_dependent_error_non_strict(e)
-            raise
+        # add suggested torch.check()s based on `src_map` to the error message
+        # replacing unbacked symints in the unresolved condition in the error
+        _suggest_torch_checks(e, src_map)
