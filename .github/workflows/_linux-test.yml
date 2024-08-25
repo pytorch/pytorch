@@ -62,6 +62,8 @@ env:
 
 jobs:
   test:
+    permissions:
+      pull-requests: write
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
