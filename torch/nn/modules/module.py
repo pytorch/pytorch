@@ -396,6 +396,35 @@ def _forward_unimplemented(self, *input: Any) -> None:
     )
 
 
+def _get_backward_hooks(self):
+    r"""Return the backward hooks for use in the call function.
+
+    It returns two lists, one with the full backward hooks and one with the non-full
+    backward hooks.
+    """
+    full_backward_hooks: List[Callable] = []
+    if _global_is_full_backward_hook is True:
+        full_backward_hooks += _global_backward_hooks.values()
+    if self._is_full_backward_hook is True:
+        full_backward_hooks += self._backward_hooks.values()
+
+    non_full_backward_hooks: List[Callable] = []
+    if _global_is_full_backward_hook is False:
+        non_full_backward_hooks += _global_backward_hooks.values()
+    if self._is_full_backward_hook is False:
+        non_full_backward_hooks += self._backward_hooks.values()
+
+    return full_backward_hooks, non_full_backward_hooks
+
+
+def _get_backward_pre_hooks(self):
+    backward_pre_hooks: List[Callable] = []
+    backward_pre_hooks += _global_backward_pre_hooks.values()
+    backward_pre_hooks += self._backward_pre_hooks.values()
+
+    return backward_pre_hooks
+
+
 class Module:
     r"""Base class for all neural network modules.
 
@@ -1476,32 +1505,6 @@ class Module:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
-    def _get_backward_hooks(self):
-        r"""Return the backward hooks for use in the call function.
-
-        It returns two lists, one with the full backward hooks and one with the non-full
-        backward hooks.
-        """
-        full_backward_hooks: List[Callable] = []
-        if _global_is_full_backward_hook is True:
-            full_backward_hooks += _global_backward_hooks.values()
-        if self._is_full_backward_hook is True:
-            full_backward_hooks += self._backward_hooks.values()
-
-        non_full_backward_hooks: List[Callable] = []
-        if _global_is_full_backward_hook is False:
-            non_full_backward_hooks += _global_backward_hooks.values()
-        if self._is_full_backward_hook is False:
-            non_full_backward_hooks += self._backward_hooks.values()
-
-        return full_backward_hooks, non_full_backward_hooks
-
-    def _get_backward_pre_hooks(self):
-        backward_pre_hooks: List[Callable] = []
-        backward_pre_hooks += _global_backward_pre_hooks.values()
-        backward_pre_hooks += self._backward_pre_hooks.values()
-
-        return backward_pre_hooks
 
     def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
         if not isinstance(result, torch.Tensor):
@@ -1753,10 +1756,10 @@ class Module:
             full_backward_hooks, non_full_backward_hooks = [], []
             backward_pre_hooks = []
             if self._backward_pre_hooks or _global_backward_pre_hooks:
-                backward_pre_hooks = self._get_backward_pre_hooks()
+                backward_pre_hooks = _get_backward_pre_hooks(self)
 
             if self._backward_hooks or _global_backward_hooks:
-                full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
+                full_backward_hooks, non_full_backward_hooks = _get_backward_hooks(self)
 
             if _global_forward_pre_hooks or self._forward_pre_hooks:
                 for hook_id, hook in (

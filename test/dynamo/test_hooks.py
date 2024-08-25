@@ -796,6 +796,58 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_sub_module_backward_hook(self):
+        def pre_backward_hook_fn(module, grad_output):
+            r = []
+            for grad in grad_output:
+                r.append(grad + 2)
+            return tuple(r)
+
+        def backward_hook_fn(module, grad_input, grad_output):
+            r = []
+            for grad in grad_input:
+                r.append(grad + 3)
+            return tuple(r)
+
+        class SubM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_full_backward_pre_hook(pre_backward_hook_fn)
+                self.register_full_backward_hook(backward_hook_fn)
+
+            def forward(self, x):
+                return x.mul(4)
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = SubM()
+
+            def forward(self, x):
+                y = self.sub(x)
+                return (y,)
+
+        mod = MyMod()
+
+        x0 = torch.ones(2, requires_grad=True)
+        eager_out = mod(x0)
+        eager_out[0].backward(torch.ones(2))
+
+        x1 = torch.ones(2, requires_grad=True)
+        mod_compiled = aot_module_simplified(mod, (x1,), nop)
+        aot_out = mod_compiled(x1)
+        aot_out[0].backward(torch.ones(2))
+
+        x2 = torch.ones(2, requires_grad=True)
+        compiled_autograd_ctx = compiled_autograd.enable(compiler_fn)
+        with compiled_autograd_ctx:
+            dynamo_out = torch.compile(mod, fullgraph=True)(x2)
+            dynamo_out[0].backward(torch.ones(2))
+            print(dynamo_out)
+
+        self.assertEqual(dynamo_out, aot_out)
+        self.assertEqual(dynamo_out, eager_out)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
