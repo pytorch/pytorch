@@ -32,6 +32,7 @@ import torch._logging
 import torch.fx
 from torch import device, Tensor
 from torch._decomp import get_decompositions
+from torch._dynamo.trace_rules import _as_posix_path
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import make_channels_last_strides_for
@@ -52,7 +53,6 @@ from torch.fx.node import Node
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
-from torch._dynamo.trace_rules import _as_posix_path
 
 from . import config, ir
 from .codegen.common import (
