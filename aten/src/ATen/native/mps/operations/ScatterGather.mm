@@ -53,10 +53,10 @@ TORCH_IMPL_FUNC(gather_out_mps)
     }
     auto input_type = getMPSDataType(self);
     auto output_type = getMPSDataType(output);
-    if (input_type == MPSDataTypeUInt8 || ((input_type == MPSDataTypeBool && !is_macos_13_or_newer()))) {
+    if (input_type == MPSDataTypeUInt8) {
       input_type = MPSDataTypeInt8;
     }
-    if (output_type == MPSDataTypeUInt8 || ((output_type == MPSDataTypeBool && !is_macos_13_or_newer()))) {
+    if (output_type == MPSDataTypeUInt8) {
       output_type = MPSDataTypeInt8;
     }
     string key = "gather_out_mps" + getTensorsStringKey({self, index, output}) + ":" + std::to_string(dim);
