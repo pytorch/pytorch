@@ -99,10 +99,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 diagnostics.rules.find_opschema_matched_symbolic_function,
                 name="optional_inputs",
             ),
-            common_utils.subtest(
-                diagnostics.rules.op_level_debugging,
-                name="get_attr_node_in_op_level_debug",
-            ),
         ],
     )
     def test_mnist_exported_with_no_warnings(self, diagnostic_rule):
@@ -128,35 +124,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        onnx_program = dynamo_export(
-            MNISTModel(), tensor_x, export_options=ExportOptions(op_level_debug=True)
-        )
+        onnx_program = dynamo_export(MNISTModel(), tensor_x)
 
         assert_has_diagnostics(
             onnx_program.diagnostic_context,
             diagnostic_rule,
             diagnostics.levels.NONE,
             expected_node="aten.convolution.default",
-        )
-
-    def test_no_warnings_on_complex_dtype_in_op_level_debug(self):
-        class ComplexModel(torch.nn.Module):
-            def forward(self, input):
-                return torch.ops.aten.mul(input, input)
-
-        real = torch.tensor([1, 2], dtype=torch.float32)
-        imag = torch.tensor([3, 4], dtype=torch.float32)
-        x = torch.complex(real, imag)
-
-        onnx_program = dynamo_export(
-            ComplexModel(), x, export_options=ExportOptions(op_level_debug=True)
-        )
-
-        assert_has_diagnostics(
-            onnx_program.diagnostic_context,
-            diagnostics.rules.op_level_debugging,
-            diagnostics.levels.NONE,
-            expected_node="aten.mul.Tensor",
         )
 
     def test_trace_only_op_with_evaluator(self):
@@ -186,28 +160,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         x = torch.arange(1.0, 6.0, requires_grad=True)
 
         _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
-
-    def test_unsupported_indices_fake_tensor_generated_with_op_level_debug(self):
-        class EmbedModelWithoutPaddingIdx(torch.nn.Module):
-            def forward(self, input, emb):
-                return torch.nn.functional.embedding(input, emb)
-
-        model = EmbedModelWithoutPaddingIdx()
-        x = torch.randint(4, (4, 3, 2))
-        embedding_matrix = torch.rand(10, 3)
-
-        onnx_program = dynamo_export(
-            model,
-            x,
-            embedding_matrix,
-            export_options=ExportOptions(op_level_debug=True),
-        )
-        assert_has_diagnostics(
-            onnx_program.diagnostic_context,
-            diagnostics.rules.op_level_debugging,
-            diagnostics.levels.WARNING,
-            expected_node="aten.embedding.default",
-        )
 
     def test_unsupported_function_schema_raises_diagnostic_warning_when_found_nearest_match(
         self,

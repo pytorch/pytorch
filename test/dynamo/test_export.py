@@ -2495,6 +2495,19 @@ def forward(self, x):
 
         torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
 
+    def test_export_fast_binary_broadcast_check_unbacked(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, numel, scalar):
+                u0 = numel.item()
+                torch._check_is_size(u0)
+                x = torch.ones(u0 + 1)
+                return scalar - x
+
+        model = MyModel().eval().cuda()
+        numel = torch.tensor(10)
+        scalar = torch.randn(1)
+        torch.export.export(model, (numel, scalar))
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2756,7 +2769,7 @@ def forward(self, x):
 
         x = torch.tensor([3])
         y = torch.randn([8, 8, 6])
-        example_inputs = [x, y]
+        example_inputs = (x, y)
         dynamic_shapes = (None, {0: torch.export.Dim("dimy", min=6, max=10)})
         gm, _ = torch._dynamo.export(
             f,
@@ -2766,7 +2779,7 @@ def forward(self, x):
         )(*example_inputs)
 
         constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-            f, example_inputs, dynamic_shapes=dynamic_shapes
+            {"x": x, "y": y}, dynamic_shapes=dynamic_shapes
         )
         self.assertEqual(
             gm.meta["input_shape_constraints"],

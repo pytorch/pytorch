@@ -226,36 +226,6 @@ def xfail_dynamic_fx_test(
     return skip_dec
 
 
-def xfail_op_level_debug_test(
-    error_message: str,
-    model_type: Optional[TorchModelType] = None,
-    reason: Optional[str] = None,
-):
-    """Xfail op level debug test.
-
-    Args:
-        reason: The reason for xfailing op level debug test.
-        model_type (TorchModelType): The model type to xfail dynamic exporting test for.
-            When None, model type is not used to xfail op level debug tests.
-
-    Returns:
-        A decorator for xfailing op level debug test.
-    """
-
-    def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            if self.op_level_debug and (
-                not model_type or self.model_type == model_type
-            ):
-                return xfail(error_message, reason)(func)(self, *args, **kwargs)
-            return func(self, *args, **kwargs)
-
-        return wrapper
-
-    return skip_dec
-
-
 def skip_dynamic_fx_test(reason: str, model_type: TorchModelType = None):
     """Skip dynamic exporting test.
 

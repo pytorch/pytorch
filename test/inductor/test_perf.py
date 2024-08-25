@@ -84,7 +84,6 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
 
 class TestCase(InductorTestCase):
     device = DEVICE
-    pass
 
 
 class NumBytesMetricTests(TestCase):

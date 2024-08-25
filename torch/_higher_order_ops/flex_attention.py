@@ -204,11 +204,12 @@ def math_attention(
         mask_mod_other_buffers,
     )
 
-    # TODO Unconditionally return logsumexp for backwards
-    # if any(t.requires_grad for t in (query, key, value)):
+    # Set fully masked rows' sumexp to 0.0
     logsumexp = post_mod_scores.logsumexp(dim=-1)
+    masked_rows = torch.all(post_mod_scores == -float("inf"), dim=-1)
+    logsumexp = torch.where(masked_rows, 0.0, logsumexp)
 
-    post_mod_scores = post_mod_scores.softmax(dim=-1)
+    post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
 
     return post_mod_scores.to(query.dtype) @ value, logsumexp / math.log(2)
 
