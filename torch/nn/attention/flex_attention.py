@@ -838,11 +838,6 @@ def _apply_kernel_options(query, key, value, kernel_options):
     output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
     kernel_options.setdefault("OUTPUT_LOGSUMEXP", output_logsumexp)
 
-    if query.size(-2) >= 128 and (query.size(-2) % 128 != 0 or key.size(-2) % 128 != 0):
-        kernel_options.setdefault("IS_DIVISIBLE", False)
-    else:
-        kernel_options.setdefault("IS_DIVISIBLE", True)
-
     return kernel_options
 
 
