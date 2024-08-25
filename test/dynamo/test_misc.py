@@ -1617,9 +1617,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_arange_length_with_float32_dtype(self):
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnts, fullgraph=True)
+        @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
             torch._check_is_size(y)
@@ -1632,8 +1630,6 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.tensor([300])
         r = f(x)
-        
-        self.assertEqual(cnts.frame_count, 1)  # no graph break
     
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check(self):
