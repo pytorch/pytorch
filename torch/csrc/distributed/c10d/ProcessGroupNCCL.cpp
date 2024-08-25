@@ -1399,7 +1399,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           checkExceptionDump =
               globalStore_->check({std::string(EXCEPTION_DUMP)});
         } catch (const std::exception& e) {
-          LOG(ERROR)
+          LOG(WARNING)
               << logPrefix()
               << "Failed to check the \"should dump\" flag on TCPStore, "
               << "(maybe TCPStore server has shut down too early), with error: "
