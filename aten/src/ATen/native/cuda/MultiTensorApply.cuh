@@ -81,6 +81,7 @@ struct DepthToMaxConfig<false> {
 };
 
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 700
+template <>
 struct DepthToMaxConfig<true> : DepthToMaxConfig<false> {};
 #else
 template <>
@@ -195,7 +196,7 @@ __global__ void multi_tensor_apply_kernel(
     CUDA_KERNEL_ASSERT(
         false &&
         "multi_tensor_apply with 32KB argument size is not supported "
-        "on devices with sm<700. This kernel should not be reachable.");
+        "on devices with sm<70. This kernel should not be reachable.");
     return;
   }
 #endif
