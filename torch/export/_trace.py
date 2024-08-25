@@ -681,7 +681,7 @@ def _export_to_aten_ir(
             if fake_mode:
                 insert_deferred_runtime_asserts(
                     gm,
-                    fake_mode.shape_env,
+                    fake_mode.shape_env,  # type: ignore[arg-type]
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
                 )
