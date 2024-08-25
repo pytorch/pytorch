@@ -140,6 +140,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
     decompose_auto_functionalized(gm.graph)
+    remove_self_clone(gm.graph)
 
     comms.reinplace_fsdp_all_gather(gm.graph)
 
@@ -730,6 +731,13 @@ def view_noop(arg, size):
 @register_noop_decomp([aten.alias, aten.clone])
 def true_noop(*args, **kwargs):
     return True
+
+
+def remove_self_clone(graph: torch.fx.Graph):
+    for node in graph.nodes:
+        if node.target == aten.copy_.default and node.args[0] == node.args[1]:
+            node.replace_all_uses_with(node.args[0])
+            graph.erase_node(node)
 
 
 def remove_noop_ops(graph: torch.fx.Graph):

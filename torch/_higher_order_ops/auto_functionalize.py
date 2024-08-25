@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -34,6 +35,9 @@ from torch.fx.experimental.proxy_tensor import (
 # This HOP effectively runs the functional version of the op when
 # called: it clones inputs that will be mutated, runs the op, and
 # then returns (output, Tensors with the new values)
+#
+# if the passed inputs are views of another inputs, we return the changed
+# based tensor and regenerate the future views from it.
 
 
 class AutoFunctionalized(HigherOrderOperator):
@@ -58,7 +62,7 @@ class AutoFunctionalized(HigherOrderOperator):
         super().__init__("auto_functionalized")
 
     def __call__(
-        self,
+        self_,
         /,
         _mutable_op: OpOverload,
         **kwargs: Any,
@@ -120,44 +124,212 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
     return True
 
 
+@dataclass
+class ViewInfo:
+    base_index: int
+    base: Any
+    size: Any
+    stride: Any
+    storage_offset: Any
+
+
+# serialize size(), stride(), storage_offset() of each mutated tensor and put them in output_kwargs.
+def serialize_view_meta(
+    mutable_args_names, input_kwargs, output_kwargs, arg_to_base_index
+):
+    for arg_name in mutable_args_names:
+        arg = input_kwargs[arg_name]
+        if arg is None:
+            output_kwargs[f"_{arg_name}_meta"] = None
+        elif isinstance(arg, list):
+            output_kwargs[f"_{arg_name}_meta"] = len(arg)
+            for i, elem in enumerate(arg):
+                if elem is None:
+                    output_kwargs[f"_{arg_name}_meta_{i}"] = None
+                else:
+                    output_kwargs[f"_{arg_name}_meta_{i}"] = [
+                        elem.size(),
+                        elem.stride(),
+                        elem.storage_offset(),
+                        arg_to_base_index[arg_name][i],
+                    ]
+        else:
+            output_kwargs[f"_{arg_name}_meta"] = [
+                arg.size(),
+                arg.stride(),
+                arg.storage_offset(),
+                arg_to_base_index[arg_name],
+            ]
+
+
+# read the serialized size(), stride(), storage_offset() and return them in a dict that maps each args to its ViewInfo.
+def deserialize_view_meta(mutable_args_names, input_kwargs, all_bases, pop_args):
+    args_view_info = {}
+    for arg_name in mutable_args_names:
+        arg_meta = input_kwargs[f"_{arg_name}_meta"]
+        if pop_args:
+            input_kwargs.pop(f"_{arg_name}_meta")
+        if arg_meta is None:
+            args_view_info[arg_name] = None
+        elif isinstance(arg_meta, int):
+            args_view_info[arg_name] = []
+
+            for i in range(arg_meta):
+                arg_meta_local = input_kwargs[f"_{arg_name}_meta_{i}"]
+                if pop_args:
+                    input_kwargs.pop(f"_{arg_name}_meta_{i}")
+
+                if arg_meta_local is None:
+                    args_view_info[arg_name].append(None)
+                else:
+                    args_view_info[arg_name].append(
+                        ViewInfo(
+                            arg_meta_local[3],
+                            all_bases[arg_meta_local[3]],
+                            arg_meta_local[0],
+                            arg_meta_local[1],
+                            arg_meta_local[2],
+                        )
+                    )
+        else:
+            args_view_info[arg_name] = ViewInfo(
+                arg_meta[3],
+                all_bases[arg_meta[3]],
+                arg_meta[0],
+                arg_meta[1],
+                arg_meta[2],
+            )
+    return args_view_info
+
+
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
     _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
     **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
+    all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
+    mutable_args_names = get_mutable_arg_names(_mutable_op)
+    args_view_info = deserialize_view_meta(
+        mutable_args_names, kwargs, all_bases, pop_args=True
+    )
+
+    def regenerate_view(ViewInfo):
+        return torch.as_strided(
+            ViewInfo.base, ViewInfo.size, ViewInfo.stride, ViewInfo.storage_offset
+        )
+
+    # Re-generate all inputs from _all_bases using args_view_info and add them to kwargs.
+    for arg_name in mutable_args_names:
+        if args_view_info[arg_name] is None:
+            kwargs[arg_name] = None
+        elif isinstance(args_view_info[arg_name], list):
+            kwargs[arg_name] = []
+            for i, elem in enumerate(args_view_info[arg_name]):
+                if elem is None:
+                    kwargs[arg_name].append(None)
+                else:
+                    view_info = args_view_info[arg_name][i]
+                    kwargs[arg_name].append(regenerate_view(view_info))
+        else:
+            kwargs[arg_name] = regenerate_view(args_view_info[arg_name])
+
+    # create new args
     new_kwargs = dict(**kwargs)
     result = []
 
-    _mutable_args_names = get_mutable_arg_names(_mutable_op)
-    for name in _mutable_args_names:
+    # Note1: We need this for the clone to be observed during decomposition(this could be an underlying bug?),
+    # but we do not need it during functionlizations, since _only_clone_these_tensors only passed during
+    # decomposition its all good for now.
+
+    # Those are never actually needed after this point, will revisit this to see if its a bug.
+    result_not_used = []
+    for name in mutable_args_names:
         if (
             _only_clone_these_tensors is not None
             and name not in _only_clone_these_tensors
         ):
             new_kwargs[name] = kwargs[name]
         else:
-            new_kwargs[name] = (
-                [clone_preserve_strides(x) for x in kwargs[name]]
-                if kwargs[name] is not None and isinstance(kwargs[name], list)
-                else clone_preserve_strides(kwargs[name])
-                if kwargs[name] is not None
-                else None
-            )
-        result.append(new_kwargs[name])
+            if kwargs[name] is not None and isinstance(kwargs[name], list):
+                new_kwargs[name] = [clone_preserve_strides(x) for x in kwargs[name]]
+                for item in new_kwargs[name]:
+                    # see Note1
+                    if _only_clone_these_tensors is not None:
+                        result_not_used.append(item)
+            elif kwargs[name] is not None:
+                new_kwargs[name] = clone_preserve_strides(kwargs[name])
+                # see Note1
+                if _only_clone_these_tensors is not None:
+                    result_not_used.append(new_kwargs[name])
+
     out = _mutable_op(**new_kwargs)
 
+    def observe_mutation(base, mutation_source):
+        if (
+            mutation_source.size() == base.size()
+            and mutation_source.stride() == base.stride()
+            and mutation_source.storage_offset() == base.storage_offset()
+        ):
+            return mutation_source
+
+        return base.as_strided_scatter(
+            mutation_source,
+            mutation_source.size(),
+            mutation_source.stride(),
+            mutation_source.storage_offset(),
+        )
+
+    for i, base in enumerate(all_bases):
+        # TODO add a test to make sure we handle arguments that are passed as null correctly
+        if base is None:
+            raise RuntimeError("base is None")
+            result.append(None)
+
+        base_with_effects = base
+        for arg_name in mutable_args_names:
+            arg = new_kwargs[arg_name]
+            if arg is None:
+                continue
+
+            if (
+                _only_clone_these_tensors is not None
+                and name not in _only_clone_these_tensors
+            ):
+                # if the argument is mutated in place, base would have already observed the effect.
+                continue
+
+            if isinstance(arg, list):
+                for j, elem in enumerate(arg):
+                    # check `base` is a base for the this argument
+                    if args_view_info[arg_name][j].base_index != i:
+                        continue
+
+                    mutation_source = new_kwargs[name][j]
+                    base_with_effects = observe_mutation(
+                        base_with_effects, mutation_source
+                    )
+
+            else:
+                if args_view_info[arg_name].base_index != i:
+                    continue
+
+                mutation_source = new_kwargs[arg_name]
+                base_with_effects = observe_mutation(base_with_effects, mutation_source)
+
+        result.append(base_with_effects)
+
     if isinstance(out, tuple):
-        return (*out, *result)  # type: ignore[return-value]
+        return (*out, *result, *result_not_used)  # type: ignore[return-value]
     else:
-        return (out, *result)  # type: ignore[return-value]
+        return (out, *result, *result_not_used)  # type: ignore[return-value]
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
 def auto_functionalized_fake(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Any,
+    **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_dense(_mutable_op, **kwargs)
@@ -168,7 +340,7 @@ def auto_functionalized_fake(
 def auto_functionalized_proxy(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Any,
+    **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
         out = auto_functionalized(_mutable_op, **kwargs)
@@ -220,6 +392,7 @@ def do_auto_functionalize(
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
     normalized_kwargs = {}
+
     schema = op._schema
     for idx, arg in enumerate(schema.arguments):
         # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
@@ -234,23 +407,77 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = arg.default_value
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
+
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
             "Please consider using a different name for this argument to avoid potential issues."
         )
-    with ctx.redispatch_to_next():
-        unwrapped_outs = auto_functionalized(
-            op, **unwrapped_kwargs  # type: ignore[arg-type]
-        )
-
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = get_mutable_arg_names(op)
 
-    unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
-        : -len(mutable_args_names)
-    ]
-    unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
+    # A list of all bases of mutable args without duplication
+    all_basis = []
+    all_basis_addresses: list[int] = []
+
+    # Map arg_name to the index of its base in all_basis.
+    arg_to_base_index: Dict[str, Any] = {}
+    for arg_name in mutable_args_names:
+        arg = normalized_kwargs[arg_name]
+        if arg is None:
+            continue
+
+        if isinstance(arg, list):
+            arg_to_base_index[arg_name] = {}
+            for i, tensor in enumerate(arg):
+                if tensor is None:
+                    arg_to_base_index[arg_name].append(None)
+                    continue
+
+                base = tensor if tensor._base is None else tensor._base
+
+                if not all_basis_addresses.__contains__(base._cdata):
+                    all_basis_addresses.append(base._cdata)
+                    all_basis.append(base)
+                    arg_to_base_index[arg_name][i] = len(all_basis) - 1
+                else:
+                    arg_to_base_index[arg_name][i] = all_basis_addresses.index(
+                        base._cdata
+                    )
+
+        else:
+            base = arg if arg._base is None else arg._base
+
+            if not all_basis_addresses.__contains__(base._cdata):
+                all_basis_addresses.append(base._cdata)
+                all_basis.append(base)
+                arg_to_base_index[arg_name] = len(all_basis) - 1
+            else:
+                arg_to_base_index[arg_name] = all_basis_addresses.index(base._cdata)
+
+    # add view_meta for each args into unwrapped_kwargs.
+    serialize_view_meta(
+        mutable_args_names, normalized_kwargs, unwrapped_kwargs, arg_to_base_index
+    )
+
+    # remove mutated args from the kwargs (its a function of _all_bases now)
+    for arg_name in mutable_args_names:
+        del unwrapped_kwargs[arg_name]
+
+    all_basis_unwrapped = ctx.unwrap_tensors(all_basis)
+
+    with ctx.redispatch_to_next():
+        unwrapped_outs = auto_functionalized(
+            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
+        )
+
+    unwrapped_actual_out: Union[Any, Tuple[Any]] = (
+        unwrapped_outs if len(all_basis) == 0 else unwrapped_outs[: -len(all_basis)]
+    )
+
+    unwrapped_mutable_out = (
+        [] if len(all_basis) == 0 else unwrapped_outs[-len(all_basis) :]
+    )
 
     if len(op._schema.returns) == 0:
         assert unwrapped_actual_out[0] is None
@@ -261,7 +488,7 @@ def do_auto_functionalize(
     else:
         assert len(unwrapped_actual_out) == len(op._schema.returns)
 
-    for name, unwrapped_out in zip(mutable_args_names, unwrapped_mutable_out):
+    for orig_arg, unwrapped_out in zip(all_basis, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
@@ -271,8 +498,6 @@ def do_auto_functionalize(
             ctx.replace(orig_arg, o)
             ctx.commit_update(orig_arg)
             ctx.sync(orig_arg)
-
-        orig_arg = normalized_kwargs[name]
 
         if isinstance(unwrapped_out, torch.Tensor):
             sync_update(unwrapped_out, orig_arg)

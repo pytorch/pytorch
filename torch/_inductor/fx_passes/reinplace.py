@@ -467,9 +467,19 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+
+        viewed_input = None
         if mutated_arg.op in ("placeholder", "get_attr"):
+            viewed_input = mutated_arg
+        else:
+            for view in shared_view_nodes:
+                if view.op in ("placeholder", "get_attr"):
+                    viewed_input = view
+                    break
+
+        if viewed_input:
             # Get the first copy_ node that mutates the mutated_arg.
-            copy_node = copy_nodes.get(mutated_arg, None)
+            copy_node = copy_nodes.get(viewed_input, None)
             if copy_node is None:
                 # There is no copy_ back to the candidate mutated_arg (which is a graph input).
                 # Therefore the semantics of the program are that it does not mutate
@@ -481,15 +491,29 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return False
 
             return True
-        elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
-            # If mutated arg is view of any of the inputs of the graph,
-            # do not allow for inplacing.
-            # This would require more sophisticated algorithm to handle
-            return False
         else:
             return not any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
             )
+
+    def log_inplace_results(
+        node_name,
+        old_tensors_to_clone,
+        tensors_to_clone,
+        possibly_missed_reinplacing_opportunities,
+    ):
+        log.info(
+            "For node %s, attempted to reinplace %s. We were unable to reinplace %s; "
+            "%s (if non-empty) are possible missed reinplacing opportunities that may be bad for "
+            "memory usage and performance.",
+            node_name,
+            old_tensors_to_clone,
+            tensors_to_clone,
+            possibly_missed_reinplacing_opportunities,
+        )
+        torch._dynamo.utils.counters["inductor"][
+            "possibly_missed_reinplacing_opportunities"
+        ] += len(possibly_missed_reinplacing_opportunities)
 
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
 
@@ -540,18 +564,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     possibly_missed_reinplacing_opportunities.append(arg)
                 tensors_to_clone.append(arg)
 
-        log.info(
-            "For node %s, attempted to reinplace %s. We were unable to reinplace %s; "
-            "%s (if non-empty) are possible missed reinplacing opportunities that may be bad for "
-            "memory usage and performance.",
+        log_inplace_results(
             node_name,
             old_tensors_to_clone,
             tensors_to_clone,
             possibly_missed_reinplacing_opportunities,
         )
-        torch._dynamo.utils.counters["inductor"][
-            "possibly_missed_reinplacing_opportunities"
-        ] += len(possibly_missed_reinplacing_opportunities)
         return tensors_to_clone
 
     for node in graph.nodes:
@@ -566,16 +584,122 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
         elif node.target == torch.ops.higher_order.auto_functionalized:
-            _mutable_op = node.args[0]
-            from torch._higher_order_ops.auto_functionalize import get_mutable_arg_names
+            from torch._higher_order_ops.auto_functionalize import (
+                deserialize_view_meta,
+                get_mutable_arg_names,
+            )
 
+            _mutable_op = node.args[0]
             tensors_to_clone = get_mutable_arg_names(_mutable_op)
+
+            kwargs = node.kwargs
+            all_bases: List[Tensor] = kwargs["_all_bases"]
+            args_view_info = deserialize_view_meta(
+                tensors_to_clone, kwargs, all_bases, pop_args=False
+            )
+
             # Don't try to reinplace Optional[Tensor] args that are None.
             tensors_to_clone = [
-                t for t in tensors_to_clone if node.kwargs[t] is not None
+                t for t in tensors_to_clone if args_view_info[t] is not None
             ]
-            tensors_to_clone = reinplace_and_refine_tensors_to_clone(
-                tensors_to_clone, node.kwargs, _mutable_op._name
+
+            old_tensors_to_clone = tensors_to_clone
+            possibly_missed_reinplacing_opportunities = []
+
+            # for each base in all_bases check if its in-placable.
+            inplaceable_bases = [can_inplace(node, arg) for arg in all_bases]
+
+            # In general if a base satisfy inplace requirements then all views on top it is also inplacable.
+
+            # Note1: One exception is when two bases in all_bases shares storage, in that case this means thats some pass
+            # have changed auto_functionalize, like CSE. To avoid mutating same storage by the custom op. we only
+            # allow inplacing one arg in such condition.
+
+            storage_to_inplace_once = set()
+            seen_storage = set()
+            for i, base in enumerate(all_bases):
+                storage = get_node_storage(base)
+                if storage in seen_storage:
+                    storage_to_inplace_once.add(storage)
+                else:
+                    seen_storage.add(storage)
+
+            seen_storage = None
+
+            # only include inplaced_storage for storages in storage_to_inplace_once
+            inplaced_storage = set()
+
+            do_not_clone = []
+            for arg_name in tensors_to_clone:
+                view_info = args_view_info[arg_name]
+                if isinstance(view_info, (list, tuple)):
+                    unique_storages = {
+                        get_node_storage(item_view.base) for item_view in view_info
+                    }
+
+                    # see Note1
+                    if any(
+                        (
+                            storage in storage_to_inplace_once
+                            and storage in inplaced_storage
+                        )
+                        for storage in unique_storages
+                    ):
+                        # we do not consider this in possibly_missed_reinplacing_opportunities
+                        return False
+
+                    # if any two items in the list shares storage we do not inplace.
+                    # TODO revisit this, why not?
+                    unique_storages = {
+                        get_node_storage(item_view.base) for item_view in view_info
+                    }
+                    if len(unique_storages) != len(view_info):
+                        possibly_missed_reinplacing_opportunities.append(arg_name)
+                        return False
+
+                    # if any of the item in the list is has non inplaceable base we do not inplace.
+                    if any(
+                        not inplaceable_bases[item_view.base_index]
+                        for item_view in view_info
+                    ):
+                        possibly_missed_reinplacing_opportunities.append(arg_name)
+                        return False
+
+                    for item_view in view_info:
+                        if get_node_storage(item_view.base) in storage_to_inplace_once:
+                            inplaced_storage.add(storage)
+
+                    # we inplace this arg yeey!
+                    do_not_clone.append(arg_name)
+
+                else:
+                    # arg is a single tensor
+                    storage = get_node_storage(view_info.base)
+                    if (
+                        storage in storage_to_inplace_once
+                        and storage in inplaced_storage
+                    ):
+                        # we do not consider this in possibly_missed_reinplacing_opportunities
+                        continue
+
+                    if not inplaceable_bases[view_info.base_index]:
+                        possibly_missed_reinplacing_opportunities.append(arg_name)
+                        continue
+
+                    if storage in storage_to_inplace_once:
+                        inplaced_storage.add(storage)
+
+                    # we inplace this arg yeey!
+                    do_not_clone.append(arg_name)
+
+            for t in do_not_clone:
+                tensors_to_clone.remove(t)
+
+            log_inplace_results(
+                _mutable_op._name,
+                old_tensors_to_clone,
+                tensors_to_clone,
+                possibly_missed_reinplacing_opportunities,
             )
 
             # Stash the metadata. There is a pass later on where we decompose
@@ -600,7 +724,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
-                node.kwargs["tensors_to_clone"], node.kwargs["kwargs"], kernel_name
+                node.kwargs["tensors_to_clone"],
+                kernel_name,
+                kwargs=node.kwargs["kwargs"],
             )
 
             kwargs = dict(node.kwargs)
