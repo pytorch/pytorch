@@ -44,8 +44,14 @@ from torch import Tensor
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch._functorch.vmap import restore_vmap
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.autograd_function_db import autograd_function_db
-from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    with_tf32_off,
+)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -71,6 +77,19 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.utils import _pytree as pytree
 
+
+def get_platform_specific_sdpa():
+    ret = [SDPBackend.MATH]
+    if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+        ret.append(SDPBackend.FLASH_ATTENTION)
+    if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+        ret.append(SDPBackend.EFFICIENT_ATTENTION)
+    if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+        ret.append(SDPBackend.CUDNN_ATTENTION)
+    return ret
+
+
+PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 
 FALLBACK_REGEX = "There is a performance drop"
 
@@ -3849,6 +3868,60 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
+
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    def test_sdpa(self, device, backend):
+        if device == "cpu":
+            raise unittest.SkipTest("This test is only for CUDA for now")
+
+        def T(*args):
+            return torch.randn(*args, dtype=torch.float16, device=device)
+
+        backend_ctx = sdpa_kernel([backend])
+        with backend_ctx:
+            for batching in [
+                (True, True, True),
+                (True, False, False),
+                (False, True, True),
+            ]:
+                size = [8, 4, 128, 64]
+                if batching[0]:
+                    query = T(3, *size)
+                else:
+                    query = T(*size)
+                if batching[1]:
+                    key = T(3, *size)
+                else:
+                    key = T(*size)
+                if batching[2]:
+                    value = T(3, *size)
+                else:
+                    value = T(*size)
+                in_dims = tuple(0 if b else None for b in batching)
+                attention = F.scaled_dot_product_attention
+
+                self._vmap_test(
+                    attention,
+                    (query, key, value),
+                    in_dims=in_dims,
+                )
+                # Backwards test doesn't work yet
+                # self._batched_grad_test(
+                #     lambda query, key, value: F.scaled_dot_product_attention(
+                #         query, key, value
+                #     ),
+                #     (query, key, value),
+                # )
+
+            B = 4
+            query = torch.rand(4, 32, B, 8, 128, dtype=torch.float16, device=device)
+            key = torch.rand(4, B, 32, 8, 128, dtype=torch.float16, device=device)
+            value = torch.rand(4, 32, 8, 128, dtype=torch.float16, device=device)
+            self._vmap_test(
+                F.scaled_dot_product_attention,
+                (query, key, value),
+                in_dims=(2, 1, None),
+            )
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
