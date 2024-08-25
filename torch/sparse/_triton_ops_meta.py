@@ -375,7 +375,6 @@ def minimize(
             minimizer_key = (
                 initial_key if initial_key in minimizer_keys else min(minimizer_keys)
             )
-            minimizer_target = all_values[minimizer_key]
             parameters = from_key(minimizer_key, parameters)
             speedup_incr = (1 - minimal_target / reference_target) * 100
             if speedup_incr < 0:
@@ -553,7 +552,7 @@ def optimize_scatter_mm(
             return value
         return next_value
 
-    meta, speedup, timing, sensitivity_message = minimize(
+    meta, speedup, timing, _ = minimize(
         bench, initial_meta, reference_meta, step_meta_parameter
     )
     if initial_meta is not reference_meta and initial_meta == meta and not force:
@@ -811,7 +810,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     raise NotImplementedError(op)
         except KeyboardInterrupt:
             break
-        except Exception as msg:
+        except Exception:
             dump()
             raise
     dump()

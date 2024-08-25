@@ -1782,7 +1782,7 @@ def find_mismatch(
         args = utils._decide_input_format(model, inputs_for_export)
 
         model = utils._pre_trace_quant_model(model, args)
-        graph, params, torch_out, module = utils._create_jit_graph(model, args)
+        graph, params, _, _ = utils._create_jit_graph(model, args)
         params_dict = utils._get_named_param_dict(graph, params)
 
         utils._apply_friendly_debug_names(graph, params_dict)

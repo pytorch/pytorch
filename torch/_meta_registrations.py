@@ -1435,7 +1435,6 @@ def _linalg_solve_ex(
         device=B.device,
     )
     shape = A.shape
-    ndim = A.ndim
     LU_ = torch.empty_strided(
         size=shape,
         stride=make_contiguous_strides_for(shape, False),
@@ -1841,7 +1840,6 @@ def meta_pad2d_backward(grad_output, self, padding):
 
     self_shape = self.shape
     if self.dim() == 4:
-        nbatch = self_shape[0]
         dim_w += 1
         dim_h += 1
         dim_plane += 1

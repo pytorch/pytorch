@@ -262,6 +262,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
             return  # both nan, so equal
 
         # handle signed zero specially for floats
+        # TODO: not used?
         array_actual = np.asarray(actual)
         array_desired = np.asarray(desired)
 
