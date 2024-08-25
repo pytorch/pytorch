@@ -52,6 +52,7 @@ from torch.fx.node import Node
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
+from torch._dynamo.trace_rules import _as_posix_path
 
 from . import config, ir
 from .codegen.common import (
@@ -1845,6 +1846,7 @@ class GraphLowering(torch.fx.Interpreter):
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
             key, path = PyCodeCache.write(code)
+            path = _as_posix_path(path)
         except Exception:
             trace_structured(
                 "inductor_output_code",
