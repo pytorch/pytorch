@@ -4,6 +4,7 @@ import logging
 import math
 import threading
 from functools import reduce
+from itertools import chain
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -168,36 +169,35 @@ else:
                 for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
 
-            # Check whether the mesh_dim_name for flattened mesh is valid.
-            if mesh_dim_name:
-                self.flatten_name_to_root_dims.setdefault(root_mesh, {})
-                invalid_dim_names = chain(
-                    *list(not_none(root_mesh.mesh_dim_names)),
-                    *self.flatten_name_to_root_dims[root_mesh].keys(),
-                )
-                if mesh_dim_name in invalid_dim_names:
-                    raise RuntimeError(
-                        f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
-                        f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
-                        f"Please specify another valid mesh_dim_name.",
-                    )
-                else:
-                    flatten_mesh_dim_name = mesh_dim_name
-            else:
-                flatten_mesh_dim_name = "_".join(
+            if not mesh_dim_name:
+                mesh_dim_name = "_".join(
                     [
                         not_none(root_mesh.mesh_dim_names)[dim]
                         for dim in flatten_dims_in_root
                     ]
                 )
+
+            # Check whether the mesh_dim_name for flattened mesh is valid.
+            self.flatten_name_to_root_dims.setdefault(root_mesh, {})
+            invalid_dim_names = chain(
+                *list(not_none(root_mesh.mesh_dim_names)),
+                *self.flatten_name_to_root_dims[root_mesh].keys(),
+            )
+            if mesh_dim_name in invalid_dim_names:
+                raise RuntimeError(
+                    f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
+                    f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
+                    f"Please specify another valid mesh_dim_name.",
+                )
+
             # Quick return if the flatten mesh has been created before.
             # TODO: If we decide to restrict flatten initialization once, we should remove
             # this check and throw an error if the flatten mesh is already created before.
             if (
                 root_mesh in self.root_to_flatten_mapping
-                and flatten_mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
+                and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
             ):
-                return self.root_to_flatten_mapping[root_mesh][flatten_mesh_dim_name]
+                return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
 
             flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
 
@@ -215,13 +215,13 @@ else:
                 flattened_mesh = DeviceMesh(
                     root_mesh.device_type,
                     mesh_nd,
-                    mesh_dim_names=(flatten_mesh_dim_name,),
+                    mesh_dim_names=(mesh_dim_name,),
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
-            self.root_to_flatten_mapping.setdefault(root_mesh, {})[flatten_mesh_dim_name] = res_flattened_mesh  # type: ignore[possibly-undefined]
-            self.flatten_name_to_root_dims[root_mesh][flatten_mesh_dim_name] = tuple(flatten_dims_in_root)  # type: ignore[possibly-undefined]
+            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = res_flattened_mesh  # type: ignore[possibly-undefined]
+            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(flatten_dims_in_root)  # type: ignore[possibly-undefined]
 
             return res_flattened_mesh
 
