@@ -2007,6 +2007,7 @@ class TritonKernel(SIMDKernel):
                 )
 
             if reduction_type in {"argmax", "argmin"}:
+                self.reverse_loop_order = False  # argmin/argmax needs forward order
                 accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
@@ -2189,12 +2190,12 @@ class TritonKernel(SIMDKernel):
         ],
         values: Tuple[CSEVariable, ...],
     ) -> Tuple[CSEVariable, ...]:
+        self.reverse_loop_order = False  # scan needs forward order
         assert self.inside_reduction
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
-        reduction_range_prefix = self.range_trees[-1].prefix
 
         broadcasted_values = []
         accumulators = []
@@ -2204,9 +2205,6 @@ class TritonKernel(SIMDKernel):
         dim = self.triton_tensor_ndim() - 1
 
         for value, dtype in zip(values, dtypes):
-            acc_type = triton_acc_type(dtype)
-            cond = " & ".join(masks)
-
             value_dtype = self.cse.generate(
                 self.compute,
                 f"{value}.to({triton_compute_type(dtype)})",
@@ -2218,7 +2216,6 @@ class TritonKernel(SIMDKernel):
             broadcasted_values.append(value)
 
             acc_type = triton_acc_type(dtype)
-            cond = " & ".join(masks)
 
             if not self.persistent_reduction:
                 accumulator = self.cse.newvar()
