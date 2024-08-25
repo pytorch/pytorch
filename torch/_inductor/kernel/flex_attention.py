@@ -514,9 +514,11 @@ flex_attention_template = TritonTemplate(
 )
 
 
-def _use_flex_decoding(query):
+def _use_flex_decoding(query, kernel_options):
     # Decide which kernel to use, return true if use flex decoding kernel.
-    return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
+    return (
+        not kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
+    ) and V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
 
 
 _h100_default_config = {
@@ -680,7 +682,7 @@ def flex_attention(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     kernel_options = dict(kernel_options)
-    if _use_flex_decoding(query):
+    if _use_flex_decoding(query, kernel_options):
         return create_flex_decoding_kernel(
             query,
             key,
@@ -713,6 +715,11 @@ def flex_attention(
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     assert Bq == Bkv, "Batch dimension must match"
     B = Bq
+
+    if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
+        kernel_options.setdefault("IS_DIVISIBLE", False)
+    else:
+        kernel_options.setdefault("IS_DIVISIBLE", True)
 
     # Reuse query strides for output layout despite different last dimension.
     # This works because only the last dim differs and we check it is contiguous.
@@ -1564,7 +1571,7 @@ def flex_attention_backward(*args, **kwargs):
         if buf is not None:
             buf.realize()
 
-    if _use_flex_decoding(query):
+    if _use_flex_decoding(query, kernel_options):
         raise NotImplementedError("Flex decoding backward pass is not implemented. ")
 
     device = query.get_device()
@@ -1573,6 +1580,12 @@ def flex_attention_backward(*args, **kwargs):
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     assert Bq == Bkv, "Batch dimension must match"
     B = Bq
+
+    kernel_options = dict(kernel_options)
+    if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
+        kernel_options.setdefault("IS_DIVISIBLE", False)
+    else:
+        kernel_options.setdefault("IS_DIVISIBLE", True)
 
     fwd_placeholder_inps = [
         create_placeholder(name, dtype, device)
@@ -1630,7 +1643,6 @@ def flex_attention_backward(*args, **kwargs):
         value.get_size(), value.get_stride(), dtype=dtype, device=device
     )
 
-    kernel_options = dict(kernel_options)
     kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA factor
