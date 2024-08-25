@@ -62,7 +62,7 @@ class AutoFunctionalized(HigherOrderOperator):
         super().__init__("auto_functionalized")
 
     def __call__(
-        self_,
+        self,
         /,
         _mutable_op: OpOverload,
         **kwargs: Any,
@@ -133,72 +133,76 @@ class ViewInfo:
     storage_offset: Any
 
 
-# serialize size(), stride(), storage_offset() of each mutated tensor and put them in output_kwargs.
-def serialize_view_meta(
-    mutable_args_names, input_kwargs, output_kwargs, arg_to_base_index
+def serialize_views_meta(
+    arg_names, arg_types, input_kwargs, output_kwargs, arg_to_base_index
 ):
-    for arg_name in mutable_args_names:
-        arg = input_kwargs[arg_name]
-        if arg is None:
-            output_kwargs[f"_{arg_name}_meta"] = None
-        elif isinstance(arg, list):
-            output_kwargs[f"_{arg_name}_meta"] = len(arg)
-            for i, elem in enumerate(arg):
-                if elem is None:
-                    output_kwargs[f"_{arg_name}_meta_{i}"] = None
-                else:
-                    output_kwargs[f"_{arg_name}_meta_{i}"] = [
-                        elem.size(),
-                        elem.stride(),
-                        elem.storage_offset(),
-                        arg_to_base_index[arg_name][i],
-                    ]
+    def serialize_single_view(prefix, tensor, base_index):
+        if tensor is None:
+            output_kwargs[f"_{prefix}_base_index"] = None
         else:
-            output_kwargs[f"_{arg_name}_meta"] = [
-                arg.size(),
-                arg.stride(),
-                arg.storage_offset(),
-                arg_to_base_index[arg_name],
-            ]
+            output_kwargs[f"_{prefix}_base_index"] = base_index
+            output_kwargs[f"_{prefix}_size"] = tensor.size()
+            output_kwargs[f"_{prefix}_stride"] = tensor.stride()
+            output_kwargs[f"_{prefix}_storage_offset"] = tensor.storage_offset()
+
+    for arg_name, arg_type in zip(arg_names, arg_types):
+        arg = input_kwargs[arg_name]
+        if isinstance(arg_type, torch.ListType):
+            if arg is None:
+                output_kwargs[f"_{arg_name}_length"] = None
+
+            output_kwargs[f"_{arg_name}_length"] = len(arg)
+            for i, elem in enumerate(arg):
+                serialize_single_view(
+                    f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
+                )
+
+        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+            serialize_single_view(
+                f"_{arg_name}",
+                input_kwargs[arg_name],
+                arg_to_base_index.get(arg_name, None),
+            )
+        else:
+            raise RuntimeError(f"Unsupported type {arg_type}")
 
 
 # read the serialized size(), stride(), storage_offset() and return them in a dict that maps each args to its ViewInfo.
-def deserialize_view_meta(mutable_args_names, input_kwargs, all_bases, pop_args):
-    args_view_info = {}
-    for arg_name in mutable_args_names:
-        arg_meta = input_kwargs[f"_{arg_name}_meta"]
+def deserialize_views_meta(arg_names, arg_types, input_kwargs, all_bases, pop_args):
+    def get_arg(name):
         if pop_args:
-            input_kwargs.pop(f"_{arg_name}_meta")
-        if arg_meta is None:
-            args_view_info[arg_name] = None
-        elif isinstance(arg_meta, int):
-            args_view_info[arg_name] = []
+            return input_kwargs.pop(name)
 
-            for i in range(arg_meta):
-                arg_meta_local = input_kwargs[f"_{arg_name}_meta_{i}"]
-                if pop_args:
-                    input_kwargs.pop(f"_{arg_name}_meta_{i}")
+        return input_kwargs[name]
 
-                if arg_meta_local is None:
-                    args_view_info[arg_name].append(None)
-                else:
-                    args_view_info[arg_name].append(
-                        ViewInfo(
-                            arg_meta_local[3],
-                            all_bases[arg_meta_local[3]],
-                            arg_meta_local[0],
-                            arg_meta_local[1],
-                            arg_meta_local[2],
-                        )
-                    )
+    def deserialize_single_view(prefix):
+        base_index = get_arg(f"_{prefix}_base_index")
+        if base_index is None:
+            return None
         else:
-            args_view_info[arg_name] = ViewInfo(
-                arg_meta[3],
-                all_bases[arg_meta[3]],
-                arg_meta[0],
-                arg_meta[1],
-                arg_meta[2],
+            size = get_arg(f"_{prefix}_size")
+            stride = get_arg(f"_{prefix}_stride")
+            storage_offset = get_arg(f"_{prefix}_storage_offset")
+            return ViewInfo(
+                base_index, all_bases[base_index], size, stride, storage_offset
             )
+
+    args_view_info: Dict[str, Any] = {}
+    for arg_name, arg_type in zip(arg_names, arg_types):
+        if isinstance(arg_type, torch.ListType):
+            length = get_arg(f"_{arg_name}_length")
+            if length is None:
+                # The whole list is None.
+                args_view_info[arg_name] = None
+            else:
+                args_view_info[arg_name] = [
+                    deserialize_single_view(f"_{arg_name}_{i}") for i in range(length)
+                ]
+
+        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+            args_view_info[arg_name] = deserialize_single_view(f"_{arg_name}")
+        else:
+            raise RuntimeError(f"Unsupported type {arg_type}")
     return args_view_info
 
 
@@ -209,9 +213,9 @@ def auto_functionalized_dense(
     **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
-    mutable_args_names = get_mutable_arg_names(_mutable_op)
-    args_view_info = deserialize_view_meta(
-        mutable_args_names, kwargs, all_bases, pop_args=True
+    mutable_args_names, mutable_args_types = get_mutable_args(_mutable_op)
+    args_view_info = deserialize_views_meta(
+        mutable_args_names, mutable_args_types, kwargs, all_bases, pop_args=True
     )
 
     def regenerate_view(ViewInfo):
@@ -277,6 +281,10 @@ def auto_functionalized_dense(
         base_with_effects = base
         for arg_name in mutable_args_names:
             arg = new_kwargs[arg_name]
+
+            if args_view_info[arg_name] is None:
+                continue
+
             if arg is None:
                 continue
 
@@ -289,6 +297,8 @@ def auto_functionalized_dense(
 
             if isinstance(arg, list):
                 for j, elem in enumerate(arg):
+                    if args_view_info[arg_name][j] is None:
+                        continue
                     # check `base` is a base for the this argument
                     if args_view_info[arg_name][j].base_index != i:
                         continue
@@ -348,17 +358,23 @@ auto_functionalized.fallthrough(DispatchKey.AutogradCPU)
 auto_functionalized.fallthrough(DispatchKey.AutogradCUDA)
 
 
-def get_mutable_arg_names(op: OpOverload) -> List[str]:
+def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.JitType]]:
     """
     Returns the list of argument names that get mutated according to the
-    schema.
+    schema and their types.
     """
     mutable_args_names = [
         arg.name
         for arg in op._schema.arguments
         if arg.alias_info is not None and arg.alias_info.is_write
     ]
-    return mutable_args_names
+
+    mutable_args_types = [
+        arg.type
+        for arg in op._schema.arguments
+        if arg.alias_info is not None and arg.alias_info.is_write
+    ]
+    return mutable_args_names, mutable_args_types
 
 
 def do_auto_functionalize(
@@ -402,7 +418,7 @@ def do_auto_functionalize(
             "Please consider using a different name for this argument to avoid potential issues."
         )
     # List of the name of args that get mutated (according to the schema)
-    mutable_args_names = get_mutable_arg_names(op)
+    mutable_args_names, mutable_args_types = get_mutable_args(op)
 
     # A list of all bases of mutable args without duplication
     all_basis = []
@@ -444,13 +460,17 @@ def do_auto_functionalize(
                 arg_to_base_index[arg_name] = all_basis_addresses.index(base._cdata)
 
     # add view_meta for each args into unwrapped_kwargs.
-    serialize_view_meta(
-        mutable_args_names, normalized_kwargs, unwrapped_kwargs, arg_to_base_index
+    serialize_views_meta(
+        mutable_args_names,
+        mutable_args_types,
+        normalized_kwargs,
+        unwrapped_kwargs,
+        arg_to_base_index,
     )
 
     # remove mutated args from the kwargs (its a function of _all_bases now)
     for arg_name in mutable_args_names:
-        del unwrapped_kwargs[arg_name]
+        del unwrapped_kwargs[arg_name]  # type: ignore[arg-type]
 
     all_basis_unwrapped = ctx.unwrap_tensors(all_basis)
 

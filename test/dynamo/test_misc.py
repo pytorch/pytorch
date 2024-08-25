@@ -913,7 +913,9 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(arg4_1, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg4_1 = arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
+        as_strided_default: "f32[3][1]cpu" = torch.ops.aten.as_strided.default(arg4_1, [3], [1], 0);  arg4_1 = None
+        as_strided_default_1: "f32[3][1]cpu" = torch.ops.aten.as_strided.default(arg1_1, [3], [1], 0);  arg1_1 = None
+        foo_default = torch.ops.mylib.foo.default(as_strided_default, [arg2_1, arg3_1], as_strided_default_1, 2, arg0_1);  as_strided_default = arg2_1 = arg3_1 = as_strided_default_1 = arg0_1 = None
         getitem_4: "f32[3][1]cpu" = foo_default[0]
         getitem_5: "f32[3][1]cpu" = foo_default[1];  foo_default = None
         return (getitem_4, getitem_5)""",
@@ -998,7 +1000,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     graph_aot,
                     """\
 def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
-        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, _x_meta = [(2,), (1,), 0, 0], _y_meta = [(2,), (1,), 0, 1], _all_bases = [arg1_1, arg0_1])
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, __x_base_index = 0, __x_size = (2,), __x_stride = (1,), __x_storage_offset = 0, __y_base_index = 1, __y_size = (2,), __y_stride = (1,), __y_storage_offset = 0, _all_bases = [arg1_1, arg0_1])
         getitem_1: "f32[2][1]cpu" = auto_functionalized[1]
         getitem_2: "f32[2][1]cpu" = auto_functionalized[2];  auto_functionalized = None
         add: "f32[2][1]cpu" = torch.ops.aten.add.Tensor(getitem_1, getitem_2)
@@ -1068,7 +1070,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
                     graph_aot,
                     """\
 def forward(self, arg0_1: "f32[2][1]cpu"):
-        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, _x_meta = [(), (), 0, 0], _y_meta = [(), (), 1, 0], _all_bases = [arg0_1])
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, __x_base_index = 0, __x_size = (), __x_stride = (), __x_storage_offset = 0, __y_base_index = 0, __y_size = (), __y_stride = (), __y_storage_offset = 1, _all_bases = [arg0_1])
         getitem_1: "f32[2][1]cpu" = auto_functionalized[1];  auto_functionalized = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
         return ()""",
@@ -1135,7 +1137,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     graph_aot,
                     """\
 def forward(self, arg0_1: "f32[2][1]cpu"):
-        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, _x_meta = [(), (), 0, 0], _y_meta = [(), (), 1, 0], _all_bases = [arg0_1])
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, __x_base_index = 0, __x_size = (), __x_stride = (), __x_storage_offset = 0, __y_base_index = 0, __y_size = (), __y_stride = (), __y_storage_offset = 1, _all_bases = [arg0_1])
         getitem_1: "f32[2][1]cpu" = auto_functionalized[1];  auto_functionalized = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
         select_2: "f32[][]cpu" = torch.ops.aten.select.int(getitem_1, 0, 0)
@@ -1207,7 +1209,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     graph_aot,
                     """\
 def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2][1]cpu"):
-        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, _x_meta = [(), (), 0, 0], _y_meta = 2, _y_meta_0 = [(), (), 0, 1], _y_meta_1 = [(2,), (1,), 0, 2], _all_bases = [arg0_1, arg1_1, arg2_1])
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, __x_base_index = 0, __x_size = (), __x_stride = (), __x_storage_offset = 0, _y_length = 2, __y_0_base_index = 1, __y_0_size = (), __y_0_stride = (), __y_0_storage_offset = 0, __y_1_base_index = 2, __y_1_size = (2,), __y_1_stride = (1,), __y_1_storage_offset = 0, _all_bases = [arg0_1, arg1_1, arg2_1])
         getitem_1: "f32[2][1]cpu" = auto_functionalized[1]
         getitem_2: "f32[2][1]cpu" = auto_functionalized[2]
         getitem_3: "f32[2][1]cpu" = auto_functionalized[3];  auto_functionalized = None
@@ -1316,7 +1318,8 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg2_1 = arg3_1 = arg1_1 = arg0_1 = foo_default = None
+        as_strided_default: "f32[3][1]cpu" = torch.ops.aten.as_strided.default(arg1_1, [3], [1], 0);  arg1_1 = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], as_strided_default, 2, arg0_1);  arg2_1 = arg3_1 = as_strided_default = arg0_1 = foo_default = None
         return ()""",
                 )
 
@@ -3288,7 +3291,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             "int",
             np.intp,
             np.int32,
-            np.uint8,
+            np.uint8
             # np.dtype('int')       # XXX: as above
         ]
 

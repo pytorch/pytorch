@@ -5990,7 +5990,7 @@ def forward(self, x, b_t, y):
             """\
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, _x_meta = [(5,), (1,), 0, 0], _z_meta = [(5,), (1,), 0, 1], _all_bases = [x, cos]);  x = cos = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, __x_base_index = 0, __x_size = (5,), __x_stride = (1,), __x_storage_offset = 0, __z_base_index = 1, __z_size = (5,), __z_stride = (1,), __z_storage_offset = 0, _all_bases = [x, cos]);  x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""",
@@ -6002,7 +6002,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, _x_meta = [(5,), (1,), 0, 0], _z_meta = [(5,), (1,), 0, 1], _all_bases = [x, cos]);  x = cos = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, __x_base_index = 0, __x_size = (5,), __x_stride = (1,), __x_storage_offset = 0, __z_base_index = 1, __z_size = (5,), __z_stride = (1,), __z_storage_offset = 0, _all_bases = [x, cos]);  x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""",

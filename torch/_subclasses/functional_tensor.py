@@ -631,7 +631,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
+    ) -> Any:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )

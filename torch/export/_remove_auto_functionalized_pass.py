@@ -11,7 +11,7 @@ from typing import List
 import torch
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
-    get_mutable_arg_names,
+    get_mutable_args,
 )
 from torch.export import ExportedProgram
 
@@ -32,7 +32,7 @@ def _remove_auto_functionalization_from_graph_helper(ep, auto_functionalize_node
         # Replace auto_functionalize(func, args) with just func(args)
         node.replace_all_uses_with(new_node)
 
-        mutable_args_names = get_mutable_arg_names(new_node.target)
+        mutable_args_names, _ = get_mutable_args(new_node.target)
 
         # update the users of the auto_func node (the getitem nodes)
         for user in list(new_node.users.keys()):

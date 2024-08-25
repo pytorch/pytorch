@@ -585,17 +585,17 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.target = inplaceable_op.inplace_op
         elif node.target == torch.ops.higher_order.auto_functionalized:
             from torch._higher_order_ops.auto_functionalize import (
-                deserialize_view_meta,
-                get_mutable_arg_names,
+                deserialize_views_meta,
+                get_mutable_args,
             )
 
             _mutable_op = node.args[0]
-            tensors_to_clone = get_mutable_arg_names(_mutable_op)
+            tensors_to_clone, arg_types = get_mutable_args(_mutable_op)
 
             kwargs = node.kwargs
-            all_bases: List[Tensor] = kwargs["_all_bases"]
-            args_view_info = deserialize_view_meta(
-                tensors_to_clone, kwargs, all_bases, pop_args=False
+            all_bases = kwargs["_all_bases"]
+            args_view_info = deserialize_views_meta(
+                tensors_to_clone, arg_types, kwargs, all_bases, pop_args=False
             )
 
             # Don't try to reinplace Optional[Tensor] args that are None.
@@ -613,7 +613,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
             # Note1: One exception is when two bases in all_bases shares storage, in that case this means thats some pass
             # have changed auto_functionalize, like CSE. To avoid mutating same storage by the custom op. we only
-            # allow inplacing one arg in such condition.
+            # allow inplacing one arg in such condition. storage_to_inplace_once tracks storages where only one tensors
+            # of that storage should be inplaced  and inplaced_storage tracked inplaced storages.
 
             storage_to_inplace_once = set()
             seen_storage = set()
@@ -632,9 +633,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             do_not_clone = []
             for arg_name in tensors_to_clone:
                 view_info = args_view_info[arg_name]
+
+                if view_info is None:
+                    continue
+
                 if isinstance(view_info, (list, tuple)):
+                    view_info_no_none = [v for v in view_info if v is not None]
+
                     unique_storages = {
-                        get_node_storage(item_view.base) for item_view in view_info
+                        get_node_storage(v.base) for v in view_info_no_none
                     }
 
                     # see Note1
@@ -646,27 +653,25 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         for storage in unique_storages
                     ):
                         # we do not consider this in possibly_missed_reinplacing_opportunities
-                        return False
+                        continue
 
                     # if any two items in the list shares storage we do not inplace.
                     # TODO revisit this, why not?
-                    unique_storages = {
-                        get_node_storage(item_view.base) for item_view in view_info
-                    }
-                    if len(unique_storages) != len(view_info):
+                    if len(unique_storages) != len(view_info_no_none):
                         possibly_missed_reinplacing_opportunities.append(arg_name)
-                        return False
+                        continue
 
-                    # if any of the item in the list is has non inplaceable base we do not inplace.
+                    # if any of the item in the list has non inplaceable base we do not inplace.
                     if any(
                         not inplaceable_bases[item_view.base_index]
-                        for item_view in view_info
+                        for item_view in view_info_no_none
                     ):
                         possibly_missed_reinplacing_opportunities.append(arg_name)
-                        return False
+                        continue
 
-                    for item_view in view_info:
-                        if get_node_storage(item_view.base) in storage_to_inplace_once:
+                    for item_view in view_info_no_none:
+                        storage = get_node_storage(item_view.base)
+                        if storage in storage_to_inplace_once:
                             inplaced_storage.add(storage)
 
                     # we inplace this arg yeey!
@@ -724,9 +729,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
-                node.kwargs["tensors_to_clone"],
-                node.kwargs["kwargs"],
-                kernel_name
+                node.kwargs["tensors_to_clone"], node.kwargs["kwargs"], kernel_name
             )
 
             kwargs = dict(node.kwargs)

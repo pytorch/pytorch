@@ -100,7 +100,13 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         def f(x):
             out = torch.empty_like(x)
             _, new_out = torch.ops.higher_order.auto_functionalized(
-                sin._opoverload, x=x, _out_meta=[(3,), (1,), 0, 0], _all_bases=[out]
+                sin._opoverload,
+                x=x,
+                __out_base_index=0,
+                __out_size=(3,),
+                __out_stride=(1,),
+                __out_storage_offset=0,
+                _all_bases=[out],
             )
             y = out * new_out
             return new_out, y
@@ -127,7 +133,10 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             select = torch.ops.aten.select.int(arg0_1, 0, 0)
             auto_functionalized = torch.ops.higher_order.auto_functionalized(
                 torch.ops.test_view.boo.default,
-                _x_meta=[(), (), 0, 0],
+                __x_base_index=0,
+                __x_size=(3,),
+                __x_stride=(1,),
+                __x_storage_offset=0,
                 _all_bases=[arg0_1],
             )
             getitem_1 = auto_functionalized[1]
@@ -147,7 +156,10 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             another_view = arg0_1[2]
             auto_functionalized = torch.ops.higher_order.auto_functionalized(
                 torch.ops.test_view.boo.default,
-                _x_meta=[(), (), 0, 0],
+                __x_base_index=0,
+                __x_size=(3,),
+                __x_stride=(1,),
+                __x_storage_offset=0,
                 _all_bases=[arg0_1],
             )
             getitem_1 = auto_functionalized[1]
@@ -167,7 +179,10 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             another_view = arg0_1[2]
             auto_functionalized = torch.ops.higher_order.auto_functionalized(
                 torch.ops.test_view.boo.default,
-                _x_meta=[(), (), 0, 0],
+                __x_base_index=0,
+                __x_size=(3,),
+                __x_stride=(1,),
+                __x_storage_offset=0,
                 _all_bases=[arg0_1],
             )
             getitem_1 = auto_functionalized[1]
@@ -188,7 +203,10 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             another_view = arg0_1[2]
             auto_functionalized = torch.ops.higher_order.auto_functionalized(
                 torch.ops.test_view.boo.default,
-                _x_meta=[(), (), 0, 0],
+                __x_base_index=0,
+                __x_size=(3,),
+                __x_stride=(1,),
+                __x_storage_offset=0,
                 _all_bases=[arg0_1],
             )
             getitem_1 = auto_functionalized[1]
@@ -204,12 +222,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     def test_views_not_inplaced3(self):
         def f(arg0_1):
             a = torch.ones(10)
-            select = a[0]
             another_view = a[2]
             auto_functionalized = torch.ops.higher_order.auto_functionalized(
                 torch.ops.test_view.boo.default,
-                _x_meta=[(), (), 0, 0],
-                _all_bases=[arg0_1],
+                __x_base_index=0,
+                __x_size=(),
+                __x_stride=(),
+                __x_storage_offset=0,
+                _all_bases=[a],
             )
             getitem_1 = auto_functionalized[1]
             return another_view
