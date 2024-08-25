@@ -18,6 +18,7 @@ from sympy.utilities.iterables import sift
 
 from .numbers import int_oo
 
+
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
 #
@@ -411,8 +412,6 @@ class CleanDiv(FloorDiv):
     Div where we can assume no rounding.
     This is to enable future optimizations.
     """
-
-    pass
 
 
 # Don't use sympy ceiling/floor as they will attempt simplifications involving
