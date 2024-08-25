@@ -1391,7 +1391,7 @@ def export(model, example_inputs):
 
     def opt_export(_, example_inputs):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return ep(*example_args, **example_kwargs)
+        return ep.module()(*example_args, **example_kwargs)
 
     return opt_export
 
@@ -3455,7 +3455,7 @@ def parse_args(args=None):
         "--total-partitions",
         type=int,
         default=1,
-        choices=range(1, 10),
+        choices=range(1, 16),
         help="Total number of partitions we want to divide the benchmark suite into",
     )
     parser.add_argument(

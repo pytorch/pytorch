@@ -3398,6 +3398,10 @@
 
 - func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
 
+- func: wrapped_linear_prepack(Tensor weight, Tensor weight_scale, Tensor weight_zero_point, Tensor bias) -> Tensor
+
+- func: wrapped_quantized_linear_prepacked(Tensor input, Tensor input_scale, Tensor input_zero_point, Tensor packed_weight, Tensor output_scale, Tensor output_zero_point, int out_channel) -> Tensor
+
 - func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
 
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
@@ -14215,6 +14219,11 @@
 
 - func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
   python_module: linalg
+
+- func: _spsolve(Tensor A, Tensor B, *, bool left=True) -> Tensor
+  python_module: sparse
+  dispatch:
+    SparseCsrCUDA: _sparse_csr_linear_solve
 
 - func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
