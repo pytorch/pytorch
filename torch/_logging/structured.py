@@ -15,6 +15,8 @@ DUMPED_FILES: Set[str] = set()
 
 
 def intern_string(s: str) -> int:
+    from torch._dynamo.trace_rules import _as_posix_path  # avoid circle import
+    s = _as_posix_path(s)
     r = INTERN_TABLE.get(s, None)
     if r is None:
         r = len(INTERN_TABLE)
