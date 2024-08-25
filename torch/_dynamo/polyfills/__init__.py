@@ -13,20 +13,6 @@ from typing import Any, Callable, Sequence
 import torch
 
 
-def all(iterator):
-    for elem in iterator:
-        if not elem:
-            return False
-    return True
-
-
-def any(iterator):
-    for elem in iterator:
-        if elem:
-            return True
-    return False
-
-
 def index(iterator, item, start=0, end=None):
     for i, elem in islice(enumerate(iterator), start, end):
         if item == elem:
