@@ -89,7 +89,7 @@ class CUDACPPScheduling(BaseScheduling):
             template_node
         ), "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
         template_node = cast(SchedulerNode, template_node)
-        _, (numel, rnumel) = template_node.group
+        _, (_, rnumel) = template_node.group
         assert rnumel == 1
         ctb: CUDATemplateBuffer = cast(CUDATemplateBuffer, template_node.node)
         kernel, render = ctb.make_kernel_render(ctb)

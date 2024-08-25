@@ -121,12 +121,13 @@ class MultiKernelState:
         #
         # Without the hash added for subkernels, the cache file may be shared by
         # different subkernels which is incorrect.
+        #
+        # NOTE: the subkernel_hashes below aren't used, so the comment above doesn't
+        # correspond to the code...
         subkernel_hashes = "\n".join(
             f"# subkernel{i} code hash: {kernel.code_hash}"
             for i, kernel in enumerate(kernels)
         )
-        kernel_name_list = ",\n    ".join(kernel_names)
-
         buf = IndentedBuffer()
         buf.writeline(
             f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["

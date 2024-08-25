@@ -21,9 +21,7 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
         stride,
         padding,
         dilation,
-        transposed,
-        output_padding,
-        groups,
+        *_,
     ) = op_schema.args_schema
 
     assert isinstance(input_spec, DTensorSpec)
@@ -37,7 +35,7 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(padding, List)
     assert isinstance(dilation, List)
     assert isinstance(weight_shape, torch.Size)
-    N, C_in, H_in, W_in = in_shape[0], in_shape[1], in_shape[2], in_shape[3]
+    N, H_in, W_in = in_shape[0], in_shape[2], in_shape[3]
     C_out = weight_shape[0]
     H_out = (H_in + 2 * padding[0] - dilation[0] * (weight_shape[2] - 1) - 1) // stride[
         0
@@ -73,13 +71,7 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
         input_spec,
         weight_spec,
         bias_shape_opt,
-        stride,
-        padding,
-        dilation,
-        transposed,
-        output_padding,
-        groups,
-        output_mask,
+        *_,
     ) = op_schema.args_schema
 
     assert isinstance(grad_output_spec, DTensorSpec)

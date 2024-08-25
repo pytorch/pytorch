@@ -515,7 +515,7 @@ def _get_win_folder_from_registry(csidl_name):
         _winreg.HKEY_CURRENT_USER,
         r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
     )
-    dir, type = _winreg.QueryValueEx(key, shell_folder_name)
+    dir, _ = _winreg.QueryValueEx(key, shell_folder_name)
     return dir
 
 

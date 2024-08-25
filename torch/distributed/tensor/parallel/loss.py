@@ -278,7 +278,6 @@ def _nll_loss_forward_handler(
     ignore_index = cast(int, args[4])
 
     channel_dim = 1 if x.dim() >= 2 else 0
-    channel_dim_size = x.shape[channel_dim]
     spec = x._spec
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
 

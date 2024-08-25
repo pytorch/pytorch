@@ -178,7 +178,7 @@ def create_read_items_for_chunk_list(
             dest_offsets = []
             lengths = []
             for (
-                dim,
+                _,
                 offset_for_saved_tensor,
                 offset_for_current_tensor,
                 length,

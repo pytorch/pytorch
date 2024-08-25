@@ -900,7 +900,7 @@ class LOBPCG:
         if self.ivars["istep"] == 0:
             Ri = self._get_rayleigh_ritz_transform(self.X)
             M = _utils.qform(_utils.qform(self.A, self.X), Ri)
-            E, Z = _utils.symeig(M, largest)
+            _, Z = _utils.symeig(M, largest)
             self.X = mm(self.X, mm(Ri, Z))
             self.update_residual()
             np = 0
@@ -978,7 +978,6 @@ class LOBPCG:
 
         """
         B = self.B
-        mm = torch.matmul
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
@@ -1097,7 +1096,6 @@ class LOBPCG:
         BU = mm_B(self.B, U)
         VBU = mm(V.mT, BU)
         i = j = 0
-        stats = ""
         for i in range(i_max):
             U = U - mm(V, VBU)
             drop = False

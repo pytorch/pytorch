@@ -665,7 +665,7 @@ def make_video(tensor, fps):
         return
     import tempfile
 
-    t, h, w, c = tensor.shape
+    _, h, w, c = tensor.shape
 
     # encode sequence of images into gif string
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)

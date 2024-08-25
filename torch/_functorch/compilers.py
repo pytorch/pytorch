@@ -160,8 +160,8 @@ class DebugInterpreter(fx.Interpreter):
 
         r = super().run_node(n)
         if "val" in n.meta:
-            n_vals, n_spec = pytree.tree_flatten(n.meta["val"])
-            r_vals, r_spec = pytree.tree_flatten(r)
+            n_vals, _ = pytree.tree_flatten(n.meta["val"])
+            r_vals, _ = pytree.tree_flatten(r)
             # TODO: There is some sort of problem where we record that an
             # operator returned a tuple/list, and then later it turns out the
             # real version of the operator returned a list/tuple. Need to
@@ -317,7 +317,7 @@ def get_inputs(input_data_path):
                 type = meta
                 input = type(random.rand())
             else:
-                type, shape, stride, dtype, device = meta
+                type, shape, _, dtype, device = meta
                 if dtype in {
                     torch.int,
                     torch.int32,
