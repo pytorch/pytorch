@@ -571,7 +571,7 @@ FunctionSchema FunctionSchema::cloneWithRemappedTypes(
 }
 
 // covariant subtyping of list of Arguments
-bool isSubtypeOfList(
+static bool isSubtypeOfList(
     ArrayRef<Argument> child,
     ArrayRef<Argument> parent,
     std::ostream* why_not) {
