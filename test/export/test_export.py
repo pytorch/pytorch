@@ -623,6 +623,42 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_unbacked_to_cond(self):
+
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return (x + 1).sum()
+
+                def false_fn(x):
+                    return (x + 3).sum()
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
+    def test_unbacked_to_cond_passthrough(self):
+
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return (x + 1)
+
+                def false_fn(x):
+                    return (x + 3)
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
@@ -2291,6 +2327,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.arange(10), torch.tensor([0, 2, 5, 7, 10])),
             fixes=[],  # nothing to fix!
         )
+
+    def test_no_suggested_fixes_for_data_dependent_errors(self):
+        # suggested fixes for data-dependent errors only work in non-strict mode
+        strict = False
+        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+
+        class cf_stacklist(torch.nn.Module):
+            def forward(self, xs, y):
+                # y.item() is not a local, so we can't suggest a fix
+                return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
+
+        with self.assertRaisesRegex(
+            error_type,
+            "Could not guard on data-dependent expression u0 < 0",
+        ):
+            export(
+                cf_stacklist(),
+                ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+                strict=strict,
+            )
 
     def test_if_functional(self):
         class Module(torch.nn.Module):
@@ -4004,6 +4060,21 @@ def forward(self, x):
         ):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
+
+    def test_redundant_assert_max_upper_bound(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                b = x.nonzero()
+                torch._check(b.shape[0] >= 3)
+                return b
+
+        m = M()
+        inp = (torch.tensor([1, 1, 1, 0, 1]),)
+        dim = torch.export.Dim("dim")
+        ep = export(m, inp, dynamic_shapes=((dim,),))
+        FileCheck().check_count(
+            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
         class Bar(torch.nn.Module):
@@ -6833,7 +6904,7 @@ def forward(self, q, k, v):
     _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
     getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
     return (getitem,)"""
-        if SM90OrLater:
+        if SM90OrLater and not torch.version.hip:
             code_str = """\
 def forward(self, q, k, v):
     _scaled_dot_product_cudnn_attention = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None

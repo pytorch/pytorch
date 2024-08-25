@@ -506,6 +506,9 @@ class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
+
     def debug_repr(self):
         return self.debug_repr_helper("(", ")")
 

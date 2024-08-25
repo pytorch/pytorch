@@ -886,23 +886,6 @@ def proxy_call(
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
 
-    # This makes DCE marginally less likely to DCE inplace operations.
-    # It is not strictly necessary
-    # Kind of a hacky way to test if an op is in-place or not
-    if (
-        func.overloadpacket.__name__[-1] == "_"
-        and func.overloadpacket.__name__[0] != "_"
-    ):
-        if isinstance(args[0], List):
-            # e.g., c10d::allreduce_ returns a list of tensors as the first element
-            # in the output.
-            for i, a in enumerate(args[0]):
-                a.proxy = proxy_out[0][i]
-        else:
-            assert isinstance(args[0], Tensor), type(args[0])
-            # Adding an undefined attribute to Tensor?
-            args[0].proxy = proxy_out  # type: ignore[attr-defined]
-
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
 

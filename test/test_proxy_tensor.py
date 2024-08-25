@@ -1822,42 +1822,6 @@ def forward(self, x_1):
             """["L['a'].size()[0] == 2*L['b'].size()[0]", "2 <= L['b'].size()[0]"]"""  # noqa: B950
         )
 
-    def test_unbacked_to_cond(self):
-
-        class M(nn.Module):
-            def forward(self, a):
-                az = a.nonzero()
-
-                def true_fn(x):
-                    return (x + 1).sum()
-
-                def false_fn(x):
-                    return (x + 3).sum()
-
-                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
-                return r * 2
-
-        M()(torch.randn(7))
-        torch.export.export(M(), (torch.randn(7),))
-
-    def test_unbacked_to_cond_passthrough(self):
-
-        class M(nn.Module):
-            def forward(self, a):
-                az = a.nonzero()
-
-                def true_fn(x):
-                    return (x + 1)
-
-                def false_fn(x):
-                    return (x + 3)
-
-                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
-                return r * 2
-
-        M()(torch.randn(7))
-        torch.export.export(M(), (torch.randn(7),))
-
     def test_guard_upperbound_range_refinement(self):
         def f(a):
             assert a.shape[0] > 5 and a.shape[0] > 12
