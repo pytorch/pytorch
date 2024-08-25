@@ -1616,6 +1616,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unused_tenor_shape_guards(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x, y):
+            z = y
+            return x * 2
+
+        f(torch.randn(3), torch.randn(4))
+        f(torch.randn(3), torch.randn(6))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
