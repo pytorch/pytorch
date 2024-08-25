@@ -4,16 +4,18 @@ import dataclasses
 import functools
 import inspect
 import itertools
+import os
+import random
 import re
 import sys
 import types
-from typing import Dict, List, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, variables
+from .. import config, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
@@ -28,6 +30,7 @@ from ..source import (
 )
 from ..utils import (
     check_unspec_or_constant_args,
+    hashable,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
@@ -35,11 +38,15 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable, wrap_bound_arg
-from .user_defined import is_standard_setattr, UserDefinedObjectVariable
+from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS = {
+    os.fspath: polyfills.fspath,
+}
 
 
 class SuperVariable(VariableTracker):
@@ -151,6 +158,17 @@ class SuperVariable(VariableTracker):
                     ).call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented("super() nn.Module.__init__")
+        elif self.objvar.source and inner_fn is object.__new__:
+            return tx.output.side_effects.track_object_new_from_user_defined_class(
+                self.objvar
+            )
+        elif name == "__new__" and isinstance(inner_fn, types.FunctionType):
+            # __new__ is a staticmethod object, but accessing __new__ from the super object, as done in
+            # _resolved_getattr_and_source, results in a function object. If not specialized here, it will try to add
+            # the `self` arg and fail bind arg matching later.
+            return variables.UserFunctionVariable(
+                inner_fn, source=source
+            ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
                 inner_fn, source=source
@@ -422,8 +440,6 @@ class InspectSignatureVariable(VariableTracker):
 
 class InspectParameterVariable(VariableTracker):
     """This is not implemented, if used will graph break."""
-
-    pass
 
 
 class InspectBoundArgumentsVariable(VariableTracker):
@@ -1092,7 +1108,16 @@ class PythonModuleVariable(VariableTracker):
 
         from .builder import SourcelessBuilder, VariableBuilder
 
-        attr_value = getattr(self.value, name)
+        if self.is_torch or name not in self.value.__dict__:
+            attr_value = getattr(self.value, name)
+        else:
+            attr_value = self.value.__dict__[name]
+
+        if hashable(attr_value):
+            if polyfill_fn := POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS.get(
+                attr_value, None
+            ):
+                return variables.UserFunctionVariable(polyfill_fn)
 
         if self.source:
             new_source = AttrSource(self.source, name)
@@ -1497,3 +1522,163 @@ np_constant_collections_map = {
     tnp.iinfo: NumpyTypeInfoVariable,
     tnp.dtype: NumpyDTypeVariable,
 }
+
+
+class RandomClassVariable(VariableTracker):
+    """random.Random"""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+    def call_function(self, tx: "InstructionTranslator", args, kwargs):
+        if len(args) > 1:
+            unimplemented("random.Random() with > 1 arg")
+        elif kwargs:
+            unimplemented("random.Random() with kwargs")
+        seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
+        return RandomVariable(seed=seed, mutable_local=variables.base.MutableLocal())
+
+
+class RandomVariable(VariableTracker):
+    """random.Random()
+
+    Implemented by wrapping a VariableTracker around a random.Random object.
+    The supported methods for the random.Random object cannot be overriden.
+    Assumes that random objects behave the same given a set seed or state.
+    """
+
+    _nonvar_fields = {
+        "random",
+        *VariableTracker._nonvar_fields,
+    }
+
+    _supported_fn_names = {
+        "random",
+        "randint",
+        "randrange",
+        "uniform",
+    }
+
+    def __init__(
+        self,
+        rand: Optional[random.Random] = None,
+        seed: Optional[VariableTracker] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        if rand is not None:
+            assert self.is_supported_random_obj(rand)
+            self.random = random.Random()
+            self.random.setstate(rand.getstate())
+        else:
+            seed = seed.as_python_constant() if seed is not None else None
+            self.random = random.Random(seed)
+
+    def python_type(self):
+        return random.Random
+
+    def as_python_constant(self):
+        return self.random
+
+    @staticmethod
+    def is_supported_random_obj(val):
+        if type(val) is not random.Random:
+            return False
+        for name in itertools.chain(
+            RandomVariable._supported_fn_names, ("seed", "getstate", "setstate")
+        ):
+            if not hasattr(val, name):
+                return False
+            meth = getattr(val, name)
+            if inspect.isbuiltin(meth):
+                # e.g. random.Random.random
+                if meth != getattr(random.Random, name).__get__(val):
+                    return False
+            else:
+                if getattr(meth, "__func__", None) is not getattr(random.Random, name):
+                    return False
+        return True
+
+    @staticmethod
+    def check_state(state):
+        assert type(state) is tuple
+        assert type(state[0]) is int
+        assert type(state[1]) is tuple
+        assert all(type(x) is int for x in state[1])
+        assert state[2] is None or type(state[2]) is float
+
+    @staticmethod
+    def wrap_state(state):
+        RandomVariable.check_state(state)
+        return variables.TupleVariable(
+            [
+                variables.ConstantVariable.create(state[0]),
+                variables.TupleVariable(
+                    [variables.ConstantVariable.create(x) for x in state[1]]
+                ),
+                variables.ConstantVariable.create(state[2]),
+            ]
+        )
+
+    @staticmethod
+    def unwrap_state(state):
+        state_obj = state.as_python_constant()
+        RandomVariable.check_state(state_obj)
+        return state_obj
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "seed":
+            tx.output.side_effects.mutation(self)
+            self.random.seed(
+                *[x.as_python_constant() for x in args],
+                **{key: val.as_python_constant() for key, val in kwargs.items()},
+            )
+            return variables.ConstantVariable.create(None)
+        elif name == "getstate":
+            return self.wrap_state(self.random.getstate())
+        elif name == "setstate":
+            tx.output.side_effects.mutation(self)
+            self.random.setstate(self.unwrap_state(args[0]))
+            return variables.ConstantVariable.create(None)
+        elif name in self._supported_fn_names:
+            tx.output.side_effects.mutation(self)
+            state = self.random.getstate()
+
+            def call_random_meth(*args, **kwargs):
+                r = random.Random()
+                r.setstate(state)
+                return getattr(r, name)(*args, **kwargs)
+
+            # self.random state not actually updated by call_random_meth, so update here
+            # by calling the method
+            getattr(self.random, name)(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+
+            return call_random_fn(tx, call_random_meth, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(random),
+                    codegen.create_load_attr("Random"),
+                ]
+            )
+        )
+        codegen.call_function(0, False)
+        # NOTE using add_push_null may result in NULL being duplicated
+        # so defer the push_null to call_function
+        codegen.dup_top()
+        codegen.load_attr("setstate")
+        codegen(self.wrap_state(self.random.getstate()))
+        codegen.call_function(1, True)
+        codegen.pop_top()
