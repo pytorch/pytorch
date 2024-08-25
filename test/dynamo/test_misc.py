@@ -1630,7 +1630,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.tensor([300])
         r = f(x)
-    
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check(self):
         cnts = torch._dynamo.testing.CompileCounter()
