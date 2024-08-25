@@ -31,13 +31,16 @@ static constexpr int64_t kBlockSize = 512;
 // - TODO(yifu): once there's a CUDART version that is not compatible with any
 // driver version below 530, we can determine at compile time to not compile
 // the kernels for 4KB kernel argument size.
+//
+// https://developer.nvidia.com/blog/cuda-12-1-supports-large-kernel-parameters/
 bool supports_large_kernel_arg() {
 #if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
   static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
   if (!supports_large_kernel_arg_.has_value()) {
     int driver_ver = 0;
     cudaDriverGetVersion(&driver_ver);
-    *supports_large_kernel_arg_ = (driver_ver >= 12010);
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major >= 7;
   }
   return *supports_large_kernel_arg_;
 #else
@@ -76,6 +79,9 @@ struct DepthToMaxConfig<false> {
       60};
 };
 
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 700
+struct DepthToMaxConfig<true> : DepthToMaxConfig<false> {};
+#else
 template <>
 struct DepthToMaxConfig<true> {
   // TODO(yifu): These values are not yet optimally tuned. I simply multiplied
@@ -91,6 +97,7 @@ struct DepthToMaxConfig<true> {
       504,
       420};
 };
+#endif
 
 template <typename T>
 __device__ __forceinline__ bool is_aligned(T* p) {
@@ -206,6 +213,12 @@ __global__ void multi_tensor_apply_kernel(
     T tensorListMeta,
     U callable,
     ArgTypes... args) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 700
+  if constexpr (U::use_large_kernel_arg) {
+    CUDA_KERNEL_ASSERT(false);
+    return;
+  }
+#endif
   // Hand the chunk information to the user-supplied functor to process however
   // it likes.
   callable(kChunkSize, tensorListMeta, args...);
