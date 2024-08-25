@@ -563,7 +563,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         with self.assertRaisesRegex(
             KeyError,
-            "Valid mesh_dim_names should be a subsequence of",
+            "Invalid mesh_dim_names",
         ):
             cp_dp_mesh = mesh_3d["cp", "dp"]
 
@@ -579,16 +579,59 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_cp_mesh = mesh_3d["dp", "cp"]
         flattened_dp_cp_mesh = dp_cp_mesh._flatten()
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
+        self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
+        root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
+        self.assertEqual(root_mesh, mesh_3d)
+        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
+            "dp_cp"
+        ]
+        self.assertEqual(flatten_mesh_root_dims, (0, 1))
 
         ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
-        dp_cp_mesh_2 = dp_cp_mesh._flatten()
+        flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten()
+        self.assertEqual(flattened_dp_cp_mesh, flattened_dp_cp_mesh_2)
         self.assertEqual(ref_pg_count, _world.group_count)
 
         # Test flatten non-contiguous dims
         dp_tp_mesh = mesh_3d["dp", "tp"]
-        flattned_dp_tp_mesh = dp_tp_mesh._flatten()
-        self.assertEqual(dp_tp_mesh.mesh.flatten(), flattned_dp_tp_mesh.mesh)
+        flattened_dp_tp_mesh = dp_tp_mesh._flatten()
+        self.assertEqual(dp_tp_mesh.mesh.flatten(), flattened_dp_tp_mesh.mesh)
+        self.assertEqual(flattened_dp_tp_mesh.mesh_dim_names[0], "dp_tp")
+        root_mesh = _mesh_resources.get_root_mesh(dp_tp_mesh)
+        self.assertEqual(root_mesh, mesh_3d)
+        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
+            "dp_tp"
+        ]
+        self.assertEqual(flatten_mesh_root_dims, (0, 2))
+
+    @with_comms
+    def test_reconstruct_mesh_with_flatten_dim(self):
+        mesh_3d = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("replicate", "shard", "cp")
+        )
+        shard_cp_mesh = mesh_3d["shard", "cp"]._flatten()
+        hsdp_mesh = mesh_3d["replicate", "shard_cp"]
+        expected_mesh_tensor = torch.tensor(
+            [[0, 1, 2, 3], [4, 5, 6, 7]], dtype=torch.int
+        )
+        self.assertEqual(hsdp_mesh.mesh, expected_mesh_tensor)
+        self.assertEqual(shard_cp_mesh.get_group(), mesh_3d["shard_cp"].get_group())
+        self.assertEqual(
+            shard_cp_mesh.get_group(), mesh_3d.get_group(mesh_dim="shard_cp")
+        )
+
+        mesh_3d = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+        )
+        dp_cp_mesh = mesh_3d["dp", "cp"]._flatten()
+        spmd_mesh = mesh_3d["dp_cp", "tp"]
+        expected_mesh_tensor = torch.tensor(
+            [[0, 1], [2, 3], [4, 5], [6, 7]], dtype=torch.int
+        )
+        self.assertEqual(spmd_mesh.mesh, expected_mesh_tensor)
+        self.assertEqual(dp_cp_mesh.get_group(), mesh_3d["dp_cp"].get_group())
+        self.assertEqual(dp_cp_mesh.get_group(), mesh_3d.get_group(mesh_dim="dp_cp"))
 
 
 class TestMeshEnv(DTensorTestBase):
