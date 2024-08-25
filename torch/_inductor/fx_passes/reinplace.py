@@ -725,8 +725,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # to eliminate (i.e. no longer need the clones)
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
                 node.kwargs["tensors_to_clone"],
-                kernel_name,
-                kwargs=node.kwargs["kwargs"],
+                node.kwargs["kwargs"],
+                kernel_name
             )
 
             kwargs = dict(node.kwargs)
