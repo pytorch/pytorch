@@ -715,5 +715,5 @@ Classes
     :template: classtemplate.rst
 
     JitScalarType
-    verification.GraphInfo
-    verification.VerificationOptions
+    torch.onnx.verification.GraphInfo
+    torch.onnx.verification.VerificationOptions

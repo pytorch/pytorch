@@ -16210,13 +16210,16 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_safe_softmax,
         assert_jit_shape_analysis=True,
         assert_autodiffed=True,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
         supports_out=False,
         supports_cow_input_no_materialize_backward=False,
         decorators=[],
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
+            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
+            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
         ),
     ),
     OpInfo(

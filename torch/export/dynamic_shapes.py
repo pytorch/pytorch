@@ -2,6 +2,7 @@
 import dataclasses
 import inspect
 import sys
+import weakref
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
@@ -227,25 +228,61 @@ def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
 @dataclasses.dataclass
 class _ConstraintTarget:
     """
-    This represents input tensor dimensions.  Do not create this
+    This represents input tensor dimensions.  Don't create this
     class directly; instead, use :func:`dynamic_dim`.
     """
 
+    w_tensor: Any  # weakref to torch.Tensor
+    # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
 
 
+class _ConstraintFactory(type):
+    """
+    Metaclass that ensures a private constructor for :class:`_Constraint`
+    """
+
+    def __call__(cls, *args, **kwargs):
+        raise TypeError(
+            f"{cls.__module__}.{cls.__qualname__} has no public constructor. "
+            f"Please use torch.export.dynamic_dim() to create one"
+        )
+
+    def _create(
+        cls, w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+    ):
+        return super().__call__(
+            w_tensor, t_id, dim, constraint_range, shared, debug_name
+        )
+
+
+def _create_constraint(
+    w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+):
+    return _Constraint._create(
+        w_tensor, t_id, dim, constraint_range, shared, debug_name
+    )
+
+
 @dataclasses.dataclass
-class _Constraint(_ConstraintTarget):
-    """
-    This represents a Dim describing a constraint target.
-
-    `name` is the name of the Dim.
-    `constraint_range` contains the min/max bounds of the Dim.
+class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
-    name: str
+    .. warning::
+        Do not construct :class:`_Constraint` directly, use :func:`dynamic_dim` instead.
+
+    This represents constraints on input tensor dimensions, e.g., requiring
+    them to be fully polymorphic or within some range.
+
+    """
+
+    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
     constraint_range: "StrictMinMaxConstraint"
+    # Represent that `constraint_range` is shared with another _ConstraintTarget, which
+    # typically arises because of a specified equality with another dynamic dimension.
+    shared: Optional[_ConstraintTarget] = None
+    debug_name: Optional[str] = None
 
     def _clone_with_range(self, lower=0, upper=None):
         # Import sympy locally
@@ -260,11 +297,13 @@ class _Constraint(_ConstraintTarget):
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return _Constraint(
+        return _create_constraint(
+            self.w_tensor,
             self.t_id,
             self.dim,
-            self.name,
             constraint_range,
+            self.shared,
+            self.debug_name,
         )
 
     def __ge__(self, lower):
@@ -306,6 +345,34 @@ class _Constraint(_ConstraintTarget):
             "max": self.constraint_range.vr.upper,
         }
 
+    def __eq__(self, other):
+        if not isinstance(other, _Constraint):
+            raise TypeError(
+                "A dynamic dim can be specified equal only to another dynamic dim. "
+                f"Equality with {type(other)} is not supported."
+            )
+
+        # import sympy locally
+        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
+        constraint_range = StrictMinMaxConstraint(
+            vr=self.constraint_range.vr & other.constraint_range.vr,
+            warn_only=False,
+        )
+        if self.debug_name is None:
+            debug_name = other.debug_name
+        else:
+            assert other.debug_name is None or self.debug_name == other.debug_name
+            debug_name = self.debug_name
+        return _create_constraint(
+            self.w_tensor,
+            self.t_id,
+            self.dim,
+            constraint_range,
+            shared=_ConstraintTarget(other.w_tensor, other.t_id, other.dim),
+            debug_name=debug_name,
+        )
+
 
 @dataclasses.dataclass
 class _PhantomRoot:
@@ -331,15 +398,23 @@ class _DerivedConstraint(_ConstraintTarget):
     This represents a derived Dim, whose root is either a regular constraint target
     (which directly specifies the shape of some input dimension) or a phantom root
     (which does so indirectly).
-
-    It can be thought of as a subclass of `_Constraint`, except that it does not
-    support <, <=, >, >= operations.
     """
 
-    name: str
-    constraint_range: "StrictMinMaxConstraint"
+    # NOTE: This is not currently a subclass of _Constraint because we do not support
+    # `shared` for derived `Dim`s. Indeed, sharing is a necessary concept only for
+    # legacy constraints based on `dynamic_dim`: equality can be expressed simply by
+    # reusing the same (derived or normal) `Dim`.
     root: Union[_ConstraintTarget, _PhantomRoot]
     fn: Callable
+    constraint_range: "StrictMinMaxConstraint"
+    debug_name: Optional[str] = None
+
+    @property
+    def shared(self):
+        # Some code paths expect a union of _Constraint and _DerivedConstraint.
+        # Thus we expose a `shared` field that is always None.
+        # TODO(avik): clean this up
+        return None
 
     @property
     def serializable_spec(self):
@@ -450,13 +525,12 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.value_ranges import ValueRanges
 
-    name = debug_name or f"dynamic_dim_{id(t)}_{index}"
-
-    return _Constraint(
+    return _create_constraint(
+        weakref.ref(t),
         id(t),
         index,
-        name,
         StrictMinMaxConstraint(vr=ValueRanges(lower=0, upper=int_oo), warn_only=False),
+        debug_name=debug_name,
     )
 
 
@@ -464,7 +538,6 @@ def _process_equalities(
     constraint: Constraint,
     get_sources: Callable[[int, int], List["Source"]],
     shape_env: "ShapeEnv",
-    names: Dict[str, Tuple[int, int]],
     source_pairs: List[Tuple["Source", "Source"]],
     derived_equalities: List[Tuple["Source", Union["Source", "Symbol"], Callable]],
     phantom_symbols: Dict[str, "Symbol"],
@@ -479,14 +552,14 @@ def _process_equalities(
     # constraints that make src0 "equal" to src1, ..., srcN.
     source_pairs.extend((source, other_source) for other_source in other_sources)
     if not isinstance(constraint, _DerivedConstraint):
-        if constraint.name in names:
-            shared_t_id, shared_dim = names[constraint.name]
-            other_sources = get_sources(shared_t_id, shared_dim)
+        if constraint.shared is not None:
+            # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
+            # and t'.size()[dim'] maps to src1', ..., srcN', we add
+            # constraints that also make src0 "equal" to src1', ..., srcN'.
+            other_sources = get_sources(constraint.shared.t_id, constraint.shared.dim)
             source_pairs.extend(
                 (source, other_source) for other_source in other_sources
             )
-        else:
-            names[constraint.name] = (constraint.t_id, constraint.dim)
     else:
         # branch based on the root of the _DerivedConstraint
         if not isinstance(constraint.root, _PhantomRoot):
@@ -884,6 +957,7 @@ def _process_dynamic_shapes(
                 # root represents an input shape dimension
                 root_constraint = symbols[dim_root.__name__][0]
                 root = _ConstraintTarget(
+                    root_constraint.w_tensor,
                     root_constraint.t_id,
                     root_constraint.dim,
                 )
@@ -901,28 +975,30 @@ def _process_dynamic_shapes(
             else:
                 root = phantom_roots[dim_root.__name__]  # type: ignore[assignment]
             constraint = _DerivedConstraint(
+                weakref.ref(tensor),
                 id(tensor),
                 i,
-                dim.__name__,
+                root,
+                dim.fn,  # type: ignore[attr-defined]
                 StrictMinMaxConstraint(
                     vr=ValueRanges(lower=dim.min, upper=dim.max),
                     warn_only=False,
                 ),
-                root,
-                dim.fn,  # type: ignore[attr-defined]
+                debug_name=dim.__name__,
             )
             if isinstance(root, _PhantomRoot):
                 # NOTE(avik): since we have not processed all inputs yet, we may replace this
                 # with a root that does represent an input shape dimension later (see below)
                 derived_constraints_with_phantom_root.append(constraint)
         elif isinstance(dim, _StaticDim):
-            constraint = _Constraint(  # type: ignore[assignment]
+            constraint = _create_constraint(
+                weakref.ref(tensor),
                 id(tensor),
                 i,
-                dim.__name__,
                 StrictMinMaxConstraint(
                     vr=ValueRanges(lower=dim.value, upper=dim.value), warn_only=False  # type: ignore[attr-defined]
                 ),
+                debug_name=dim.__name__,
             )
         else:
             constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
@@ -971,7 +1047,17 @@ def _process_dynamic_shapes(
             derived_constraint_with_phantom_root.root = symbols[phantom_root_name][0]
 
     for dynamic_dims in symbols.values():
-        constraints.extend(dynamic_dims)
+        if all(
+            isinstance(dynamic_dim, _DerivedConstraint) for dynamic_dim in dynamic_dims
+        ):
+            constraints.extend(dynamic_dims)
+        else:
+            primary, *others = dynamic_dims
+            if others:
+                for other in others:
+                    constraints.append(primary == other)  # type: ignore[arg-type]
+            else:
+                constraints.append(primary)
 
     return constraints  # type: ignore[return-value]
 

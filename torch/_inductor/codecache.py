@@ -68,8 +68,6 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
-    from .remote_cache import RemoteCacheBackend
-
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
@@ -1175,7 +1173,7 @@ class FxGraphCache:
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
         local: bool,
-        remote_cache: Optional[RemoteCacheBackend],
+        remote_cache: None,
     ) -> None:
         """
         Store a serialized CompiledFxGraph on disk.
@@ -1222,16 +1220,17 @@ class FxGraphCache:
                 write_atomic(path, content, make_dirs=True)
 
             if remote_cache:
-                time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
                 cache_data = (
                     {
                         "data": content,
-                        "time_taken_ms": time_taken_ms,
+                        "time_taken_ms": int(
+                            disk_compiled_graph._time_taken_ns // 1e6
+                        ),  # Convert from NS to MS
                     }
                     if config.is_fbcode()
                     else content
                 )
-                remote_cache.put(key, cache_data)  # type: ignore[arg-type]
+                remote_cache.put(key, cache_data)
         except Exception:
             log.warning("fx graph unable to write to cache", exc_info=True)
             counters["inductor"]["fxgraph_cache_write_error"] += 1
@@ -1292,7 +1291,7 @@ class FxGraphCache:
             cache_info["key"] = key
             cache_info["components"] = debug_lines
 
-            remote_cache: Optional[RemoteCacheBackend] = None
+            remote_cache = None
             if remote:
                 cache_id = "fx-graph-v1"
                 try:
@@ -1346,11 +1345,9 @@ class FxGraphCache:
                     ) != 0:
                         cache_info["ephemeral_timeout_increase"] = ephemeral_increase
             compiled_graph._fx_graph_cache_key = key
-        except BypassFxGraphCache as e:
+        except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
-            log.info("Bypassing FX Graph Cache because '%s'", e)
-            cache_info["cache_bypass_reason"] = str(e)
             cache_event_time = time_ns()
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(
@@ -2227,7 +2224,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
-        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
+        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == -1 && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");

@@ -204,7 +204,7 @@ Tensor NestedTensor_batch_offsets_from_size_tensor(
     for (const auto j : c10::irange(sizes_size_1)) {
       prod *= sizes_ptr[i * sizes_size_1 + j];
     }
-    offsets_ptr[i + 1] = offsets_ptr[i] + static_cast<int32_t>(prod);
+    offsets_ptr[i + 1] = offsets_ptr[i] + prod;
   }
   return offsets;
 }
