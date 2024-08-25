@@ -1,15 +1,12 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, TypeVar
-
 import torch
-
+from typing import List
 
 __all__ = [
     "compile",
     "assume_constant_result",
     "reset",
     "allow_in_graph",
-    "substitute_in_graph",
     "list_backends",
     "disable",
     "cudagraph_mark_step_begin",
@@ -18,16 +15,11 @@ __all__ = [
     "is_dynamo_compiling",
 ]
 
-
-_F = TypeVar("_F", bound=Callable[..., Any])
-
-
 def compile(*args, **kwargs):
     """
     See :func:`torch.compile` for details on the arguments for this function.
     """
     return torch.compile(*args, **kwargs)
-
 
 def reset() -> None:
     """
@@ -38,7 +30,6 @@ def reset() -> None:
     import torch._dynamo
 
     torch._dynamo.reset()
-
 
 def allow_in_graph(fn):
     """
@@ -120,54 +111,6 @@ def allow_in_graph(fn):
     return torch._dynamo.allow_in_graph(fn)
 
 
-def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
-    """
-    Register a polyfill handler for a function, usually a C function from the C extension, to be
-    used in place of the original function when inlining the original function in the graph.
-
-    .. note::
-
-        The polyfill handler is only used when inlining the original function. It is not used when
-        the original function is called directly. In the eager mode, the decorated function calls
-        the performant C function rather than the polyfill handler.
-
-    The polyfill handler is a function that will be called in place of the original function when
-    inlining the original function. The polyfill handler should have the same signature and the same
-    behavior as the original function.
-
-    Args:
-        original_fn (callable): The original function, usually a C function, to register a polyfill
-            handler for.
-
-    Returns:
-        A decorator that registers the polyfill handler for the original function.
-
-    Example::
-
-        >>> import operator
-        >>> operator.indexOf([1, 2, 3, 4, 5], 3)
-        2
-        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
-        ... # xdoctest: +SKIP("Long tracebacks")
-        Traceback (most recent call last):
-        ...
-        torch._dynamo.exc.Unsupported: ...
-
-        >>> @torch.compiler.substitute_in_graph(operator.indexOf)
-        ... def indexOf(a, b, /):
-        ...     for i, item in enumerate(a):
-        ...         if item is b or item == b:
-        ...             return i
-        ...     raise ValueError("sequence.index(x): x not in sequence")
-        >>>
-        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
-        2
-    """
-    import torch._dynamo
-
-    return torch._dynamo.substitute_in_graph(original_fn)
-
-
 def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
@@ -178,7 +121,6 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     import torch._dynamo
 
     return torch._dynamo.list_backends(exclude_tags)
-
 
 def assume_constant_result(fn):
     """
@@ -198,7 +140,6 @@ def assume_constant_result(fn):
 
     return torch._dynamo.assume_constant_result(fn)
 
-
 def disable(fn=None, recursive=True):
     """
     This function provides both a decorator and a context manager to disable compilation on a function
@@ -211,7 +152,6 @@ def disable(fn=None, recursive=True):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive)
-
 
 def cudagraph_mark_step_begin():
     """
@@ -237,7 +177,6 @@ def cudagraph_mark_step_begin():
     from torch._inductor import cudagraph_trees
 
     cudagraph_trees.mark_step_begin()
-
 
 def wrap_numpy(fn):
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
@@ -267,12 +206,9 @@ def wrap_numpy(fn):
         tensor([ 0.,  2.,  4.,  6.,  8., 10.], device='cuda:0')
     """
     from torch._dynamo.external_utils import wrap_numpy as wrap
-
     return wrap(fn)
 
-
 _is_compiling_flag: bool = False
-
 
 def is_compiling() -> bool:
     """
@@ -294,7 +230,6 @@ def is_compiling() -> bool:
         return False
     else:
         return _is_compiling_flag
-
 
 def is_dynamo_compiling() -> bool:
     """

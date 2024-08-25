@@ -1880,9 +1880,7 @@ class BaseTy(Enum):
     Storage = auto()
     Stream = auto()
     SymInt = auto()
-    SymBool = auto()
     ConstQuantizerPtr = auto()  # TODO: rename
-    GraphModule = auto()
 
 
 @dataclass(frozen=True)

@@ -1,10 +1,6 @@
 #include <sstream>
 
-#ifdef TORCH_CUDA_USE_NVTX3
-#include <nvtx3/nvtx3.hpp>
-#else
 #include <nvToolsExt.h>
-#endif
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/ApproximateClock.h>

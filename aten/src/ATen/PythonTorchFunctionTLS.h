@@ -31,6 +31,4 @@ struct TORCH_API PythonTorchFunctionTLS {
 
 TORCH_API bool torch_function_mode_enabled();
 
-TORCH_API bool torch_function_all_disabled();
-
 } // namespace at::impl

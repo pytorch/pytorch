@@ -119,10 +119,6 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
     def get_compute_capability(device: _device_t = None):
         raise NotImplementedError
 
-    @staticmethod
-    def is_bf16_supported(including_emulation: bool = False):
-        raise NotImplementedError
-
 
 class DeviceGuard:
     """
@@ -202,7 +198,6 @@ class CudaInterface(DeviceInterface):
     get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[arg-type]
     exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type]
     maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type]
-    is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -283,10 +278,6 @@ class XpuInterface(DeviceInterface):
     def get_compute_capability(device: _device_t = None):
         cc = torch.xpu.get_device_capability(device)
         return cc
-
-    @staticmethod
-    def is_bf16_supported(including_emulation: bool = False) -> bool:
-        return torch.xpu.is_bf16_supported()
 
 
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}

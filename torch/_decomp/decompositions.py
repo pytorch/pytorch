@@ -3810,11 +3810,6 @@ def _unsafe_index(x, indices):
     return aten.index(x, indices)
 
 
-@register_decomposition([aten._unsafe_index_put])
-def _unsafe_index_put(x, indices, value, accumulate=False):
-    return aten.index_put(x, indices, value, accumulate)
-
-
 @register_decomposition([aten._unsafe_masked_index])
 def _unsafe_masked_index(x, mask, indices, fill):
     for index in indices:

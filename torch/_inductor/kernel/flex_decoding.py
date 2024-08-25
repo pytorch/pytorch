@@ -44,10 +44,8 @@ flex_decoding_template = TritonTemplate(
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
     # reduction buffers: M rowmax across local KV split, L local sumexp across local KV split
-    # M: Number of queries, N: Number of keys/values
-    # QK_HEAD_DIM: The dimension of the query and key embeddings
-    # V_HEAD_DIM: The dimension of the value embeddings
-    # BLOCK_M, QK_HEAD_DIM: M, and D dimemsion are always assigned to the same block
+    # M: Number of queries, N: Number of keys/values, D(BLOCK_DMODEL): Model dimension
+    # BLOCK_M, BLOCK_DMODEL: M, and D dimemsion are always assigned to the same block
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head t: Number of kv splits
     # (Modifiable) Config options:
     # SPLIT_KV: number of blocks K & V are split into
@@ -117,7 +115,7 @@ flex_decoding_template = TritonTemplate(
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    acc = tl.zeros([BLOCK_M, V_HEAD_DIM], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
 
     # initialize offsets
     tl.device_assert(BLOCK_M % G == 0)
@@ -127,8 +125,7 @@ flex_decoding_template = TritonTemplate(
     offs_hq = offs_g + off_hkv * G
     off_m = tl.arange(0, BLOCK_M_PER_HQ)                                    # [BLOCK_M_PER_HQ]
     offs_m = tl.ravel(tl.broadcast_to(off_m[None, :], [G, BLOCK_M_PER_HQ])) # [BLOCK_M]
-    offs_d = tl.arange(0, QK_HEAD_DIM)
-    offs_vd = tl.arange(0, V_HEAD_DIM)
+    offs_d = tl.arange(0, BLOCK_DMODEL)
 
     # KV_IDX / FULL_KV_IDX and KV_NUM_BLKS / FULL_KV_NUM_BLKS are always contiguous.
     sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_h
@@ -139,13 +136,21 @@ flex_decoding_template = TritonTemplate(
 
     q_range = stride_qg * off_g[:, None, None] + stride_qm * off_m[None, :, None] + stride_qk * offs_d[None, None, :]
 
+    Q_block_ptr = tl.make_block_ptr(
+        base=Q + q_offset,
+        shape=(Q_LEN, BLOCK_DMODEL),        # (M, d)
+        strides=(stride_qm, stride_qk),
+        offsets=(0, 0),                     # No offset: one CTA per query
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
     if SAFE_M_BOUNDARY:
         q = tl.load(Q + q_offset + q_range)
     else:
         mask = off_m[None, :, None] < Q_LEN
         q = tl.load(Q + q_offset + q_range, mask)
 
-    q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM])
+    q = tl.reshape(q, [BLOCK_M, BLOCK_DMODEL])
 
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -159,23 +164,22 @@ flex_decoding_template = TritonTemplate(
     off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
     # first kv block we're loading
 
-    # last valid block according to sparse mask
-    block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+    block_n_last_valid = kv_num_blocks * SPARSE_KV_MULTIPLE         # last valid block according to sparse mask
 
     K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
-        shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
+        shape=(BLOCK_DMODEL, KV_LEN),                # (d, N)
         strides=(stride_kk, stride_kn),
         offsets=(0, off_n),
-        block_shape=(QK_HEAD_DIM, BLOCK_N),
+        block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
         base=V + v_offset,
-        shape=(KV_LEN, V_HEAD_DIM),
+        shape=(KV_LEN, BLOCK_DMODEL),
         strides=(stride_vn, stride_vk),
         offsets=(off_n, 0),
-        block_shape=(BLOCK_N, V_HEAD_DIM),
+        block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(1, 0)
     )
     offs_n = tl.arange(0, BLOCK_N) + off_n
@@ -205,23 +209,22 @@ flex_decoding_template = TritonTemplate(
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
 
-        # last valid block according to sparse mask
-        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+        block_n_last_valid = kv_num_blocks * SPARSE_KV_MULTIPLE         # last valid block according to sparse mask
 
         K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
-        shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
+        shape=(BLOCK_DMODEL, KV_LEN),                # (d, N)
         strides=(stride_kk, stride_kn),
         offsets=(0, off_n),
-        block_shape=(QK_HEAD_DIM, BLOCK_N),
+        block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1)
         )
         V_block_ptr = tl.make_block_ptr(
             base=V + v_offset,
-            shape=(KV_LEN, V_HEAD_DIM),
+            shape=(KV_LEN, BLOCK_DMODEL),
             strides=(stride_vn, stride_vk),
             offsets=(off_n, 0),
-            block_shape=(BLOCK_N, V_HEAD_DIM),
+            block_shape=(BLOCK_N, BLOCK_DMODEL),
             order=(1, 0)
         )
         offs_n = tl.arange(0, BLOCK_N) + off_n
@@ -275,16 +278,19 @@ flex_decoding_template = TritonTemplate(
     idx_t = off_t
     idx_hq = off_hkv*G + off_g[:, None, None]
     idx_m = off_m[None, :, None]
-    idx_d = offs_vd[None, None, :]
+    idx_d = offs_d[None, None, :]
     # TODO generalize and add proper mask support
     mask = (idx_m < Q_LEN)
-    acc = acc.reshape(G, BLOCK_M_PER_HQ, V_HEAD_DIM)
+    acc = acc.reshape(G, BLOCK_M_PER_HQ, BLOCK_DMODEL)
     {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
  """
     + compute_forward_inner
     + compute_next_offset_func
     + compute_forward_block_mn,
 )
+
+
+MAX_SPLIT_KV = 64
 
 
 def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
@@ -297,14 +303,8 @@ def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
 
 
 def _get_decoding_default_config(key) -> Tuple[int, int, int]:
-    dtype = key.get_dtype()
-    head_dim = key.get_size()[-1]
-    sm_version = torch.cuda.get_device_capability()
-    default_config = (64, 2, 1)
-    if sm_version >= (9, 0):
-        if head_dim > 128 and dtype == torch.float32:
-            return default_config
-        return (64, 2, 3)
+    default_config = (64, 2, 3)
+
     return default_config
 
 
@@ -335,14 +335,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,
     ) = block_mask
 
-    Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
-    Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq == Bkv, "Batch dimension must match"
-    B = Bq
     kernel_options = dict(kernel_options)
 
     # Calculate GQA head sharing
-    gqa_shared_heads = Hq // Hkv
+    gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
     if not is_power_of_2(gqa_shared_heads):
         raise ValueError(
             "Number of shared query heads sharing the same KV head must be power of 2. "
@@ -368,7 +364,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
         full_kv_indices,
     ]:
         buf.realize()
-
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
     configs.append(_get_decoding_default_config(key))
@@ -382,11 +377,16 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # TODO: fix autotuning.
 
     kernel_options["SM_SCALE"] = scale
-    kernel_options["SPLIT_KV"] = get_split_k(B, Hkv, seq_len_kv)
+    kernel_options["SPLIT_KV"] = get_split_k(
+        key.get_size()[0], key.get_size()[1], key.get_size()[2]
+    )
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
+    assert kernel_options["SPLIT_KV"] <= MAX_SPLIT_KV
 
     # create config dependent intermediate buffers
-    buf_ACC_shape = [B, MAX_SPLIT_KV, Hq, seq_len_q, v_head_dim]
+    buf_ACC_shape = (
+        query.get_size()[:1] + [MAX_SPLIT_KV] + query.get_size()[1:]
+    )  # [B, SPLIT_KV, Hq, M, D]
     buf_ML_shape = buf_ACC_shape[:-1]
     buf_M = empty_strided(
         buf_ML_shape,
@@ -408,9 +408,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
-    kernel_options["QK_HEAD_DIM"] = qk_head_dim
-    kernel_options["V_HEAD_DIM"] = v_head_dim
+    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
 
+    m = query.get_size()[-2]
     kernel_options["BLOCK_M"] = (
         # m
         # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
@@ -418,7 +418,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         max(
             next_power_of_2(
                 V.graph.sizevars.size_hint(
-                    seq_len_q, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                    m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
                 )
                 * gqa_shared_heads
             ),
@@ -427,27 +427,26 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
 
     query = ir.ExternKernel.realize_input(query)
-    stride_b, stride_hq, stride_seq_len_q, stride_qk_head_dim = query.get_stride()
+    q_stride = query.get_stride()
 
     # Reshape query for GQA: [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D]
-    gqa_query_shape = (B, Hkv, gqa_shared_heads, seq_len_q, qk_head_dim)
+    gqa_query_shape = (
+        query.get_size()[:1]
+        + [key.get_size()[1], gqa_shared_heads]
+        + query.get_size()[2:]
+    )
     gqa_query_stride = (
-        stride_b,
-        stride_hq * gqa_shared_heads,
-        stride_hq,
-        stride_seq_len_q,
-        stride_qk_head_dim,
+        q_stride[:1] + [q_stride[1] * gqa_shared_heads, q_stride[1]] + q_stride[2:]
     )
     query = lowerings[aten.as_strided](query, gqa_query_shape, gqa_query_stride)
 
     V.graph.sizevars.guard_leq(
-        seq_len_q * gqa_shared_heads, sympy.Integer(kernel_options["BLOCK_M"])
+        m * gqa_shared_heads, sympy.Integer(kernel_options["BLOCK_M"])
     )
 
     kernel_options["SAFE_M_BOUNDARY"] = (
-        (seq_len_q * gqa_shared_heads) % kernel_options["BLOCK_M"]
+        (m * gqa_shared_heads) % kernel_options["BLOCK_M"]
     ) == 0
-    # TODO: This feels sketchy
     kernel_options["SAFE_N_BOUNDARY"] = True
 
     # Note, we don't need to pass in the captured buffers explicitly
@@ -523,17 +522,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Reduction
 
     g_M = lowerings[aten.max](buf_M, dim=1, keepdim=True)[0]
-    # See [Note] Handle fully masked out rows:
-    # g_M Is the global max among split kv blocks.
-    masked_rows = lowerings[aten.eq](g_M, -float("inf"))
-    g_M = lowerings[aten.where](masked_rows, 0.0, g_M)
     adj_M = lowerings[aten.sub](buf_M, g_M)
     alpha = lowerings[aten.exp2](adj_M)
 
     buf_L = lowerings[aten.mul](buf_L, alpha)
     g_L = lowerings[aten.sum](buf_L, axis=1)
-    masked_rows_squeezed = lowerings[aten.squeeze](masked_rows, dim=1)
-    g_L = lowerings[aten.where](masked_rows_squeezed, 1.0, g_L)
     logsumexp = lowerings[aten.log2](g_L)
     logsumexp = lowerings[aten.add](logsumexp, lowerings[aten.squeeze](g_M, dim=1))
 

@@ -110,12 +110,6 @@ static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
     "TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN"};
 
-// Control whether to use CudaEventCache for the collective in watchdog thread.
-// We noticed in the past when cuda global lock is held, destroying CudaEvent
-// can cause a hang.
-static std::vector<std::string> TORCH_NCCL_CUDA_EVENT_CACHE = {
-    "TORCH_NCCL_CUDA_EVENT_CACHE"};
-
 static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
@@ -269,7 +263,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         const std::optional<std::vector<at::Tensor>>& inputs = std::nullopt,
         bool desyncDebug = false,
         bool enableTiming = false,
-        bool cudaEventCacheEnabled = false,
         DebugLevel distDebugLevel = DebugLevel::Off);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
@@ -428,21 +421,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::optional<uint64_t> trace_id_;
     DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
-  };
-
-  class CUDAEventCache {
-   public:
-    CUDAEventCache();
-    std::shared_ptr<at::cuda::CUDAEvent> create(bool timing);
-    static CUDAEventCache& get();
-
-   private:
-    std::mutex cacheMutex_;
-    // NOTE: We intentionaly store raw pointers so that
-    // we do not attempt to destroy the event objects on process exit,
-    // because cuda may be gone.
-    std::vector<at::cuda::CUDAEvent*>
-        eventsArray_[2]; // 0 for timing=false, 1 for timing=true
   };
 
   struct Options : Backend::Options {
@@ -986,9 +964,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;
 
-  // We gate the cudaEventCache so that we can roll it out gradually.
-  std::atomic<bool> cudaEventCacheEnabled_;
-
   // Monitor thread which checks the heartbeat of Watchdog thread.
   // If the monitor thread finds there is no heartbeat, it will dump debug info
   // and then kill the watchdog thread to avoid hang.
@@ -1106,7 +1081,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
-  bool dumpOnTimeoutOrEx_;
+  bool dumpOnException_;
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;
