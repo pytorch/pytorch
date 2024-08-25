@@ -246,8 +246,7 @@ class LRScheduler:
 
         for param_group, lr in zip(self.optimizer.param_groups, values):
             if isinstance(param_group["lr"], Tensor):
-                lr_val = lr.item() if isinstance(lr, Tensor) else lr  # type: ignore[attr-defined]
-                param_group["lr"].fill_(lr_val)
+                param_group["lr"].fill_(lr)
             else:
                 param_group["lr"] = lr
 
