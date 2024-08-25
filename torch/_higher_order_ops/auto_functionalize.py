@@ -238,12 +238,6 @@ def auto_functionalized_dense(
     new_kwargs = dict(**kwargs)
     result = []
 
-    # Note1: We need this for the clone to be observed during decomposition(this could be an underlying bug?),
-    # but we do not need it during functionlizations, since _only_clone_these_tensors only passed during
-    # decomposition its all good for now.
-
-    # Those are never actually needed after this point, will revisit this to see if its a bug.
-    result_not_used = []
     for name in mutable_args_names:
         if (
             _only_clone_these_tensors is not None
@@ -253,15 +247,9 @@ def auto_functionalized_dense(
         else:
             if kwargs[name] is not None and isinstance(kwargs[name], list):
                 new_kwargs[name] = [clone_preserve_strides(x) for x in kwargs[name]]
-                for item in new_kwargs[name]:
-                    # see Note1
-                    if _only_clone_these_tensors is not None:
-                        result_not_used.append(item)
+
             elif kwargs[name] is not None:
                 new_kwargs[name] = clone_preserve_strides(kwargs[name])
-                # see Note1
-                if _only_clone_these_tensors is not None:
-                    result_not_used.append(new_kwargs[name])
 
     out = _mutable_op(**new_kwargs)
 
@@ -320,9 +308,9 @@ def auto_functionalized_dense(
         result.append(base_with_effects)
 
     if isinstance(out, tuple):
-        return (*out, *result, *result_not_used)  # type: ignore[return-value]
+        return (*out, *result)  # type: ignore[return-value]
     else:
-        return (out, *result, *result_not_used)  # type: ignore[return-value]
+        return (out, *result)  # type: ignore[return-value]
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
