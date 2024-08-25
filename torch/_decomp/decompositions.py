@@ -765,18 +765,18 @@ def slice_forward(
     start_val = start if start is not None else 0
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val += sizes[dim]
 
-    if end_val < 0:
+    if guard_size_oblivious(end_val < 0):
         end_val += sizes[dim]
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val = 0
-    elif start_val > sizes[dim]:
+    elif guard_size_oblivious(start_val > sizes[dim]):
         start_val = sizes[dim]
 
-    if end_val < start_val:
+    if guard_size_oblivious(end_val < start_val):
         end_val = start_val
     elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
         end_val > sizes[dim]
@@ -3808,6 +3808,11 @@ def _reshape_alias(x, shape, *args):
 @register_decomposition([aten._unsafe_index])
 def _unsafe_index(x, indices):
     return aten.index(x, indices)
+
+
+@register_decomposition([aten._unsafe_index_put])
+def _unsafe_index_put(x, indices, value, accumulate=False):
+    return aten.index_put(x, indices, value, accumulate)
 
 
 @register_decomposition([aten._unsafe_masked_index])
