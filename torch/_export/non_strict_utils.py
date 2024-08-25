@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import inspect
+import logging
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING, Union
 
@@ -29,10 +30,14 @@ from torch.export.dynamic_shapes import (
     DIM,
 )
 from torch.export.graph_signature import CustomObjArgument
+from torch.fx.experimental import _config as config
 from torch.fx.experimental.symbolic_shapes import (
+    _find_user_code_frame,
+    _suggest_fixes_for_data_dependent_error_non_strict,
     ConstraintViolationError,
     DimDynamic,
     EqualityConstraint,
+    GuardOnDataDependentSymNode,
     ShapeEnv,
     StatelessSymbolicContext,
     ValueRanges,
@@ -48,6 +53,9 @@ from torch.utils._pytree import (
 
 if TYPE_CHECKING:
     from sympy import Symbol
+
+
+log = logging.getLogger(__name__)
 
 
 def key_path_to_source(kp: KeyPath) -> Source:
@@ -466,3 +474,43 @@ def _fakify_script_objects(
         for fqn, orig_obj in patched_attr.items():
             cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
             setattr(cur_mod, attr, orig_obj)
+
+
+class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
+    """
+    1. Handles data-dependent errors raised by torch function calls in non-strict.
+
+    Any data-dependent error is due to some condition on unbacked symints
+    that cannot be resolved. A mechanical way of fixing the error is to use
+    a torch._check() call to assert either that condition or its negation.
+    The handler suggests these options as code and points to the location
+    of the torch function call that raised the error as part of the error
+    message shown to the user, who can then simply select and copy-paste
+    a suggested fix at that location.
+
+    NOTE: Not all data-dependent errors are raised by torch function calls.
+    In particular, conditions on unbacked symints can appear outside such
+    calls, and as such are not handled here.
+
+    2. Handles line-of-code logging for each torch function call in non-strict.
+
+    Usage: TORCHEXPORT_EXTENDED_DEBUG_CURRENT_LOC=1 TORCH_LOGS="+export" ...
+    """
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        if log.isEnabledFor(logging.DEBUG) and config.extended_debug_current_loc:
+            frame = _find_user_code_frame()
+            if frame is not None:
+                log.debug(
+                    "%s called at %s:%s in %s",
+                    func.__qualname__,
+                    frame.f_code.co_filename,
+                    frame.f_lineno,
+                    frame.f_code.co_name,
+                )
+        try:
+            return func(*args, **kwargs)
+        except GuardOnDataDependentSymNode as e:
+            _suggest_fixes_for_data_dependent_error_non_strict(e)
+            raise
