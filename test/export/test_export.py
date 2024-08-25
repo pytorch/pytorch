@@ -7071,10 +7071,12 @@ def forward(self, x, y):
 class GraphModule(torch.nn.Module):
     def forward(self, x: "f32[2, 4]", y: "f32[4]"):
         add: "f32[2, 4]" = torch.ops.aten.add.Tensor(x, y);  x = None
+
         hints_wrapper_body_graph_0 = self.hints_wrapper_body_graph_0
         hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_graph_0, (add, y), {}, hints = {'outer_body': True});  hints_wrapper_body_graph_0 = add = y = None
         getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
         return (getitem,)
+
     class hints_wrapper_body_graph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[2, 4]", arg1_1: "f32[4]"):
             hints_wrapper_body_graph_0 = self.hints_wrapper_body_graph_0
@@ -7082,6 +7084,7 @@ class GraphModule(torch.nn.Module):
             getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
             abs_1: "f32[2, 4]" = torch.ops.aten.abs.default(getitem);  getitem = None
             return (abs_1,)
+
         class hints_wrapper_body_graph_0(torch.nn.Module):
             def forward(self, arg0_1: "f32[2, 4]", arg1_1: "f32[4]"):
                 relu: "f32[2, 4]" = torch.ops.aten.relu.default(arg0_1);  arg0_1 = None
