@@ -22,8 +22,33 @@
 #define CAFFE2_LOG_THRESHOLD INT_MIN
 #endif // CAFFE2_LOG_THRESHOLD
 
+namespace c10 {
+
+class C10_API MessageLogger {
+ public:
+  MessageLogger(const char* file, int line, int severity);
+  ~MessageLogger();
+  // Return the stream associated with the logger object.
+  std::stringstream& stream() {
+    return stream_;
+  }
+
+ private:
+  // When there is a fatal log, we simply abort.
+  void DealWithFatal() {
+    abort();
+  }
+
+  const char* tag_;
+  std::stringstream stream_;
+  int severity_;
+};
+} // namespace c10
+
 // If glog is used somewhere
-#ifndef LOG
+#if defined(FBCODE_CAFFE2)
+#include <c10/util/logging_is_google_glog.h>
+#else
 #include <c10/util/logging_is_not_google_glog.h>
 #endif
 
@@ -108,7 +133,11 @@ C10_API void UpdateLoggingLevelsFromFlags();
 }
 
 constexpr bool IsUsingGoogleLogging() {
+#if defined(FBCODE_CAFFE2)
+  return true;
+#else
   return false;
+#endif
 }
 
 /**

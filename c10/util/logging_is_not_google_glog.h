@@ -1,6 +1,8 @@
 #ifndef C10_UTIL_LOGGING_IS_NOT_GOOGLE_GLOG_H_
 #define C10_UTIL_LOGGING_IS_NOT_GOOGLE_GLOG_H_
 
+#ifndef FBCODE_CAFFE2
+
 #include <chrono>
 #include <climits>
 #include <ctime>
@@ -23,26 +25,6 @@ const int GLOG_FATAL = 3;
 const int GLOG_ERROR = 2;
 const int GLOG_WARNING = 1;
 const int GLOG_INFO = 0;
-
-class C10_API MessageLogger {
- public:
-  MessageLogger(const char* file, int line, int severity);
-  ~MessageLogger();
-  // Return the stream associated with the logger object.
-  std::stringstream& stream() {
-    return stream_;
-  }
-
- private:
-  // When there is a fatal log, we simply abort.
-  void DealWithFatal() {
-    abort();
-  }
-
-  const char* tag_;
-  std::stringstream stream_;
-  int severity_;
-};
 
 // This class is used to explicitly ignore values in the conditional
 // logging macros.  This avoids compiler warnings like "value computed
@@ -255,4 +237,5 @@ inline void PrintSequence(std::ostream& out, Iter begin, Iter end) {
 }
 } // namespace c10
 
+#endif
 #endif // C10_UTIL_LOGGING_IS_NOT_GOOGLE_GLOG_H_

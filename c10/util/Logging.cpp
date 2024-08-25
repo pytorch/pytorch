@@ -24,6 +24,11 @@ C10_DEFINE_bool(
     "of throwing an exception.");
 
 namespace c10 {
+#if defined(FBCODE_CAFFE2)
+static const int GLOG_FATAL = google::GLOG_FATAL;
+static const int GLOG_WARNING = google::GLOG_WARNING;
+static const auto GLOG_INFO = google::GLOG_INFO;
+#endif
 
 namespace {
 std::function<::c10::Backtrace()>& GetFetchStackTrace() {
@@ -275,7 +280,6 @@ C10_DEFINE_int(
     "The minimum log level that caffe2 will output.");
 
 namespace c10 {
-
 void initLogging() {
   detail::setLogLevelFlagFromEnv();
 }
@@ -342,6 +346,7 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
   if (GLOBAL_RANK != -1) {
     stream_ << "[rank" << GLOBAL_RANK << "]:";
   }
+  constexpr auto CAFFE2_SEVERITY_PREFIX = "FEWIV";
   stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
           << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
           << std::setfill('0') << " " << std::setw(2) << timeinfo->tm_hour
