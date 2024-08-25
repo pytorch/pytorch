@@ -1204,7 +1204,8 @@ def forward(self, x_a_1, x_b_1, y_1):
             x = LoggingTensor(torch.randperm(3))
             torch.save(x, f)
             f.seek(0)
-            x_loaded = torch.load(f)
+            with torch.serialization.safe_globals([LoggingTensor]):
+                x_loaded = torch.load(f)
             self.assertTrue(type(x_loaded) is type(x))
             self.assertEqual(x, x_loaded)
             self.assertEqual(x.elem, x_loaded.elem)
