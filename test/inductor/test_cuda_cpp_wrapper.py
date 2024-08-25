@@ -17,7 +17,6 @@ try:
     try:
         from . import (
             test_combo_kernels,
-
             test_foreach,
             test_pattern_matcher,
             test_select_algorithm,
@@ -26,6 +25,7 @@ try:
         )
     except ImportError:
         import test_combo_kernels
+
         import test_foreach
         import test_pattern_matcher
         import test_select_algorithm
