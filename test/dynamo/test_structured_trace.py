@@ -21,7 +21,7 @@ from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.inductor_utils import HAS_CUDA
-
+from torch._dynamo.trace_rules import _as_posix_path
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
@@ -149,7 +149,8 @@ class StructuredTraceTest(TestCase):
         trace_log.setLevel(self.old_level)
 
     def assertParses(self):
-        out = tempfile.mkdtemp()
+        out = _as_posix_path(tempfile.mkdtemp())
+        raw_file_path = _as_posix_path(self.raw_file.name)
         try:
             subprocess.check_call(
                 [
@@ -159,7 +160,7 @@ class StructuredTraceTest(TestCase):
                     "--overwrite",
                     "--no-browser",
                     "--strict",
-                    self.raw_file.name,
+                    raw_file_path,
                 ]
             )
         finally:
