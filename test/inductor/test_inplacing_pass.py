@@ -96,13 +96,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         def f(x):
             out = torch.empty_like(x)
-            _, new_out = auto_functionalized(
-                sin._opoverload,
-                x=x,
-                out=out,
-                _all_bases=[out],
-                _observe_mutation_from=[["out"]],
-            )
+            _, new_out = torch.ops.higher_order.auto_functionalized(sin._opoverload, x = x, _out_meta = [(3,), (1,), 0, 0], _all_bases = [out])
             y = out * new_out
             return new_out, y
 
@@ -116,7 +110,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
         self.assertEqual(num_reinplacing_failures(), 1)
 
-    def get_clone_count(self, graph):
+    def get_not_inplaced_count(self, graph):
         counter = 0
         for node in graph.nodes:
             if node.target == torch.ops.higher_order.auto_functionalized:
@@ -126,12 +120,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     def test_view_inplaced(self):
         def f(arg0_1):
             select = torch.ops.aten.select.int(arg0_1, 0, 0)
-            auto_functionalized = torch.ops.higher_order.auto_functionalized(
-                torch.ops.test_view.boo.default,
-                x=select,
-                _all_bases=[arg0_1],
-                _observe_mutation_from=[["x"]],
-            )
+            auto_functionalized = torch.ops.higher_order.auto_functionalized( torch.ops.test_view.boo.default, _x_meta = [(), (), 0, 0], _all_bases = [arg0_1])
             getitem_1 = auto_functionalized[1]
             copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
             return ()
@@ -140,19 +129,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm = make_fx(f, tracing_mode="fake")(x1)
         reinplace_inplaceable_ops_core(gm.graph)
 
-        self.assertEqual(self.get_clone_count(gm.graph), 0)
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 0)
 
     # introduce a view another_view that is used `after` the copy
     def test_view_inplaced2(self):
         def f(arg0_1):
             select = torch.ops.aten.select.int(arg0_1, 0, 0)
             another_view = arg0_1[2]
-            auto_functionalized = torch.ops.higher_order.auto_functionalized(
-                torch.ops.test_view.boo.default,
-                x=select,
-                _all_bases=[arg0_1],
-                _observe_mutation_from=[["x"]],
-            )
+            auto_functionalized = torch.ops.higher_order.auto_functionalized( torch.ops.test_view.boo.default, _x_meta = [(), (), 0, 0], _all_bases = [arg0_1])
             getitem_1 = auto_functionalized[1]
             copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
             return another_view
@@ -161,19 +145,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm = make_fx(f, tracing_mode="fake")(x1)
         reinplace_inplaceable_ops_core(gm.graph)
 
-        self.assertEqual(self.get_clone_count(gm.graph), 0)
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 0)
 
     # introduce a view another_view that is used `before` the copy
     def test_views_not_inplaced(self):
         def f(arg0_1):
             select = torch.ops.aten.select.int(arg0_1, 0, 0)
             another_view = arg0_1[2]
-            auto_functionalized = torch.ops.higher_order.auto_functionalized(
-                torch.ops.test_view.boo.default,
-                x=select,
-                _all_bases=[arg0_1],
-                _observe_mutation_from=[["x"]],
-            )
+            auto_functionalized = torch.ops.higher_order.auto_functionalized( torch.ops.test_view.boo.default, _x_meta = [(), (), 0, 0], _all_bases = [arg0_1])
             getitem_1 = auto_functionalized[1]
             use_another_view = another_view * 10
             copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
@@ -183,19 +162,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm = make_fx(f, tracing_mode="fake")(x1)
         reinplace_inplaceable_ops_core(gm.graph)
 
-        self.assertEqual(self.get_clone_count(gm.graph), 1)
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
 
-    # a view over input with out copy node, inplace not allowed
+    # a view over input without copy node, inplace not allowed
     def test_views_not_inplaced2(self):
         def f(arg0_1):
             select = torch.ops.aten.select.int(arg0_1, 0, 0)
             another_view = arg0_1[2]
-            auto_functionalized = torch.ops.higher_order.auto_functionalized(
-                torch.ops.test_view.boo.default,
-                x=select,
-                _all_bases=[arg0_1],
-                _observe_mutation_from=[["x"]],
-            )
+            auto_functionalized = torch.ops.higher_order.auto_functionalized( torch.ops.test_view.boo.default, _x_meta = [(), (), 0, 0], _all_bases = [arg0_1])
             getitem_1 = auto_functionalized[1]
             return
 
@@ -203,7 +177,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm = make_fx(f, tracing_mode="fake")(x1)
         reinplace_inplaceable_ops_core(gm.graph)
 
-        self.assertEqual(self.get_clone_count(gm.graph), 1)
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
 
     # no copy nodes, view over local, with a use for another view
     def test_views_not_inplaced3(self):
@@ -211,12 +185,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             a = torch.ones(10)
             select = a[0]
             another_view = a[2]
-            auto_functionalized = torch.ops.higher_order.auto_functionalized(
-                torch.ops.test_view.boo.default,
-                x=select,
-                _all_bases=[a],
-                _observe_mutation_from=[["x"]],
-            )
+            auto_functionalized = torch.ops.higher_order.auto_functionalized( torch.ops.test_view.boo.default, _x_meta = [(), (), 0, 0], _all_bases = [arg0_1])
             getitem_1 = auto_functionalized[1]
             return another_view
 
@@ -224,7 +193,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm = make_fx(f, tracing_mode="fake")(x1)
         reinplace_inplaceable_ops_core(gm.graph)
 
-        self.assertEqual(self.get_clone_count(gm.graph), 1)
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
 
     def test_multi_output_intermediate(self):
         for requires_grad in [False, True]:

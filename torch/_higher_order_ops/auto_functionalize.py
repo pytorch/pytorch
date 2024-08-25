@@ -1,6 +1,9 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import json
 import warnings
+from collections import namedtuple
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -61,7 +64,8 @@ class AutoFunctionalized(HigherOrderOperator):
         super().__init__("auto_functionalized")
 
     def __call__(
-        self_,  # noqa: B902
+        self_,
+        /,
         _mutable_op: OpOverload,
         **kwargs: Any,
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
@@ -121,6 +125,83 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
         return False
     return True
 
+@dataclass
+class ViewInfo:
+    base_index: int
+    base: Any
+    size: Any
+    stride: Any
+    storage_offset: Any
+
+
+# serialize size(), stride(), storage_offset() of each mutated tensor and put them in output_kwargs.
+def serialize_view_meta(
+    mutable_args_names, input_kwargs, output_kwargs, arg_to_base_index
+):
+    for arg_name in mutable_args_names:
+        arg = input_kwargs[arg_name]
+        if arg is None:
+            output_kwargs[f"_{arg_name}_meta"] = None
+        elif isinstance(arg, list):
+            output_kwargs[f"_{arg_name}_meta"] = len(arg)
+            for i, elem in enumerate(arg):
+                if elem is None:
+                    output_kwargs[f"_{arg_name}_meta_{i}"] = None
+                else:
+                    output_kwargs[f"_{arg_name}_meta_{i}"] = [
+                        elem.size(),
+                        elem.stride(),
+                        elem.storage_offset(),
+                        arg_to_base_index[arg_name][i],
+                    ]
+        else:
+            output_kwargs[f"_{arg_name}_meta"] = [
+                arg.size(),
+                arg.stride(),
+                arg.storage_offset(),
+                arg_to_base_index[arg_name],
+            ]
+
+
+# read the serialized size(), stride(), storage_offset() and return them in a dict that maps each args to its ViewInfo.
+def deserialize_view_meta(mutable_args_names, input_kwargs, all_bases, pop_args):
+    args_view_info = {}
+    for arg_name in mutable_args_names:
+        arg_meta = input_kwargs[f"_{arg_name}_meta"]
+        if pop_args:
+            input_kwargs.pop(f"_{arg_name}_meta")
+        if arg_meta is None:
+            args_view_info[arg_name] = None
+        elif isinstance(arg_meta, int):
+            args_view_info[arg_name] = []
+
+            for i in range(arg_meta):
+                arg_meta_local = input_kwargs[f"_{arg_name}_meta_{i}"]
+                if pop_args:
+                    input_kwargs.pop(f"_{arg_name}_meta_{i}")
+
+                if arg_meta_local is None:
+                    args_view_info[arg_name].append(None)
+                else:
+                    args_view_info[arg_name].append(
+                        ViewInfo(
+                            arg_meta_local[3],
+                            all_bases[arg_meta_local[3]],
+                            arg_meta_local[0],
+                            arg_meta_local[1],
+                            arg_meta_local[2],
+                        )
+                    )
+        else:
+            args_view_info[arg_name] = ViewInfo(
+                arg_meta[3],
+                all_bases[arg_meta[3]],
+                arg_meta[0],
+                arg_meta[1],
+                arg_meta[2],
+            )
+    return args_view_info
+
 
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
@@ -128,11 +209,33 @@ def auto_functionalized_dense(
     _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
     **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
-    _all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
-    _observe_mutation_from = kwargs.pop("_observe_mutation_from", [])
+    all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
+    mutable_args_names = get_mutable_arg_names(_mutable_op)
+    args_view_info = deserialize_view_meta(
+        mutable_args_names, kwargs, all_bases, pop_args=True
+    )
 
-    _mutable_args_names = get_mutable_arg_names(_mutable_op)
+    def regenerate_view(ViewInfo):
+        return torch.as_strided(
+            ViewInfo.base, ViewInfo.size, ViewInfo.stride, ViewInfo.storage_offset
+        )
 
+    # Re-generate all inputs from _all_bases using args_view_info and add them to kwargs.
+    for arg_name in mutable_args_names:
+        if args_view_info[arg_name] is None:
+            kwargs[arg_name] = None
+        elif isinstance(args_view_info[arg_name], list):
+            kwargs[arg_name] = []
+            for i, elem in enumerate(args_view_info[arg_name]):
+                if elem is None:
+                    kwargs[arg_name].append(None)
+                else:
+                    view_info = args_view_info[arg_name][i]
+                    kwargs[arg_name].append(regenerate_view(view_info))
+        else:
+            kwargs[arg_name] = regenerate_view(args_view_info[arg_name])
+
+    # create new args
     new_kwargs = dict(**kwargs)
     result = []
 
@@ -142,7 +245,7 @@ def auto_functionalized_dense(
 
     # Those are never actually needed after this point, will revisit this to see if its a bug.
     result_not_used = []
-    for name in _mutable_args_names:
+    for name in mutable_args_names:
         if (
             _only_clone_these_tensors is not None
             and name not in _only_clone_these_tensors
@@ -178,41 +281,43 @@ def auto_functionalized_dense(
             mutation_source.storage_offset(),
         )
 
-    for base, mutations_sources in zip(_all_bases, _observe_mutation_from):
+    for i, base in enumerate(all_bases):
+        # TODO add a test to make sure we handle arguments that are passed as null correctly
         if base is None:
+            raise RuntimeError("base is None")
             result.append(None)
 
         base_with_effects = base
+        for arg_name in mutable_args_names:
+            arg = new_kwargs[arg_name]
+            if arg is None:
+                continue
 
-        for entry in mutations_sources:
-            if isinstance(entry, tuple):
-                agr_name = entry[0]
-                index = entry[1]
-                if (
-                    _only_clone_these_tensors is not None
-                    and agr_name not in _only_clone_these_tensors
-                ):
-                    # if the argument is mutated in place, base would have already observed the effect.
-                    # TODO we can add a check that invalidate the inplace in case address of base and address of base
-                    pass
-                else:
-                    mutation_source = new_kwargs[agr_name][index]
+            if (
+                _only_clone_these_tensors is not None
+                and name not in _only_clone_these_tensors
+            ):
+                # if the argument is mutated in place, base would have already observed the effect.
+                continue
+
+            if isinstance(arg, list):
+                for j, elem in enumerate(arg):
+                    # check `base` is a base for the this argument
+                    if args_view_info[arg_name][j].base_index != i:
+                        continue
+
+                    mutation_source = new_kwargs[name][j]
                     base_with_effects = observe_mutation(
                         base_with_effects, mutation_source
                     )
+
             else:
-                agr_name = entry
-                if (
-                    _only_clone_these_tensors is not None
-                    and agr_name not in _only_clone_these_tensors
-                ):
-                    # if the argument is mutated in place, base would have already observed the effect.
-                    pass
-                else:
-                    mutation_source = new_kwargs[agr_name]
-                    base_with_effects = observe_mutation(
-                        base_with_effects, mutation_source
-                    )
+                if args_view_info[arg_name].base_index != i:
+                    continue
+
+                mutation_source = new_kwargs[arg_name]
+                base_with_effects = observe_mutation(base_with_effects, mutation_source)
+
         result.append(base_with_effects)
 
     if isinstance(out, tuple):
@@ -312,69 +417,59 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = get_mutable_arg_names(op)
 
-    # A list of all bases of mutable args with out duplication
+    # A list of all bases of mutable args without duplication
     all_basis = []
     all_basis_addresses: list[int] = []
 
-    # For each mutable arg, stores the base[arg_name], in case of arg is a list it stores a list of bases.
-    basis: Dict[str, Any] = {}
-
+    # Map arg_name to the index of its base in all_basis.
+    arg_to_base_index: Dict[str, Any] = {}
     for arg_name in mutable_args_names:
         arg = normalized_kwargs[arg_name]
         if arg is None:
             continue
 
         if isinstance(arg, list):
-            basis[arg_name] = []
-            for tensor in arg:
+            arg_to_base_index[arg_name] = {}
+            for i, tensor in enumerate(arg):
                 if tensor is None:
-                    basis[arg_name].append(None)
+                    arg_to_base_index[arg_name].append(None)
                     continue
 
                 base = tensor if tensor._base is None else tensor._base
 
-                basis[arg_name].append(base)
                 if not all_basis_addresses.__contains__(base._cdata):
                     all_basis_addresses.append(base._cdata)
                     all_basis.append(base)
+                    arg_to_base_index[arg_name][i] = len(all_basis) - 1
+                else:
+                    arg_to_base_index[arg_name][i] = all_basis_addresses.index(
+                        base._cdata
+                    )
 
         else:
             base = arg if arg._base is None else arg._base
-            basis[arg_name] = base
+
             if not all_basis_addresses.__contains__(base._cdata):
                 all_basis_addresses.append(base._cdata)
                 all_basis.append(base)
+                arg_to_base_index[arg_name] = len(all_basis) - 1
+            else:
+                arg_to_base_index[arg_name] = all_basis_addresses.index(base._cdata)
+
+    # add view_meta for each args into unwrapped_kwargs.
+    serialize_view_meta(
+        mutable_args_names, normalized_kwargs, unwrapped_kwargs, arg_to_base_index
+    )
+
+    # remove mutated args from the kwargs (its a function of _all_bases now)
+    for arg_name in mutable_args_names:
+        del unwrapped_kwargs[arg_name]
 
     all_basis_unwrapped = ctx.unwrap_tensors(all_basis)
 
-    # For each base in all_basis, we generate the list of arguments that the base should observe their mutations.
-    # An entry in observe_mutation_from is a list [items1, item2..] each item can be
-    # an argument, ex arg1, arg2, .. or it could be a tuple(arg1, 0)
-    # tuple(arg1, 0) means that arg1 is a list and base should observe the mutation of arg1[0]
-    observe_mutation_from: List[List[Any]] = []
-
-    for base, base_address in zip(all_basis_unwrapped, all_basis_addresses):
-        tmp: List[Any] = []
-        for arg_name in mutable_args_names:
-            arg = normalized_kwargs[arg_name]
-            if arg is None:
-                continue
-
-            if isinstance(arg, list):
-                for i, elem in enumerate(arg):
-                    if elem is None:
-                        continue
-                    # check `base` is a base for the this argument
-                    if basis[arg_name][i]._cdata == base_address:
-                        tmp.append((arg_name, i))
-
-            elif basis[arg_name]._cdata == base_address:
-                tmp.append(arg_name)
-        observe_mutation_from.append(tmp)
-
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
-            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped, _observe_mutation_from=observe_mutation_from)  # type: ignore[arg-type]
+            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, Tuple[Any]] = (
