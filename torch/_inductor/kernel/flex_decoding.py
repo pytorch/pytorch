@@ -341,6 +341,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
     B = Bq
     kernel_options = dict(kernel_options)
 
+    # TODO: Fix flex decoding non-divisible case!
+    if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
+        kernel_options.setdefault("IS_DIVISIBLE", False)
+    else:
+        kernel_options.setdefault("IS_DIVISIBLE", True)
+
     # Calculate GQA head sharing
     gqa_shared_heads = Hq // Hkv
     if not is_power_of_2(gqa_shared_heads):
