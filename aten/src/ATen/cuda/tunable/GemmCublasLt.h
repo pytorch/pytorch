@@ -264,7 +264,15 @@ cudaDataType_t GetBiasTypeFromParams(const GemmParams<T>* params) {
 
 template <typename T>
 cudaDataType_t GetBiasTypeFromParams(const GemmAndBiasParams<T>* params) {
-    return at::cuda::ScalarTypeToCudaDataType(params->bias_dtype);
+    if (std::is_same_v<T, double>) {
+      return CUDA_R_64F;
+    } else if (std::is_same_v<T, float>) {
+      return CUDA_R_32F;
+    } else if (std::is_same_v<T, Half>) {
+      return CUDA_R_16F;
+    } else if (std::is_same_v<T, BFloat16>) {
+      return CUDA_R_16BF;
+    }
 }
 
 template <typename T>
@@ -677,7 +685,7 @@ auto GetCublasLtGemmTypeStringAndOps(const GemmParams<T>* params) {
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
-auto GetCublasLtGemmAndBiasTypeStringAndOps(const GemmParams<T>* params) {
+auto GetCublasLtGemmAndBiasTypeStringAndOps(const GemmAndBiasParams<T>* params) {
     return GetCublasLtTypeStringAndOps<T, ALayout, BLayout, GemmAndBiasParams<T>>(params);
 }
 
