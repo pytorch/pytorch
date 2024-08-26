@@ -10,7 +10,7 @@ import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.distributed._composable.fsdp.fully_shard import FSDPModule
+from torch.distributed._composable.fsdp.fully_shard import FSDPModule, fully_shard
 from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
 
@@ -475,8 +475,9 @@ class _PipelineStageBase(ABC):
         there are additional state-variables and performance considerations depending on the data parallelism used.
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
         """
-        if backward_type == "full":
-            last_backward = self._seen_bwd_chunks >= self.chunks - 1  # type: ignore[operator]
+        full_backward = bwd_kwargs["full_backward"]
+        if full_backward:
+            last_backward = self._seen_bwd_chunks == self.chunks - 1  # type: ignore[operator]
         else:
             # For backwards are split into weight and input, we will see twice as many bwd_chunks
             last_backward = self._seen_bwd_chunks == 2 * self.chunks - 1  # type: ignore[operator]
@@ -520,25 +521,22 @@ class _PipelineStageBase(ABC):
                     result = perform_backward(backward_type)()
         # If submod is a FSDP module
         elif isinstance(self.submod, FSDPModule):
-            # used for FSDP
-            if backward_type == "input":
-                print(f"[{self.stage_index}] input: {last_backward=} {self._seen_bwd_chunks=}, {self.chunks=}")
-                self.submod.set_reshard_after_backward(False)
-            elif backward_type == "weight":
-                print(f"[{self.stage_index}] weight: {last_backward=} {self._seen_bwd_chunks=}, {self.chunks=}")
-                self.submod.set_reshard_after_backward(last_backward)
-            elif backward_type == "full":
-                # TODO: remove when "full" backward is no longer needed
-                print(f"[{self.stage_index}] full: {last_backward=} {self._seen_bwd_chunks=}, {self.chunks=}")
-                self.submod.set_reshard_after_backward(last_backward)
-            if last_backward:
-                print(f"[{dist.get_global_rank(self.group, self.group_rank)}-{self.stage_index}] BEFORE! {next(self.submod.parameters())=}")
-            self.submod.set_is_last_backward(last_backward)
-            self.submod.set_requires_gradient_sync(last_backward)
+            self.submod.set_is_last_backward(False)
+            self.submod.set_reshard_after_backward(False)
+            self.submod.set_requires_gradient_sync(False)
             result = perform_backward(backward_type)()
             if last_backward:
-                # torch.distributed.breakpoint()
-                print(f"[{dist.get_global_rank(self.group, self.group_rank)}-{self.stage_index}] AFTER! {next(self.submod.parameters())=}")
+                # Manually call post backward for FSDP
+                def run_post_backward(fsdp_module: FSDPModule) -> None:
+                    fsdp_module.set_is_last_backward(True)
+                    fsdp_module.set_reshard_after_backward(True)
+                    fsdp_module.set_requires_gradient_sync(True)
+                    fsdp_state = fully_shard.state(fsdp_module)
+                    for state in fsdp_state._state_ctx.all_states:
+                        if state._fsdp_param_group:
+                            state._fsdp_param_group.post_backward()
+
+                run_post_backward(self.submod)
         else:
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
@@ -659,6 +657,9 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
+        # Save full_backward
+        bwd_kwargs["full_backward"] = full_backward
+
         # Custom backward function
         if self.dw_builder:
             # TODO: We may want to change our semantics so we are allowed to ignore
@@ -679,13 +680,9 @@ class _PipelineStageBase(ABC):
                 if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
                     bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
 
-                module_params = self.submod.named_parameters()
-                # for name, param in module_params:
-                #     print(f"{self.log_prefix}{name=}, {param=}")
                 grads_input, param_groups = self.backward_maybe_with_nosync(
                     "input", bwd_kwargs
                 )
-
 
                 # TODO: we dont need to save this, add to dw_runner?
                 self.backward_state[bwd_chunk_id] = (
@@ -693,7 +690,6 @@ class _PipelineStageBase(ABC):
                     param_groups,
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
-                    module_params,
                 )
                 self.grads_input = grads_input
                 # Save a placeholder for the dw_runner
@@ -714,22 +710,13 @@ class _PipelineStageBase(ABC):
                 param_groups,
                 stage_output,
                 output_grads,
-                module_params,
             ) = self.backward_state.pop(bwd_chunk_id)
-
-            # print(f"testing")
-            # if module_params != self.submod.named_parameters():
-            #     print(module_params), print(self.submod.named_parameters())
-            #     print("The following named parameters are different:")
-            #     for name, param1 in module_params:
-            #         param2 = dict(self.submod.named_parameters())[name]
-            #         if param1 is not param2:
-            #             print(f"{name}: {param1} vs {param2}")
 
             if self.stage_index != 0:
                 bwd_kwargs = {
                     "stage_output": stage_output,
                     "param_groups": param_groups,
+                    "full_backward": False,
                 }
                 weight_grads, _ = self.backward_maybe_with_nosync("weight", bwd_kwargs)
             else:
@@ -742,6 +729,7 @@ class _PipelineStageBase(ABC):
                     "stage_output": stage_output,
                     "output_grads": output_grads,
                     "input_values": input_values,
+                    "full_backward": False,
                 }
                 self.backward_maybe_with_nosync("full", bwd_kwargs)
 

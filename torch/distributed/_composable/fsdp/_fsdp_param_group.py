@@ -364,7 +364,6 @@ class FSDPParamGroup:
                 self.reshard()
         if len(fsdp_params_with_grad) == 0:
             return
-        print(f"{self._with_fqn('post backward')}")
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
             if self.comm_ctx.reduce_scatter_state is not None:
                 torch.cuda.current_stream().wait_event(
