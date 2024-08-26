@@ -159,7 +159,7 @@ class Node(abc.ABC):
 def _get_grad_fn_or_grad_acc(t):
     if t.requires_grad and t.grad_fn is None:
         with torch.enable_grad():
-            node = t.view_as(t).grad_fn.next_functions[0][0]
+            return t.view_as(t).grad_fn.next_functions[0][0]
     else:
         return t.grad_fn
 
