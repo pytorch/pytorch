@@ -1905,6 +1905,7 @@ class AotCodeCompiler:
 
                 if use_mmap_weights:
                     import resource
+
                     page_size_ = resource.getpagesize()
                     page_size = max(16384, page_size_)
 
