@@ -1,6 +1,7 @@
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/torch.h>
 #include <algorithm>
 
