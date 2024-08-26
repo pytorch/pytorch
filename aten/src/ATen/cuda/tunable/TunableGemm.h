@@ -199,14 +199,14 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
 
 #ifdef USE_ROCM
-    static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
+    const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
     if (env_rocblas == nullptr || strcmp(env_rocblas, "1") == 0) {
       for (auto&& [name, op] : GetRocBlasGemmTypeStringAndOps<T>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
     }
 
-    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
     if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
