@@ -605,6 +605,11 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         ]
         self.assertEqual(flatten_mesh_root_dims, (0, 2))
 
+        # Test flatten with a flattened mesh_dim_name
+        cp_tp_mesh = mesh_3d["cp", "tp"]
+        cp_tp_mesh._flatten("dummy")
+        self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
+
     @with_comms
     def test_reconstruct_mesh_with_flatten_dim(self):
         mesh_3d = init_device_mesh(

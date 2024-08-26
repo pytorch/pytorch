@@ -1223,9 +1223,9 @@ def export(
         if byte_size < 2 * 1024 * 1024 * 1024:
             # The checker may segfault so we need to run it in a separate process
             _isolated.safe_call(
-                onnx.checker.check_model,
+                onnx.checker.check_model,  # type:ignore[attr-defined]
                 onnx_program.model_proto,
-                full_check=True,  # type: ignore[attr-defined]
+                full_check=True,
             )
             export_status.onnx_checker = True
             verbose_print("Run `onnx.checker` on the ONNX model... ✅")
