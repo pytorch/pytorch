@@ -367,6 +367,28 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
     @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nan_p2p(self):
+        # Putting NaN at recv buffer, program should not fail as NaN checker
+        # should not check on receive buffer
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
+        if self.rank == 0:
+            c10d.send(t, 1)
+        elif self.rank == 1:
+            # Putting NaN at recv buffer
+            t[1, 1] = float("nan")
+            c10d.recv(t, 0)
+        c10d.destroy_process_group()
+        # reset env
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
+
+    @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_destruct_before_terminate_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
