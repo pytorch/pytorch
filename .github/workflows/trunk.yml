@@ -48,7 +48,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
@@ -80,7 +80,8 @@ jobs:
       build-environment: libtorch-linux-focal-cuda12.1-py3.7-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       build-generates-artifacts: false
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      runner: "linux.4xlarge"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -92,7 +93,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-no-ops
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       test-matrix: |
@@ -108,7 +109,8 @@ jobs:
       build-environment: libtorch-linux-focal-cuda12.4-py3.7-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       build-generates-artifacts: false
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      runner: "linux.4xlarge"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -120,7 +122,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-no-ops
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       test-matrix: |
@@ -199,6 +201,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
           { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
+    secrets: inherit
 
   win-vs2019-cpu-py3-test:
     name: win-vs2019-cpu-py3
@@ -225,7 +228,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-rocm6.1-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
@@ -235,6 +238,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
           { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-rocm6_1-py3_8-test:
     permissions:
@@ -256,7 +260,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       use_split_build: true
       build-environment: linux-focal-cuda12.4-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
@@ -288,7 +292,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       use_split_build: true
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
