@@ -66,7 +66,11 @@ jobs:
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
+    {%- if branches == "nightly" %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    {%- else %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
     {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
