@@ -19,6 +19,7 @@ from itertools import product
 from pathlib import Path
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensorConverter
 from torch._utils import _rebuild_tensor
 from torch._utils_internal import get_file_path_2
 from torch.serialization import (
@@ -4197,6 +4198,68 @@ class TestSerialization(TestCase, SerializationMixin):
             sd_loaded = torch.load(g)
             sd_loaded_ref = torch.load(f)
             self.assertEqual(sd_loaded, sd_loaded_ref)
+
+    @parametrize("fake", (True, False))
+    def test_metadata_only_serialization(self, fake):
+        # Create one tensor that uses each of the paths in __reduce_ex__ that should work
+        t_device = "cuda" if torch.cuda.is_available() else "cpu"
+        t_v2 = torch.randn(2, 3, device=t_device)
+        t_v3 = torch.randn(2, 3, dtype=torch.complex32, device=t_device)
+        i = torch.tensor([[0, 1, 1],
+                          [2, 0, 2]])
+        v = torch.tensor([3, 4, 5], dtype=torch.float32)
+        if not fake:
+            # FakeTensorConverter messes up sizes of i and v for the sparse tensor
+            st = torch.sparse_coo_tensor(i, v, (2, 4))
+        tt = TwoTensor(torch.randn(2), torch.randn(2))
+        with FakeTensorMode() as mode:
+            ft = torch.randn(2, 3, device=t_device)
+
+        mode = FakeTensorMode()
+        converter = FakeTensorConverter()
+
+        def fn(t):
+            return converter.from_real_tensor(mode, t) if fake else t
+
+        sd = {
+            't_v2': fn(t_v2),
+            't_v3': fn(t_v3),
+            'tt': fn(tt),
+            'ft': fn(ft),
+        }
+
+        sd_expected = {
+            't_v2': torch.zeros(2, 3),
+            't_v3': torch.zeros(2, 3, dtype=torch.complex32),
+            'tt': TwoTensor(torch.zeros(2), torch.zeros(2)),
+            'ft': torch.zeros(2, 3),
+        }
+
+        if not fake:
+            sd['st'] = st
+            sd_expected['st'] = torch.sparse_coo_tensor(torch.zeros(2, 3), torch.zeros(3), (2, 4))
+
+        with BytesIOContext() as f:
+            torch.save(sd, f, metadata_only=True)
+            f.seek(0)
+            with safe_globals([TwoTensor]):
+                sd_loaded = torch.load(f, weights_only=True)
+            self.assertEqual(sd_loaded, sd_expected)
+
+    def test_metadata_only_serialization_error_cases(self):
+        def _save_load(t):
+            with BytesIOContext() as f:
+                torch.save(t, f, metadata_only=True)
+                f.seek(0)
+                torch.load(f, weights_only=True)
+
+        nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
+        t = torch.randn(2, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "Cannot serialize NST with metadata_only=True"):
+            _save_load(nt)
+
+        with self.assertWarnsRegex(UserWarning, "meta device with metadata_only=True is a no-op"):
+            _save_load(t)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
