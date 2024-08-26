@@ -1391,6 +1391,45 @@ class TestSplitCatFxPasses(TestCase):
                 dim=1,
             )
 
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "normalization_pass": {},
+                "move_reshape_out_of_split_stack_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def move_reshape_out_of_split_stack(x):
+            x_c = x.view(50000, 5)
+            l1_out = torch.split(x_c, [1, 1, 1, 1, 1], dim=1)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            reshape0 = item0.reshape(-1, 5)
+            reshape1 = item1.reshape(-1, 5)
+            reshape2 = item2.reshape(-1, 5)
+            reshape3 = item3.reshape(-1, 5)
+            reshape4 = item4.reshape(-1, 5)
+            other0 = reshape0.clone()
+            other1 = reshape1.clone()
+            other2 = reshape2.clone()
+            other3 = reshape3.clone()
+            return torch.stack(
+                (
+                    other0,
+                    other1,
+                    other2,
+                    reshape0,
+                    reshape1,
+                    reshape2,
+                    reshape3,
+                    reshape4,
+                    other3,
+                ),
+                dim=0,
+            )
+
         args = [
             torch.randn(500, 500),
         ]
@@ -1402,16 +1441,18 @@ class TestSplitCatFxPasses(TestCase):
             exptected_unbind_to_cat_view,
             expected_split_stack_to_cats,
             exptected_unbind_stack_to_slices,
+            expected_move_reshape_out_of_split_stack,
         ) in [
-            (split_cat_split, 2, 0, 0, 0, 0, 0),
-            (split_cat_split_kwarg, 2, 0, 0, 0, 0, 0),
-            (remove_cat_node_with_all_getitmes, 0, 2, 0, 0, 0, 0),
-            (mutate_cat_node_with_some_getitmes, 0, 1, 0, 0, 0, 0),
-            (split_cat_to_slices, 0, 0, 1, 0, 0, 0),
-            (unbind_cat_to_view, 0, 0, 0, 1, 0, 0),
-            (split_stack_to_cats_same_dim, 0, 0, 0, 0, 1, 0),
-            (split_stack_to_cats_different_dim, 0, 0, 0, 0, 1, 0),
-            (unbind_stack_to_slices, 0, 0, 0, 0, 0, 1),
+            (split_cat_split, 2, 0, 0, 0, 0, 0, 0),
+            (split_cat_split_kwarg, 2, 0, 0, 0, 0, 0, 0),
+            (remove_cat_node_with_all_getitmes, 0, 2, 0, 0, 0, 0, 0),
+            (mutate_cat_node_with_some_getitmes, 0, 1, 0, 0, 0, 0, 0),
+            (split_cat_to_slices, 0, 0, 1, 0, 0, 0, 0),
+            (unbind_cat_to_view, 0, 0, 0, 1, 0, 0, 0),
+            (split_stack_to_cats_same_dim, 0, 0, 0, 0, 1, 0, 0),
+            (split_stack_to_cats_different_dim, 0, 0, 0, 0, 1, 0, 0),
+            (unbind_stack_to_slices, 0, 0, 0, 0, 0, 1, 0),
+            (move_reshape_out_of_split_stack, 0, 0, 0, 0, 0, 0, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
@@ -1440,6 +1481,10 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["unbind_stack_to_slices_pass"],
                 exptected_unbind_stack_to_slices,
+            )
+            self.assertEqual(
+                counters["inductor"]["move_reshape_out_of_split_stack_pass"],
+                expected_move_reshape_out_of_split_stack,
             )
             counters.clear()
 
