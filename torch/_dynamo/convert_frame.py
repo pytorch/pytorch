@@ -160,7 +160,6 @@ class Tracker:
 
 input_codes = Tracker()
 output_codes = Tracker()
-disabled_codes: Dict[int, Callable[..., Any]] = {}
 
 initial_global_state: Optional[GlobalStateGuard] = None
 
