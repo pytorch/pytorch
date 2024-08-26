@@ -492,7 +492,7 @@ def linear_backward_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.to.dtype, "input: jt_all, dtype: any")
 def to_dtype(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -809,7 +809,7 @@ def chunk_default(func, *args, **kwargs):
         lengths = inp._offsets.diff()
         chunked_lengths = lengths.chunk(chunks)
         chunked_offsets = [torch.cumsum(x, dim=0) for x in chunked_lengths]
-        chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]
+        chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]  # type: ignore[arg-type]
         nested_kwargs = [
             {"offsets": per_offsets, "_ragged_idx": inp._ragged_idx}
             for per_offsets in chunked_offsets
@@ -1613,7 +1613,7 @@ def masked_select_default(func, *args, **kwargs):
             f"Mask with shape {mask.shape} is not compatible with input's shape {inp.shape}"
         )
     res_values = inp._values.masked_select(mask.values())
-    mask_cumsum = F.pad(mask.values().cumsum(dim=0), (1, 0))
+    mask_cumsum = F.pad(mask.values().cumsum(dim=0), (1, 0))  # type: ignore[arg-type]
 
     args = extract_kwargs(inp)
     args["offsets"] = mask_cumsum[inp._offsets]
