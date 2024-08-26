@@ -4223,10 +4223,11 @@ class CPUReproTests(TestCase):
         from torch._inductor.virtualized import V
         from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
-        def check_use_full_bits(func, shapes, dtype, mixed):
+        def check_use_full_bits(func, shapes, dtype, mixed, check_vecn):
             example_inputs = [torch.randn(shape, dtype=dtype) for shape in shapes]
             if mixed:
-                example_inputs[0] = example_inputs[0].float()
+                example_inputs[0] = example_inputs[0].to(
+                    dtype=torch.half if dtype == torch.bfloat16 else torch.bfloat16)
             self.common(func, example_inputs)
             gm, _ = torch._dynamo.export(func)(*example_inputs)
             gm = torch.fx.symbolic_trace(gm)
@@ -4248,10 +4249,16 @@ class CPUReproTests(TestCase):
                 with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
                     graph.run(*example_inputs)
                     code, _ = graph.codegen()
-                    self.assertTrue(
-                        "at::vec::VectorizedN" in code
-                        or "at::vec::convert<float,2" in code
-                    )
+                    if check_vecn:
+                        self.assertTrue(
+                            "at::vec::VectorizedN" in code
+                            or "at::vec::convert<float,2" in code
+                        )
+                    else:
+                        self.assertFalse(
+                            "at::vec::VectorizedN" in code
+                            or "at::vec::convert<float,2" in code
+                        )
 
         funcs = []
 
@@ -4282,10 +4289,11 @@ class CPUReproTests(TestCase):
             [(10, 32, 20, 20), (10, 32, 20, 20)],
         ]
         mixed_types = [False, False, True]
+        check_vecns = [True, True, True]
 
         for dtype in [torch.bfloat16, torch.float16]:
-            for func, shapes, mixed in zip(funcs, example_shapes, mixed_types):
-                check_use_full_bits(func, shapes, dtype, mixed)
+            for func, shapes, mixed, check_vecn in zip(funcs, example_shapes, mixed_types, check_vecns):
+                check_use_full_bits(func, shapes, dtype, mixed, check_vecn)
 
 
 if __name__ == "__main__":

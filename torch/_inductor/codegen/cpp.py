@@ -3199,7 +3199,6 @@ def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Tuple[Optional[torch.dtype], bo
                 elif _lowp_fp_type is not None:
                     if _lowp_fp_type != opt_ctx.dtype:
                         warnings.warn("bf16 and fp16 are mixed in the scheduler node.")
-                        return None, True
                 else:
                     _lowp_fp_type = opt_ctx.dtype
             else:
