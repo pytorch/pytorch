@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 
 import torch
@@ -11,6 +12,7 @@ from ..select_algorithm import (
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import mm_args, mm_grid, mm_options
+
 
 aten = torch.ops.aten
 
@@ -233,7 +235,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         for config in mm_configs():
             # see https://github.com/openai/triton/issues/1298
             # BLOCK_K = K causes llvm error
-            if config.kwargs["BLOCK_K"] < k1:
+            if V.graph.sizevars.statically_known_lt(config.kwargs["BLOCK_K"], k1):
                 mm_plus_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2, mat3, mat4),

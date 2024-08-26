@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import functools
 import logging
@@ -48,6 +49,7 @@ from ._fsdp_extensions import (
     _ext_pre_flatten_transform,
     FSDPExtensions,
 )
+
 
 __all__ = [
     "FlatParameter",
@@ -1140,7 +1142,7 @@ class FlatParamHandle:
             tuple(fqns_list),
             tuple(shapes_list),
             tuple(numels_list),
-            shard_param_offsets,
+            tuple(shard_param_offsets),
         )
 
     @no_type_check

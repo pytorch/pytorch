@@ -6,6 +6,7 @@
 
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/AtomicAddFloat.h>
@@ -154,32 +155,40 @@ void take_kernel(
 
 void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   // NOTE: duplicate indices are only supported if accumulate is true.
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-    iter.dtype(), "index_put", [&] {
-    // See Note [Enabling Deterministic Operations]
-    // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
-    // must enable serial execution if deterministic algorithms are enabled.
-    const bool is_deterministic = at::globalContext().deterministicAlgorithms();
-    if (accumulate) {
-      bool use_parallel_for = (!is_deterministic) && (
-        (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
-      if (use_parallel_for && iter.dtype() == ScalarType::Float) {
-        cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-          cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
-        });
+  AT_DISPATCH_V2(
+    iter.dtype(),
+    "index_put",
+    AT_WRAP([&] {
+      // See Note [Enabling Deterministic Operations]
+      // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
+      // must enable serial execution if deterministic algorithms are enabled.
+      const bool is_deterministic = at::globalContext().deterministicAlgorithms();
+      if (accumulate) {
+        bool use_parallel_for = (!is_deterministic) && (
+          (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
+        if (use_parallel_for && iter.dtype() == ScalarType::Float) {
+          cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
+            cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
+          });
+        } else {
+          // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
+          // this needs to be thread-safe.
+          cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
+            *(scalar_t*)(dst + offset) += *(scalar_t*)src;
+          }, /*serial_execution=*/true);
+        }
       } else {
-        // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
-        // this needs to be thread-safe.
         cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) += *(scalar_t*)src;
-        }, /*serial_execution=*/true);
+          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        }, /*serial_execution=*/is_deterministic);
       }
-    } else {
-      cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-        *(scalar_t*)(dst + offset) = *(scalar_t*)src;
-      }, /*serial_execution=*/is_deterministic);
-    }
-  });
+    }),
+    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+    AT_EXPAND(AT_FLOAT8_TYPES),
+    kComplexHalf,
+    kHalf,
+    kBool,
+    kBFloat16);
 }
 
 void index_fill_kernel(

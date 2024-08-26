@@ -22,7 +22,7 @@
 #define USE_CUDNN_RNN_V8_API
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 std::string cudnnTypeToString(cudnnDataType_t dtype);
 
@@ -31,9 +31,7 @@ std::string cudnnTypeToString(cudnnDataType_t dtype);
 inline int dataSize(cudnnDataType_t dataType)
 {
   switch (dataType) {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
     case CUDNN_DATA_BFLOAT16:
-#endif
     case CUDNN_DATA_HALF: return 2;
     case CUDNN_DATA_FLOAT: return 4;
     default: return 8;
@@ -113,7 +111,7 @@ class TORCH_CUDA_CPP_API Descriptor {
 protected:
   void init() {
     if (desc_ == nullptr) {
-      T* raw_desc;
+      T* raw_desc = nullptr;
       AT_CUDNN_CHECK(ctor(&raw_desc));
       desc_.reset(raw_desc);
     }
@@ -237,7 +235,7 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
   // WARNING: This function is very expensive, avoid calling this function!
   void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
     TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
-    size_t state_size;
+    size_t state_size = 0;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
     AT_ASSERT(options.device().type() == kCUDA);
     AT_ASSERT(options.dtype() == kByte);
@@ -357,6 +355,24 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
     AT_CUDNN_CHECK(
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
+  void set_v8_v9(
+      cudnnDataType_t datatype,
+      cudnnLossNormalizationMode_t normMode,
+      cudnnNanPropagation_t gradMode,
+      int maxLabelLength) {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
+    auto gradModev9 = CUDNN_CTC_ZERO_OOB_GRADIENTS;
+    if (gradMode == cudnnNanPropagation_t::CUDNN_PROPAGATE_NAN) {
+      gradModev9 = CUDNN_CTC_SKIP_OOB_GRADIENTS;
+    }
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptor_v9(mut_desc(), datatype, normMode, gradModev9, maxLabelLength));
+#else
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptor_v8(mut_desc(), datatype, normMode, gradMode, maxLabelLength));
+#endif
+  }
+
 };
 
 struct TORCH_CUDA_CPP_API ActivationDescriptor
@@ -389,4 +405,4 @@ union Constant
   }
 };
 
-}}  // namespace
+} // namespace

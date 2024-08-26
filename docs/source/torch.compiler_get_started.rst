@@ -15,7 +15,8 @@ understanding of how you can use ``torch.compile`` in your own programs.
 .. note::
    To run this script, you need to have at least one GPU on your machine.
    If you do not have a GPU, you can remove the ``.to(device="cuda:0")`` code
-   in the snippet below and it will run on CPU.
+   in the snippet below and it will run on CPU. You can also set device to
+   ``xpu:0`` to run on Intel® GPUs.
 
 .. code:: python
 

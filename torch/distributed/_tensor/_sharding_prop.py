@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import lru_cache
 from itertools import chain
 from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
@@ -23,6 +24,7 @@ from torch.distributed._tensor._utils import (
 )
 from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 from torch.distributed.device_mesh import DeviceMesh
+
 
 aten = torch.ops.aten
 
@@ -237,7 +239,7 @@ class ShardingPropagator:
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
-                expected_input_specs = []
+                expected_input_specs: List[DTensorSpec] = []
 
                 # in case where the op does not specify input_specs and output_specs
                 # is a DTensorSpec, we use output_specs as the spec for each DTensor

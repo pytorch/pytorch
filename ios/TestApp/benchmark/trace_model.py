@@ -3,6 +3,7 @@ from torchvision import models
 import torch
 from torch.utils.mobile_optimizer import optimize_for_mobile
 
+
 model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
 model.eval()
 example = torch.rand(1, 3, 224, 224)

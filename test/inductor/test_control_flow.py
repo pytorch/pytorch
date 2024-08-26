@@ -3,15 +3,14 @@ import itertools
 
 import torch
 import torch._dynamo.testing
-
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1):
@@ -207,8 +206,8 @@ class CondTests(TestCase):
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_simple_control_flow(self, device, dynamic):
         # cond control flow without nesting
@@ -222,8 +221,44 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    def test_cond_control_flow_with_precomputed_size(self):
+        class TestModel(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv2d = torch.nn.Conv2d(
+                    512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+                )
+                self.threshold = 20
+
+            def forward(self, x: torch.Tensor, index) -> torch.Tensor:
+                def true_fn(x: torch.Tensor):
+                    return self.conv2d(x)
+
+                def false_fn(x: torch.Tensor):
+                    return self.conv2d(x)
+
+                return torch.cond(
+                    index < self.threshold and index >= 0, true_fn, false_fn, (x,)
+                )
+
+        main_model = TestModel().to(GPU_TYPE)
+        x1 = torch.rand(2, 512, 128, 72).to(GPU_TYPE)
+        x2 = torch.rand(2, 512, 96, 96).to(GPU_TYPE)
+
+        opt_model = torch.compile(main_model)
+        out1 = main_model(x1, 1)
+        opt_out1 = opt_model(x1, 1)
+        self.assertTrue(torch.allclose(out1, opt_out1, atol=1e-5))
+
+        out2 = main_model(x2, 30)
+        opt_out2 = opt_model(x2, 30)
+        self.assertTrue(torch.allclose(out2, opt_out2, atol=1e-5))
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_nested_control_flow(self, device, dynamic):
         # cond control flow with nesting
@@ -239,8 +274,8 @@ class CondTests(TestCase):
             num_predicates=3,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_outer_code_before_after(self, device, dynamic):
         # some code before and after the conditional
@@ -254,8 +289,8 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_multiple_outputs(self, device, dynamic):
         # multiple outputs with different shapes
@@ -270,8 +305,8 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_advanced_dynamic_shapes(self, device):
         # subgraphs input shapes include symbolic expressions
         class Model(torch.nn.Module):
@@ -298,7 +333,7 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
-    @requires_cuda
+    @requires_gpu
     def test_cond_use_buffers_from_outer_scope(self):
         # subgraphs input shapes include symbolic expressions
         self._run_test(
@@ -308,11 +343,11 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
                 torch.randn(10, 20),
             ),
-            device="cuda",
+            device=GPU_TYPE,
             dynamic=False,
         )
 
-    @requires_cuda
+    @requires_gpu
     def test_cond_reintepret_view_inputs_outputs(self):
         # ReinterpretView in inputs and outputs of the subgraphs
         self._run_test(
@@ -321,13 +356,12 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
                 torch.randn(10, 20),
             ),
-            device="cuda",
+            device=GPU_TYPE,
             dynamic=True,
         )
 
-    @skipIfRocm
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_subgraphs_with_parameters(self, device, dynamic):
         # nested Modules with parameters
@@ -338,8 +372,8 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_non_tensor_predicates(self, device, dynamic):
         # model with a boolean predicate
@@ -356,7 +390,7 @@ class CondTests(TestCase):
                 num_predicates=0,
             )
 
-    @requires_cuda
+    @requires_gpu
     def test_cond_aliasing_outputs(self):
         # output aliasing in subgraphs: not supported
         class Model(torch.nn.Module):
@@ -379,8 +413,8 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
             )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_decompose_ops_in_subgraph(self, device):
         class Model(torch.nn.Module):
             def forward(self, p, a):
@@ -400,8 +434,8 @@ class CondTests(TestCase):
             device=device,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_decompose_ops_in_subgraph_recursive(self, device):
         def inner_fn1(x):
             return torch.zeros_like(x)
@@ -427,7 +461,7 @@ class CondTests(TestCase):
             device=device,
         )
 
-    @requires_cuda
+    @requires_gpu
     def test_cond_inductor_fx_passes_recursively_applied(self):
         counters = {"pre_grad": 0, "post_grad": 0}
 
@@ -452,7 +486,7 @@ class CondTests(TestCase):
                     torch.randn(10, 20),
                     torch.randn(10, 20),
                 ),
-                device="cuda",
+                device=GPU_TYPE,
                 dynamic=True,
                 num_predicates=3,
             )
@@ -586,8 +620,8 @@ class WhileLoopTests(TestCase):
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_while_loop_simple_control_flow(self, device, dynamic):
         # while_loop control flow without nesting
@@ -601,8 +635,8 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_while_loop_nested_control_flow(self, device, dynamic):
         # while_loop control flow with nesting
@@ -617,8 +651,8 @@ class WhileLoopTests(TestCase):
             num_counters=2,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_while_loop_with_outer_code(self, device, dynamic):
         # while_loop control flow with outer code
@@ -632,9 +666,8 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
-    @skipIfRocm
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_while_loop_with_parameters(self, device, dynamic):
         # while_loop control flow with parameters
@@ -645,8 +678,8 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     # dynamic=True doesn't work now due to
     # https://github.com/pytorch/pytorch/issues/123596
     @parametrize("dynamic", [False])
@@ -663,12 +696,77 @@ class WhileLoopTests(TestCase):
         )
 
 
+class AssociativeScanTests(TestCase):
+    @requires_gpu
+    @parametrize("device", [GPU_TYPE])
+    @parametrize("backend", ["inductor"])
+    def test_pointwise_associative_scan_CUDA_flip(self, device, backend):
+        def fct(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        for n in range(10):
+            x = torch.arange(n, device=device)
+            torch.compiler.reset()
+            associative_scan1 = torch.compile(
+                associative_scan, backend=backend, fullgraph=True
+            )
+            associative_scan2 = associative_scan
+
+            result1 = associative_scan1(fct, x, 0, reverse=False)
+            result2 = associative_scan2(fct, x, 0, reverse=False)
+            result3 = torch.cumsum(x, 0)
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Flip only non-compiled and compare with compiled reverse=True
+            result1 = associative_scan1(fct, x, 0, reverse=True)
+            result2 = torch.flip(
+                associative_scan2(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Flip only compiled and compare with non-compiled reverse=True
+            result1 = torch.flip(
+                associative_scan1(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+            )
+            result2 = associative_scan2(fct, x, 0, reverse=True)
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Use reverse=False, but flip both results before and after
+            result1 = torch.flip(
+                associative_scan1(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+            )
+            result2 = torch.flip(
+                associative_scan2(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Reverse=True
+            result1 = associative_scan1(fct, x, 0, reverse=True)
+            result2 = associative_scan2(fct, x, 0, reverse=True)
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+
 instantiate_parametrized_tests(CondTests)
 instantiate_parametrized_tests(WhileLoopTests)
+instantiate_parametrized_tests(AssociativeScanTests)
 
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

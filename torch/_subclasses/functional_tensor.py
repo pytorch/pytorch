@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
@@ -7,12 +8,14 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
+
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
@@ -96,6 +99,15 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten._batch_norm_impl_index.default,  # type: ignore[has-type]
         torch.ops.aten.cudnn_batch_norm.default,  # type: ignore[has-type]
         torch.ops.aten.miopen_batch_norm.default,  # type: ignore[has-type]
+        torch.ops.aten.atleast_1d.default,  # type: ignore[has-type]
+        torch.ops.aten.atleast_2d.default,  # type: ignore[has-type]
+        torch.ops.aten.atleast_3d.default,  # type: ignore[has-type]
+        torch.ops.aten.cartesian_prod.default,  # type: ignore[has-type]
+        torch.ops.aten.conj_physical.default,  # type: ignore[has-type]
+        torch.ops.aten.alpha_dropout.default,  # type: ignore[has-type]
+        torch.ops.aten.feature_dropout.default,  # type: ignore[has-type]
+        torch.ops.aten.feature_alpha_dropout.default,  # type: ignore[has-type]
+        torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
     ]
 
     def __new__(cls, elem):
@@ -128,15 +140,17 @@ class FunctionalTensor(torch.Tensor):
             # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
             cls,
             elem.shape,  # sizes
-            elem.stride(),  # strides
-            elem.storage_offset(),  # storage_offset
+            elem.stride() if not is_sparse_any(elem) else None,  # strides
+            elem.storage_offset()
+            if not is_sparse_any(elem)
+            else None,  # storage_offset
             None,  # memory_format
             elem.dtype,  # dtype
             elem.layout,  # layout
             elem.device,  # device
             False,  # pin_memory
             elem.requires_grad,  # requires_grad
-            "sizes",  # dispatch_sizes_strides_policy
+            None,  # dispatch_sizes_strides_policy
             False,  # dispatch_device
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
@@ -173,10 +187,10 @@ class FunctionalTensor(torch.Tensor):
                 torch.ops.aten.is_contiguous.memory_format,
             ]:
                 assert len(args) == 2 and isinstance(args[0], FunctionalTensor)
-                return func(args[0].elem, args[1])
+                return func(torch._from_functional_tensor(args[0].elem), args[1])
             assert len(args) == 1 and isinstance(args[0], FunctionalTensor)
 
-            return func(args[0].elem)
+            return func(torch._from_functional_tensor(args[0].elem))
         # Originally I tried to implement my subclass without giving it a torch_dispatch, but I gave up:
         # - _make_wrapper_subclass requires a __torch_dispatch__
         # - If we want to use _make_subclass(), we have a problem: the subclass will share a TensorImpl with the inner tensor,
@@ -264,9 +278,18 @@ class FunctionalTensor(torch.Tensor):
     int = _conversion_method_template(dtype=torch.int32)
     long = _conversion_method_template(dtype=torch.int64)
 
+    # TODO(sparse-team): fixes #133174 but can we do without the relay?
+    def to_dense(self):
+        return self.elem.to_dense()
+
+    @property
+    def layout(self):
+        return self.elem.layout
+
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
+        super().__init__()
         self.export = export
         self.is_on_stack = False
         self.enter_stack = []
@@ -279,6 +302,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         # Map of effect type (ex. _EffectType.ORDERED) to a token. The tokens help keep
         # track of the ordering between side effectful operations.
         self._tokens: Dict[Any, torch.Tensor] = {}
+
+        # Filled after forward tracing.
+        self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
 
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to
@@ -330,41 +356,35 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         def _can_decompose(func):
             # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832
-            # We never decompose dropout in export
+            # Never decompose dropout in export
             if self.export and func == torch.ops.aten.dropout.default:
                 return False
-            # TODO (tmanlaibaatar)
-            # Eventually, we don't want to decompose any aten op at all
-            # but there is a safety and coverage gap that we need to close
-            # before that.
-            #
-            # (1) the "safety" is what we are risking with this PR
-            #     (we are blindly taking every op that advertises as
-            #      functional and sending it to the functional fallback.
-            #      We risk silent correctness if we have an op that lies about its schema,
-            #      that we didn't manually hardcode above) Therefore we always decompose them
-            # (2) the "not every composite inplace op has a functional variant" is a coverage gap,
-            #      but not really a safety risk, since we'll loudly error when we try to generate
-            #      functionalization kernels for these new (composite) inplace/view ops. But until we
-            #      establish such gap more concretely, we still decompose them
-            if self._dispatch_key is not None:
-                # it is unsafe to not decompose ops that claim to be functional but actually aren't
-                if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
-                    return True
-                # only decompose view or inplace mutating ops
-                alias_info = len(
-                    [i for i in func._schema.arguments if i.alias_info is not None]
-                )
-                should_decompose = alias_info != 0 or func._schema.is_mutable
-                if not should_decompose:
-                    if func.namespace not in ["aten", "prim"]:
-                        warnings.warn(
-                            f"At pre-dispatch tracing, we will assume that any "
-                            f"custom op that is marked with CompositeImplicitAutograd "
-                            f"and functional are safe to not decompose. We found {func}"
-                            f" to be one such op."
-                        )
-                return should_decompose
+
+            # We unconditionally decompose ops that are maybe aliasing or mutating ops
+            if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+                return True
+
+            # (1) we unconditionally decompose maybe-aliasing or maybe-mutating ops,
+            # because we must know statically of an op mutates or aliasing in order to functionalize it properly
+            # (2) for mutating ops that have CompositeImplicit decomps, we choose to decompose them today.
+            # In theory, we could walk this back and avoid decomposing them later if we need to.
+            alias_info_present = any(arg.alias_info for arg in func._schema.arguments)
+            if alias_info_present or func._schema.is_mutable:
+                return True
+
+            # If we are here, it means we are seeing functional composite op.
+            # For pre-dispatch IR or export inference IR, we wont' decompose them
+            if (self.export or self.pre_dispatch) and func._can_decompose():
+                if func.namespace not in ["aten", "prim"]:
+                    # TODO (tmanlaibaatar) check if the op is PT2 compliant
+                    warnings.warn(
+                        f"At pre-dispatch tracing, we assume that any custom op marked with "
+                        f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
+                        f"Found {func} to be one such op."
+                    )
+                return False
+
+            # in normal torch.compile IR, we decompose functional composite ops
             return True
 
         if (
@@ -504,11 +524,22 @@ class FunctionalTensorMode(TorchDispatchMode):
             or func == torch.ops.aten.lift_fresh.default
         ):
             return outs_wrapped
+        # for metadata mutations, need to manually mutate the metadata of the FunctionalTensor wrapper
+        if (
+            torch.Tag.inplace_view in func.tags
+            and func is not torch.ops.aten.set_.source_Tensor
+        ):
+            with torch.utils._mode_utils.no_dispatch():
+                func(*args, **kwargs)
         # Wrapper tensor subclasses do not have correct aliasing info! Use this util to manually correct the output aliasing.
         # inplace ops like `aten.add_()` are expected to return inputs **directly**, instead of creating fresh tensor objects.
         # Use this util to figure out the right thing to return.
         # If none of our inputs were wrapped, then we have no FunctionalTensor outputs that we need to fix up storages for.
         return return_and_correct_aliasing(func, args, kwargs, outs_wrapped)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
 
 @contextlib.contextmanager
@@ -719,3 +750,9 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def mark_mutation_hidden_from_autograd(self, tensor) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
+
+
+def mb_unwrap_functional_tensor(tensor: torch.Tensor):
+    if isinstance(tensor, FunctionalTensor):
+        return torch._from_functional_tensor(tensor.elem)
+    return tensor

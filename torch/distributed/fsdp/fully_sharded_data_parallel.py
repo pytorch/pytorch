@@ -85,8 +85,8 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.utils import _p_assert
-from ._flat_param import FlatParameter, FlatParamHandle
 
+from ._flat_param import FlatParameter, FlatParamHandle
 from ._optim_utils import (
     _flatten_optim_state_dict,
     _get_param_id_to_param_from_optim_input,
@@ -522,6 +522,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
         _register_all_state_dict_hooks(self)
+        self._zero_scalar = None
 
     @property
     def module(self) -> nn.Module:
@@ -686,6 +687,15 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             A StateDictSettings that include the previous state_dict type and
             configuration for the module.
         """
+        warnings.warn(
+            "FSDP.state_dict_type() and FSDP.set_state_dict_type() are being "
+            "deprecated. Please use APIs, get_state_dict() and set_state_dict(), "
+            "which can support different parallelisms, FSDP1, FSDP2, DDP. "
+            "API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html"
+            "#torch.distributed.checkpoint.state_dict.get_state_dict ."
+            "Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .",
+            FutureWarning,
+        )
         _state_dict_type_to_config = {
             StateDictType.FULL_STATE_DICT: FullStateDictConfig,
             StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
@@ -1104,6 +1114,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             raise RuntimeError(
                 "`clip_grad_norm_()` should only be called on the root FSDP instance"
             )
+        if self._zero_scalar is None:
+            self._zero_scalar = torch.tensor(0.0, device=self.compute_device)
         self._assert_state(TrainingState.IDLE)
         # If every FSDP instance uses `NO_SHARD`, then we can directly use
         # the normal `nn.utils` one targeting local gradients
@@ -1143,11 +1155,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 if param.grad is not None:
                     grads.append(param.grad)
         # Compute local norms (forced to be in FP32)
-        local_sharded_norm = _get_grad_norm(sharded_params, norm_type).to(
-            self.compute_device
+        local_sharded_norm = _get_grad_norm(
+            sharded_params, norm_type, self._zero_scalar, self.compute_device
         )
         local_nonsharded_norm = (
-            _get_grad_norm(nonsharded_params, norm_type).to(self.compute_device)
+            _get_grad_norm(
+                nonsharded_params, norm_type, self._zero_scalar, self.compute_device
+            )
             if nonsharded_params
             else None
         )
@@ -2085,6 +2099,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 def _get_grad_norm(
     params: Iterable[nn.Parameter],
     norm_type: float,
+    zero: torch.Tensor,
+    device: torch.device,
 ) -> torch.Tensor:
     """
     Return the gradient norm of parameters ``param`` s, where the gradients are viewed as a single vector.
@@ -2094,7 +2110,8 @@ def _get_grad_norm(
     """
     params_with_grad = [param for param in params if param.grad is not None]
     if len(params_with_grad) == 0:
-        return torch.tensor(0.0)
+        # Reuse a tensor for zero to avoid a GPU sync
+        return zero
     grads = [param.grad for param in params_with_grad]
     grad_dtypes = {grad.dtype for grad in grads}
     if len(grad_dtypes) != 1:
@@ -2113,7 +2130,7 @@ def _get_grad_norm(
         norm_type,
         dtype=torch.float32,
     )
-    return grad_norm
+    return grad_norm.to(device=device)
 
 
 def _get_param_to_fqn(

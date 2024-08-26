@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from types import TracebackType
 from typing import List, Optional
 import tempfile

@@ -68,6 +68,8 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
     ${TORCH_ROOT}/third_party/kineto/libkineto/include
+    ${TORCH_ROOT}/third_party/cpp-httplib
+    ${TORCH_ROOT}/third_party/nlohmann/include
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -80,6 +82,8 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     Python::Module
     pybind::pybind11
     opentelemetry::api
+    httplib
+    nlohmann
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
@@ -131,8 +135,18 @@ if(USE_CUDA)
         list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cudnn)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
     endif()
+    if(USE_CUSPARSELT)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cusparselt)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUSPARSELT)
+    endif()
 
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
+    if(TARGET torch::nvtx3)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtx3)
+    else()
+      if(TARGET torch::nvtoolsext)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
+      endif()
+    endif()
 endif()
 
 if(USE_ROCM)
@@ -163,6 +177,10 @@ if(USE_CUDNN OR USE_ROCM)
           PROPERTIES COMPILE_DEFINITIONS "USE_STATIC_CUDNN"
         )
     endif()
+endif()
+
+if(USE_CUSPARSELT)
+    list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/cuda/shared/cusparselt.cpp)
 endif()
 
 if(USE_MPS)
@@ -278,11 +296,6 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
 endif()
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-endif()
-
 if(NOT MSVC)
   # cudaProfilerInitialize must go away
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations")
@@ -296,7 +309,16 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
-add_dependencies(torch_python Caffe2_PROTO)
+
+if(CAFFE2_USE_MKL AND BUILD_LIBTORCHLESS)
+
+  # Use the RPATH of the linked libraries
+  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+  # we need to explicitly link caffe2::mkl in order to have the
+  # correct RPATH in torch_python for the split build
+  target_link_libraries(torch_python PRIVATE caffe2::mkl)
+endif()
+
 add_dependencies(torch_python onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
@@ -304,10 +326,53 @@ if(USE_NUMPY)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
+if(USE_CUFILE AND NOT USE_ROCM)
+  target_compile_definitions(torch_python PRIVATE USE_CUFILE)
+endif()
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
+
+# in case of the split build we need to add compile definitions
+if(BUILD_LIBTORCHLESS)
+  if(USE_UCC AND USE_C10D_UCC)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_UCC)
+  endif()
+
+  if(USE_UCC AND USE_C10D_NCCL)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_NCCL)
+  endif()
+
+  if(USE_DISTRIBUTED)
+    target_compile_definitions(torch_python PRIVATE USE_DISTRIBUTED)
+  endif()
+
+  if(USE_MPI AND USE_C10D_MPI)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_MPI)
+  endif()
+
+  if(USE_GLOO AND USE_C10D_GLOO)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_GLOO)
+  endif()
+
+  if(NOT WIN32)
+    target_compile_definitions(torch_python PRIVATE USE_RPC)
+  endif()
+
+  if(USE_TENSORPIPE)
+    target_compile_definitions(torch_python PRIVATE USE_TENSORPIPE)
+  endif()
+
+  set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
+  "Experimental option to use a single thread pool for inter- and intra-op parallelism")
+  if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
+    target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+  endif()
+
+endif()
+
 add_dependencies(torch_python torch_python_stubs)
 add_dependencies(torch_python flatbuffers)
 
@@ -364,6 +429,12 @@ if(BUILD_ONEDNN_GRAPH)
   if(NOT BUILD_LIBTORCHLESS)
     target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
   endif()
+endif()
+
+if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
+   # Workaround numerous decret-without-a-gil warnings from JIT
+   # see https://github.com/pytorch/pytorch/issues/130073
+   target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")

@@ -88,7 +88,7 @@ std::optional<std::string> findSchemaDifferences(
   }
 
   // no differences found
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 } // namespace c10

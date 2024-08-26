@@ -242,7 +242,7 @@ pyhpc_equation_of_state,pass,0
 
 
 
-pyhpc_isoneutral_mixing,fail_to_run,0
+pyhpc_isoneutral_mixing,pass,0
 
 
 
@@ -350,4 +350,4 @@ vision_maskrcnn,fail_to_run,0
 
 
 
-yolov3,fail_to_run,0
+yolov3,pass,0

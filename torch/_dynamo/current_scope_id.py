@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 import contextlib
 import threading
+
 
 # Global variable to identify which SubgraphTracer we are in.
 # It is sometimes difficult to find an InstructionTranslator to use.

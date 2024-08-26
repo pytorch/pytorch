@@ -1,4 +1,7 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import functools
+import itertools
 import numbers
 import operator
 import sys
@@ -8,6 +11,7 @@ from itertools import chain, product
 from typing import Any, Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
+import torch._meta_registrations
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
@@ -29,6 +33,7 @@ from torch._prims_common.wrappers import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
+
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
@@ -416,6 +421,15 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
+@register_decomposition(aten._safe_softmax)
+def safe_softmax(self, dim, dtype=None):
+    out = torch.softmax(self, dim=dim, dtype=dtype)
+    masked = self.eq(float("-inf"))
+    masked_rows = torch.all(masked, dim=dim, keepdim=True)
+    zeros = torch.zeros_like(out)
+    return torch.where(masked_rows, zeros, out)
+
+
 @register_decomposition(aten.smooth_l1_loss)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -733,6 +747,11 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_size_oblivious,
+        statically_known_true,
+    )
+
     ndim = self.dim()
     if ndim == 0:
         raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
@@ -746,20 +765,22 @@ def slice_forward(
     start_val = start if start is not None else 0
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val += sizes[dim]
 
-    if end_val < 0:
+    if guard_size_oblivious(end_val < 0):
         end_val += sizes[dim]
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val = 0
-    elif start_val > sizes[dim]:
+    elif guard_size_oblivious(start_val > sizes[dim]):
         start_val = sizes[dim]
 
-    if end_val < start_val:
+    if guard_size_oblivious(end_val < start_val):
         end_val = start_val
-    elif end_val > sizes[dim]:
+    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
+        end_val > sizes[dim]
+    ):
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
@@ -773,6 +794,70 @@ def slice_forward(
         )
     else:
         return self.as_strided(sizes, strides, storage_offset)
+
+
+def _normalize_start_end(
+    x: Tensor, dim: int, start: Optional[int], end: Optional[int]
+) -> Tuple[int, int]:
+    """
+    Normalize start and end such that both are in the range
+    [0, x.get_size()[dim]] and start <= end.
+    """
+    dim_size = x.shape[dim]
+
+    def clamp_wrap(val, lower, upper, default) -> int:
+        if val is None:
+            return default
+        if val < 0:
+            val = val + dim_size
+        return min(max(val, lower), upper)
+
+    start = clamp_wrap(start, 0, dim_size, 0)
+    end = clamp_wrap(end, start, dim_size, dim_size)
+    return start, end
+
+
+# This is not in torch._refs because aten.index used by
+# aten._unsafe_masked_index does not have a decomposition.
+@register_decomposition(aten.slice_scatter)
+@out_wrapper()
+def slice_scatter(
+    input: Tensor,
+    src: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+    dim = utils.canonicalize_dim(input.ndim, dim)
+    dim_size = input.shape[dim]
+    start, end = _normalize_start_end(input, dim, start, end)
+
+    src_size = list(input.shape)
+    src_size[dim] = (end - start + (step - 1)) // step
+    src = src.expand(src_size)
+
+    if start == 0 and end == dim_size and step == 1:
+        return src.clone()
+
+    indices = [None] * input.dim()
+    idx = torch.arange(dim_size, device=input.device)
+    indices[dim] = (idx - start) // step
+
+    mask = torch.ones(dim_size, device=input.device, dtype=torch.bool)
+    if start != 0:
+        mask = torch.logical_and(mask, idx >= start)
+
+    if end != dim_size:
+        mask = torch.logical_and(mask, idx < end)
+
+    if step != 1:
+        mask = torch.logical_and(mask, (idx - start) % step == 0)
+
+    mask_shape = [1] * input.dim()
+    mask_shape[dim] = -1
+    mask = mask.view(mask_shape)
+    return aten.where(mask, aten._unsafe_masked_index(src, mask, indices, 0), input)
 
 
 @register_decomposition(aten.select_backward)
@@ -1500,7 +1585,7 @@ def native_group_norm_backward(
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
     torch._check(
         input.numel() == N * C * HxW,
-        lambda: f"Expect input to have { N * C * HxW} elements",
+        lambda: f"Expect input to have {N * C * HxW} elements",
     )
     torch._check(
         mean.shape == (N, group),
@@ -2069,7 +2154,7 @@ def _fused_dropout_decomposition(input, p, generator=None):
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
-    x: Tensor,
+    x: Union[Tensor, NumberType],
     *,
     dtype: Optional[torch.dtype] = None,
     layout=None,
@@ -2080,24 +2165,33 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
+    assert isinstance(x, (torch.Tensor, int, float, bool, complex))
     if device is None and dtype is None and memory_format is None:
-        return x.clone()
+        if isinstance(x, torch.Tensor):
+            return x.clone()
+        else:
+            return x
     dtype_converted = False
 
-    if device is not None and device != x.device:
+    if isinstance(x, torch.Tensor):
+        x_tensor = x
+    else:
+        x_tensor = torch.scalar_tensor(x)
+
+    if device is not None and device != x_tensor.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
-            x = torch._prims.convert_element_type(x, dtype)
+            x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
             dtype_converted = True
-        x = torch._prims.device_put(x, device)
+        x_tensor = torch._prims.device_put(x_tensor, device)
 
     if dtype is not None and not dtype_converted:
-        x = torch._prims.convert_element_type(x, dtype)
+        x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
         dtype_converted = True
 
     if memory_format is not None:  # no ref/prim for memory format
-        return torch.clone(x, memory_format=memory_format)
-    return x
+        return torch.clone(x_tensor, memory_format=memory_format)
+    return x_tensor
 
 
 # Questionable decompositions
@@ -2147,7 +2241,7 @@ def cudnn_batch_norm(
 
 def _broadcast_batch_norm_backward(x, broadcast_mask):
     for axis, mask in enumerate(broadcast_mask):
-        if mask == 1 and not (axis < x.ndim and x.shape[axis] == broadcast_mask[axis]):
+        if mask == 1 and not (axis < x.ndim and x.shape[axis] == mask):
             x = x.unsqueeze(axis)
     return x
 
@@ -3712,8 +3806,65 @@ def _reshape_alias(x, shape, *args):
 
 
 @register_decomposition([aten._unsafe_index])
-def _index(x, indices):
+def _unsafe_index(x, indices):
     return aten.index(x, indices)
+
+
+@register_decomposition([aten._unsafe_index_put])
+def _unsafe_index_put(x, indices, value, accumulate=False):
+    return aten.index_put(x, indices, value, accumulate)
+
+
+@register_decomposition([aten._unsafe_masked_index])
+def _unsafe_masked_index(x, mask, indices, fill):
+    for index in indices:
+        if index is not None:
+            torch._check(
+                index.dtype in [torch.long, torch.int],
+                lambda: "tensors used as indices must be long or int tensors",
+            )
+
+    torch._check(
+        mask.dtype == torch.bool,
+        lambda: "tensors used as masks must be bool tensors",
+    )
+
+    if x.numel() == 0:
+        meta_result = torch._meta_registrations.meta_index_Tensor(x, indices)
+        return x.new_full(meta_result.shape, fill)
+
+    for i in range(len(indices)):
+        index = indices[i]
+        if index is not None:
+            indices[i] = index.clamp(min=0, max=x.size(i) - 1)
+
+    return aten._unsafe_index(x, indices).masked_fill(~mask, fill)
+
+
+@register_decomposition([aten._unsafe_masked_index_put_accumulate])
+def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
+    for index in indices:
+        if index is not None:
+            torch._check(
+                index.dtype in [torch.long, torch.int],
+                lambda: "tensors used as indices must be long or int tensors",
+            )
+
+    torch._check(
+        mask.dtype == torch.bool,
+        lambda: "tensors used as masks must be bool tensors",
+    )
+
+    if x.numel() == 0:
+        return x.clone()
+
+    for i in range(len(indices)):
+        index = indices[i]
+        if index is not None:
+            indices[i] = index.clamp(min=-x.size(i), max=x.size(i) - 1)
+
+    masked_value = values.masked_fill(~mask, 0)
+    return aten._unsafe_index_put(x, indices, masked_value, accumulate=True)
 
 
 def _nll_loss_forward(
@@ -4467,6 +4618,97 @@ def _reflection_or_replication_pad(
     return result
 
 
+@register_decomposition(aten.reflection_pad1d_backward)
+@register_decomposition(aten.reflection_pad2d_backward)
+@register_decomposition(aten.reflection_pad3d_backward)
+@out_wrapper("grad_input")
+def _reflection_pad_backward(grad_output, x, padding):
+    dim = len(padding) // 2
+
+    dhw = [h - 1 for h in x.shape[-dim:]]
+
+    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
+    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
+
+    indices = []
+    for i in range(x.ndim):
+        view_shape = [1] * x.ndim
+        view_shape[i] = -1
+        indices.append(torch.arange(x.shape[i], device=x.device).view(view_shape))
+
+    b = indices[:-dim]
+    xyz = indices[-dim:]
+
+    def index_range_condition(index_range):
+        i, lb, ub = index_range
+        return torch.logical_and(i >= lb, i <= ub)
+
+    # Areas after reflection:
+    #
+    #   top-left    |   top     |   top-right
+    # -----------------------------------------
+    #   left        |   center  |   right
+    # -----------------------------------------
+    #   bottom-left |   bottom  |   bottom-right
+    #
+    # The center area is the original matrix. Other areas are reflections.
+
+    center = [xyz[i] + padding_left[i] for i in range(dim)]
+    left_reflect = [padding_left[i] - xyz[i] for i in range(dim)]
+    right_reflect = [2 * dhw[i] + padding_left[i] - xyz[i] for i in range(dim)]
+
+    # Accumulate gradients from different areas
+    # If some of the padding is negative, center load is not always valid
+    range_c = [
+        (center[i], 0, dhw[i] + padding_left[i] + padding_right[i]) for i in range(dim)
+    ]
+    cond = functools.reduce(
+        aten.logical_and, [index_range_condition(range_c[i]) for i in range(dim)]
+    )
+    grad = aten._unsafe_masked_index(grad_output, cond, b + center, 0.0)
+
+    def accumulate(grad, out, index_ranges):
+        # If the upper bound is less than the lower bound, we can get rid of one accumulation.
+        # This happens when the padding size is zero.
+        for i in range(dim):
+            upper_less_than_lower = index_ranges[i][2] < index_ranges[i][1]
+            if isinstance(upper_less_than_lower, bool) and upper_less_than_lower:
+                return grad
+
+        cond = functools.reduce(
+            aten.logical_and,
+            [index_range_condition(index_range) for index_range in index_ranges],
+        )
+        g = aten._unsafe_masked_index(grad_output, cond, b + out, 0.0)
+        return grad + g
+
+    for area in itertools.product(*[[-1, 0, 1] for _ in range(dim)]):
+        if area == tuple([0] * dim):
+            # center, this is already done.
+            continue
+
+        outs = []
+        index_ranges = []
+
+        for i in range(dim):
+            if area[i] == 0:
+                out = center[i]
+                index_range = range_c[i]
+            elif area[i] == -1:
+                out = left_reflect[i]
+                index_range = (xyz[i], 1, padding_left[i])
+            elif area[i] == 1:
+                out = right_reflect[i]
+                index_range = (xyz[i], dhw[i] - padding_right[i], dhw[i] - 1)
+
+            outs.append(out)  # type: ignore[possibly-undefined]
+            index_ranges.append(index_range)  # type: ignore[possibly-undefined]
+
+        grad = accumulate(grad, outs, index_ranges)
+
+    return grad
+
+
 @register_decomposition(aten.aminmax)
 @out_wrapper("min", "max")
 def aminmax(self, *, dim=None, keepdim=False):
@@ -4755,6 +4997,10 @@ def sum_default(
 
 @register_decomposition([aten.squeeze.default, aten.squeeze.dim])
 def squeeze_default(self: Tensor, dim: Optional[int] = None):
+    # handle a scalar directly
+    if not isinstance(self, torch.Tensor):
+        return self
+    # perform squeeze
     if dim is None:
         return aten.squeeze.dims(self, list(range(self.dim())))
     else:
@@ -4762,11 +5008,13 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
 
 
 @register_decomposition(torch.ops.aten._weight_norm_interface)
-def _weight_norm_interface(x, y, dim=0):
+def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
-    keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
-    norm = x.norm(2, keep_dim, keepdim=True)
-    return x * (y / norm), norm
+    keep_dim = tuple(i for i in range(len(v.shape)) if i != dim)
+    # align with cuda behavior, keep norm in 'float' when g is 'bfloat16'
+    norm_dtype = torch.float if g.dtype == torch.bfloat16 else None
+    norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
+    return v * (g / norm.to(g.dtype)), norm
 
 
 @register_decomposition(aten.isin)

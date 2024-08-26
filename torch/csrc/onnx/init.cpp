@@ -155,9 +155,8 @@ void initONNXBindings(PyObject* module) {
           "_jit_pass_onnx_unpack_quantized_weights",
           ::torch::wrap_pybind_function(
               [](std::shared_ptr<Graph>& graph,
-                 std::map<std::string, IValue>& paramsDict,
-                 bool caffe2) {
-                UnpackQuantizedWeights(graph, paramsDict, caffe2);
+                 std::map<std::string, IValue>& paramsDict) {
+                UnpackQuantizedWeights(graph, paramsDict);
                 return paramsDict;
               }),
           pybind11::return_value_policy::move)
@@ -292,7 +291,5 @@ void initONNXBindings(PyObject* module) {
       .value("TRAINING", TrainingMode::TRAINING);
 
   onnx.attr("PRODUCER_VERSION") = py::str(TORCH_VERSION);
-
-  onnx.attr("_CAFFE2_ATEN_FALLBACK") = false;
 }
 } // namespace torch::onnx

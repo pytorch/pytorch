@@ -12,9 +12,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe_cuda.h>
 C10_DIAGNOSTIC_POP()
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 namespace {
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL
@@ -94,7 +92,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
 
     message.tensors.push_back(std::move(tensor));
 
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   at::DataPtr allocateTensorForReceiving(
@@ -126,8 +124,6 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
 C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CUDA, TensorpipeCudaConverter);
 
 } // namespace
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif

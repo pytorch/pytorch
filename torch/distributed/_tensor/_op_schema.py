@@ -1,11 +1,13 @@
+# mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement
 from torch.distributed.device_mesh import DeviceMesh
+
 
 try:
     from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
@@ -20,6 +22,9 @@ except ImportError:
 # Common type aliases
 ArgsType = Tuple[object, ...]
 KwargsType = Dict[str, object]
+
+PlacementList = List[Optional[Placement]]
+
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
 # be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
@@ -118,8 +123,6 @@ class StrategyType:
         OpStrategy and TupleStrategy
     """
 
-    pass
-
 
 class OpStrategy(StrategyType):
     """
@@ -209,10 +212,10 @@ class RuntimeSchemaInfo:
 @dataclass
 class OpSchema:
     """
-    OpSchema is a data class that describes an operator input schemas, it
-    includes DTensor DTensorSpecs and non-tensor args/kwargs (positional order
-    preserved). It is mainly used by the dispatching logic below to run things like
-    sharding propagation.
+    OpSchema is a data class that describes an operator input schemas, it includes
+    DTensorSpecs (instead of DTensor) and non-tensor args/kwargs (positional order
+    preserved). It is mainly used by the DTensor's dispatching logic to perform various
+    actions (i.e. sharding propagation, caching sharding decisions, redistribute, etc.)
 
     NOTE: this should be used as a read only data class
     TODO: make this a frozen dataclass
@@ -220,9 +223,9 @@ class OpSchema:
     Args:
         op: the operator overload we are intercepting
         args_schema: contains args except that the DTensor args have been replaced
-            with its DTensorSpec
+            with its DTensorSpec or OpStrategy
         kwargs_schema: contains kwargs except that the DTensor kwargs have been replaced
-            with its DTensorSpec
+            with its DTensorSpec or OpStrategy
     """
 
     op: OpOverload
@@ -238,15 +241,24 @@ class OpSchema:
             with NO non-DTensor positional arguments (i.e. int/float/tuple, etc)
             mainly used by sharding propagation to propagate the output spec
         """
-        # filter out non-relevant values from args schema to get a clean spec list
-        # this would mainly be used by sharding propagation rules
-        if self.schema_info is not None and self.schema_info.needs_pytree:
-            return tuple(
-                item
-                for item in tree_leaves(self.args_schema)
-                if isinstance(item, DTensorSpec)
-            )
-        return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
+        args = (
+            tree_leaves(self.args_schema)
+            if self.schema_info is not None and self.schema_info.needs_pytree
+            else self.args_schema
+        )
+        return tuple(item for item in args if isinstance(item, DTensorSpec))
+
+    @property
+    def args_strategy(self) -> Tuple[OpStrategy, ...]:
+        # filter out non-relevant values from args schema to get a clean OpStrategy list
+        # separate with args_spec for the ease of type annotation
+        # TODO: see if we should merge this with args_spec
+        args = (
+            tree_leaves(self.args_schema)
+            if self.schema_info is not None and self.schema_info.needs_pytree
+            else self.args_schema
+        )
+        return tuple(item for item in args if isinstance(item, OpStrategy))
 
     def __repr__(self) -> str:
         args_schema = ", ".join([str(arg_schema) for arg_schema in self.args_schema])
@@ -257,24 +269,24 @@ class OpSchema:
         )
 
     def __str__(self) -> str:
-        args_sharding: List[str] = []
+        args_schema: List[str] = []
         mesh_shape = None
         for arg in self.args_schema:
             if isinstance(arg, DTensorSpec):
-                args_sharding.append(str(arg))
+                args_schema.append(str(arg))
                 mesh_shape = arg.mesh.shape
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
-                args_sharding.append(_pretty_print_spec(arg.strategies[0].output_specs))
+                args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.mesh_shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]
                 assert isinstance(first_op_strtgy, OpStrategy)
                 mesh_shape = first_op_strtgy.mesh_shape
-                args_sharding.append(str(arg))
+                args_schema.append(str(arg))
             else:
-                args_sharding.append(str(arg))
-        return f"Op(op={self.op}, args_sharding={', '.join(args_sharding)} @ mesh: {mesh_shape})"
+                args_schema.append(str(arg))
+        return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
     def __post_init__(self) -> None:
         has_symints = False
@@ -413,13 +425,13 @@ class OpSchema:
 @dataclass
 class OutputSharding:
     """
-    OutputSharding is a data class that is used by the sharding propagation
-    rules, it could set the output_spec upon successful propagation, and if
-    it failed, output_spec would become None and sharding propagation rules
-    could give a list of suggestions for inputs to reshard.
+    OutputSharding is a data class that is used by the sharding propagation,
+    it could set the output_spec upon successful propagation. If needs_redistribute
+    is set to True, a redistribute_schema would be returned together to indicate
+    the input arguments needs to be redistributed before the op execution.
 
-    NOTE: the schema_suggestion generated by sharding propagation should be
-    exactly the same as the operator OpSchema, except the DTensor DTensorSpecs
+    NOTE: the redistribute_schema generated by sharding propagation should be
+    exactly the same as the operator OpSchema, except the DTensorSpecs
     """
 
     output_spec: OutputSpecType

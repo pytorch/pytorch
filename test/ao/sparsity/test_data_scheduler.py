@@ -8,9 +8,9 @@ from typing import Tuple
 import torch
 from torch import nn
 from torch.ao.pruning._experimental.data_scheduler import BaseDataScheduler
-
 from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
 from torch.testing._internal.common_utils import TestCase
+
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
