@@ -163,6 +163,7 @@ Tensor _nested_select_backward_symint(
   const Tensor& grad,
   const Tensor& nested_self,
   int64_t dim,
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   c10::SymInt index) {
   auto nt_self = get_nested_tensor_impl(nested_self);
   const Tensor& self_buffer = nt_self->get_buffer();
@@ -220,6 +221,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   Tensor dbeta;
   auto input_buffer = nt_impl_input->get_buffer();
   auto grad_buffer = nt_impl_grad->get_buffer();
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (grad_input_mask[0]) {
     dInput = at::native::empty_like(
         input_buffer,
