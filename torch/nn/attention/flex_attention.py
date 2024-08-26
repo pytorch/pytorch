@@ -929,9 +929,9 @@ def flex_attention(
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
-    # TODO: Remove these checks once we fully support non divisible cases.
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
+    # TODO: Remove these checks once we fully support non divisible cases.
     if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
         raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
     if key.size(-2) % 128 != 0:
