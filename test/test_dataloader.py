@@ -1372,7 +1372,7 @@ except RuntimeError as e:
             del loader1_it
             del loader2_it
 
-    @unittest.skipIf(true, "This test is disabled in pytorch/pytorch")
+    @unittest.skipIf(True, "This test is disabled in pytorch/pytorch")
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
