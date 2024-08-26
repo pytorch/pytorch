@@ -60,6 +60,7 @@ self-hosted-runner:
     # Organization wide AWS Windows runners
     - windows.g4dn.xlarge
     - windows.g4dn.xlarge.nonephemeral
+    - windows.4xlarge
     - windows.4xlarge.nonephemeral
     - windows.8xlarge.nvidia.gpu
     - windows.8xlarge.nvidia.gpu.nonephemeral
