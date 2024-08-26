@@ -143,38 +143,6 @@ if has_triton():
         tmp2 = tmp0 + tmp1
         tl.store(out_ptr + (x1 + (x_elements * y0)), tmp2, xmask & ymask)
 
-    @triton.autotune(
-        configs=[
-            triton.Config(
-                {"BLOCK_SIZE_X": 64, "BLOCK_SIZE_Y": 64}, num_stages=4, num_warps=4
-            ),
-        ],
-        key=["DUMMY"],
-    )
-    @triton.jit
-    def add_kernel_2d_autotuned_crazy_order(
-        in_ptr0,
-        in_ptr1,
-        out_ptr,
-        x_elements,
-        BLOCK_SIZE_X: "tl.constexpr",
-        BLOCK_SIZE_Y: "tl.constexpr",
-        y_elements,
-        DUMMY: "tl.constexpr",
-    ):
-        xoffset = tl.program_id(0) * BLOCK_SIZE_X
-        xindex = xoffset + tl.arange(0, BLOCK_SIZE_X)[:, None]
-        xmask = xindex < x_elements
-        yoffset = tl.program_id(1) * BLOCK_SIZE_Y
-        yindex = yoffset + tl.arange(0, BLOCK_SIZE_Y)[None, :]
-        ymask = yindex < y_elements
-        x1 = xindex
-        y0 = yindex
-        tmp0 = tl.load(in_ptr0 + (x1 + (x_elements * y0)), xmask & ymask)
-        tmp1 = tl.load(in_ptr0 + (y0 + (y_elements * x1)), xmask & ymask)
-        tmp2 = tmp0 + tmp1
-        tl.store(out_ptr + (x1 + (x_elements * y0)), tmp2, xmask & ymask)
-
     def _dummy_early_config_prune(configs, *_, **__):
         return configs
 
@@ -282,27 +250,6 @@ if has_triton():
         in_y_stride,
         out_y_stride,
         X_BLOCK_SIZE: "tl.constexpr",
-        Y_BLOCK_SIZE: "tl.constexpr",
-    ):
-        xid = tl.program_id(axis=0)
-        yid = tl.program_id(axis=1)
-        x_start = xid * X_BLOCK_SIZE
-        y_start = yid * Y_BLOCK_SIZE
-        x_offsets = x_start + tl.arange(0, X_BLOCK_SIZE)
-        y_offsets = y_start + tl.arange(0, Y_BLOCK_SIZE)
-        src_offsets = y_offsets[:, None] * in_y_stride + x_offsets[None, :]
-        dst_offsets = y_offsets[:, None] * out_y_stride + x_offsets[None, :]
-        src = tl.load(in_ptr + src_offsets)
-        tl.store(out_ptr + dst_offsets, src * 2.0)
-
-    @triton.jit
-    # TODO: we need autotuning params too
-    def double_strided_kernel_crazy_order(
-        in_ptr,
-        out_ptr,
-        in_y_stride,
-        X_BLOCK_SIZE: "tl.constexpr",
-        out_y_stride,
         Y_BLOCK_SIZE: "tl.constexpr",
     ):
         xid = tl.program_id(axis=0)
