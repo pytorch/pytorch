@@ -2287,6 +2287,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_partials_graph_break_reconstruct(self):
         def fn(udf_mul_0, udf_mul_1, x):
+            print(udf_mul_0, "func")
             lambda0 = functools.partial(udf_mul_0, y=x)
             lambda1 = functools.partial(udf_mul_1, y=x)
 
@@ -2807,6 +2808,66 @@ class GraphModule(torch.nn.Module):
 
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
+
+    def test_foldable_binary_op(self):
+        for op in (operator.pow, operator.mul, operator.floordiv, operator.truediv, operator.mod, operator.add, operator.sub):
+            with self.subTest(op=op):
+
+                def fn():
+                    # first arg to op
+                    first_args = itertools.chain(range(-30, -1), range(1, 30)) # avoid 0 as a base in pow
+                    # second arg to op
+                    second_args = itertools.chain(range(-10, -1), range(1, 10)) # avoid division by 0 
+                    arg_tuples  = itertools.product(first_args, second_args)
+                    args1, args2 = zip(*arg_tuples)
+                    return tuple(map(op, args1, args2))
+
+                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                self.assertEqual(opt_fn(), fn())
+
+    def test_foldable_binary_op_seq(self):
+        for op in (operator.concat, operator.iconcat):
+            with self.subTest(op=op):
+
+                def fn():
+                    # first arg to op
+                    first_args = [tuple(range(-10, i)) for i in range(10)]
+                    # second arg to op
+                    second_args = [tuple(range(-10, i)) for i in range(10)]
+                    return tuple(map(op, first_args, second_args))
+
+                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                self.assertEqual(opt_fn(), fn())
+
+        for op in (operator.contains, operator.countOf):
+            with self.subTest(op=op):
+
+                def fn():
+                    # first arg to op
+                    first_args = [tuple(range(-10, i)) for i in range(10)]
+                    # second arg to op
+                    second_args = list(range(10))
+                    return tuple(map(op, first_args, second_args)) # contains get the list as first arg, attention
+
+                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                self.assertEqual(opt_fn(), fn())
+
+    def test_delset_item_ops(self):
+        def fn():
+            a = [1, 2, 3]
+            operator.setitem(a, 1, 4)
+            return a
+
+        opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+        self.assertEqual(opt_fn(), fn())
+
+        def fn():
+            a = [1, 2, 3]
+            operator.setitem(a, 0, 8)
+            return a
+
+        opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+        self.assertEqual(opt_fn(), fn())
 
     def gen_random_range_args(self):
         args_count = random.randint(1, 3)
