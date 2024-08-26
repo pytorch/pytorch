@@ -211,10 +211,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   Variable var;
   if (grad_fn) {
     var = make_variable(data, Edge(std::move(grad_fn), output_nr_));
-  } else if (requires_grad_ || data.requires_grad()) {
-    var = make_variable(data, requires_grad_);
   } else {
-    var = data;
+    var = make_variable(data, requires_grad_);
   }
 
   impl::set_grad_accumulator(var, grad_accumulator_);
