@@ -824,7 +824,9 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
-def _apply_kernel_options(query, key, value, kernel_options):
+def _apply_kernel_options(
+    query: Tensor, key: Tensor, value: Tensor, return_lse: bool, kernel_options
+):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
@@ -832,11 +834,13 @@ def _apply_kernel_options(query, key, value, kernel_options):
 
     # If foward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
-    any_inputs_require_grad = (
-        query.requires_grad or key.requires_grad or value.requires_grad
-    )
-    output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
-    kernel_options.setdefault("OUTPUT_LOGSUMEXP", output_logsumexp)
+    kernel_options["OUTPUT_LOGSUMEXP"] = True
+    if not return_lse:
+        any_inputs_require_grad = (
+            query.requires_grad or key.requires_grad or value.requires_grad
+        )
+        output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
+        kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
 
     return kernel_options
 
@@ -957,6 +961,7 @@ def flex_attention(
         query,
         key,
         value,
+        return_lse,
         kernel_options,
     )
 
