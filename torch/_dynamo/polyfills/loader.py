@@ -11,11 +11,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 
-POLYFILLED_MODULE_NAMES: Tuple[str, ...] = (
-    "builtins",
-    "functools",
-    "itertools",
-)
+POLYFILLED_MODULE_NAMES: Tuple[str, ...] = ("builtins",)
 POLYFILLED_MODULES: Tuple["ModuleType", ...] = tuple(
     importlib.import_module(f".{submodule}", package=polyfills.__name__)
     for submodule in POLYFILLED_MODULE_NAMES
