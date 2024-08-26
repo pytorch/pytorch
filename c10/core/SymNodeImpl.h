@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DispatchKeySet.h>
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
@@ -213,6 +214,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   }
   virtual bool is_symbolic() {
     return true;
+  }
+  virtual c10::DispatchKeySet key_set() const {
+    return c10::DispatchKeySet();
   }
   std::ostream& operator<<(std::ostream& os) {
     os << str();

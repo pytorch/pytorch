@@ -5,6 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Bitset.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/util/irange.h>
 #include <ATen/core/Variadic.h>
 #include <ATen/core/stack.h>
@@ -44,6 +45,15 @@ static inline DispatchKeySet computeDispatchKeySet(
   // the TLS in question to be zero-initialized, so you don't actually win
   // anyting in that case.
   return (((ks | local.included_) - local.excluded_) & key_mask);
+}
+
+// NB: This is also used in backend select
+inline void updateDispatchKeySetFromSize(DispatchKeySet& ks, c10::SymIntArrayRef sizes) {
+  for (const auto& x : sizes) {
+    if (x.is_heap_allocated()) {
+      ks = ks | x.toSymNodeImplUnowned()->key_set();
+    }
+  }
 }
 
 }
@@ -93,6 +103,9 @@ namespace detail {
       if (gen.has_value() && gen->defined()) {
         ts = ts | gen->key_set();
       }
+    }
+    void operator()(const c10::SymIntArrayRef& xs) {
+      impl::updateDispatchKeySetFromSize(ts, xs);
     }
     template <typename T>
     void operator()(const T&) {
@@ -153,6 +166,13 @@ public:
       } else if (C10_UNLIKELY(ivalue.isTensorList())) {
         for (const at::Tensor& tensor : ivalue.toTensorList()) {
           ks = ks | tensor.key_set();
+        }
+      } else if (C10_UNLIKELY(ivalue.isSymIntList())) {
+        for (const auto& elt : ivalue.toListRef()) {
+          if (elt.isSymInt()) {
+            // IValues tagged SymInt are guaranteed to be heap_allocated
+            ks = ks | elt.toSymNodeImplUnowned()->key_set();
+          }
         }
       }
       // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
