@@ -10816,8 +10816,6 @@ fn
         gc.collect()
         self.assertTrue(cleared)
 
-    # this test is only valid for no inlining because the params are held in Dynamo graph as attributes.
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
