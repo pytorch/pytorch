@@ -3379,11 +3379,12 @@ class TilingSelect:
                     if has_free_symbols(call_ranges):
                         # For dynamic shape, if tiling_len is less than cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype),
                         # use tiling_factor // 2
-                        if V.graph.sizevars.size_hint(
-                            call_ranges[tiling_indice]
-                        ) < cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype):
+                        tiling_len = V.graph.sizevars.size_hint(
+                            call_ranges[tiling_indice], fallback=0
+                        )
+                        if tiling_len < cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype):
                             V.graph.sizevars.guard_lt(
-                                call_ranges[tiling_indice],
+                                tiling_len,
                                 cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype),
                             )
                             tiling_factor = (
