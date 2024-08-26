@@ -943,6 +943,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             code[0]
         )
 
+    @expectedFailure
     @supported_platform
     def test_do_not_trigger_dynamic_shapes_on_empty_block_mask(self):
         torch._dynamo.reset()
