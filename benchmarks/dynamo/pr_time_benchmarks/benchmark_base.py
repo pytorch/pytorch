@@ -1,10 +1,10 @@
 import csv
 from abc import ABC, abstractmethod
 
+from fbscribelogger import make_scribe_logger
+
 import torch._C._instruction_counter as i_counter
 import torch._dynamo.config as config
-
-from fbscribelogger import make_scribe_logger
 from torch._dynamo.utils import CompileTimeInstructionCounter
 
 
@@ -94,8 +94,7 @@ class BenchmarkBase(ABC):
             self._work()
             count = i_counter.end(id)
             print(f"instruction count for iteration {i} is {count}")
-            if i != 0:
-                results.append(count)
+            results.append(count)
         return min(results)
 
     def _count_compile_time_instructions(self):
@@ -109,8 +108,7 @@ class BenchmarkBase(ABC):
             self._work()
             count = CompileTimeInstructionCounter.value()
             print(f"compile time instruction count for iteration {i} is {count}")
-            if i != 0:
-                results.append(count)
+            results.append(count)
 
         config.record_compile_time_instruction_count = False
         return min(results)

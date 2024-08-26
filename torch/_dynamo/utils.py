@@ -56,7 +56,7 @@ from typing import (
 from typing_extensions import Literal, TypeGuard
 
 import torch
-import torch._C._instruction_counter as i_counter
+import torch._C._instruction_counter as _instruction_counter
 import torch._functorch.config
 import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
@@ -3112,17 +3112,20 @@ def store_user_object_weakref(obj):
 class CompileTimeInstructionCounter:
     _counter: int = 0
     _id: int = -1
+    _depth = 0
 
     @classmethod
     def start(cls) -> None:
-        if cls._id != -1:
-            raise RuntimeError("CompileTimeInstructionCounter is already started")
-        cls._id = i_counter.start()
+        cls._depth = cls._depth + 1
+        if cls._depth == 1:
+            cls._id = _instruction_counter.start()
 
     @classmethod
     def end(cls) -> None:
-        cls._counter += i_counter.end(cls._id)
-        cls._id = -1
+        cls._depth = cls._depth - 1
+        if cls._depth == 0:
+            cls._counter += _instruction_counter.end(cls._id)
+            cls._id = -1
 
     @classmethod
     def clear(cls) -> None:
@@ -3132,18 +3135,11 @@ class CompileTimeInstructionCounter:
     def value(cls) -> int:
         return cls._counter
 
-
-class CompileTimeInstructionCollector:
-    def __init__(self):
-        pass
-
-    def __enter__(self):
-        if config.record_compile_time_instruction_count:
-            self.started = True
-            CompileTimeInstructionCounter.start()
-        else:
-            self.started = False
-
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        if self.started:
-            CompileTimeInstructionCounter.end()
+    @classmethod
+    @contextmanager
+    def record(cls):
+        try:
+            cls.start()
+            yield
+        finally:
+            cls.end()
