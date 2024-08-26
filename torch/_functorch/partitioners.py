@@ -29,6 +29,7 @@ from torch.utils.checkpoint import CheckpointPolicy
 
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
+from ._aot_autograd.utils import is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target
 
 
@@ -249,12 +250,18 @@ def _is_backward_state(node: fx.Node) -> bool:
     return node.op == "placeholder" and isinstance(node.meta.get("val"), BackwardState)
 
 
+def _has_tag_is_backward(node: fx.Node) -> bool:
+    return node.meta.get("partitioner_tag", None) == "is_backward"
+
+
 def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "must_be_in_backward"
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
-    return _has_tag_must_be_in_backward(node)
+    return _has_tag_must_be_in_backward(node) or (
+        _has_tag_is_backward(node) and is_with_effects(node)
+    )
 
 
 def _extract_fwd_bwd_outputs(
