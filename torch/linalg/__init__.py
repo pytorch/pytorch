@@ -2134,6 +2134,9 @@ Letting `*` be zero or more batch dimensions,
     It is possible to compute the solution of the system :math:`XA = B` by passing the inputs
     :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
 
+.. note::
+    :attr:`A` is allowed to be a non-batched `torch.sparse_csr_tensor`, but only with `left=True`.
+
 """ + fr"""
 .. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.solve_ex")}
 """ + r"""
