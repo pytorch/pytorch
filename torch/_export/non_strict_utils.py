@@ -20,7 +20,12 @@ from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.dynamic_shapes import _tree_map_with_path
+from torch.export.dynamic_shapes import (
+    _check_dynamic_shapes,
+    _combine_args,
+    _process_dynamic_shapes,
+    _tree_map_with_path,
+)
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -91,7 +96,7 @@ def fakify(
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name  # type: ignore[assignment]
+            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
@@ -120,15 +125,14 @@ def make_fake_inputs(
     #   - output_graph.py fakifies inputs.
     #   - [post-tracing] guards.py processes input shape equalities.
 
-    constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-        nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace
+    combined_args = _combine_args(
+        nn_module, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
     )
-    constraints = constraints or []
+    _check_dynamic_shapes(combined_args, dynamic_shapes)
+    constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
-        if constraint.shared is not None:
-            t_constraints[constraint.shared.t_id][constraint.shared.dim] = constraint
 
     context = torch._guards.TracingContext.try_get()
     if context is not None:
@@ -185,6 +189,7 @@ def make_fake_inputs(
             (args, kwargs),
         )
 
+        names: Dict[str, Tuple[int, int]] = {}
         source_pairs: List[Tuple[Source, Source]] = []
         derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []
         phantom_symbols: Dict[str, Symbol] = {}
@@ -193,6 +198,7 @@ def make_fake_inputs(
                 constraint,
                 lambda t_id, dim: sources[(t_id, dim)],
                 fake_mode.shape_env,
+                names,
                 source_pairs,
                 derived_equalities,
                 phantom_symbols,
@@ -267,7 +273,6 @@ def produce_guards_and_solve_constraints(
         assert constraint_violation_error
         raise constraint_violation_error
     dim_constraints.solve()
-    dim_constraints.remove_redundant_dynamic_results()
     forced_specializations = dim_constraints.forced_specializations()
     if not _is_torch_jit_trace:
         msg = dim_constraints.prettify_results(
