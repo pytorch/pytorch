@@ -1974,6 +1974,21 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 torch.add(x, y)
         self.assertTrue(len(p2.events()) == 0)
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_lazy_build_tree(self):
+        with profile() as p:
+            self.payload()
+
+        stats = p._stats()
+        # Test that the tree is not built
+        self.assertEqual(stats.function_events_build_tree_call_duration_us, 0)
+        self.assertEqual(stats.number_of_events, 0)
+
+        # Test that the tree is built on demand
+        p.events()
+        self.assertGreater(stats.function_events_build_tree_call_duration_us, 0)
+        self.assertGreater(stats.number_of_events, 0)
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:
