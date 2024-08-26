@@ -15,6 +15,7 @@ import subprocess
 import sys
 import sysconfig
 import warnings
+from ctypes import cdll
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
@@ -158,6 +159,8 @@ def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
         return _is_apple_clang(cpp_compiler)
+    elif _IS_WINDOWS:
+        return bool(re.search(r"(clang-cl)", cpp_compiler))
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
@@ -761,6 +764,20 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+@functools.lru_cache(None)
+def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
+    try:
+        output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
+            "utf8"
+        )
+        omp_path = os.path.join(output.rstrip(), omp_name)
+        if os.path.isfile(omp_path):
+            os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+            omp_module = cdll.LoadLibrary(omp_path)
+    except subprocess.SubprocessError:
+        pass
+
+
 def _get_openmp_args(
     cpp_compiler: str,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
@@ -817,11 +834,16 @@ def _get_openmp_args(
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
     elif _IS_WINDOWS:
-        # /openmp, /openmp:llvm
-        # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
-        # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
-        cflags.append("openmp")
-        cflags.append("openmp:experimental")  # MSVC CL
+        if _is_clang(cpp_compiler):
+            cflags.append("openmp")
+            libs.append("libomp")
+            perload_clang_libomp_win(cpp_compiler, "libomp.dll")
+        else:
+            # /openmp, /openmp:llvm
+            # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
+            # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
+            cflags.append("openmp")
+            cflags.append("openmp:experimental")  # MSVC CL
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp())
