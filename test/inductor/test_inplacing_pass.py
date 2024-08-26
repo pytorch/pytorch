@@ -9,7 +9,12 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    subtest,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -95,7 +100,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         def f(x):
             out = torch.empty_like(x)
-            _, new_out = auto_functionalized(sin._opoverload, x=x, out=out)
+            _, new_out = auto_functionalized(sin._opoverload, x=x, result=out)
             y = out * new_out
             return new_out, y
 
@@ -182,9 +187,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         # Both list inputs failed to reinplace. So we should have emitted clones for them.
         self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
 
-    def test_partitioner_recomputes_factory(self):
-        factory_op = torch.ones_like
-
+    @parametrize(
+        "factory_op",
+        [
+            subtest(torch.ones_like, name="ones_like"),
+            subtest(torch.empty_like, name="empty_like"),
+        ],
+    )
+    def test_partitioner_recomputes_factory(self, factory_op):
         class MySin(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -207,6 +217,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         x = torch.randn(3, requires_grad=True, device=device)
         y = f(x)
         self.assertEqual(num_reinplacing_failures(), 0)
+
+
+instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
 
 if __name__ == "__main__":

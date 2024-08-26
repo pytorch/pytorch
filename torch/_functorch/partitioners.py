@@ -1291,6 +1291,8 @@ def get_default_op_list() -> OpTypes:
         aten.full,
         aten.as_strided,
         aten.zeros,
+        aten.empty,
+        aten.empty_like,
         aten.argmax,
         aten.maximum,
         prims.iota,
