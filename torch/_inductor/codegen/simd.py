@@ -1068,6 +1068,7 @@ class SIMDScheduling(BaseScheduling):
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
         not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
+        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1079,9 +1080,17 @@ class SIMDScheduling(BaseScheduling):
             _, (node_numel, node_rnumel) = n.group
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
+        def expect_improved_memory_usage(n):
+            for read in n.read_writes.reads:
+                if read.name in current_loop_buffer_usage:
+                    return True
+            return False
+
         def schedule_node_in_loop(n):
             done.add(n)
             node_schedule.append(n)
+            current_loop_buffer_usage.update([x.name for x in n.read_writes.reads])
+
             # A scan is modelled as a reduction in the scheduler but has a
             # full sized output that can be used inside the loop body
             if (
@@ -1091,16 +1100,31 @@ class SIMDScheduling(BaseScheduling):
                 and not isinstance(n.node.data, ir.Scan)
             ):
                 not_ready_yet_nodes.add(n.get_name())
+            else:  # this node is available within the loop
+                current_loop_buffer_usage.update([x.name for x in n.read_writes.writes])
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
             else:
+                # flush out any other runnable nodes to reduce number of loops
+                not_ready_yet_nodes.add(node.get_name())
+                for other_node in nodes[index + 1 :]:
+                    if (
+                        other_node not in done
+                        and fits_in_main_body(other_node)
+                        and not (not_ready_yet_nodes & other_node.ancestors)
+                        and expect_improved_memory_usage(other_node)
+                    ):
+                        schedule_node_in_loop(other_node)
+                    else:
+                        not_ready_yet_nodes.add(other_node.get_name())
                 node_schedule.append(DisableReduction)
             yield
             node_schedule.append(EnableReduction)
             not_ready_yet_nodes.clear()
+            current_loop_buffer_usage.clear()
 
         def requires_closing_previous_reduction(node, node_schedule):
             if rnumel == 1:
@@ -1118,7 +1142,9 @@ class SIMDScheduling(BaseScheduling):
             done.add(node)
 
             if fits_in_main_body(node):
-                if requires_closing_previous_reduction(node, node_schedule):
+                if requires_closing_previous_reduction(node, node_schedule) or (
+                    current_loop_buffer_usage and not expect_improved_memory_usage(node)
+                ):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
 
