@@ -1164,21 +1164,19 @@ def forward(self, add_1):
             x = torch.randn([3, 3])
             ep = export(mod, (x,))
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
-            print(inplace_ep.graph)
-
-            nodes = inplace_ep.graph.nodes
-            getitems = 0
-            for node in nodes:
-                if node.op == "call_function":
-                    self.assertFalse(node.target is auto_functionalized)
-                    if node.target is operator.getitem:
-                        getitems += 1
-            self.assertEqual(getitems, 2)  # tuple return of len 2
-
-            out_specs = inplace_ep.graph_signature.output_specs
-            self.assertEqual(out_specs[0].arg.name, "b_state")  # state
-            self.assertEqual(out_specs[1].arg.name, "getitem")  # tuple return 1
-            self.assertEqual(out_specs[2].arg.name, "getitem_1")  # tuple return 2
+            graph_text = str(inplace_ep.graph)
+            self.assertExpectedInline(
+                graph_text,
+                """\
+graph():
+    %b_state : [num_users=2] = placeholder[target=b_state]
+    %x : [num_users=1] = placeholder[target=x]
+    %as_strided_default : [num_users=1] = call_function[target=torch.ops.aten.as_strided.default](args = (%b_state, [1], [1], 0), kwargs = {})
+    %custom_mutator_tuple_default : [num_users=2] = call_function[target=torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator_tuple.default](args = (%x, %as_strided_default), kwargs = {})
+    %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%custom_mutator_tuple_default, 0), kwargs = {})
+    %getitem_4 : [num_users=1] = call_function[target=operator.getitem](args = (%custom_mutator_tuple_default, 1), kwargs = {})
+    return (b_state, getitem_3, getitem_4)""",
+            )
 
 
 if __name__ == "__main__":
