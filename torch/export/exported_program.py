@@ -4,7 +4,6 @@ import contextlib
 import copy
 import dataclasses
 import functools
-import itertools
 import operator
 import types
 import warnings
@@ -488,19 +487,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     ):
         return _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index)
 
-    param_buffer_name_to_idx = {}
-    count = 0
-    for name, _ in itertools.chain(ep.named_parameters(), ep.named_buffers()):
-        param_buffer_name_to_idx[name] = count
-        count += 1
-
     mod = ep.module()
-
-    param_buffer_original_index_to_current_idx = {}
-    for ix, (name, _) in enumerate(
-        itertools.chain(mod.named_parameters(), mod.named_buffers())
-    ):
-        param_buffer_original_index_to_current_idx[param_buffer_name_to_idx[name]] = ix
 
     fake_args = []
     for node in mod.graph.nodes:
@@ -580,7 +567,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
     gm, new_graph_signature = _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
 
     return _reorder_placeholder_same_as_original_ep_pass(
-        gm, new_graph_signature, param_buffer_original_index_to_current_idx
+        gm,
+        new_graph_signature,
+        ep.graph_module,
+        ep.graph_signature,
     )
 
 
