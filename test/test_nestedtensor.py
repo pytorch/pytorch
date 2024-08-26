@@ -6692,23 +6692,23 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         from torch.utils.flop_counter import FlopCounterMode
 
         def get_flops(nt):
-            flop_counter = FlopCounterMode(print=False)
+            flop_counter = FlopCounterMode(display=False)
             with flop_counter:
                 ret = torch.nn.functional.scaled_dot_product_attention(nt, nt, nt)
-                ret.values().backward()
+                ret.values().sum().backward()
             return flop_counter.get_total_flops()
 
         values = torch.randn(
             (8 * 16, 4, 16), requires_grad=True, device=device, dtype=torch.float16
         )
         offsets = torch.arange(0, 8 * 16 + 1, 16, device=device, dtype=torch.int32)
-        nt = convert_jagged_to_nested_tensor(values, offsets, max_seqlen=16)
+        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
 
         values_meta = torch.randn(
-            (8 * 16, 4, 16), requires_true=True, device="meta", dtype=torch.float16
+            (8 * 16, 4, 16), requires_grad=True, device="meta", dtype=torch.float16
         )
         offsets_meta = torch.arange(0, 8 * 16 + 1, 16, device="meta", dtype=torch.int32)
-        nt_meta = convert_jagged_to_nested_tensor(values, offsets, max_seqlen=16)
+        nt_meta = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
 
         self.assertEqual(get_flops(nt), get_flops(nt_meta))
 
