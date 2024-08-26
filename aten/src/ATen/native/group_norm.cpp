@@ -80,7 +80,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   auto memory_format = X.device().is_cpu() ?
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
-  TORCH_CHECK(X.is_contiguous(memory_format));
+  TORCH_CHECK(X.is_contiguous(memory_format) || (X.device().is_xpu() && memory_format == at::MemoryFormat::Contiguous));
 
   bool mixed_type = is_mixed_type(X, gamma, beta);
   if (mixed_type) {
