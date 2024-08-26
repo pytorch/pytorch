@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
+from torch._dynamo.testing import skipIfNotPy311
 
 
 d = torch.ones(10, 10)
@@ -2810,6 +2811,7 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(opt_fn(), fn())
 
     def test_foldable_binary_op(self):
+        # Dynamo support for foldable binary ops
         for op in (operator.pow, operator.mul, operator.floordiv, operator.truediv, operator.mod, operator.add, operator.sub):
             with self.subTest(op=op):
 
@@ -2826,6 +2828,7 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(opt_fn(), fn())
 
     def test_foldable_binary_op_seq(self):
+        # Dynamo support for foldable binary ops of sequences
         for op in (operator.concat, operator.iconcat):
             with self.subTest(op=op):
 
@@ -2853,9 +2856,10 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(opt_fn(), fn())
 
     def test_delset_item_ops(self):
+        # Dynamo support for operator.setitem and operator.delitem
         def fn():
             a = [1, 2, 3]
-            operator.setitem(a, 1, 4)
+            operator.delitem(a, 1)
             return a
 
         opt_fn = torch._dynamo.optimize(nopython=True)(fn)
@@ -2868,6 +2872,17 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch._dynamo.optimize(nopython=True)(fn)
         self.assertEqual(opt_fn(), fn())
+
+    @skipIfNotPy311
+    def test_operator_call(self):
+        for func in [operator.add, operator.sub, operator.mul, operator.truediv]:
+            with self.subTest(func=func):
+
+                def fn():
+                    return operator.call(func, 2, 3)
+
+                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                self.assertEqual(opt_fn(), fn())
 
     def gen_random_range_args(self):
         args_count = random.randint(1, 3)
