@@ -1642,6 +1642,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
 
     @supported_platform
+    def test_small_q_kv_len(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (1, 1, 1, 16),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        out_eager, lse_eager = flex_attention(query, key, value, return_lse=True)
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        out_compiled, lse_compiled = flex_compile(query, key, value, return_lse=True)
+
+        assert torch.equal(out_eager, out_compiled)
+        assert torch.equal(lse_eager, lse_compiled)
+
+    @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3
