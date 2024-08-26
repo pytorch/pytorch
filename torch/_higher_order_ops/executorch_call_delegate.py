@@ -25,7 +25,12 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.utils._pytree import tree_flatten
 
 
-executorch_call_delegate = HigherOrderOperator("executorch_call_delegate")
+class ExecutorchCallDelegate(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("executorch_call_delegate")
+
+
+executorch_call_delegate = ExecutorchCallDelegate()
 executorch_call_delegate.fallthrough(torch._C.DispatchKey.PythonDispatcher)
 executorch_call_delegate.fallthrough(torch._C.DispatchKey.PythonTLSSnapshot)
 executorch_call_delegate.fallthrough(torch._C.DispatchKey.ADInplaceOrView)
