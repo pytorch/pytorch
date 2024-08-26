@@ -1,16 +1,20 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
+import functools
+import inspect
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
+from .convert_frame import disabled_codes
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
+from .utils import is_function
 
 
 if TYPE_CHECKING:
@@ -26,6 +30,9 @@ else:
         if name.startswith("__"):
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 def run(fn=None):
@@ -49,9 +56,15 @@ def disable(fn=None, recursive=True):
     """
     if recursive:
         if fn is not None:
+            id_fn = id(fn)
+            if cached_fn := disabled_codes.get(id_fn):
+                return cached_fn
+
             fn = innermost_fn(fn)
             assert callable(fn)
-            return DisableContext()(fn)
+            out = DisableContext()(fn)
+            disabled_codes[id_fn] = out
+            return out
         return DisableContext()
     else:
         return skip(fn)
@@ -142,7 +155,6 @@ def disallow_in_graph(fn):
 @_disallow_in_graph_helper(throw_if_not_allowed=False)
 def graph_break():
     """Force a graph break"""
-    pass
 
 
 def forbid_in_graph(fn):
@@ -158,6 +170,166 @@ def forbid_in_graph(fn):
     assert callable(fn), "forbid_in_graph applies only to callables"
     fn._dynamo_forbidden = True
     return fn
+
+
+def substitute_in_graph(
+    original_fn: _F,
+    *,
+    skip_signature_check: bool = False,
+) -> Callable[[_F], _F]:
+    """
+    Register a polyfill handler for a function, usually a C function from the C extension, to be
+    used in place of the original function when inlining the original function in the graph.
+
+    .. note::
+
+        The polyfill handler is only used when inlining the original function. It is not used when
+        the original function is called directly. In the eager mode, the decorated function calls
+        the performant C function rather than the polyfill handler.
+
+    The polyfill handler is a function that will be called in place of the original function when
+    inlining the original function. The polyfill handler should have the same signature and the same
+    behavior as the original function.
+
+    Args:
+        original_fn (callable): The original function, usually a C function, to register a polyfill
+            handler for.
+        skip_signature_check (bool, optional): Whether to skip the signature check between the
+            original function and the polyfill handler. Defaults to ``False``.
+
+    Returns:
+        A decorator that registers the polyfill handler for the original function.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("conflict with the tests: duplicate polyfill handlers")
+        >>> import operator
+        >>> operator.indexOf([1, 2, 3, 4, 5], 3)
+        2
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        Traceback (most recent call last):
+        ...
+        torch._dynamo.exc.Unsupported: ...
+
+        >>> @torch.compiler.substitute_in_graph(operator.indexOf)
+        ... def indexOf(a, b, /):
+        ...     for i, item in enumerate(a):
+        ...         if item is b or item == b:
+        ...             return i
+        ...     raise ValueError("sequence.index(x): x not in sequence")
+        >>>
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        2
+    """
+    if not is_function(original_fn):
+        raise TypeError(
+            f"substitute_in_graph expects a function but got {type(original_fn)!r}"
+        )
+
+    def wrapper(traceable_fn: _F) -> _F:
+        if not is_function(traceable_fn):
+            raise TypeError(
+                f"@substitute_in_graph(...) expects a function but got {type(traceable_fn)!r}"
+            )
+
+        if not skip_signature_check:
+            try:
+                original_sig = inspect.signature(original_fn)
+            except ValueError:
+                pass
+            else:
+                traceable_sig = inspect.signature(traceable_fn)
+
+                def sig_ident(sig):
+                    # Ignore annotations for parameters and return type
+                    return (
+                        tuple(
+                            p.name
+                            for p in sig.parameters.values()
+                            if (
+                                p.kind
+                                not in {
+                                    p.KEYWORD_ONLY,
+                                    # the name of *args and **kwargs is not important
+                                    p.VAR_POSITIONAL,
+                                    p.VAR_KEYWORD,
+                                }
+                            )
+                        ),
+                        {
+                            p.name
+                            for p in sig.parameters.values()
+                            if p.kind == p.KEYWORD_ONLY
+                        },
+                        {
+                            p.name: p.default
+                            for p in sig.parameters.values()
+                            # the name of *args and **kwargs is not important
+                            if p.kind not in {p.VAR_POSITIONAL, p.VAR_KEYWORD}
+                        },
+                    )
+
+                wildcard_sig = inspect.signature(lambda *args, **kwargs: None)
+
+                if (
+                    sig_ident(original_sig) != sig_ident(traceable_sig)
+                    and sig_ident(original_sig) != sig_ident(wildcard_sig)
+                    and sig_ident(traceable_sig) != sig_ident(wildcard_sig)
+                ):
+                    raise TypeError(
+                        f"Signature mismatch between {original_fn} and {traceable_fn}: "
+                        f"{original_sig} != {traceable_sig}"
+                    )
+
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.trace_rules import get_torch_obj_rule_map
+        from torch._dynamo.variables import PolyfilledFunctionVariable
+        from torch._dynamo.variables.builder import VariableBuilder
+
+        id_dispatch_map = VariableBuilder._id_dispatch()
+        if id(original_fn) in id_dispatch_map:
+            raise ValueError(
+                f"Duplicate dispatch rule for {original_fn}: "
+                "already registered in VariableBuilder's id dispatch map"
+            )
+
+        rule_map = get_torch_obj_rule_map()
+        if original_fn in rule_map:
+            raise ValueError(
+                f"Duplicate object {original_fn} with different rules: "
+                f"{PolyfilledFunctionVariable}, {rule_map[original_fn]}"
+            )
+
+        polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
+        if original_fn in polyfill_handlers:
+            raise ValueError(
+                f"Duplicate polyfill handlers for {original_fn}: "
+                f"already handled by {polyfill_handlers[original_fn]}"
+            )
+
+        # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
+        # C++ function.
+        @functools.wraps(traceable_fn)
+        def wrapped(*args, **kwargs):
+            return original_fn(*args, **kwargs)
+
+        def dispatch_fn(self, value):
+            return PolyfilledFunctionVariable(
+                value,
+                source=self.source,
+                **self.install_guards(GuardBuilder.CLOSURE_MATCH),
+            )
+
+        id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
+        rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
+        polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = traceable_fn
+
+        wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
+        wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
+
+        return wrapped  # type: ignore[return-value]
+
+    return wrapper
 
 
 # Helper function to flatten a tensor subclass and apply a function to
@@ -348,7 +520,6 @@ def _allow_in_graph_einops():
         )
 
         # einops > 0.6.1 will call the op registration logic as it is imported.
-        pass
     except ImportError:
         # einops <= 0.6.1
         allow_in_graph(einops.rearrange)

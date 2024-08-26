@@ -64,11 +64,10 @@ def _replace_with_hop_helper(
                 # Rename the name of getitem nodes to the actual name of its contents
                 # for passing verifier and better readability, also propagate metadata
                 for get_item_node in call_func_node.users.keys():
-                    idx: int = get_item_node.args[1]
+                    idx: int = get_item_node.args[1]  # type: ignore[assignment]
                     output_node = output_args[idx]
                     get_item_node._rename(output_node.name)
                     get_item_node.meta = output_node.meta
-                    pass
 
             elif isinstance(output_args, torch.fx.Node):
                 call_func_node = graph.create_node(
@@ -115,7 +114,10 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
     replace_ctx = contextlib.nullcontext()
     new_signature = None
     if graph_signature is not None:
-        new_signature = copy.deepcopy(graph_signature)
+        # Cannot deep copy a real ScriptObject, which is referenced
+        # in the FakeScriptObject. Copy should be good enough to guard
+        # against accidental mutation to original graph_signature.
+        new_signature = copy.copy(graph_signature)
         new_gm_out_node = next(reversed(new_gm.graph.find_nodes(op="output")))
         assert new_gm_out_node.op == "output" and len(new_gm_out_node.args[0]) == len(
             new_signature.output_specs

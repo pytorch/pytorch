@@ -374,8 +374,6 @@ class CleanDiv(FloorDiv):
     This is to enable future optimizations.
     """
 
-    pass
-
 
 # Don't use sympy ceiling/floor as they will attempt simplifications involving
 # frac

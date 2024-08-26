@@ -37,6 +37,10 @@
 
 namespace c10d {
 
+// Control broadcasting of NCCL uniqueId
+static std::vector<std::string> TORCH_NCCL_BCAST_UNIQUEID = {
+    "TORCH_NCCL_BCAST_UNIQUEID"};
+
 // Control whether to always use high priority streams
 static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
     "TORCH_NCCL_HIGH_PRIORITY"};
@@ -105,6 +109,16 @@ static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
 // signal from other ranks, e.g. to dump the debugging information.
 static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
     "TORCH_NCCL_COORD_CHECK_MILSEC"};
+
+// Whether to log C++ stack traces on unclean shutdown (default true)
+static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
+    "TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN"};
+
+// Control whether to use CudaEventCache for the collective in watchdog thread.
+// We noticed in the past when cuda global lock is held, destroying CudaEvent
+// can cause a hang.
+static std::vector<std::string> TORCH_NCCL_CUDA_EVENT_CACHE = {
+    "TORCH_NCCL_CUDA_EVENT_CACHE"};
 
 static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
@@ -259,6 +273,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         const std::optional<std::vector<at::Tensor>>& inputs = std::nullopt,
         bool desyncDebug = false,
         bool enableTiming = false,
+        bool cudaEventCacheEnabled = false,
         DebugLevel distDebugLevel = DebugLevel::Off);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
@@ -417,6 +432,21 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::optional<uint64_t> trace_id_;
     DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
+  };
+
+  class CUDAEventCache {
+   public:
+    CUDAEventCache();
+    std::shared_ptr<at::cuda::CUDAEvent> create(bool timing);
+    static CUDAEventCache& get();
+
+   private:
+    std::mutex cacheMutex_;
+    // NOTE: We intentionaly store raw pointers so that
+    // we do not attempt to destroy the event objects on process exit,
+    // because cuda may be gone.
+    std::vector<at::cuda::CUDAEvent*>
+        eventsArray_[2]; // 0 for timing=false, 1 for timing=true
   };
 
   struct Options : Backend::Options {
@@ -935,10 +965,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>>
       inInitializationCommMap_;
 
-  // Map from ncclUniqueId to appropriate communicator.
-  std::unordered_map<std::string, std::shared_ptr<NCCLComm>> ncclIdToCommMap_;
-
-  // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
+  // Mutex to guard maps like devNCCLCommMap_.
   std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
@@ -959,6 +986,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;
+
+  // We gate the cudaEventCache so that we can roll it out gradually.
+  std::atomic<bool> cudaEventCacheEnabled_;
 
   // Monitor thread which checks the heartbeat of Watchdog thread.
   // If the monitor thread finds there is no heartbeat, it will dump debug info
@@ -1077,10 +1107,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
-  bool dumpOnException_;
+  bool dumpOnTimeoutOrEx_;
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;
+
+  // Whether or not to print C++ stack traces to logs on unclean shutdown.
+  bool logCppStackOnUncleanShutdown_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_

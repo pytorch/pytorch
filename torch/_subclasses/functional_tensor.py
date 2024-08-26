@@ -299,6 +299,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         # track of the ordering between side effectful operations.
         self._tokens: Dict[Any, torch.Tensor] = {}
 
+        # Filled after forward tracing.
+        self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
+
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to
         # see which tensors need to be functionalized and discover how many
@@ -743,3 +746,9 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def mark_mutation_hidden_from_autograd(self, tensor) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
+
+
+def mb_unwrap_functional_tensor(tensor: torch.Tensor):
+    if isinstance(tensor, FunctionalTensor):
+        return torch._from_functional_tensor(tensor.elem)
+    return tensor

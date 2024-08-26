@@ -2,11 +2,9 @@
 
 import contextlib
 import copy
-import inspect
 import itertools
 import math
 import operator
-import re
 import unittest
 
 import numpy as np
@@ -2501,7 +2499,6 @@ class TestDimConstraints(TestCase):
         dim_constraints.add(s5 >= 2)
 
         dim_constraints.solve()
-        dim_constraints.remove_redundant_dynamic_results()
         self.assertEqual(
             dim_constraints._static_results,
             {
@@ -2520,51 +2517,11 @@ class TestDimConstraints(TestCase):
         self.assertEqual(
             dim_constraints._dynamic_results,
             {
-                "dynamic_dim(L['e'], 1) == dynamic_dim(L['c'], 1)",
-                "dynamic_dim(L['d'], 1) == dynamic_dim(L['c'], 1)",
+                "2 <= L['c'].size()[1]",
+                "L['d'].size()[1] == L['c'].size()[1]",
+                "L['e'].size()[1] == L['c'].size()[1]",
             },
         )
-
-        def dummy_fn(a, b, c, d, e, f):
-            pass
-
-        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn), {})
-        static_code, dynamic_code = re.findall(r"```(.*?)```", action_code, re.DOTALL)
-        expected_static = """
-def specializations(a, b, c, d, e, f):
-    # a:
-    assert a.size()[0] == 8
-    assert a.size()[1] == 22
-    assert a.size()[2] == 96
-    assert a.size()[3] == 96
-
-    # b:
-    assert b.size()[0] == 8
-    assert b.size()[1] == 22
-    assert b.size()[2] == 3
-
-    # c:
-    assert c.size()[0] == 8
-
-    # d:
-    assert d.size()[0] == 8
-
-    # f:
-    assert f.size()[1] == 1
-"""
-        expected_dynamic = """
-def specify_constraints(a, b, c, d, e, f):
-    return [
-        # d:
-        dynamic_dim(d, 1) == dynamic_dim(c, 1),
-
-        # e:
-        dynamic_dim(e, 1) == dynamic_dim(c, 1),
-    ]
-"""
-
-        self.assertEqual(static_code, expected_static)
-        self.assertEqual(dynamic_code, expected_dynamic)
 
 
 class TestGuardsExpressions(TestCase):

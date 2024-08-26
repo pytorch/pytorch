@@ -79,7 +79,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         with tempfile.NamedTemporaryFile(suffix=".pte") as f:
             torch.export.save(exported_program, f.name)
-            del exported_program  # Delete the exported program to ensure that we are loading from file
+            del (
+                exported_program
+            )  # Delete the exported program to ensure that we are loading from file
             loaded_exported_program = torch.export.load(f.name)
 
         self._compare_onnx_and_torch_exported_program(

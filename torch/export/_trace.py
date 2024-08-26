@@ -681,7 +681,7 @@ def _export_to_aten_ir(
             if fake_mode:
                 insert_deferred_runtime_asserts(
                     gm,
-                    fake_mode.shape_env,
+                    fake_mode.shape_env,  # type: ignore[arg-type]
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
                 )
@@ -2075,6 +2075,13 @@ def _export(
     torch._export.utils.remove_proxy_from_state_dict(original_state_dict, in_place=True)
 
     from torch._export.verifier import Verifier
+
+    if (
+        isinstance(mod, torch.fx.GraphModule)
+        and hasattr(mod, "meta")
+        and "custom" in mod.meta
+    ):
+        gm.meta.update({"custom": mod.meta["custom"]})
 
     exported_program = ExportedProgram(
         root=gm,

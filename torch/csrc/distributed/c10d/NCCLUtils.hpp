@@ -219,7 +219,6 @@ TORCH_API std::string getNcclVersion();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();
 int nccl_nonblocking_timeout();
-bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf);
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
@@ -272,7 +271,7 @@ class NCCLComm {
     // Add lock in this destructor, as aborted_ needs to be read after memory
     // barrier here.
     std::unique_lock<std::mutex> lock(mutex_);
-    if (ncclComm_ && !aborted_) {
+    if (ncclComm_ && initialized_ && !aborted_) {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
       // Use ncclCommAbort instead of ncclCommDestroy here since
       // ncclCommDestroy could block forever waiting for work to complete on
@@ -381,7 +380,7 @@ class NCCLComm {
       std::optional<std::string> commFailureReason = std::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-    if (aborted_) {
+    if (aborted_ && !initialized_) {
       // Should not abort twice.
       return;
     }

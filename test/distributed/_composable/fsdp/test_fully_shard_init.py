@@ -373,6 +373,16 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
             chunks = torch.chunk(orig_param, self.world_size, dim=0)
             self.assertEqual(sharded_param._local_tensor, chunks[self.rank])
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_raise_scalar_parameter(self):
+        """Tests raising an exception when the model has scalar parameters."""
+        model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
+        model.register_parameter("scalar_p", nn.Parameter(torch.tensor(1.0).cuda()))
+        with self.assertRaisesRegex(
+            ValueError, "Change scalar_p to a 1D tensor with numel equal to 1."
+        ):
+            fully_shard(model)
+
 
 class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
     @property
