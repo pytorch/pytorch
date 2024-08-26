@@ -888,7 +888,7 @@ void all2all_single_unequal_split(
       type,
       comm,
       stream.stream()));
-#else 
+#else
   int numranks;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
@@ -938,27 +938,32 @@ void all2all(
   auto comm = to_nccl_comm(_comm);
 
 #ifdef NCCL_ALLTOALLV_SUPPORTED
-  std::vector<size_t> sendCounts(outputTensors.size());
-  std::vector<size_t> sendDisps(outputTensors.size());
+  TORCH_INTERNAL_ASSERT(
+      outputTensors.size() == inputTensors.size(),
+      "number of input tensors is not equal to number of output tensors");
+  std::vector<size_t> sendCounts(inputTensors.size());
+  std::vector<size_t> sendDisps(inputTensors.size());
   std::vector<size_t> recvCounts(outputTensors.size());
   std::vector<size_t> recvDisps(outputTensors.size());
-  uintptr_t sendBase =
-      reinterpret_cast<uintptr_t>(inputTensors[0].data_ptr());
-  uintptr_t recvBase =
-      reinterpret_cast<uintptr_t>(outputTensors[0].data_ptr());
+  uintptr_t sendBase = reinterpret_cast<uintptr_t>(inputTensors[0].data_ptr());
+  uintptr_t recvBase = reinterpret_cast<uintptr_t>(outputTensors[0].data_ptr());
   size_t dtypeSize = inputTensors.front().element_size();
 
   for (const auto r : c10::irange(outputTensors.size())) {
     sendCounts[r] = inputTensors[r].numel();
-    sendDisps[r] =
-        (reinterpret_cast<uintptr_t>(inputTensors[r].data_ptr()) -
-         sendBase) /
-        dtypeSize;
+    auto sendOffset =
+        reinterpret_cast<uintptr_t>(inputTensors[r].data_ptr()) - sendBase;
+    TORCH_INTERNAL_ASSERT(
+        sendOffset % dtypeSize == 0,
+        "sendOffset is not divisible by dtypeSize");
+    sendDisps[r] = sendOffset / dtypeSize;
     recvCounts[r] = outputTensors[r].numel();
-    recvDisps[r] =
-        (reinterpret_cast<uintptr_t>(outputTensors[r].data_ptr()) -
-         recvBase) /
-        dtypeSize;
+    auto recvOffset =
+        reinterpret_cast<uintptr_t>(outputTensors[r].data_ptr()) - recvBase;
+    TORCH_INTERNAL_ASSERT(
+        recvOffset % dtypeSize == 0,
+        "recvOffset is not divisible by dtypeSize");
+    recvDisps[r] = recvOffset / dtypeSize;
   }
   NCCL_CHECK(ncclAllToAllv(
       inputTensors[0].data_ptr(),
