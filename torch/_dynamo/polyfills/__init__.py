@@ -1,26 +1,16 @@
-# mypy: allow-untyped-defs
-
 """
 Python polyfills for common builtins.
 """
+
+# NOTE: 1. Please do not import any submodule in the directory here to avoid circular imports.
+#       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
+
+# mypy: allow-untyped-defs
+
 import math
 from typing import Any, Callable, Sequence
 
 import torch
-
-
-def all(iterator):
-    for elem in iterator:
-        if not elem:
-            return False
-    return True
-
-
-def any(iterator):
-    for elem in iterator:
-        if elem:
-            return True
-    return False
 
 
 def index(iterator, item, start=0, end=None):
@@ -156,11 +146,13 @@ def mapping_get(obj, key, value=None):
         return value
 
 
-def instantiate_user_defined_class_object(*args, **kwargs):
-    cls = args[0]
-    other_args = args[1:]
-    obj = cls.__new__(cls, *other_args, **kwargs)
-    obj.__init__(*other_args, **kwargs)
+def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
+    obj = cls.__new__(cls, *args, **kwargs)
+
+    # Only call __init__ if the object is an instance of the class
+    # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
+    if isinstance(obj, cls):
+        obj.__init__(*args, **kwargs)
     return obj
 
 
