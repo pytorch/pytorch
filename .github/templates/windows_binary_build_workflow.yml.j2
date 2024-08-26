@@ -56,7 +56,11 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
+    {%- if branches == "nightly" %}
+    runs-on: windows.4xlarge
+    {%- else %}
     runs-on: windows.4xlarge.nonephemeral
+    {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
     {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
