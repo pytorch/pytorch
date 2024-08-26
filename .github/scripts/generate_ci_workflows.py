@@ -10,6 +10,7 @@ from typing_extensions import TypedDict  # Python 3.11+
 import generate_binary_build_matrix  # type: ignore[import]
 import jinja2
 
+
 Arch = Literal["windows", "linux", "macos"]
 
 GITHUB_DIR = Path(__file__).resolve().parent.parent
