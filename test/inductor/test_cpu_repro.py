@@ -3586,7 +3586,8 @@ class CPUReproTests(TestCase):
                 with torch.no_grad():
                     opt_mod = torch.compile(mod)
                     _, code = run_and_get_cpp_code(opt_mod, x)
-                FileCheck().check_count("__at_align__", 0, exactly=True).run(code)
+                # check that there are no non_contiguous loads
+                FileCheck().check_count("__at_align__ std::array", 0, exactly=True).run(code)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
