@@ -98,7 +98,6 @@ class TestModuleTracker(TestCase):
             res = checkpoint(lambda inp: mod(inp), inp)
             res.sum().backward()
 
-
     def test_bw_detection(self):
         mod = nn.Linear(2, 2)
 

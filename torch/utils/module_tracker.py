@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import logging
 import weakref
 from typing import Set
 
@@ -9,7 +10,6 @@ from torch.nn.modules.module import (
     register_module_forward_pre_hook,
 )
 from torch.utils._pytree import tree_flatten
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class ModuleTracker:
                 logger.info(
                     "The module hierarchy tracking seems to be broken as this Module was already entered. %s during %s",
                     name,
-                    "backward" if is_bw else "forward"
+                    "backward" if is_bw else "forward",
                 )
             self.parents.add(name)
 
@@ -113,7 +113,7 @@ class ModuleTracker:
                 logger.info(
                     "The Module hierarchy tracking is confused as we're exiting a Module that was never entered. %s during %s",
                     name,
-                    "backward" if is_bw else "forward"
+                    "backward" if is_bw else "forward",
                 )
 
         return fn
