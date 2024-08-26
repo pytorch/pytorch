@@ -215,6 +215,7 @@ class autocast:
             Default: ``True``
     """
 
+
     def __init__(
         self,
         device_type: str,
