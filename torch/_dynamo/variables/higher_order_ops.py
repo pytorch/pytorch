@@ -1510,7 +1510,7 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
         )
-    
+
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
