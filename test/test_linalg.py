@@ -5037,7 +5037,7 @@ class TestLinalg(TestCase):
             # GEMMs.
             self.assertEqual((total_num_results - ref_num_results), 1)
 
-            # Test Last Gemm Entry and verify that it is HIPBLASLt
+            # Test Last Gemm Entry and verify that it is ROCBLAS
             gemm_signature = 'nn_512_512_512'
             gemm_library = 'Gemm_Rocblas'
             gemm_last_entry_signature = gemm_result[-1][1]
