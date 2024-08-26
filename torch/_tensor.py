@@ -392,6 +392,7 @@ class Tensor(torch._C.TensorBase):
                 )
                 or self.data_ptr() == 0
             )
+            and self.untyped_storage()._serialize_data
         ):
             arg_wrapper_subclass = (
                 type(self),
