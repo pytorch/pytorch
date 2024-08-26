@@ -124,7 +124,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         def f(x):
             out = torch.empty_like(x)
-            _, new_out = auto_functionalized(sin._opoverload, x=x, out=out)
+            _, new_out = auto_functionalized(sin._opoverload, x=x, result=out)
             y = out * new_out
             return new_out, y
 
@@ -212,15 +212,20 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
 
     @parametrize(
+        "factory_op",
+        [
+            subtest(torch.ones_like, name="ones_like"),
+            subtest(torch.empty_like, name="empty_like"),
+        ],
+    )
+    @parametrize(
         "sin_op",
         [
             subtest(sin, name="sin_op"),
             subtest(sin_triton, name="sin_triton"),
         ],
     )
-    def test_partitioner_recomputes_factory(self, sin_op):
-        factory_op = torch.ones_like
-
+    def test_partitioner_recomputes_factory(self, factory_op, sin_op):
         class MySin(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -246,6 +251,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
 
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:
