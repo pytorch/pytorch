@@ -575,7 +575,7 @@ cu_library(
     name = "torch_cuda",
     srcs = [
         "torch/csrc/distributed/c10d/intra_node_comm.cu",
-        "torch/csrc/distributed/c10d/Utils.cu",
+        "torch/csrc/distributed/c10d/NCCLUtils.cu",
         "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
     ],
     copts = torch_cuda_half_options,
@@ -744,7 +744,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/intra_node_comm.cu",
             "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
-            "torch/csrc/distributed/c10d/Utils.cu",
+            "torch/csrc/distributed/c10d/NCCLUtils.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
     )) + torch_sources,
