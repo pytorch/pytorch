@@ -7075,7 +7075,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         m = Mod()
         d1 = torch.export.Dim("d1", max=2048)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, "Constraints violated \(d1\)"
+            torch._dynamo.exc.UserError, r"Constraints violated \(d1\)"
         ):
             ep = torch.export.export(
                 m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
@@ -9657,6 +9657,36 @@ def ___make_guard_fn():
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
 
+    def test_iterator_limit(self):
+        def fn(x):
+            def gen():
+                while True:
+                    yield x
+
+            return list(gen())
+
+        x = torch.randn([0, 1, 2, 3, 4, 5])
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "infinite generator"
+        ):
+            compiled_fn(x)
+
+        # FIXME(XuehaiPan): do not inline infinite generator if it does not raise errors in eager mode
+        def fn(x):
+            def gen():
+                while True:
+                    yield x
+
+            return list(zip(range(10), gen()))
+
+        x = torch.randn([0, 1, 2, 3, 4, 5])
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "infinite generator"
+        ):
+            compiled_fn(x)
+
     def test_itertools_islice(self):
         counters.clear()
 
@@ -9999,6 +10029,22 @@ def ___make_guard_fn():
             return [(k, list(g)) for k, g in itertools.groupby(l, key=operator.neg)]
 
         l = [1, 2, -2, 3, 4, 4, -4, 0, -2]
+        eager = fn(l)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(l)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_tee(self):
+        counters.clear()
+
+        def fn(l):
+            a, b = itertools.tee(l)
+            return list(a), list(b)
+
+        l = [1, 2, 2, 3, 4, 4, 4, 1, 2]
         eager = fn(l)
 
         compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)

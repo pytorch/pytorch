@@ -107,8 +107,8 @@ def _find_q_dq_node_for_user(
 
     q_node = None
     if (
-        dq_node.args[0].op == "call_function"
-        and dq_node.args[0].target in _QUANTIZE_OPS
+        dq_node.args[0].op == "call_function"  # type: ignore[union-attr]
+        and dq_node.args[0].target in _QUANTIZE_OPS  # type: ignore[union-attr]
     ):
         q_node = dq_node.args[0]
     return (q_node, dq_node)
@@ -171,6 +171,7 @@ def _is_supported_batch_norm_for_training(node: Node):
     Return True if the given node refers to an aten batch norm op QAT supports.
     """
     supported_ops = [
+        torch.ops.aten.batch_norm.default,
         torch.ops.aten._native_batch_norm_legit.default,
         # Note: we won't need this op anymore after batch norm consolidation
         # For now, we need to continue to support it because it gives better
@@ -279,25 +280,35 @@ def fold_bn_weights_into_conv_node(
     # native_batch_norm has 3 outputs, we expect getitem calls on the output
     # and we want to replace the uses of getitem 0 with the output of conv
     #
-    # Before:
-    # conv -> bn - (first output) -> users1
-    #          \ - (second output) -> users2
-    #          \ - (third output) -> users3
-    # After:
-    # conv -> (first output) -> users1
-    #       bn -
-    #          \ - (second output) -> users2
-    #          \ - (third output) -> users3
-    # if users2 and users3 are empty then bn will be removed through dead code elimination
-
-    for user in bn_node.users:
-        if (
-            user.op != "call_function"
-            or user.target != operator.getitem
-            or user.args[1] != 0
-        ):
-            continue
-        user.replace_all_uses_with(conv_node)
+    if bn_node.target == torch.ops.aten.batch_norm.default:
+        # With the new training ir, instead of batch_norm + getitem,
+        # we only have the batch_norm node.
+        #
+        # Before:
+        # conv -> bn -> users
+        # After:
+        # conv -> users
+        #       bn has no users now
+        bn_node.replace_all_uses_with(conv_node)
+    else:
+        # Before:
+        # conv -> bn - (first output) -> users1
+        #          \ - (second output) -> users2
+        #          \ - (third output) -> users3
+        # After:
+        # conv -> (first output) -> users1
+        #       bn -
+        #          \ - (second output) -> users2
+        #          \ - (third output) -> users3
+        # if users2 and users3 are empty then bn will be removed through dead code elimination
+        for user in bn_node.users:
+            if (
+                user.op != "call_function"
+                or user.target != operator.getitem
+                or user.args[1] != 0
+            ):
+                continue
+            user.replace_all_uses_with(conv_node)
 
     # If the BN node does not have users, erase it from the graph
     # Note: we need to do this manually because the model can still be in train
@@ -315,9 +326,9 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     if not has_bn:
         return
     for n in m.graph.nodes:
-        if (
-            n.op != "call_function"
-            or n.target != torch.ops.aten._native_batch_norm_legit_no_training.default
+        if n.op != "call_function" or n.target not in (
+            torch.ops.aten._native_batch_norm_legit_no_training.default,
+            torch.ops.aten.batch_norm.default,
         ):
             continue
         bn_node = n
@@ -362,7 +373,7 @@ def _get_aten_graph_module_for_pattern(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
     aten_pattern = capture_pre_autograd_graph(
-        pattern,
+        pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
     )
@@ -382,7 +393,7 @@ def _get_aten_graph_module_for_pattern(
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
 
-    return aten_pattern
+    return aten_pattern  # type: ignore[return-value]
 
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
