@@ -13,6 +13,7 @@ self-hosted-runner:
     - linux.24xlarge
     - linux.24xlarge.ephemeral
     - linux.arm64.2xlarge
+    - linux.arm64.2xlarge.ephemeral
     - linux.4xlarge.nvidia.gpu
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
@@ -23,6 +24,7 @@ self-hosted-runner:
     - am2.linux.12xlarge
     - am2.linux.24xlarge
     - am2.linux.arm64.2xlarge
+    - am2.linux.arm64.2xlarge.ephemeral
     - am2.linux.4xlarge.nvidia.gpu
     - am2.linux.8xlarge.nvidia.gpu
     - am2.linux.16xlarge.nvidia.gpu
