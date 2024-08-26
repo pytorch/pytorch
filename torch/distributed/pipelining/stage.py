@@ -476,12 +476,11 @@ class _PipelineStageBase(ABC):
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
         """
         if backward_type == "full":
-            last_backward = self._seen_bwd_chunks == self.chunks - 1  # type: ignore[operator]
+            last_backward = self._seen_bwd_chunks >= self.chunks - 1  # type: ignore[operator]
         else:
             # For backwards are split into weight and input, we will see twice as many bwd_chunks
             last_backward = self._seen_bwd_chunks == 2 * self.chunks - 1  # type: ignore[operator]
 
-        params = self.submod.parameters()
         def perform_backward(backward_type):
             if backward_type == "full":
                 return lambda: stage_backward(
@@ -494,11 +493,11 @@ class _PipelineStageBase(ABC):
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
                     bwd_kwargs["input_values"],
-                    params,
+                    self.submod.parameters(),
                 )
             elif backward_type == "weight":
                 return lambda: stage_backward_weight(
-                    params, bwd_kwargs["param_groups"]
+                    self.submod.parameters(), bwd_kwargs["param_groups"]
                 )
             else:
                 raise RuntimeError(f"Unknown backward type: {backward_type}")
@@ -528,12 +527,17 @@ class _PipelineStageBase(ABC):
             elif backward_type == "weight":
                 print(f"[{self.stage_index}] weight: {last_backward=} {self._seen_bwd_chunks=}, {self.chunks=}")
                 self.submod.set_reshard_after_backward(last_backward)
-                if last_backward:
-                    print(f"[{dist.get_global_rank(self.group, self.group_rank)}-{self.stage_index}] BEFORE! {next(self.submod.parameters())=}")
+            elif backward_type == "full":
+                # TODO: remove when "full" backward is no longer needed
+                print(f"[{self.stage_index}] full: {last_backward=} {self._seen_bwd_chunks=}, {self.chunks=}")
+                self.submod.set_reshard_after_backward(last_backward)
+            if last_backward:
+                print(f"[{dist.get_global_rank(self.group, self.group_rank)}-{self.stage_index}] BEFORE! {next(self.submod.parameters())=}")
             self.submod.set_is_last_backward(last_backward)
             self.submod.set_requires_gradient_sync(last_backward)
             result = perform_backward(backward_type)()
             if last_backward:
+                # torch.distributed.breakpoint()
                 print(f"[{dist.get_global_rank(self.group, self.group_rank)}-{self.stage_index}] AFTER! {next(self.submod.parameters())=}")
         else:
             # Non-DP submodule, regular backward
