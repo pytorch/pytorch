@@ -23,7 +23,6 @@ from torch._dynamo.exc import UserError
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._subclasses import fake_tensor
-from torch.export import dynamic_dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -2495,6 +2494,19 @@ def forward(self, x):
 
         torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
 
+    def test_export_fast_binary_broadcast_check_unbacked(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, numel, scalar):
+                u0 = numel.item()
+                torch._check_is_size(u0)
+                x = torch.ones(u0 + 1)
+                return scalar - x
+
+        model = MyModel().eval().cuda()
+        numel = torch.tensor(10)
+        scalar = torch.randn(1)
+        torch.export.export(model, (numel, scalar))
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2721,7 +2733,7 @@ def forward(self, x):
         y = torch.randn(10, 3, 4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            ".*x.*size.*1.* = 3 is not equal to .*y.*size.*2.* = 4",
+            ".*y.*size.*2.* = 4 is not equal to .*x.*size.*1.* = 3",
         ):
             torch.export.export(
                 bar,
@@ -2756,7 +2768,7 @@ def forward(self, x):
 
         x = torch.tensor([3])
         y = torch.randn([8, 8, 6])
-        example_inputs = [x, y]
+        example_inputs = (x, y)
         dynamic_shapes = (None, {0: torch.export.Dim("dimy", min=6, max=10)})
         gm, _ = torch._dynamo.export(
             f,
@@ -2766,7 +2778,7 @@ def forward(self, x):
         )(*example_inputs)
 
         constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-            f, example_inputs, dynamic_shapes=dynamic_shapes
+            {"x": x, "y": y}, dynamic_shapes=dynamic_shapes
         )
         self.assertEqual(
             gm.meta["input_shape_constraints"],
@@ -2858,11 +2870,6 @@ def forward(self, x):
             torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
         dynamic_shapes = ({0: dimx_0, 1: dimx_1, 2: dimx_2}, None, {0: dimx_0})
         torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
-
-    def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
-        x = torch.ones(6, 4, 4)
-        with self.assertRaisesRegex(TypeError, "Cannot determine truth value"):
-            4 < dynamic_dim(x, 0) <= 6  # noqa: B015
 
     def test_export_dynamic_dim_range_constraint(self):
         x = torch.ones(6, 4, 4)
