@@ -26,6 +26,7 @@ import threading
 import time
 import types
 import typing
+import uuid
 import warnings
 import weakref
 from contextlib import contextmanager
@@ -53,7 +54,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, TypeIs
+from typing_extensions import Literal, TypeGuard
 
 import torch
 import torch._functorch.config
@@ -68,9 +69,9 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import TracingContext
+from torch._guards import Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
-from torch._utils_internal import log_compilation_event
+from torch._utils_internal import log_chromium_event_internal, log_compilation_event
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
@@ -218,6 +219,16 @@ def _add_time_spent(key: str, phase_name: str, time_spent: float) -> None:
     frame_phase_timing[key][phase_name] += time_spent
 
 
+def get_cache_stats() -> Dict[str, Any]:
+    """Get a bunch of metadata about cache hits and misses to use in chromium events"""
+    cache_stats = {
+        "fxgraph_cache_hit": counters["inductor"]["fxgraph_cache_hit"],
+        "fxgraph_cache_miss": counters["inductor"]["fxgraph_cache_miss"],
+        "fxgraph_cache_bypass": counters["inductor"]["fxgraph_cache_bypass"],
+    }
+    return cache_stats
+
+
 # dynamo_timed is a context manager
 # By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
@@ -251,6 +262,7 @@ def dynamo_timed(
     phase_name: Optional[str] = None,
     fwd_only: bool = True,
 ):
+    chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     if key not in compilation_time_metrics:
         compilation_time_metrics[key] = []
 
@@ -260,13 +272,22 @@ def dynamo_timed(
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
-            ChromiumEventLogger.log_event_start(key, time.time_ns())
+            start = time.time_ns()
+            chromium_log.log_event_start(key, start, None)
             if phase_name:
-                ChromiumEventLogger.log_event_start(phase_name, time.time_ns())
+                chromium_log.log_event_start(phase_name, start)
             yield
+
             if phase_name:
-                ChromiumEventLogger.log_event_end(phase_name, time.time_ns())
-            ChromiumEventLogger.log_event_end(key, time.time_ns())
+                chromium_log.log_event_end(
+                    phase_name,
+                    time.time_ns(),
+                    {"cache_stats": get_cache_stats()},
+                    start,
+                )
+            chromium_log.log_event_end(
+                key, time.time_ns(), {"cache_stats": get_cache_stats()}, start
+            )
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
     except Exception as e:
@@ -532,14 +553,14 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
+def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
     ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
-) -> TypeIs[T]:
+) -> TypeGuard[T]:
     ...
 
 
@@ -820,8 +841,17 @@ class ChromiumEventLogger:
     a specification of the Chromium Event JSON format.
     """
 
-    @staticmethod
+    def __init__(self):
+        self.stack = ["__start__"]
+        # Generate a unique id for this logger, which we can use in scuba to filter down
+        # to a single python run.
+        self.id_ = str(uuid.uuid4())
+
+        # TODO: log to init/id tlparse after I add support for it
+        log.info("ChromiumEventLogger initialized with id %s", self.id_)
+
     def log_event_start(
+        self,
         event_name: str,
         time_ns: int,
         metadata: Optional[Dict[str, Any]] = None,
@@ -832,18 +862,27 @@ class ChromiumEventLogger:
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
-        ChromiumEventLogger._log_timed_event(
+        event = self._log_timed_event(
             event_name,
             time_ns,
             "B",
             metadata,
         )
+        log_chromium_event_internal(event, self.stack, self.id_)
+        self.stack.append(event_name)
 
-    @staticmethod
+    def reset(self) -> None:
+        # We this on every compile in case a compile crashes or restarts and we haven't
+        # cleared the stack.
+        self.stack.clear()
+        self.stack.append("__start__")
+
     def log_event_end(
+        self,
         event_name: str,
         time_ns: int,
         metadata: Optional[Dict[str, Any]] = None,
+        start_time_ns: Optional[int] = None,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -852,28 +891,53 @@ class ChromiumEventLogger:
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
-        ChromiumEventLogger._log_timed_event(
+        # These stack health checks currently never happen,
+        # but they're written this way to future proof any weird event
+        # overlaps in the future.
+        if event_name not in self.stack:
+            # Something went wrong, we never called start on this event,
+            # or it was skipped due to overlapping events below
+            log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
+            return
+
+        event = self._log_timed_event(
             event_name,
             time_ns,
             "E",
             metadata,
         )
 
-    @staticmethod
+        while event_name != self.stack[-1]:
+            # If the event isn't the most recent one to end, pop
+            # off the stack until it is.
+            # Since event_name in self.stack, this pop is always safe
+            log.warning(
+                "ChromiumEventLogger: Detected overlapping events, fixing stack"
+            )
+            self.stack.pop()
+
+        log_chromium_event_internal(event, self.stack, self.id_, start_time_ns)
+        # Finally pop the actual event off the stack
+        self.stack.pop()
+
     def _log_timed_event(
+        self,
         event_name: str,
         time_ns: int,
         phase: str,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
         Logs a timed event in chromium format. See log_event_start, log_event_end, etc.
         """
         event = {
             "name": event_name,
-            "ts": time_ns / 1000,  # Chromium events are in ms
+            "ts": time_ns / 1000,  # Chromium events are in micro seconds
             "args": metadata,
             "ph": phase,
+            # These categories are needed in all chromium traces
+            "cat": "dynamo_timed",
+            "tid": 0,
             "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
         }
         torch._logging.trace_structured(
@@ -882,9 +946,10 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=False,  # Not every chromium event will have a trace_id
         )
+        return event
 
-    @staticmethod
     def log_instant_event(
+        self,
         event_name: str,
         time_ns: int,
         metadata: Optional[Dict[str, Any]] = None,
@@ -901,7 +966,10 @@ class ChromiumEventLogger:
             "ts": time_ns / 1000,
             "args": metadata,
             "ph": "i",
-            "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
+            # These categories are needed in all chromium traces
+            "cat": "dynamo_timed",
+            "tid": 0,
+            "pid": 0,
             "s": "p",  # We use "process" level instant events so they all appear on the same row in the trace.
         }
         torch._logging.trace_structured(
@@ -910,6 +978,18 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=True,
         )
+        # Log an instant event with the same start and end time
+        log_chromium_event_internal(event, self.stack, self.id_)
+
+
+CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
+
+
+def get_chromium_event_logger() -> ChromiumEventLogger:
+    global CHROMIUM_EVENT_LOG
+    if CHROMIUM_EVENT_LOG is None:
+        CHROMIUM_EVENT_LOG = ChromiumEventLogger()
+    return CHROMIUM_EVENT_LOG
 
 
 @dataclasses.dataclass
@@ -2151,7 +2231,7 @@ def get_real_value(node, tracer):
         return cache[node]
 
     op = node.op
-    args, kwargs = torch.fx.node.map_arg(
+    args, kwargs = torch.fx.node.map_arg(  # type: ignore[misc]
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
@@ -2264,7 +2344,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
-    guard_source: torch._guards.GuardSource,
+    tensor_source: Source,
 ) -> Tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -2277,12 +2357,20 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
+    from .source import is_from_unspecialized_param_buffer_source
+
     if (
-        guard_source.is_specialized_nn_module()
-        and config.force_nn_module_property_static_shapes
-    ):
+        tensor_source.guard_source().is_specialized_nn_module()
+        # Marking the tensor attributes of nn modules static to keep the behavior same as before
+        # inline_inbuilt_nn_module flag was introduced.
+        or tensor_source.guard_source().is_unspecialized_nn_module()
+    ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
-    if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
+
+    if (
+        type(tensor) is torch.nn.Parameter
+        or is_from_unspecialized_param_buffer_source(tensor_source)
+    ) and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR

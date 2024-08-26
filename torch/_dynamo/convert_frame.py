@@ -95,6 +95,7 @@ from .utils import (
     format_bytecode,
     frame_phase_timing,
     gen_record_file_name,
+    get_chromium_event_logger,
     increment_frame,
     is_namedtuple,
     istype,
@@ -159,6 +160,7 @@ class Tracker:
 
 input_codes = Tracker()
 output_codes = Tracker()
+disabled_codes: Dict[int, Callable[..., Any]] = {}
 
 initial_global_state: Optional[GlobalStateGuard] = None
 
@@ -869,6 +871,9 @@ def _compile(
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
         convert_frame_intern = structured.intern_string(__file__)
+        # Initialize the ChromiumEventLogger on start
+        chromium_event_log = get_chromium_event_logger()
+        chromium_event_log.reset()
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
