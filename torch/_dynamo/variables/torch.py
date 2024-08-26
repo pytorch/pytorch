@@ -16,7 +16,7 @@ from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch._streambase import _StreamBase
 
-from .. import config, polyfill, variables
+from .. import config, polyfills, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
     can_convert_to_tracable_parameter,
@@ -399,7 +399,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx: "InstructionTranslator", *args, **kwargs):
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.accumulate_grad), args, kwargs
+                SourcelessBuilder.create(tx, polyfills.accumulate_grad), args, kwargs
             )
 
         @register(math.radians)
@@ -407,7 +407,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfill.radians), args, kwargs
+                    SourcelessBuilder.create(tx, polyfills.radians), args, kwargs
                 )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
