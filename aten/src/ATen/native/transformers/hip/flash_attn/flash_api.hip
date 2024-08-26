@@ -72,7 +72,8 @@ void check_gpu_arch(hipStream_t stream) {
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
       TORCH_CHECK(false,
-                  "FlashAttention only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx942:sramecc+:xnack-)")
+                  "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
+                  " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
 }
 
