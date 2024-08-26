@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -89,6 +89,8 @@ class AutogradCompilerInstance:
         scalars: List[Union[int, float]],
     ):
         counters["compiled_autograd"]["captures"] += 1
+        self.aot_graph_cls_name: Optional[str] = None
+        self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
@@ -300,6 +302,7 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
+        self.rename_aot_dispatcher_nodes()
         self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
@@ -309,15 +312,15 @@ class AutogradCompilerInstance:
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
         set_locals_to_steal(graph, ["inputs"])
-        compiled_autograd_log.info(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph, colored=True)
+        lazy_graph_code = lazy_format_graph_code(
+            "Compiled autograd graph",
+            graph,
+            include_device=True,
+            include_stride=True,
+            colored=True,
         )
-        verbose_log.debug(
-            "%s",
-            lazy_format_graph_code(
-                "Compiled autograd graph", graph, include_device=True, colored=True
-            ),
-        )
+        compiled_autograd_log.info("%s", lazy_graph_code)
+        verbose_log.debug("%s", lazy_graph_code)
         trace_structured(
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
@@ -335,6 +338,84 @@ class AutogradCompilerInstance:
                 in_compiled_autograd_region = False
 
         return runtime_wrapper, self.compiler_fn(graph)
+
+    def rename_aot_dispatcher_nodes(self):
+        """
+        Renames nodes as they appear in the AOTDispatcher backward graphs, prefixed by AOT id
+        e.g. AOTDispatcher backward graph X's `sin_Y` -> `aotX_sin_Y`
+        """
+        if self.aot_graph_cls_name is None:
+            return
+
+        def is_similar(a: torch.fx.node.Node, b: torch.fx.node.Node):
+            target_match = a.target == b.target
+            if not target_match:
+                target_match = (
+                    hasattr(a.target, "__name__")
+                    and hasattr(b.target, "__name__")
+                    and a.target.__name__ == b.target.__name__
+                )
+            return (
+                target_match
+                and a.op == b.op
+                and a.type == b.type
+                and len(a.all_input_nodes) == len(b.all_input_nodes)
+            )
+
+        for nodecall_index, info in self.aot_graph_infos.items():
+            ca_node_start_idx = info["ca_node_start_idx"]
+            aot_id = info["aot_id"]
+            aot_graph = info["aot_gm"].graph
+
+            # 1. Find the first op from user code in the AOT graph
+            aot_it = iter(aot_graph.nodes)
+            aot_node = next(aot_it)
+            assert aot_node is not None
+            try:
+                while aot_node.op != "call_function":
+                    aot_node = next(aot_it)
+            except StopIteration:
+                continue
+
+            try:
+                # 2. Find the first op in the compiled autograd graph segment
+                ca_it = iter(self.fx_tracer.graph.nodes)
+                for _ in range(ca_node_start_idx):
+                    next(ca_it)
+                ca_node = next(ca_it)
+
+                # Graphs should all end with output node
+                while ca_node.op != "output" and not is_similar(ca_node, aot_node):
+                    # The compiled autograd graph may contain lazily inserted ops
+                    # We skip those when aligning nodes
+                    ca_node = next(ca_it)
+
+                # 3. Keep alligned and rename nodes
+                while aot_node.op != "output" and ca_node.op != "output":
+                    if not ca_node.users:
+                        # TODO: DCE for compiled autograd graph
+                        ca_node = next(ca_it)
+                        continue
+
+                    if not is_similar(aot_node, ca_node):
+                        # There should be no lazily inserted ops in the middle of a match
+                        # So any deviation is an error
+                        raise StopIteration
+
+                    ca_node.name = f"aot{aot_id}_{aot_node.name}"
+                    for i, inp in enumerate(aot_node.all_input_nodes):
+                        ca_node.all_input_nodes[i].name = f"aot{aot_id}_{inp.name}"
+
+                    aot_node = next(aot_it)
+                    ca_node = next(ca_it)
+            except StopIteration:
+                verbose_log.debug(
+                    "Failed to match %s%s (NodeCall %s) nodes with AOT backward graph %s nodes",
+                    self.aot_graph_cls_name,
+                    aot_id,
+                    nodecall_index,
+                    aot_id,
+                )
 
     def reorder_accumulate_grad_nodes(self):
         """
@@ -364,7 +445,7 @@ class AutogradCompilerInstance:
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):
-            proxies = [proxies[i] for i in range(len(tensors))]
+            proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
@@ -375,9 +456,27 @@ class AutogradCompilerInstance:
         track_tensor_tree(bw_state, proxy, constant=None, tracer=self.fx_tracer)
         return bw_state
 
-    def set_node_origin(self, node_name, node_index):
+    def set_node_origin(
+        self,
+        node_name: str,
+        nodecall_index: int,
+        pyobj: Optional[torch.autograd.Function],
+    ):
+        maybe_aot_id = ""
+        if pyobj is not None:
+            forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]
+            if hasattr(forward_cls, "_aot_id"):
+                # backward was created by AOT Dispatcher
+                self.aot_graph_cls_name = node_name
+                maybe_aot_id = forward_cls._aot_id
+                self.aot_graph_infos[nodecall_index] = {
+                    "ca_node_start_idx": len(self.fx_tracer.graph.nodes),
+                    "aot_id": maybe_aot_id,
+                    "aot_gm": forward_cls._lazy_backward_info.bw_module,
+                }
+
+        new_code = f"{node_name}{maybe_aot_id} (NodeCall {nodecall_index})"
         raw_stack_trace = CapturedTraceback.extract().format()[-1]
-        new_code = f"{node_name} (NodeCall {node_index})"
         new_stack_trace = raw_stack_trace.replace(
             "raw_stack_trace = CapturedTraceback.extract().format()[-1]", new_code
         )

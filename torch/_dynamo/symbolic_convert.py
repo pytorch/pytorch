@@ -19,7 +19,20 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Deque,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -59,12 +72,14 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
     Source,
+    TorchFunctionModeStackSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
     get_instruction_source_311,
+    get_torch_function_mode_stack,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -87,6 +102,7 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -104,6 +120,11 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+
+
+if TYPE_CHECKING:
+    from .variables.torch_function import TorchFunctionModeVariable
+
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -128,6 +149,9 @@ compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
 compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
+
+
+PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 
 @dataclasses.dataclass
@@ -704,6 +728,7 @@ class InstructionTranslatorBase(
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
     symbolic_globals: Dict[str, VariableTracker]
+    symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"]
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
@@ -1334,33 +1359,47 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
+    def _raise_exception_variable(self, inst):
+        val = self.pop()
+        # User can raise exception in 2 ways
+        #   1) raise exception type - raise NotImplementedError
+        #   2) raise execption instance - raise NotImplemetedError("foo")
+
+        # 1) when user raises exception type
+        if isinstance(val, variables.BuiltinVariable):
+            # Create the instance of the exception type
+            # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
+            val = val.call_function(self, [], {})  # type: ignore[arg-type]
+
+        # Save the exception in a global data structure
+        self.exn_vt_stack.append(val)
+
+        # 2) when user raises exception instance
+        if isinstance(val, variables.ExceptionVariable):
+            if val.exc_type is StopIteration:
+                # StopIteration is used to find the end of iteration while tracing __next__
+                raise exc.ObservedUserStopIteration(f"raised exception {val}")
+            raise exc.ObservedException(f"raised exception {val}")
+        unimplemented(f"raise {exc}")
+
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
             unimplemented("re-raise")
         elif inst.arg == 1:
-            val = self.pop()
-            # User can raise exception in 2 ways
-            #   1) raise exception type - raise NotImplementedError
-            #   2) raise execption instance - raise NotImplemetedError("foo")
-
-            # 1) when user raises exception type
-            if isinstance(val, variables.BuiltinVariable):
-                # Create the instance of the exception type
-                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
-                val = val.call_function(self, [], {})  # type: ignore[arg-type]
-
-            # Save the exception in a global data structure
-            self.exn_vt_stack.append(val)
-
-            # 2) when user raises exception instance
-            if isinstance(val, variables.ExceptionVariable):
-                if val.exc_type is StopIteration:
-                    # StopIteration is used to find the end of iteration while tracing __next__
-                    raise exc.ObservedUserStopIteration(f"raised exception {val}")
-                raise exc.ObservedException(f"raised exception {val}")
-            unimplemented(f"raise {exc}")
+            self._raise_exception_variable(inst)
         else:
+            # Support raise .. from None ... Dynamo does not track __cause__ and other attributes of exception. So we
+            # ignore `from None` part.
+            from_vt = self.pop()
+            if isinstance(from_vt, ConstantVariable) and from_vt.value is None:
+                self._raise_exception_variable(inst)
             unimplemented("raise ... from ...")
+
+    def RERAISE(self, inst):
+        if sys.version_info >= (3, 11):
+            # RERAISE is currently supported in a narrow case of `raise ... from None`
+            self._raise_exception_variable(inst)
+        unimplemented("RERAISE")
 
     def exception_handler(self, raised_exception):
         if sys.version_info >= (3, 11):
@@ -1375,10 +1414,6 @@ class InstructionTranslatorBase(
 
                 # 2) if 'lasti' is true, then push the offset that the exception was raised at
                 if exn_tab_entry.lasti:
-                    # This is untested. Any test that tests this end-to-end
-                    # requires supporting more bytecodes. Therefore graph
-                    # breaking for now.
-                    unimplemented("lasti=True while exception handling")
                     self.push(
                         variables.ConstantVariable(self.current_instruction.offset)
                     )
@@ -1410,9 +1445,12 @@ class InstructionTranslatorBase(
                     # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                     self.popn(3)
                     if len(self.block_stack) == 0:
-                        unimplemented(
-                            "exception is raised when block stack " "is empty"
-                        )
+                        # No handler found in this frame. Bubble the exception to the parent
+                        # instruction translater.
+                        self.stack.clear()
+                        if type(self) is InstructionTranslator:
+                            raise Unsupported("Observed exception")
+                        raise raised_exception
                     block_stack_entry = self.block_stack.pop()
 
                 if block_stack_entry.inst.opname != "SETUP_FINALLY":
@@ -2511,6 +2549,7 @@ class InstructionTranslatorBase(
         code_options: Dict[str, Any],
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
+        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
@@ -2525,6 +2564,7 @@ class InstructionTranslatorBase(
         self.output = output
         self.symbolic_locals = symbolic_locals
         self.symbolic_globals = symbolic_globals
+        self.symbolic_torch_function_mode_stack = symbolic_torch_function_mode_stack
         self.stack = []
         # stack of variable names for tracking 3.13 closures
         self.name_stack: list[Any] = []
@@ -2647,6 +2687,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_locals={},  # set below
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals={},
+            symbolic_torch_function_mode_stack=collections.deque(),
             f_code=f_code,
             export=export,
             inline_depth=0,
@@ -2681,6 +2722,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             }
 
+            self._init_torch_function_mode_stack()
+
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
@@ -2714,11 +2757,34 @@ class InstructionTranslator(InstructionTranslatorBase):
                 # Calling a torch.compiled function
                 f"- Calling torch.func.{name}(compiled_fn) function from eager mode is not supported. "
                 f"Ensure that torch.func.{name} is also wrapped within a torch.compile function. "
-                "For more information, see PyTorch issue #128711."
+                "For more information, see PyTorch issue #128711.\n"
                 # if it reaches here, it means Dynamo failed to inline a functorch function
                 f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
             )
             unimplemented(msg)
+
+    def _init_torch_function_mode_stack(self):
+        from .variables.torch_function import TorchFunctionModeStackVariable
+
+        TorchFunctionModeStackVariable.reset()
+
+        self.symbolic_torch_function_mode_stack: Deque[
+            TorchFunctionModeVariable
+        ] = collections.deque()
+        # We want to retrieve all modes to properly reconstruct the stack if needed
+        py_stack = get_torch_function_mode_stack(filter_ignored=False)
+
+        if py_stack:
+            has_device_context = isinstance(
+                py_stack[0], torch.utils._device.DeviceContext
+            )
+
+        for i, val in enumerate(py_stack):
+            self.symbolic_torch_function_mode_stack.append(
+                variables.LazyVariableTracker.create(
+                    val, source=TorchFunctionModeStackSource(i)
+                )
+            )
 
     def get_example_value(self, source: Source):
         if isinstance(source, LocalSource):
@@ -3047,11 +3113,23 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
+                parent,
+                code,
+                sub_locals,
+                parent.symbolic_globals,
+                parent.symbolic_torch_function_mode_stack,
+                closure_cells,
+                func,
             )
         else:
             tracer = InliningInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
+                parent,
+                code,
+                sub_locals,
+                parent.symbolic_globals,
+                parent.symbolic_torch_function_mode_stack,
+                closure_cells,
+                func,
             )
 
         strict_ctx: Any = contextlib.nullcontext()
@@ -3102,6 +3180,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         code: types.CodeType,
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
+        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
     ) -> None:
@@ -3118,6 +3197,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
+            symbolic_torch_function_mode_stack=symbolic_torch_function_mode_stack,
             instructions=instructions,
             code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,
@@ -3279,6 +3359,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_VALUE(self, inst: Instruction):
         self.generated_items.append(self.pop())
+        if len(self.generated_items) > MAX_ITERATOR_LIMIT:
+            unimplemented(
+                "Too many yield values in generator. Maybe you are inlining an infinite generator. "
+                f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
+            )
         self.push(ConstantVariable.create(None))
 
     def GET_YIELD_FROM_ITER(self, inst):

@@ -16,9 +16,11 @@ def define_targets(rules):
         src = "caffe2/core/macros.h.in",
         out = "caffe2/core/macros.h",
         definitions = [
+            "CAFFE2_BUILD_SHARED_LIBS",
             "CAFFE2_PERF_WITH_AVX",
             "CAFFE2_PERF_WITH_AVX2",
             "CAFFE2_PERF_WITH_AVX512",
+            "CAFFE2_USE_EXCEPTION_PTR",
             "CAFFE2_USE_CUDNN",
             "USE_MKLDNN",
             "CAFFE2_USE_ITT",

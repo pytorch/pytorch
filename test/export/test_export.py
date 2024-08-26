@@ -30,13 +30,19 @@ from torch._export.utils import (
 )
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
-from torch.export import Dim, dynamic_dim, export, unflatten
+from torch.export import Dim, export, unflatten
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
-from torch.export.graph_signature import InputKind
+from torch.export.graph_signature import (
+    ExportGraphSignature,
+    InputKind,
+    OutputKind,
+    OutputSpec,
+    TensorArgument,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
@@ -177,6 +183,15 @@ def is_training_ir_test(test_name):
     return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX) or test_name.endswith(
         TRAINING_IR_DECOMP_NON_STRICT_SUFFIX
     )
+
+
+def get_hop_schema(ep: torch.export.ExportedProgram):
+    hop_node = next(
+        node
+        for node in ep.graph.nodes
+        if isinstance(node.target, torch._ops.HigherOrderOperator)
+    )
+    return torch._library.utils.hop_schema_from_fx_node(hop_node)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -798,6 +813,46 @@ graph():
             if node.op == "call_function":
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
+
+    @testing.expectedFailureSerDer  # failed serializing SymInt nodes in subgraph (known issue)
+    def test_hoo_inline_users_issue(self):
+        # This came from an issue where replace_with_hop passes would inline subgraphs,
+        # and mess up node.users for nodes present in multiple subgraphs (e.g. _x in SetGradCase
+        # below, since it's used in both set_grad_enabled HOO modules).
+        # This checks that node.users and node.args are in correspondence.
+        def check_users_for_graph(graph):
+            def _tuple_contains(_tuple, val):
+                # check nested, since output node args have format ((x, y, ...),)
+                return any(
+                    _tuple_contains(x, val) if isinstance(x, tuple) else x == val
+                    for x in _tuple
+                )
+
+            for node in graph.nodes:
+                # check node.users
+                for user in node.users.keys():
+                    assert _tuple_contains(user.args, node)
+                # check node.args
+                for arg in node.args:
+                    if isinstance(arg, torch.fx.Node):
+                        assert _tuple_contains(arg.users, node)
+
+        # check set grad enabled
+        class SetGradCase(torch.nn.Module):
+            def forward(self, x):
+                _x = x.shape[0] + 2
+                _xx = _x + 2
+                with torch.no_grad():
+                    y = _x * 4
+                return _xx, y
+
+        ep = export(
+            SetGradCase(),
+            (torch.randn(6),),
+            dynamic_shapes={"x": (Dim("dx"),)},
+            strict=False,
+        )
+        check_users_for_graph(ep.graph)
 
     def test_export_predispatch_custom_ops_warnings(self):
         @torch.library.custom_op("mylib::foo", mutates_args={})
@@ -2252,6 +2307,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             fixes=[],  # nothing to fix!
         )
 
+    def test_no_suggested_fixes_for_data_dependent_errors(self):
+        # suggested fixes for data-dependent errors only work in non-strict mode
+        strict = False
+        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+
+        class cf_stacklist(torch.nn.Module):
+            def forward(self, xs, y):
+                # y.item() is not a local, so we can't suggest a fix
+                return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
+
+        with self.assertRaisesRegex(
+            error_type,
+            "Could not guard on data-dependent expression u0 < 0",
+        ):
+            export(
+                cf_stacklist(),
+                ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+                strict=strict,
+            )
+
     def test_if_functional(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2344,32 +2419,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "Expected.*shape\\[1\\] = 5 to be of the form 2\\*s1, where s1 is an integer",
         ):
             em.module()(x)
-
-    def test_not_correct_dim(self):
-        def f(x):
-            return x.cos()
-
-        def g(x):
-            return x + 4
-
-        inp_for_f = torch.tensor(5)
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, "Cannot mark 0-dimension tensors to be dynamic"
-        ):
-            constraints = [dynamic_dim(inp_for_f, 0)]
-
-        inp_for_f_mul_dim = torch.ones(5, 5)
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError,
-            "Expected the dimension passed to dynamic_dim to be in the range \\[0:1\\]",
-        ):
-            constraints = [dynamic_dim(inp_for_f_mul_dim, 2)]
-
-        inp_for_g = 4
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"
-        ):
-            constraints = [dynamic_dim(inp_for_g, 0)]
 
     @testing.expectedFailureRetraceability  # T183144629
     def test_map(self):
@@ -3965,6 +4014,21 @@ def forward(self, x):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
+    def test_redundant_assert_max_upper_bound(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                b = x.nonzero()
+                torch._check(b.shape[0] >= 3)
+                return b
+
+        m = M()
+        inp = (torch.tensor([1, 1, 1, 0, 1]),)
+        dim = torch.export.Dim("dim")
+        ep = export(m, inp, dynamic_shapes=((dim,),))
+        FileCheck().check_count(
+            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
@@ -4100,6 +4164,11 @@ def forward(self, x):
         dim0 = torch.export.Dim("dim0", min=3)
         inp = torch.ones(6, 4)
         ep = export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0}})
+        schema = get_hop_schema(ep)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
+        )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
@@ -5489,6 +5558,11 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",
         )
+        schema = get_hop_schema(ep)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1]""",
+        )
 
         cond_top_level_nn_module_stack = [
             node.meta["nn_module_stack"]
@@ -5573,6 +5647,12 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
                 pre_dispatch=True,
                 strict=False,
             )
+
+        schema = get_hop_schema(exported_program)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1]""",  # noqa: B950
+        )
 
         self.assertExpectedInline(
             str(exported_program.graph_module.code.strip()),
@@ -6058,6 +6138,12 @@ def forward(self, x):
                 (torch.randn(4), torch.randn(4), torch.randn(4)),
                 pre_dispatch=True,
             )
+
+        schema = get_hop_schema(ep)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1]""",
+        )
         # test cond subgraph
         expected_names_and_ops = [
             ("mul_2", "placeholder"),
@@ -6793,7 +6879,7 @@ def forward(self, q, k, v):
     _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
     getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
     return (getitem,)"""
-        if SM90OrLater:
+        if SM90OrLater and not torch.version.hip:
             code_str = """\
 def forward(self, q, k, v):
     _scaled_dot_product_cudnn_attention = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None
@@ -7110,6 +7196,87 @@ def forward(self, x):
                     nn_module_stack_1.values(), nn_module_stack_2.values()
                 ):
                     self.assertEqual(v1, v2)
+
+    def test_duplicated_getitem(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.topk(x, 2)
+
+        foo = Foo()
+        inputs = (torch.randn(3),)
+        ep = torch.export.export(foo, inputs, strict=False)
+
+        graph_module = copy.deepcopy(ep.graph_module)
+
+        call_function_node = None
+        num_getitems = 0
+        for node in graph_module.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.topk.default
+            ):
+                call_function_node = node
+            elif node.op == "call_function" and node.target == operator.getitem:
+                self.assertIs(node.args[0], call_function_node)
+                num_getitems += 1
+
+        self.assertIsNotNone(call_function_node)
+        self.assertEqual(num_getitems, 2)
+
+        output_node = list(graph_module.graph.nodes)[-1]
+
+        nodes = []
+        with graph_module.graph.inserting_before(output_node):
+            nodes.append(
+                graph_module.graph.call_function(
+                    operator.getitem, (call_function_node, 1)
+                )
+            )
+            nodes.append(
+                graph_module.graph.call_function(
+                    operator.getitem, (call_function_node, 0)
+                )
+            )
+            nodes.append(
+                graph_module.graph.call_function(
+                    operator.getitem, (call_function_node, 0)
+                )
+            )
+            nodes.append(
+                graph_module.graph.call_function(
+                    operator.getitem, (call_function_node, 1)
+                )
+            )
+        signature = ExportGraphSignature(
+            input_specs=ep.graph_signature.input_specs,
+            output_specs=ep.graph_signature.output_specs
+            + [
+                OutputSpec(
+                    kind=OutputKind.USER_OUTPUT,
+                    arg=TensorArgument(name=node.name),
+                    target=None,
+                )
+                for node in nodes
+            ],
+        )
+        output_node.args = (output_node.args[0] + tuple(nodes),)
+        graph_module.recompile()
+        new_ep = ep._update(graph_module, signature)
+
+        new_num_getitems = 0
+        for node in new_ep.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.topk.default
+            ):
+                call_function_node = node
+            elif node.op == "call_function" and node.target == operator.getitem:
+                self.assertIs(node.args[0], call_function_node)
+                new_num_getitems += 1
+        self.assertEqual(num_getitems, new_num_getitems)
+        self.assertEqual(
+            len(list(new_ep.graph.nodes)[-1].args[0]), len(signature.output_specs)
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

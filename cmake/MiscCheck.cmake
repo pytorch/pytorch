@@ -2,6 +2,8 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
+set(CAFFE2_USE_EXCEPTION_PTR 1)
+
 # ---[ Check if we want to turn off deprecated warning due to glog.
 if(USE_GLOG)
   cmake_push_check_state(RESET)
@@ -106,6 +108,9 @@ if(IOS AND (${IOS_ARCH} MATCHES "armv7*"))
   add_definitions("-arch" ${IOS_ARCH})
   add_definitions("-Wno-deprecated-declarations")
 endif()
+
+# ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.
+set(CAFFE2_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 
 if(USE_NATIVE_ARCH)
   check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)

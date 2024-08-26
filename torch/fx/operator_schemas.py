@@ -143,7 +143,6 @@ def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...]
             # Matched exactly one schema, unambiguous
             _, schema_to_check = matched_schemas[0]
             throw_if_mutable(schema_to_check)
-            pass
         else:
             # Ambiguous schema match. Since mutability checking is best effort,
             # do nothing.
@@ -219,7 +218,6 @@ def create_type_hint(x):
     except Exception as e:
         # We tried to create a type hint for list but failed.
         warnings.warn(f"We were not able to successfully create type hint from the type {x}")
-        pass
     return x
 
 @compatibility(is_backward_compatible=False)

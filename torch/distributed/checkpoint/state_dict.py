@@ -358,6 +358,9 @@ def _verify_options(
             optim_state_dict_config,
         ):
             with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", message="FSDP.state_dict_type", category=FutureWarning
+                )
                 with FSDP.state_dict_type(
                     module=module,
                     state_dict_type=state_dict_type,
