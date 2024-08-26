@@ -31,6 +31,7 @@ struct Stat {
     peak = current;
   }
 
+
   int64_t current = 0;
   int64_t peak = 0;
   int64_t allocated = 0;
