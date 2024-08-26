@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -611,8 +610,6 @@ using SizeType = uint64_t;
 // this common case with `SYSCHECK`.
 // Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
-
-void checkForNan(const at::Tensor& tensor, at::cuda::CUDAStream& stream);
 
 namespace tcputil {
 
