@@ -11396,6 +11396,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
+    @instantiate_parametrized_tests
     class TritonCodeGenTests(TestCase):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -11899,6 +11900,20 @@ if HAS_GPU and not TEST_WITH_ASAN:
             # we are asserting that when inductor allocates this tensor,
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
+
+        @requires_gpu()
+        @parametrize("upcast_to_fp32", [False, True])
+        def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
+            @torch.compile
+            def func(a, b):
+                return a * b
+
+            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 2
+            with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                fp32_cast_in_code = "float32" in code
+                self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
