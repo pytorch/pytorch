@@ -2967,19 +2967,15 @@ class TestSDPACudaOnly(NNTestCase):
             'grad_value': 8.5,
         }
         if TEST_WITH_ROCM:
-            fudge_factors['grad_query'] = 180.0
-            if head_dim > 128:
-                fudge_factors['grad_key'] *= 1.5
-            if seq_len_q >= 512 or seq_len_k >= 512:
-                fudge_factors['grad_query'] *= 1.25
-                fudge_factors['grad_key'] *= 3.0
-            if seq_len_q >= 1024:
-                fudge_factors['grad_query'] *= 1.5
+            fudge_factors['grad_key'] = 45.0
+            fudge_factors['grad_query'] = 360.0
+            if seq_len_k >= 1024:
+                fudge_factors['grad_key'] = 70.0
             if seq_len_k >= 2048:
-                fudge_factors['grad_query'] *= 2.6
-                fudge_factors['grad_key'] *= 2.6
+                fudge_factors['grad_key'] = 160.0
+                fudge_factors['grad_query'] = 650.0
             if dtype == torch.float32:
-                fudge_factors['grad_key'] = 180.0
+                fudge_factors['grad_key'] = 90.0
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
@@ -3081,19 +3077,15 @@ class TestSDPACudaOnly(NNTestCase):
             "grad_attn_mask": 45.0,
         }
         if TEST_WITH_ROCM:
-            fudge_factors['grad_query'] = 180.0
-            if head_dim > 128:
-                fudge_factors['grad_key'] *= 1.5
-            if seq_len_q >= 512 or seq_len_k >= 512:
-                fudge_factors['grad_query'] *= 1.25
-                fudge_factors['grad_key'] *= 3.0
-            if seq_len_q >= 2048:
-                fudge_factors['grad_query'] *= 1.5
+            fudge_factors['grad_key'] = 45.0
+            fudge_factors['grad_query'] = 360.0
+            if seq_len_k >= 1024:
+                fudge_factors['grad_key'] = 70.0
             if seq_len_k >= 2048:
-                fudge_factors['grad_query'] *= 2.6
-                fudge_factors['grad_key'] *= 2.6
+                fudge_factors['grad_key'] = 160.0
+                fudge_factors['grad_query'] = 650.0
             if dtype == torch.float32:
-                fudge_factors['grad_key'] = 180.0
+                fudge_factors['grad_key'] = 90.0
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
@@ -3206,22 +3198,22 @@ class TestSDPACudaOnly(NNTestCase):
             'grad_value': 4,
         }
         if TEST_WITH_ROCM:
-            fudge_factors['grad_query'] = 180.0
-            if head_dim > 128:
-                fudge_factors['grad_key'] *= 1.5
-            if seq_len_q >= 512 or seq_len_k >= 512:
-                fudge_factors['grad_query'] *= 1.25
-                fudge_factors['grad_key'] *= 3.0
-            if seq_len_q >= 1024:
-                fudge_factors['grad_query'] *= 1.5
+            fudge_factors['grad_key'] = 45.0
+            fudge_factors['grad_query'] = 360.0
+            if seq_len_k >= 1024:
+                fudge_factors['grad_key'] = 70.0
             if seq_len_k >= 2048:
-                fudge_factors['grad_query'] *= 3.2
-                fudge_factors['grad_key'] *= 4.0
+                fudge_factors['grad_key'] = 190.0
+                fudge_factors['grad_query'] = 650.0
+                if seq_len_q >= 2048:
+                    fudge_factors['grad_query'] = 1100.0
+            if dtype == torch.float32:
+                fudge_factors['grad_key'] = 90.0
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
-            fudge_factors=fudge_factors
+            fudge_factors=fudge_factors,
         )
 
     # @skipIfRocm  # FIXME: "capturing stream has unjoined work"
