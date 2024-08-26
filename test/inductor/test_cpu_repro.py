@@ -1972,6 +1972,32 @@ class CPUReproTests(TestCase):
             with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
                 _internal_check(fn, inps, "aten.scatter_reduce_")
 
+    @patch("torch.cuda.is_available", lambda: False)
+    @requires_vectorization
+    @torch._inductor.config.patch({"cpp.fallback_scatter_reduce_sum": False})
+    def test_scatter_using_atomic_add_vec(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        inps = (
+            torch.zeros(1, 1, 25),
+            2,
+            torch.tensor([[[3, 5, 7, 9] * 5]]),
+            torch.ones(1, 1, 25),
+        )
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, inps)
+        assert metrics.generated_cpp_vec_kernel_count == 2
+
+        with set_num_threads(1), config.patch(
+            {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+        ):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, inps)
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
