@@ -3455,7 +3455,7 @@ def parse_args(args=None):
         "--total-partitions",
         type=int,
         default=1,
-        choices=range(1, 10),
+        choices=range(1, 16),
         help="Total number of partitions we want to divide the benchmark suite into",
     )
     parser.add_argument(
