@@ -33,6 +33,9 @@ static constexpr int64_t kBlockSize = 512;
 // the kernels for 4KB kernel argument size.
 //
 // https://developer.nvidia.com/blog/cuda-12-1-supports-large-kernel-parameters/
+
+__global__ void dummy_kernel(void*) {}
+
 bool supports_large_kernel_arg() {
 #if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
   static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
@@ -40,7 +43,11 @@ bool supports_large_kernel_arg() {
     int driver_ver = 0;
     cudaDriverGetVersion(&driver_ver);
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major >= 7;
+    cudaFuncAttributes func_attr;
+    cudaFuncGetAttributes(&func_attr, (void*)dummy_kernel);
+    *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major >= 7 &&
+        func_attr.binaryVersion >= 70;
+    LOG(WARNING) << "binary version: " << func_attr.binaryVersion;
   }
   return *supports_large_kernel_arg_;
 #else
