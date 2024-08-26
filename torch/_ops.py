@@ -246,6 +246,10 @@ class HigherOrderOperator(OperatorBase):
     # practice due to name collisions.
     def __init__(self, name):
         super().__init__()
+        if type(self) is HigherOrderOperator:
+            raise RuntimeError(
+                "Direct instantiation of HigherOrderOperator is not allowed. Please subclass it."
+            )
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
