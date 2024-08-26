@@ -4229,37 +4229,18 @@ class CPUReproTests(TestCase):
                 example_inputs[0] = example_inputs[0].to(
                     dtype=torch.half if dtype == torch.bfloat16 else torch.bfloat16
                 )
-            self.common(func, example_inputs)
-            gm, _ = torch._dynamo.export(func)(*example_inputs)
-            gm = torch.fx.symbolic_trace(gm)
-            shape_env = shape_env_from_inputs(example_inputs)
-            fake_mode = detect_fake_mode(example_inputs)
-            if not fake_mode:
-                fake_mode = torch._subclasses.FakeTensorMode()
-                FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+            f_opt = torch.compile()(func)
+            _, code = run_and_get_cpp_code(f_opt, *example_inputs)
+            if check_vecn:
+                self.assertTrue(
+                    "at::vec::VectorizedN" in code
+                    or "at::vec::convert<float,2" in code
+                )
             else:
-                FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
-                    *example_inputs
+                self.assertFalse(
+                    "at::vec::VectorizedN" in code
+                    or "at::vec::convert<float,2" in code
                 )
-
-            with V.set_fake_mode(fake_mode):
-                graph = GraphLowering(
-                    gm,
-                    shape_env=shape_env,
-                )
-                with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
-                    graph.run(*example_inputs)
-                    code, _ = graph.codegen()
-                    if check_vecn:
-                        self.assertTrue(
-                            "at::vec::VectorizedN" in code
-                            or "at::vec::convert<float,2" in code
-                        )
-                    else:
-                        self.assertFalse(
-                            "at::vec::VectorizedN" in code
-                            or "at::vec::convert<float,2" in code
-                        )
 
         funcs = []
 
