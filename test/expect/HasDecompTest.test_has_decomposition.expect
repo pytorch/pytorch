@@ -231,9 +231,12 @@ aten::_foreach_frac_
 aten::_foreach_lerp.List
 aten::_foreach_lerp.List_out
 aten::_foreach_lerp.Scalar
+aten::_foreach_lerp.ScalarList
+aten::_foreach_lerp.ScalarList_out
 aten::_foreach_lerp.Scalar_out
 aten::_foreach_lerp_.List
 aten::_foreach_lerp_.Scalar
+aten::_foreach_lerp_.ScalarList
 aten::_foreach_lgamma
 aten::_foreach_lgamma.out
 aten::_foreach_lgamma_
