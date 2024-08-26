@@ -237,7 +237,7 @@ void floating_half_bfloat16_(TensorList tensors) {
   OP_CUSTOM_FUNCTOR(function, op_name, functor_name);
 
 OP(floating_half_bfloat16, erfc, Erfc);
-OP(floating_half, lgamma, Lgamma);
+OP(floating_half_bfloat16, lgamma, Lgamma);
 OP(floating_half_bfloat16, trunc, Truncf);
 OP(floating_half_bfloat16, floor, Floor);
 OP(floating_half_bfloat16, ceil, Ceil);
