@@ -60,7 +60,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.9"
       runner_prefix: amz2023.
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -129,7 +129,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       runner_prefix: amz2023.
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -175,7 +175,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.10"
       runner_prefix: amz2023.
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -244,7 +244,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       runner_prefix: amz2023.
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -290,7 +290,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.11"
       runner_prefix: amz2023.
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -359,7 +359,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       runner_prefix: amz2023.
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -405,7 +405,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.12"
       runner_prefix: amz2023.
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -474,7 +474,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       runner_prefix: amz2023.
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
