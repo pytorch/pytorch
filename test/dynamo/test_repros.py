@@ -5702,7 +5702,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.sin(x)
 
         fn(torch.randn(4))
-
+        
+    @requires_cuda
     def test_flip_bad_accuracy(self):
         import torch
         import torch._dynamo.config
