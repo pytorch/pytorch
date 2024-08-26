@@ -11912,7 +11912,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
                 func_opt = torch._dynamo.optimize("inductor")(func)
                 code = run_and_get_triton_code(func_opt, *inps)
-                fp32_cast_in_code = "float32" in code
+                fp32_cast_in_code = "to(tl.float32)" in code
                 self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
