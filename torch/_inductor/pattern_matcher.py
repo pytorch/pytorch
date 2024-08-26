@@ -1621,6 +1621,8 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
     elif node.op == "call_method":
         if _mutation_op_re.search(node.target):  # type: ignore[union-attr, arg-type]
             return True
+    if node.target is torch.ops.higher_order.auto_functionalized:
+        return False
     return node.kwargs.get("out") is not None
 
 
