@@ -180,7 +180,7 @@ class ProcessGroupNCCLNoHeartbeatCaught
       : ProcessGroupNCCLTimedOutErrors(store, rank, size, opts),
         hasMonitorThreadCaughtError_(false) {}
 
-  std::timed_mutex& getWatchdogMutex() {
+  std::mutex& getWatchdogMutex() {
     return workMetaListMutex_;
   }
 
@@ -413,7 +413,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   work = pg.allreduce(tensors_);
   {
     // Now run all reduce with errors.
-    std::lock_guard<std::timed_mutex> lock(pg.getWatchdogMutex());
+    std::lock_guard<std::mutex> lock(pg.getWatchdogMutex());
     LOG(INFO) << "Lock watchdog thread.";
     // Wait long enough before monitor thread throws exceptions.
     std::this_thread::sleep_for(
