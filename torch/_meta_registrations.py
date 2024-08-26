@@ -5099,10 +5099,10 @@ def meta__scaled_dot_product_cudnn_attention(
     value: Tensor,
     attn_bias: Optional[Tensor],
     compute_log_sumexp: bool,
-    dropout_p: float,
-    is_causal: bool,
-    return_debug_mask: bool,
-    scale: Optional[float],
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    scale: Optional[float] = None,
 ):
     B = query.size(0)
     H = query.size(1)
