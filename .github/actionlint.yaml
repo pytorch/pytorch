@@ -40,6 +40,7 @@ self-hosted-runner:
     # Repo-specific IBM hosted S390x runner
     - linux.s390x
     # Organization wide AWS Windows runners
+    - windows.4xlarge
     - windows.4xlarge.nonephemeral
     - windows.8xlarge.nvidia.gpu
     - windows.8xlarge.nvidia.gpu.nonephemeral
