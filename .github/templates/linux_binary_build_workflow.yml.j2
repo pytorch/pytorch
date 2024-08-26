@@ -76,7 +76,7 @@ jobs:
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       {%- else %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       {%- endif %}
