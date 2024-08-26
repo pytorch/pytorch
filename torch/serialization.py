@@ -264,30 +264,6 @@ class safe_globals(_weights_only_unpickler._safe_globals):
     """
 
 
-_skip_saving_storage: bool = False
-
-
-def set_skip_saving_storage(skip_saving_storage: bool) -> None:
-    """
-    Set whether to skip saving storage when saving tensors.
-
-    Args:
-        skip_saving_storage: whether to skip saving storage when saving tensors.
-    """
-    global _skip_saving_storage
-    _skip_saving_storage = skip_saving_storage
-
-
-def get_skip_saving_storage() -> bool:
-    """
-    Get whether to skip saving storage when saving tensors.
-
-    Returns:
-        skip_saving_storage: whether to skip saving storage when saving tensors.
-    """
-    return _skip_saving_storage
-
-
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
     # zipfile.is_zipfile() is True if the magic number appears anywhere in the
@@ -782,7 +758,8 @@ def save(
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
         metadata_only: specifies whether to reserve space for storages in
-            the checkpoint but skip writing their bytes
+            the checkpoint but skip writing their bytes, has special semantic of
+            creating space for storages when FakeTensors are passed
 
     .. note::
         A common PyTorch convention is to save tensors using .pt file extension.
@@ -822,6 +799,10 @@ def save(
             )
             return
     else:
+        if metadata_only:
+            raise RuntimeError(
+                "Cannot use metadata_only=True with _use_new_zipfile_serialization=False"
+            )
         with _open_file_like(f, "wb") as opened_file:
             _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
@@ -888,7 +869,6 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             # pointing to the same data all have the same dtype. If storage is
             # not allocated, don't perform this check
 
-            # FIXME: Does this have any implications on metadata_only?
             if storage.data_ptr() != 0:
                 if storage.data_ptr() in storage_dtypes:
                     if storage_dtype != storage_dtypes[storage.data_ptr()]:

@@ -214,7 +214,8 @@ class Tensor(torch._C.TensorBase):
         )
         state = torch._utils._get_obj_state(self)
         tensor_type = type(self)
-        # FIXME: Should I throw a warning for this?
+        # Strip all state when using FakeTensor with metadata_only because FakeTensor has
+        # some state that cannot be pickled
         if isinstance(self, torch._subclasses.fake_tensor.FakeTensor) and metadata_only:
             state = None
             tensor_type = torch.Tensor
