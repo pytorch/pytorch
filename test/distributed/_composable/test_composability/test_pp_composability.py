@@ -17,8 +17,8 @@ from torch.distributed.pipelining.schedules import (
     ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
-    ScheduleLoopedBFS,
     ScheduleInterleavedZeroBubble,
+    ScheduleLoopedBFS,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -82,11 +82,11 @@ class ComposabilityTest(MultiProcessTestCase):
     @parametrize(
         "ScheduleClass",
         [
-            # ScheduleGPipe,
-            # Schedule1F1B,
-            # ScheduleInterleaved1F1B,
-            # ScheduleLoopedBFS,
-            # ScheduleFlexibleInterleaved1F1B,
+            ScheduleGPipe,
+            Schedule1F1B,
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleFlexibleInterleaved1F1B,
             ScheduleInterleavedZeroBubble,
         ],
     )
@@ -110,7 +110,7 @@ class ComposabilityTest(MultiProcessTestCase):
 
         # create "entire model"
         total_layers = 8
-        dim = 6
+        dim = 10
         full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
         ref_model = nn.Sequential(*copy.deepcopy(full_model))
         ref_model.to(self.device)
@@ -168,8 +168,8 @@ class ComposabilityTest(MultiProcessTestCase):
 
         # Create pipeline stage
         def build_stage(stage_idx, num_stages):
-            dp_model, offset = get_stage_module(stage_idx, num_stages)
-            dp_model = apply_dp(dp_model, dp_type)
+            partial_model, offset = get_stage_module(stage_idx, num_stages)
+            dp_model = apply_dp(partial_model, dp_type)
             stage = PipelineStage(
                 dp_model,
                 stage_idx,
@@ -200,7 +200,6 @@ class ComposabilityTest(MultiProcessTestCase):
             num_stages = pp_group.size() * n_virtual
             stages = []
             offsets = []
-            print(f"{num_stages=}")
             for i in range(n_virtual):
                 stage, offset = build_stage(pp_group.rank() + n_virtual * i, num_stages)
                 stages.append(stage)
@@ -235,15 +234,10 @@ class ComposabilityTest(MultiProcessTestCase):
                     parts[0] = str(int(parts[0]) + offset)
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
-                    # TODO: WITH FSDP
                     self.assertTrue(isinstance(p.grad, DTensor))
-                    try:
-                        self.assertEqual(ref_p.grad, p.grad.full_tensor())
-                    except Exception as e:
-                        print(f"{name=} {ref_p.grad=} {p.grad.full_tensor()=}")
-                        raise e
-                    # self.assertEqual(ref_p.grad, p.grad)
-                    # torch.testing.assert_close(ref_p.grad, p.grad, rtol=1e-5, atol=5e-5)
+                    torch.testing.assert_close(
+                        ref_p.grad, p.grad.full_tensor(), rtol=1e-5, atol=5e-5
+                    )
         elif dp_type == "DDP":
             for partial_model, offset in zip(partial_models, offsets):
                 for name, p in partial_model.named_parameters():

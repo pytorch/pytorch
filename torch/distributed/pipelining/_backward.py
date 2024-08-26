@@ -219,17 +219,12 @@ def stage_backward_input(
                 inp.grad += dinputs[i]
     else:
         dinputs = None
-    # for p_group in param_groups:
-    #     print(f"{p_group['params']=}")
-    # print(f"{param_groups=}")
     return dinputs, param_groups
 
 
 def stage_backward_weight(
     weights: Iterator[Parameter], param_groups: List[Dict[str, Any]]
 ):
-    # for w in weights:
-    #     print(f"{w=}")
     # map weights to param_group_weights
     grad_acc_to_weight = {}
     weight_grads = []
@@ -255,13 +250,11 @@ def stage_backward_weight(
             grad_outputs=sum(param_group["grads"], tuple()),
         )
         for grad_acc, dw in zip(param_group["params"], dweights):
-            # torch.distributed.debug()
             weight, index = grad_acc_to_weight[grad_acc]
             if weight.grad is None:
                 weight.grad = dw
             else:
                 weight.grad += dw
-    # torch.distributed.breakpoint()
     # return grads in the original order weights were provided in
     return weight_grads
 
