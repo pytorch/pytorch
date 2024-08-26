@@ -228,6 +228,14 @@ TuningResultsValidator::TuningResultsValidator() {
         [hipblaslt_version]() { return hipblaslt_version; },
         [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
   }
+#elif defined(USE_CUDA)
+  {
+    std::string cuda_version = c10::str(CUDA_VERSION);
+    RegisterValidator(
+        "CUDA_VERSION",
+        [cuda_version]() { return cuda_version; },
+        [cuda_version](auto&& k) { return cuda_version == k ? OK : FAIL; });
+  }
 #endif
 }
 
