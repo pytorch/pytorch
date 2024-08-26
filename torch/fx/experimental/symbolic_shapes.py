@@ -1267,13 +1267,14 @@ def _is_supported_equivalence(expr):
         )
     return isinstance(expr, sympy.Symbol)
 
-def _has_unsupported_sympy_function(expr) -> bool:
+def _has_uninterpretable_sympy_function(expr) -> bool:
+    """
+    Add functions that our sympy interpreter can't reify into FX nodes
+    """
     return expr.has(
         torch.utils._sympy.functions.ToFloat,
         torch.utils._sympy.functions.TruncToInt,
         torch.utils._sympy.functions.CeilToInt,
-        # add more sympy functions that involve float<->int conversion here
-        # since our solver does not know what to do with them
     )
 
 @dataclass(frozen=True)
@@ -1675,6 +1676,14 @@ class DimConstraints:
         # symbols that are marked dynamic
         self._marked_dynamic = marked_dynamic
 
+        # track supported sympy functions and subtract from list of all sympy functions
+        self._supported_sympy_functions: Set[sympy.Function] = {
+            Mod,
+            PythonMod,
+            FloorDiv,
+        }
+        self._enumerate_sympy_functions()
+
     def rewrite_with_congruences(self, s, expr):
         """
         Eliminate expressions of the form b // d and b % d while adding congruences of the form b % d == k.
@@ -1741,6 +1750,20 @@ class DimConstraints:
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
+    def _enumerate_sympy_functions(self):
+        module = torch.utils._sympy.functions
+        all_functions = set()
+        for attr in dir(module):
+            if isinstance(func := getattr(module, attr), sympy.FunctionClass):
+                all_functions.add(func)
+        self._unsupported_sympy_functions = all_functions.difference(self._supported_sympy_functions)
+
+    def _has_unsupported_sympy_function(self, expr) -> bool:
+        """
+        Tracks list of sympy.Functions the export solver doesn't know how to handle.
+        """
+        return expr.has(*self._unsupported_sympy_functions)
+
     def add(self, expr) -> bool:
         """Add an expression to the set of constraints.
 
@@ -1757,7 +1780,7 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne) or _has_unsupported_sympy_function(expr):
+        if isinstance(expr, sympy.Ne) or self._has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
