@@ -138,12 +138,12 @@ def serialize_views_meta(
 ):
     def serialize_single_view(prefix, tensor, base_index):
         if tensor is None:
-            output_kwargs[f"_{prefix}_base_index"] = None
+            output_kwargs[f"{prefix}_base_index"] = None
         else:
-            output_kwargs[f"_{prefix}_base_index"] = base_index
-            output_kwargs[f"_{prefix}_size"] = tensor.size()
-            output_kwargs[f"_{prefix}_stride"] = tensor.stride()
-            output_kwargs[f"_{prefix}_storage_offset"] = tensor.storage_offset()
+            output_kwargs[f"{prefix}_base_index"] = base_index
+            output_kwargs[f"{prefix}_size"] = tensor.size()
+            output_kwargs[f"{prefix}_stride"] = tensor.stride()
+            output_kwargs[f"{prefix}_storage_offset"] = tensor.storage_offset()
 
     for arg_name, arg_type in zip(arg_names, arg_types):
         arg = input_kwargs[arg_name]
@@ -176,13 +176,13 @@ def deserialize_views_meta(arg_names, arg_types, input_kwargs, all_bases, pop_ar
         return input_kwargs[name]
 
     def deserialize_single_view(prefix):
-        base_index = get_arg(f"_{prefix}_base_index")
+        base_index = get_arg(f"{prefix}_base_index")
         if base_index is None:
             return None
         else:
-            size = get_arg(f"_{prefix}_size")
-            stride = get_arg(f"_{prefix}_stride")
-            storage_offset = get_arg(f"_{prefix}_storage_offset")
+            size = get_arg(f"{prefix}_size")
+            stride = get_arg(f"{prefix}_stride")
+            storage_offset = get_arg(f"{prefix}_storage_offset")
             return ViewInfo(
                 base_index, all_bases[base_index], size, stride, storage_offset
             )
@@ -219,6 +219,12 @@ def auto_functionalized_dense(
     )
 
     def regenerate_view(ViewInfo):
+        if (
+            ViewInfo.base.size() == ViewInfo.size
+            and ViewInfo.base.stride() == ViewInfo.stride
+            and ViewInfo.base.storage_offset() == ViewInfo.storage_offset
+        ):
+            return ViewInfo.base
         return torch.as_strided(
             ViewInfo.base, ViewInfo.size, ViewInfo.stride, ViewInfo.storage_offset
         )
