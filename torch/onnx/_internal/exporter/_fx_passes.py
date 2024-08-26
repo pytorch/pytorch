@@ -8,14 +8,6 @@ from torch.onnx._internal.exporter import _decomp, _registration
 from torch.onnx._internal.fx import diagnostics, passes
 
 
-_ATEN_ASSERTION_TARGETS = frozenset(
-    {
-        torch.ops.aten.sym_constrain_range_for_size.default,
-        torch.ops.aten._assert_async.msg,
-    }
-)
-
-
 def decompose_with_registry(
     exported_program: torch.export.ExportedProgram, registry: _registration.ONNXRegistry
 ) -> torch.export.ExportedProgram:
@@ -23,30 +15,10 @@ def decompose_with_registry(
 
     This function is needed so it shows clearly on the profiler results.
     """
-    decomp_table = _decomp.create_onnx_friendly_decomposition_table(registry)
     onnx_registered_ops = set(_decomp.get_onnx_implemented_overloads(registry))
+    decomp_table = _decomp.create_onnx_friendly_decomposition_table(onnx_registered_ops)
     # Try to preserve some known CompositeImplicitAutograd ops
-    aten = torch.ops.aten
-    to_preserve = {
-        aten._upsample_bilinear2d_aa.default,
-        aten._upsample_nearest_exact1d.vec,
-        aten._upsample_nearest_exact2d.vec,
-        aten._upsample_nearest_exact3d.vec,
-        aten.group_norm.default,
-        aten.linear.default,
-        aten.upsample_bilinear2d.default,
-        aten.upsample_bilinear2d.vec,
-        aten.upsample_linear1d.default,
-        aten.upsample_linear1d.vec,
-        aten.upsample_nearest1d.default,
-        aten.upsample_nearest1d.vec,
-        aten.upsample_nearest2d.default,
-        aten.upsample_nearest2d.vec,
-        aten.upsample_nearest3d.default,
-        aten.upsample_nearest3d.vec,
-        aten.upsample_trilinear3d.default,
-        aten.upsample_trilinear3d.vec,
-    }
+    to_preserve = _decomp.get_preserve_ops()
     # We can only preserve implemented ops
     can_preserve = tuple(to_preserve.intersection(onnx_registered_ops))
     return exported_program.run_decompositions(decomp_table, _preserve_ops=can_preserve)
@@ -65,8 +37,12 @@ def insert_type_promotion_nodes(
 
 def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """Remove all assertion and check nodes from the FX graph"""
+    aten_assertion_targets = {
+        torch.ops.aten.sym_constrain_range_for_size.default,
+        torch.ops.aten._assert_async.msg,
+    }
     for node in graph_module.graph.nodes:
-        if node.op == "call_function" and node.target in _ATEN_ASSERTION_TARGETS:
+        if node.op == "call_function" and node.target in aten_assertion_targets:
             graph_module.graph.erase_node(node)
     graph_module.recompile()
     return graph_module

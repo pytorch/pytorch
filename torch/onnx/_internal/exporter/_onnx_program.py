@@ -48,9 +48,16 @@ def _ort_session_initializer(model: str | bytes) -> ort.InferenceSession:
 
 
 class ONNXProgram:
-    """A substitute class for `torch.onnx.ONNXProgram`."""
+    """A class to represent an ONNX program that is callable with torch tensors."""
 
-    def __init__(self, model: ir.Model, exported_program: torch.export.ExportedProgram):
+    def __init__(
+        self, model: ir.Model, exported_program: torch.export.ExportedProgram | None
+    ):
+        """Initialize the ONNX program with the specified model and exported program.
+        Args:
+            model: The ONNX model.
+            exported_program: The exported program that produced the ONNX model. Optional.
+        """
         self.model: ir.Model = model
         self.exported_program = exported_program
         self._inference_session: ort.InferenceSession | None = None
