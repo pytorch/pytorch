@@ -1,5 +1,7 @@
-#include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+
+#include <ATen/core/NestedIntSymNodeImpl.h>
+#include <ATen/NestedTensorImpl.h>
 #include <c10/util/Optional.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -9,6 +11,7 @@
 #include <ATen/ops/_nested_tensor_storage_offsets_native.h>
 #include <ATen/ops/_nested_tensor_strides_native.h>
 #include <ATen/ops/chunk_native.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/split_with_sizes_native.h>
 #endif
 
@@ -165,6 +168,41 @@ std::vector<Tensor> split_with_sizes_nested(
     splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, new_offsets);
   }
   return splits;
+}
+
+Tensor get_nested_sizes_from_sym_sizes(const c10::SymIntArrayRef& size) {
+  // Given sym_sizes_ produce _nested_tensor_sizes, such that
+  // nested_sizes_from_sym_sizes(nt.sym_size()) == nt._nested_tensor_sizes()
+  TORCH_INTERNAL_ASSERT(!size.empty(), "Expected non-empty size.");
+  const int64_t B = size[0].expect_int();
+  if (B == 0) {
+    TORCH_INTERNAL_ASSERT(size.size() == 1);
+    // Mirrors logic in ctor when NT is created from empty list
+    return at::ones({}, TensorOptions().dtype(at::kLong));
+  }
+  auto nt_sizes = at::empty({B, static_cast<int64_t>(size.size() - 1)},
+                            TensorOptions().dtype(at::kLong));
+  for (const auto i : c10::irange(size.size())) {
+    int64_t idx = static_cast<int64_t>(i);
+    if (idx == 0) {
+      continue;
+    }
+    if (size[idx].is_heap_allocated() && size[idx].toSymNodeImplUnowned()->is_nested_int()) {
+      auto vec = c10::get_nested_int_vec(size[idx].toSymNodeImplUnowned());
+      // NB: nested_int_vec in the C++ nested tensor case holds lengths not offsets
+      //     so if the sizes came from jagged NT, we could support it by computing
+      //     lengths from offsets. But not supporting to for now because it's not
+      //     very useful and to get good performance we'd want to cache the result.
+      TORCH_CHECK(
+          size[idx].toSymNodeImplUnowned()->key_set().has(DispatchKey::NestedTensor),
+          "Expected nested int to have been created from C++ NestedTensor sizes");
+      TORCH_INTERNAL_ASSERT(vec.size(0) == B, vec.size(0), " != ", B);
+      nt_sizes.select(1, idx - 1).copy_(vec);
+    } else {
+      nt_sizes.select(1, idx - 1).fill_(size[i]);
+    }
+  }
+  return nt_sizes;
 }
 
 } // namespace native

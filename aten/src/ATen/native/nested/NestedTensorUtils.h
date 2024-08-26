@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/Layout.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -315,7 +316,7 @@ inline Tensor wrap_tensor_node(
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
           pin_memory);
   if (tensor_node.degree() == 0) {
-    return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
+    return wrap_buffer(ones({0}, dtype, layout, device), ones({}, at::kLong, at::kStrided));
   }
 
   // Fast path: if all tensors are on CPU, have contiguous memory, and the same
@@ -410,6 +411,8 @@ inline at::Tensor map_nested_tensor(F&& fn, A... a) {
       c10::nullopt,
       c10::nullopt);
 }
+
+TORCH_API Tensor get_nested_sizes_from_sym_sizes(const c10::SymIntArrayRef& size);
 
 } // namespace native
 } // namespace at
