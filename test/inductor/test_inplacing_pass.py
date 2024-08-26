@@ -9,8 +9,13 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    subtest,
+)
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -34,6 +39,30 @@ def sin(x: torch.Tensor, result: torch.Tensor) -> None:
 def sin_cos(x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor) -> None:
     out_sin.copy_(x.sin())
     out_cos.copy_(x.cos())
+
+
+if HAS_GPU:
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def sin_kernel(
+        in_ptr0,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        output = tl.sin(x)
+        tl.store(out_ptr + offsets, output, mask=mask)
+
+    def sin_triton(x, out):
+        n_elements = x.numel()
+        sin_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=4)
 
 
 class TestReinplacingPassCorrectness(InductorTestCase):
@@ -182,14 +211,21 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         # Both list inputs failed to reinplace. So we should have emitted clones for them.
         self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
 
-    def test_partitioner_recomputes_factory(self):
+    @parametrize(
+        "sin_op",
+        [
+            subtest(sin, name="sin_op"),
+            subtest(sin_triton, name="sin_triton"),
+        ],
+    )
+    def test_partitioner_recomputes_factory(self, sin_op):
         factory_op = torch.ones_like
 
         class MySin(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
                 out = factory_op(x)
-                sin(x, out)
+                sin_op(x, out)
                 ctx.save_for_backward(out)
                 return out
 
@@ -197,7 +233,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             def backward(ctx, grad):
                 (saved,) = ctx.saved_tensors
                 out = factory_op(grad)
-                sin(saved, out)
+                sin_op(saved, out)
                 return out
 
         @torch.compile(backend="inductor")
@@ -208,6 +244,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         y = f(x)
         self.assertEqual(num_reinplacing_failures(), 0)
 
+
+instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:
