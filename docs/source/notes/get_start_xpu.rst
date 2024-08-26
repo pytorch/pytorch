@@ -1,79 +1,50 @@
-Pytorch 2.4: Getting Started on Intel GPU
-=========================================
+Getting Started on Intel GPU
+============================
 
-The support for Intel GPUs is released alongside PyTorch v2.4.
+Hardware Prerequisite
+---------------------
 
-This release only supports build from source for Intel GPUs.
+.. list-table:: 
+   :widths: 50 50
+   :header-rows: 1
 
-Prerequisites
--------------
+   * - Validated Hardware
+     - Supported OS
+   * - Intel® Data Center GPU Max Series
+     - Linux
+   * - (Prototype Support) Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (MTL-H) 
+     - Windows/Linux
+
+
+Software Prerequisite
+---------------------
 
 Visit `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html>`_ for more detailed information regarding:
 
-#. Supported hardware.
 #. Intel GPU driver installation
 #. Intel support package installation
-#. compilation environment setup
+#. Environment setup
 
-Build from source
------------------
+Installation
+------------
 
-Now we have all the required packages installed and environment acitvated. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` by building from source. For more details, refer to official guides in `PyTorch from source <https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support>`_, `Vision from source <https://github.com/pytorch/vision/blob/main/CONTRIBUTING.md#development-installation>`_ and `Audio from source <https://pytorch.org/audio/main/build.linux.html>`_.
+Binaries
+^^^^^^^^
+
+Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio``.
 
 .. code-block::
 
-   # Get PyTorch Source Code
-   git clone --recursive https://github.com/pytorch/pytorch
-   cd pytorch
-   git checkout main # or checkout the specific release version >= v2.4
-   git submodule sync
-   git submodule update --init --recursive
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
 
-   # Get required packages for compilation
-   conda install cmake ninja
-   pip install -r requirements.txt
 
-   # Pytorch for Intel GPUs only support Linux platform for now.
-   # Install the required packages for pytorch compilation.
-   conda install intel::mkl-static intel::mkl-include
+From Source
+^^^^^^^^^^^
 
-   # (optional) If using torch.compile with inductor/triton, install the matching version of triton
-   # Run from the pytorch directory after cloning
-   # For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
-   USE_XPU=1 make triton
-
-   # If you would like to compile PyTorch with new C++ ABI enabled, then first run this command:
-   export _GLIBCXX_USE_CXX11_ABI=1
-
-   # pytorch build from source
-   export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-   python setup.py develop
-   cd ..
-
-   # (optional) If using torchvison.
-   # Get torchvision Code
-   git clone https://github.com/pytorch/vision.git
-   cd vision
-   git checkout main # or specific version
-   python setup.py develop
-   cd ..
-
-   # (optional) If using torchaudio.
-   # Get torchaudio Code
-   git clone https://github.com/pytorch/audio.git
-   cd audio
-   pip install -r requirements.txt
-   git checkout main # or specific version
-   git submodule sync
-   git submodule update --init --recursive
-   python setup.py develop
-   cd ..
+Build from source refer to `PyTorch Installation Build from source <https://github.com/pytorch/pytorch?tab=readme-ov-file#from-source>`_.
 
 Check availability for Intel GPU
 --------------------------------
-
-.. note::
-   Make sure the environment is properly set up by following `Environment Set up <#set-up-environment>`_ before running the code.
 
 To check if your Intel GPU is available, you would typically use the following code:
 
@@ -82,7 +53,11 @@ To check if your Intel GPU is available, you would typically use the following c
    import torch
    torch.xpu.is_available()  # torch.xpu is the API for Intel GPU support
 
-If the output is ``False``, ensure that you have Intel GPU in your system and correctly follow the `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html>`_. Then, check that the PyTorch compilation is correctly finished.
+If the output is ``False``, double check following steps below.
+
+#. Intel GPU driver installation
+#. Intel support package installation
+#. Environment setup
 
 Minimum Code Change
 -------------------
@@ -102,7 +77,6 @@ The following points outline the support and limitations for PyTorch with Intel 
 #. Both training and inference workflows are supported.
 #. Both eager mode and ``torch.compile`` is supported.
 #. Data types such as FP32, BF16, FP16, and Automatic Mixed Precision (AMP) are all supported.
-#. Models that depend on third-party components, will not be supported until PyTorch v2.5 or later.
 
 Examples
 --------
@@ -172,6 +146,7 @@ Inference with ``torch.compile``
 
    import torch
    import torchvision.models as models
+   import time
 
    model = models.resnet50(weights="ResNet50_Weights.DEFAULT")
    model.eval()
@@ -183,10 +158,22 @@ Inference with ``torch.compile``
    data = data.to("xpu")
    ######## code changes #######
 
-   model = torch.compile(model)
-   for i in range(ITERS):
-       with torch.no_grad():
-           model(data)
+    for i in range(ITERS):
+        start = time.time()
+        with torch.no_grad():
+            model(data)
+            torch.xpu.synchronize()
+        end = time.time()
+        print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
+
+    model = torch.compile(model)
+    for i in range(ITERS):
+        start = time.time()
+        with torch.no_grad():
+            model(data)
+            torch.xpu.synchronize()
+        end = time.time()
+        print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
 
    print("Execution finished")
 
@@ -221,6 +208,7 @@ Train with FP32
        download=DOWNLOAD,
    )
    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=128)
+   train_len = len(train_loader)
 
    model = torchvision.models.resnet50()
    criterion = torch.nn.CrossEntropyLoss()
@@ -231,6 +219,7 @@ Train with FP32
    criterion = criterion.to("xpu")
    ######################## code changes #######################
 
+   print(f"Initiating training")
    for batch_idx, (data, target) in enumerate(train_loader):
        ########## code changes ##########
        data = data.to("xpu")
@@ -241,7 +230,9 @@ Train with FP32
        loss = criterion(output, target)
        loss.backward()
        optimizer.step()
-       print(batch_idx)
+       if (batch_idx + 1) % 10 == 0:
+            iteration_loss = loss.item()
+            print(f"Iteration [{batch_idx+1}/{train_len}], Loss: {iteration_loss:.4f}")
    torch.save(
        {
            "model_state_dict": model.state_dict(),
@@ -280,6 +271,7 @@ Train with AMP
        download=DOWNLOAD,
    )
    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=128)
+   train_len = len(train_loader)
 
    model = torchvision.models.resnet50()
    criterion = torch.nn.CrossEntropyLoss()
@@ -292,6 +284,7 @@ Train with AMP
    criterion = criterion.to("xpu")
    ######################## code changes #######################
 
+   print(f"Initiating training")
    for batch_idx, (data, target) in enumerate(train_loader):
        ########## code changes ##########
        data = data.to("xpu")
@@ -305,7 +298,9 @@ Train with AMP
        scaler.step(optimizer)
        scaler.update()
        optimizer.zero_grad()
-       print(batch_idx)
+       if (batch_idx + 1) % 10 == 0:
+            iteration_loss = loss.item()
+            print(f"Iteration [{batch_idx+1}/{train_len}], Loss: {iteration_loss:.4f}")
 
    torch.save(
        {
