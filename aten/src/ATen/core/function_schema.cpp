@@ -287,7 +287,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
   return out;
 }
 
-size_t findFirstOutArg(const std::vector<Argument>& args) {
+static size_t findFirstOutArg(const std::vector<Argument>& args) {
   // find the start of out args in the schema
   for (const auto out_start_idx : c10::irange(args.size())) {
     if (args.at(out_start_idx).is_out()) {
