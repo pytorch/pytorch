@@ -1164,6 +1164,7 @@ def forward(self, add_1):
             x = torch.randn([3, 3])
             ep = export(mod, (x,))
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
+            print(inplace_ep.graph)
 
             nodes = inplace_ep.graph.nodes
             getitems = 0
