@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.utils import ChromiumEventLogger, counters
+from torch._dynamo.utils import counters, get_chromium_event_logger
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -502,7 +502,8 @@ class AOTAutogradCache:
             "cache_state": cache_state,
             "components": debug_lines,
         }
-        ChromiumEventLogger.log_instant_event(
+        chromium_log = get_chromium_event_logger()
+        chromium_log.log_instant_event(
             f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_args
         )
         torch._logging.trace_structured(
