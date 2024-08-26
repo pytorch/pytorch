@@ -125,7 +125,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -193,7 +193,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -261,7 +261,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -393,7 +393,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -461,7 +461,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -529,7 +529,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -661,7 +661,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -729,7 +729,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -797,7 +797,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -929,7 +929,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -997,7 +997,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -1065,7 +1065,7 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
     secrets:
