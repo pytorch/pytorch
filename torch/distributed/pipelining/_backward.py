@@ -246,6 +246,7 @@ def stage_backward_weight(
                 weight.grad = dw
             else:
                 weight.grad += dw
+    # torch.distributed.breakpoint()
     # return grads in the original order weights were provided in
     return weight_grads
 
