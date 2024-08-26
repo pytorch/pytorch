@@ -37,9 +37,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   libtorch-cpu-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -51,14 +60,16 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cpu-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-pre-cxx11-build
+    needs:
+      - libtorch-cpu-shared-with-deps-pre-cxx11-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -73,7 +84,7 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -104,6 +115,7 @@ jobs:
   libtorch-cuda11_8-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -116,14 +128,16 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda11_8-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_8-shared-with-deps-pre-cxx11-build
+    needs:
+      - libtorch-cuda11_8-shared-with-deps-pre-cxx11-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -139,7 +153,7 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -171,6 +185,7 @@ jobs:
   libtorch-cuda12_1-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -183,14 +198,16 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_1-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda12_1-shared-with-deps-pre-cxx11-build
+    needs:
+      - libtorch-cuda12_1-shared-with-deps-pre-cxx11-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -206,7 +223,7 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -238,6 +255,7 @@ jobs:
   libtorch-cuda12_4-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -250,14 +268,16 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build_name: libtorch-cuda12_4-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_4-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda12_4-shared-with-deps-pre-cxx11-build
+    needs:
+      - libtorch-cuda12_4-shared-with-deps-pre-cxx11-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -273,7 +293,7 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_4-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -302,116 +322,10 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-rocm6_0-shared-with-deps-pre-cxx11-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
-      runner_prefix: amz2023.
-      build_name: libtorch-rocm6_0-shared-with-deps-pre-cxx11
-      build_environment: linux-binary-libtorch-pre-cxx11
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-rocm6_0-shared-with-deps-pre-cxx11-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm6_0-shared-with-deps-pre-cxx11-build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: libtorch-rocm6_0-shared-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: pytorch/manylinux-builder:rocm6.0-main
-      - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
-  libtorch-rocm6_0-shared-with-deps-pre-cxx11-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: libtorch-rocm6_0-shared-with-deps-pre-cxx11-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
-      build_name: libtorch-rocm6_0-shared-with-deps-pre-cxx11
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   libtorch-rocm6_1-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -424,14 +338,16 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build_name: libtorch-rocm6_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-rocm6_1-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm6_1-shared-with-deps-pre-cxx11-build
+    needs:
+      - libtorch-rocm6_1-shared-with-deps-pre-cxx11-build
+      - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -510,6 +426,116 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm6_1-shared-with-deps-pre-cxx11
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  libtorch-rocm6_2-shared-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      build_name: libtorch-rocm6_2-shared-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-rocm6_2-shared-with-deps-pre-cxx11-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - libtorch-rocm6_2-shared-with-deps-pre-cxx11-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm6_2-shared-with-deps-pre-cxx11
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.2-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  libtorch-rocm6_2-shared-with-deps-pre-cxx11-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-rocm6_2-shared-with-deps-pre-cxx11-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+      build_name: libtorch-rocm6_2-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
