@@ -148,29 +148,32 @@ extern "C" {{export_declaration}}
                     int64_t k_start = kc * Kr;
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
                     {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
-                    {%- if w_scale_zp is not none %}
-                    int64_t zp_end = k_end / q_group_size;
-                    int64_t zp_start = k_start / q_group_size;
-                    {%- set tile_S_2d = kernel.slice_nd(w_scale_zp, [("zp_start", "zp_end"), ("n_start * 2", "n_end * 2")]) %}
-                    {%- set tile_W_3d = kernel.slice_nd(W, [("nc", "nc + 1"), ("k_start", "k_end"), ()]) %}
-                    {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n // 8]) %}
-                    {%- else %}
-                    {%- set tile_W_3d = kernel.slice_nd(W, [("nc", "nc + 1"), ("k_start", "k_end"), ()]) %}
-                    {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+                    for (int64_t nci = nc; nci < nc_block_end; nci++) {
+                        {%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+                        {%- if w_scale_zp is not none %}
+                        int64_t zp_end = k_end / q_group_size;
+                        int64_t zp_start = k_start / q_group_size;
+                            {%- set tile_S_2d = kernel.slice_nd(w_scale_zp, [("zp_start", "zp_end"), ("nci * 2 * Nr", "(nci + 1) * 2 * Nr")]) %}
+                            {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
+                            {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n // 8]) %}
+                        {%- else %}
+                            {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
+                            {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+                        {%- endif %}
+                        {%- if w_scale_zp is not none %}
+                        if (kc == k_block_start) {
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc_slice, accum=False, actual_N=N)|indent(28, false) }}
+                        } else {
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc_slice, accum=True, actual_N=N)|indent(28, false) }}
+                        }
+                        {%- else %}
+                        if (kc == k_block_start) {
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=False)|indent(28, false) }}
+                        } else {
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=True)|indent(28, false) }}
+                        }
                     {%- endif %}
-                    {%- if w_scale_zp is not none %}
-                    if (kc == k_block_start) {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc, accum=False, actual_N=N)|indent(24, false) }}
-                    } else {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc, accum=True, actual_N=N)|indent(24, false) }}
                     }
-                    {%- else %}
-                    if (kc == k_block_start) {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False)|indent(24, false) }}
-                    } else {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
-                    }
-                    {%- endif %}
                 }
 {%- if maybe_k_slicing %}
                 if (num_k_slices > 1) {
