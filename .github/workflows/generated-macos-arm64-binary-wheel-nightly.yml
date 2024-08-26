@@ -34,7 +34,7 @@ concurrency:
 jobs:
   wheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-14-arm64
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -150,7 +150,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-14-arm64
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -266,7 +266,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-14-arm64
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -382,7 +382,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-14-arm64
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
