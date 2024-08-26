@@ -773,11 +773,13 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",
+    "torch/csrc/cuda/GdsFile.cpp",
 ]
 
 libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
     "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/shared/cudnn.cpp",
+    "torch/csrc/cuda/shared/cusparselt.cpp",
     "torch/csrc/cuda/Tensor.cpp",
 ]
 
@@ -1440,6 +1442,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/cuda/CUDABlas.cpp",
     "aten/src/ATen/cuda/CUDASparseBlas.cpp",
     "aten/src/ATen/cuda/CublasHandlePool.cpp",
+    "aten/src/ATen/native/cuda/linalg/CudssHandlePool.cpp",
     "aten/src/ATen/cuda/tunable/StreamTimer.cpp",
     "aten/src/ATen/cuda/tunable/Tunable.cpp",
     "aten/src/ATen/native/cuda/Activation.cpp",

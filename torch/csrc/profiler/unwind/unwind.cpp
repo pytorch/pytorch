@@ -37,6 +37,7 @@ Stats stats() {
 #else
 
 #include <c10/util/flat_hash_map.h>
+#include <dlfcn.h>
 #include <elf.h>
 #include <link.h>
 #include <linux/limits.h>
