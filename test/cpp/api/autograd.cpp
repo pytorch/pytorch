@@ -1198,7 +1198,7 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
   auto z = x * x;
   {
     WarningCapture warnings;
-    z.backward(torch::ones({5, 5}), c10::nullopt, true);
+    z.backward(torch::ones({5, 5}), std::nullopt, true);
     ASSERT_TRUE(
         warnings.str().find("Using backward() with create_graph=True") !=
         std::string::npos);
@@ -1206,7 +1206,7 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
 
   {
     WarningCapture warnings;
-    torch::autograd::backward({z}, {torch::ones({5, 5})}, c10::nullopt, true);
+    torch::autograd::backward({z}, {torch::ones({5, 5})}, std::nullopt, true);
     ASSERT_TRUE(
         warnings.str().find("Using backward() with create_graph=True") !=
         std::string::npos);

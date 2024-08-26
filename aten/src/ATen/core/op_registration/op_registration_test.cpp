@@ -909,28 +909,28 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // optional types (with has_value() == false)
   testArgTypes<std::optional<double>>::test(
-    std::optional<double>(c10::nullopt), [] (const std::optional<double>& v) {EXPECT_FALSE(v.has_value());},
-    std::optional<double>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    std::optional<double>(std::nullopt), [] (const std::optional<double>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<double>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(float? a) -> float?");
   testArgTypes<std::optional<int64_t>>::test(
-    std::optional<int64_t>(c10::nullopt), [] (const std::optional<int64_t>& v) {EXPECT_FALSE(v.has_value());},
-    std::optional<int64_t>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    std::optional<int64_t>(std::nullopt), [] (const std::optional<int64_t>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<int64_t>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(int? a) -> int?");
   testArgTypes<std::optional<bool>>::test(
-    std::optional<bool>(c10::nullopt), [] (const std::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
-    std::optional<bool>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    std::optional<bool>(std::nullopt), [] (const std::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<bool>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(bool? a) -> bool?");
   testArgTypes<std::optional<bool>>::test(
-    std::optional<bool>(c10::nullopt), [] (const std::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
-    std::optional<bool>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    std::optional<bool>(std::nullopt), [] (const std::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<bool>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(bool? a) -> bool?");
   testArgTypes<std::optional<std::string>>::test(
-    std::optional<std::string>(c10::nullopt), [] (const std::optional<std::string>& v) {EXPECT_FALSE(v.has_value());},
-    std::optional<std::string>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    std::optional<std::string>(std::nullopt), [] (const std::optional<std::string>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<std::string>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(str? a) -> str?");
   testArgTypes<std::optional<Tensor>>::test(
-    std::optional<Tensor>(c10::nullopt), [] (const std::optional<Tensor>& v) {EXPECT_FALSE(v.has_value());},
-    std::optional<Tensor>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    std::optional<Tensor>(std::nullopt), [] (const std::optional<Tensor>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<Tensor>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(Tensor? a) -> Tensor?");
 
 
@@ -1136,8 +1136,8 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // Test optional of list (with nullopt)
   testArgTypes<std::optional<c10::List<int64_t>>>::test(
-    std::optional<c10::List<int64_t>>(c10::nullopt), [] (const std::optional<c10::List<int64_t>>& v) {EXPECT_FALSE(v.has_value());},
-    std::optional<c10::List<int64_t>>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    std::optional<c10::List<int64_t>>(std::nullopt), [] (const std::optional<c10::List<int64_t>>& v) {EXPECT_FALSE(v.has_value());},
+    std::optional<c10::List<int64_t>>(std::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with empty list)
@@ -1160,8 +1160,8 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // Test list of optional (with values)
   testArgTypes<c10::List<::std::optional<int64_t>>>::test(
-    c10::List<::std::optional<int64_t>>(c10::List<::std::optional<int64_t>>({3, c10::nullopt, 2})), [] (const c10::List<::std::optional<int64_t>>& v) {expectListEquals<std::optional<int64_t>>({3, c10::nullopt, 2}, v);},
-    c10::List<::std::optional<int64_t>>(c10::List<::std::optional<int64_t>>({3, c10::nullopt, 2})), [] (const IValue& v) {expectListEquals<std::optional<int64_t>>({3, c10::nullopt, 2}, v.to<c10::List<::std::optional<int64_t>>>());},
+    c10::List<::std::optional<int64_t>>(c10::List<::std::optional<int64_t>>({3, std::nullopt, 2})), [] (const c10::List<::std::optional<int64_t>>& v) {expectListEquals<std::optional<int64_t>>({3, std::nullopt, 2}, v);},
+    c10::List<::std::optional<int64_t>>(c10::List<::std::optional<int64_t>>({3, std::nullopt, 2})), [] (const IValue& v) {expectListEquals<std::optional<int64_t>>({3, std::nullopt, 2}, v.to<c10::List<::std::optional<int64_t>>>());},
     "(int?[] a) -> int?[]");
 
   // dict types
@@ -2141,7 +2141,7 @@ TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_mixedCall
 
 TEST(OperatorRegistrationTest, getRegistrationsForDispatchKey) {
   // should return every registered op
-  auto all_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(c10::nullopt);
+  auto all_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(std::nullopt);
   // should return every registered op with a cpu kernel
   auto cpu_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(c10::DispatchKey::CPU);
   ASSERT_TRUE(all_ops.size() > 0);

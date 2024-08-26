@@ -1,7 +1,9 @@
+# mypy: allow-untyped-defs
 from torch.distributions import constraints
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import StickBreakingTransform
+
 
 __all__ = ["LogisticNormal"]
 

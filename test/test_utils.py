@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
 import os
@@ -47,6 +48,7 @@ from torch.utils.checkpoint import (
     get_device_states,
 )
 from torch.utils.data import DataLoader
+
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -115,7 +117,7 @@ class TestCheckpoint(TestCase):
     # the number of times forward pass happens
     def test_checkpoint_trigger(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.counter = 0
 
@@ -216,7 +218,7 @@ class TestCheckpoint(TestCase):
 
     def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 module_list = [
                     nn.Linear(100, 50),
@@ -1177,9 +1179,11 @@ class TestDeviceUtils(TestCase):
             kwargs.pop("device", None)
             with torch.device("meta"):
                 r = func(sample.input, *sample.args, **kwargs)
-            self.assertTrue(
-                tree_all_only(torch.Tensor, lambda x: x.device.type == "meta", r)
-            )
+
+            def is_meta_device(x: torch.Tensor) -> bool:
+                return x.device.type == "meta"
+
+            self.assertTrue(tree_all_only(torch.Tensor, is_meta_device, r))
 
 
 instantiate_device_type_tests(TestDeviceUtils, globals())

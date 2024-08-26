@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
+from torch._C import _NodeIter
 
 import os
 import contextlib
@@ -220,8 +222,10 @@ dtype_abbrs = {
     torch.int64: 'i64',
     torch.bool: 'b8',
     torch.uint8: 'u8',
+    torch.uint16: 'u16',
     torch.uint32: 'u32',
     torch.uint64: 'u64',
+    torch.bits16: 'b16',
 }
 
 @compatibility(is_backward_compatible=True)
@@ -270,20 +274,8 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        root = self.graph._root
-        if self.direction == "_next":
-            cur = root._next
-            while cur is not root:
-                if not cur._erased:
-                    yield cur
-                cur = cur._next
-        else:
-            assert self.direction == "_prev"
-            cur = root._prev
-            while cur is not root:
-                if not cur._erased:
-                    yield cur
-                cur = cur._prev
+        assert self.direction == "_prev" or self.direction == "_next"
+        yield from _NodeIter(self.graph._root, self.direction == "_prev")
 
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
@@ -383,7 +375,7 @@ class CodeGen:
 
     def _gen_python_code(
         self, nodes, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False
     ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
@@ -452,13 +444,41 @@ class CodeGen:
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
 
+        codes = {
+            "yellow": "\033[33m",
+            "cyan": "\033[36m",
+            "green": "\033[32m",
+            "blue": "\033[34m",
+            "red": "\033[31m",
+            "dim": "\033[2m",
+            "dim_blue": "\033[2m\033[34m",
+            "dim_green": "\033[2m\033[32m",
+            "reset": "\033[0m",
+        }
+
+        def make_wrapper_func(name):
+            def f(s):
+                if colored:
+                    return f"{codes[name]}{s}{codes['reset']}"
+                return s
+            return f
+
+        yellow = make_wrapper_func("yellow")
+        cyan = make_wrapper_func("cyan")
+        red = make_wrapper_func("red")
+        green = make_wrapper_func("green")
+        dim_green = make_wrapper_func("dim_green")
+        dim = make_wrapper_func("dim")
+        dim_blue = make_wrapper_func("dim_blue")
+        blue = make_wrapper_func("blue")
+
         def _get_repr(arg: Any) -> str:
             # Handle NamedTuples (if it has `_fields`) via add_global.
             if isinstance(arg, tuple) and hasattr(arg, '_fields'):
                 qualified_name = _get_qualified_name(type(arg))
                 global_name = add_global(qualified_name, type(arg))
                 return f"{global_name}{repr(tuple(arg))}"
-            elif isinstance(arg, torch._ops.OpOverload):
+            elif isinstance(arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
                 qualified_name = _get_qualified_name(arg)
                 global_name = add_global(qualified_name, arg)
                 return f"{global_name}"
@@ -466,7 +486,15 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
-            return repr(arg)
+            elif isinstance(arg, Node):
+                return repr(arg)
+            elif isinstance(arg, torch.Tensor):
+                size = list(arg.size())
+                dtype = str(arg.dtype).split(".")[-1]
+                return f"torch.Tensor(size={size}, dtype={dtype})"
+            else:
+                return blue(repr(arg))
+
 
         def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
             args_s = ', '.join(_get_repr(a) for a in args)
@@ -503,9 +531,16 @@ class CodeGen:
                 body.append('\n')
                 return
             nodes_to_delete = user_to_last_uses.get(user, [])
+
+            if len(user.users.keys()) == 0:
+                # This node is not used by any others. however it's also not
+                # removed by DCE since side-effect. We want to free it's outputs
+                # right after its execution done to save memory.
+                nodes_to_delete.append(user)
+
             if len(nodes_to_delete):
                 to_delete_str = ' = '.join([repr(n) for n in nodes_to_delete] + ['None'])
-                body.append(f';  {to_delete_str}\n')
+                body.append(f';  {dim(to_delete_str)}\n')
             else:
                 body.append('\n')
 
@@ -527,10 +562,11 @@ class CodeGen:
                         if parsed_stack_trace := _parse_stack_trace(node.stack_trace):
                             summary_str = parsed_stack_trace.get_summary_str()
 
-                        body.append(f'\n# {summary_str}\n')
+                        body.append(f'\n {dim("# " + summary_str)}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
-                    body.append('\n# No stacktrace found for following nodes\n')
+                    no_stacktrace_msg = "# No stacktrace found for following nodes"
+                    body.append(f'\n{dim(no_stacktrace_msg)}\n')
 
         def stringify_shape(shape : Iterable) -> str:
             return f"[{', '.join(str(x) for x in shape)}]"
@@ -540,18 +576,18 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
-                from torch._subclasses.fake_tensor import FakeTensor
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', node.meta.get('example_value', None)))
                 # use string as annotation, to make it valid python code
-                if isinstance(meta_val, FakeTensor):
+
+                if isinstance(meta_val, torch.Tensor):
                     stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
                     device_annotation = f"{meta_val.device}" if include_device else ""
                     maybe_type_annotation = \
-                        f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}' \
-                        f'{stride_annotation}{device_annotation}"'
+                        f': "{red(dtype_abbrs[meta_val.dtype])}{blue(stringify_shape(meta_val.shape))}' \
+                        f'{dim_blue(stride_annotation)}{dim_green(device_annotation)}"'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):
@@ -1361,7 +1397,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def python_code(
         self, root_module: str, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1423,16 +1459,16 @@ class Graph:
         with override_node_repr(self):
             return self._python_code(
                 root_module, namespace,
-                verbose=verbose, include_stride=include_stride, include_device=include_device
+                verbose=verbose, include_stride=include_stride, include_device=include_device, colored=colored
             )
 
     def _python_code(
         self, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes, root_module, namespace,
-            verbose=verbose, include_stride=include_stride, include_device=include_device
+            verbose=verbose, include_stride=include_stride, include_device=include_device, colored=colored
         )
 
 
@@ -1548,11 +1584,16 @@ class Graph:
                             m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
-    def eliminate_dead_code(self):
+    def eliminate_dead_code(self, is_impure_node: Optional[Callable[[Node], bool]] = None):
         """
         Remove all dead code from the graph, based on each node's number of
         users, and whether the nodes have any side effects. The graph must be
         topologically sorted before calling.
+
+        Args:
+            is_impure_node (Optional[Callable[[Node], bool]]): A function that returns
+            whether a node is impure. If this is None, then the default behavior is to
+            use Node.is_impure.
 
         Returns:
           bool: Whether the graph was changed as a result of the pass.
@@ -1582,18 +1623,24 @@ class Graph:
             side-effectful nodes (see Node.is_impure) but in general coverage
             is very bad, so you should assume that this method is not sound
             to call unless you know that your FX graph consists entirely
-            of functional operations.
+            of functional operations or you supply your own custom
+            function for detecting side-effectful nodes.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
         self.lint()
+
+        def has_side_effect(node):
+            if is_impure_node is not None:
+                return is_impure_node(node)
+            return node.is_impure()
 
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
         # the removed node.
         changed = False
         for node in reversed(self.nodes):
-            if not node.is_impure() and len(node.users) == 0:
+            if not has_side_effect(node) and len(node.users) == 0:
                 self.erase_node(node)
                 changed = True
 

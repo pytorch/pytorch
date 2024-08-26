@@ -4,10 +4,10 @@ import argparse
 import os
 import re
 import subprocess
-
 from datetime import datetime
 from distutils.util import strtobool
 from pathlib import Path
+
 
 LEADING_V_PATTERN = re.compile("^v")
 TRAILING_RC_PATTERN = re.compile("-rc[0-9]*$")

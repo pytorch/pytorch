@@ -1,10 +1,11 @@
+# mypy: allow-untyped-defs
 import operator
 from functools import reduce
 from typing_extensions import deprecated
 
 import torch
 import torch._utils
-from ..function import Function
+from torch.autograd.function import Function
 
 
 class Type(Function):

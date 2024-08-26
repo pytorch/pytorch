@@ -1,11 +1,10 @@
+# mypy: allow-untyped-defs
 import torch
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
-
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental._backward_state import BackwardState
-
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 from torch.utils._pytree import tree_map_only
@@ -49,8 +48,13 @@ def trace_wrapped(*args, **kwargs):
         return _trace_wrapped_op(*args, **kwargs)
 
 
+class TraceWrapped(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("trace_wrapped")
+
+
 # TODO(jansel): need to ensure this does not get DCEed
-_trace_wrapped_op = HigherOrderOperator("trace_wrapped")
+_trace_wrapped_op = TraceWrapped()
 
 
 def _assert_meta(grad, size, stride, dtype):

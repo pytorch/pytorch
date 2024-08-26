@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -186,6 +187,7 @@ struct CacheNode {
     next.clear();
     key_storage.clear();
     expected_sizes.clear();
+    runtime_wrapper = nullptr;
     compiled_fn = nullptr;
   }
 
@@ -193,10 +195,12 @@ struct CacheNode {
     return next.empty() && !compiled_fn;
   }
 
-  CacheNode() : compiled_fn(nullptr) {}
+  CacheNode() : runtime_wrapper(nullptr), compiled_fn(nullptr) {}
   ~CacheNode() {
     if (!Py_IsInitialized()) {
-      compiled_fn.release(); // leak on shutdown
+      // leak on shutdown
+      runtime_wrapper.release();
+      compiled_fn.release();
     }
   }
   CacheNode(CacheNode&&) = delete;
@@ -250,6 +254,7 @@ struct CacheNode {
     if (!cache_hit) {
       // we missed cache because static size inputs didn't match; force
       // recompilation with the varying size input as dynamic
+      runtime_wrapper = nullptr;
       compiled_fn = nullptr;
     }
     return cache_hit;
@@ -298,6 +303,7 @@ struct CacheNode {
   std::vector<CacheKeyBuffer> key_storage;
   std::vector<SizeInput> expected_sizes;
 
+  THPObjectPtr runtime_wrapper;
   THPObjectPtr compiled_fn;
 };
 
@@ -358,6 +364,48 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
+PyObject* wrap_lifted_ivalue_args(
+    const std::vector<LiftedIValueArg>& lifted_ivalue_args) {
+  PyObject* pyivalueargs =
+      PyList_New(static_cast<Py_ssize_t>(lifted_ivalue_args.size()));
+  size_t idx = 0;
+  for (const auto& arg : lifted_ivalue_args) {
+    if (arg.actual_ptr->isInt() || arg.actual_ptr->isSymInt()) {
+      PyList_SET_ITEM(
+          pyivalueargs, idx++, PyLong_FromSsize_t(arg.actual_ptr->toInt()));
+    } else if (arg.actual_ptr->isDouble() || arg.actual_ptr->isSymFloat()) {
+      PyList_SET_ITEM(
+          pyivalueargs, idx++, PyFloat_FromDouble(arg.actual_ptr->toDouble()));
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Unexpected lifted ivalue type");
+    }
+  }
+  return pyivalueargs;
+}
+
+void set_ivalue_proxies(
+    PyObject* fake_ivalue_args,
+    std::vector<LiftedIValueArg>& lifted_ivalue_args) {
+  TORCH_INTERNAL_ASSERT(PyList_Check(fake_ivalue_args));
+  TORCH_INTERNAL_ASSERT(
+      static_cast<size_t>(PyList_Size(fake_ivalue_args)) ==
+      lifted_ivalue_args.size());
+
+  for (const auto& i : c10::irange(lifted_ivalue_args.size())) {
+    auto& arg = lifted_ivalue_args[i];
+    if (arg.actual_ptr->isInt() || arg.actual_ptr->isSymInt()) {
+      arg.proxy = at::IValue(
+          py::cast<c10::SymInt>(PyList_GET_ITEM(fake_ivalue_args, i)));
+      TORCH_INTERNAL_ASSERT(arg.proxy.isSymInt());
+    } else if (arg.actual_ptr->isDouble() || arg.actual_ptr->isSymFloat()) {
+      arg.proxy = at::IValue(
+          py::cast<c10::SymFloat>(PyList_GET_ITEM(fake_ivalue_args, i)));
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Unexpected lifted ivalue type");
+    }
+  }
+}
+
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
@@ -366,11 +414,20 @@ static TraceState call_begin_capture(
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
   THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
+  THPObjectPtr pyivalueargsinput(
+      wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
-      self, method_name, pyinput.get(), pysizeinput.get(), nullptr)));
+      self,
+      method_name,
+      pyinput.get(),
+      pysizeinput.get(),
+      pyivalueargsinput.get(),
+      nullptr)));
 
-  PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr};
-  check(PyArg_ParseTuple(pyresult.get(), "OO", &fake_inputs, &fake_sizes));
+  PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr},
+      *fake_ivalue_args{nullptr};
+  check(PyArg_ParseTuple(
+      pyresult.get(), "OOO", &fake_inputs, &fake_sizes, &fake_ivalue_args));
 
   variable_list proxy_inputs = THPVariable_UnpackList(fake_inputs);
   TORCH_INTERNAL_ASSERT(
@@ -381,6 +438,7 @@ static TraceState call_begin_capture(
     arg.proxy_tensor = proxy_inputs[i];
   }
 
+  set_ivalue_proxies(fake_ivalue_args, compiler_call.lifted_ivalue_args.args);
   return TraceState(cache.unwrap_dynamic_inputs(fake_sizes), num_outputs);
 }
 
@@ -413,6 +471,7 @@ CacheNode* _compiled_autograd_impl(
     const edge_list& output_edges,
     THPObjectPtr* graph_arg_inputs,
     THPObjectPtr* graph_arg_sizes,
+    THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
@@ -541,15 +600,19 @@ CacheNode* _compiled_autograd_impl(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      if (python_verbose_logger != nullptr) {
-        std::string _node_name = call.node->name();
-        THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
-        TORCH_INTERNAL_ASSERT(node_name != nullptr);
-        THPObjectPtr set_node_origin(
-            PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
-        check(PyObject_CallFunction(
-            set_node_origin, "OI", node_name.get(), i, nullptr));
+      std::string _node_name = call.node->name();
+      THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
+      TORCH_INTERNAL_ASSERT(node_name != nullptr);
+      THPObjectPtr set_node_origin(
+          PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
+
+      PyObject* pyobj = Py_None;
+      if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
+        pyobj = pynode->obj;
       }
+
+      check(PyObject_CallFunction(
+          set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
@@ -586,17 +649,27 @@ CacheNode* _compiled_autograd_impl(
         if (next.is_valid() && output.defined()) {
           input_buffers.lookup(next.function.get())
               .add(
-                  next.input_nr, std::move(output), c10::nullopt, c10::nullopt);
+                  next.input_nr, std::move(output), std::nullopt, std::nullopt);
         }
       }
     }
 
-    cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
+    PyObject* res = check(call_end_capture(py_compiler, state.outputs));
+    TORCH_CHECK(PyTuple_Check(res), "Expected end_capture to return tuple");
+    TORCH_CHECK(
+        PyTuple_Size(res) == 2,
+        "Expected end_capture to return tuple of size 2");
+    cache->runtime_wrapper = Py_NewRef(PyTuple_GetItem(res, 0));
+    TORCH_CHECK(
+        PyCallable_Check(cache->runtime_wrapper),
+        "Expected end_capture to return runtime_wrapper");
+    cache->compiled_fn = Py_NewRef(PyTuple_GetItem(res, 1));
+    TORCH_CHECK(
+        PyCallable_Check(cache->compiled_fn),
+        "Expected end_capture to return compiled_fn");
     state.debug_asserts();
   } // End cache miss region
 
-  // TODO(jansel): we should release all the variables and then use a
-  //               boxed calling convention so activation memory can be freed
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
     for (auto& call : calls) {
@@ -606,6 +679,8 @@ CacheNode* _compiled_autograd_impl(
 
   *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
+  *graph_arg_ivalue_args =
+      wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args);
   *graph_arg_hooks = convert_hook_list(compiler_call.hooks);
   return cache;
 }
@@ -616,9 +691,6 @@ variable_list compiled_autograd(
     bool accumulate_grad,
     const edge_list& output_edges) {
   TORCH_CHECK(
-      output_edges.empty() || !accumulate_grad,
-      "specifying inputs= with .backward() not yet implemented for compiled autograd")
-  TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
   static std::mutex lock;
@@ -628,6 +700,7 @@ variable_list compiled_autograd(
 
   THPObjectPtr inputs;
   THPObjectPtr sizes;
+  THPObjectPtr ivalue_args;
   THPObjectPtr hooks;
   CacheNode* cache = _compiled_autograd_impl(
       graph_root,
@@ -636,10 +709,17 @@ variable_list compiled_autograd(
       output_edges,
       &inputs,
       &sizes,
+      &ivalue_args,
       &hooks);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
+      cache->runtime_wrapper.get(),
+      cache->compiled_fn.get(),
+      inputs.get(),
+      sizes.get(),
+      ivalue_args.get(),
+      hooks.get(),
+      NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;

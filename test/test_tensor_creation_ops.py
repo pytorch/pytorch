@@ -3177,18 +3177,19 @@ class TestTensorCreation(TestCase):
         dtype = torch.float64
         t = torch.randn(2, 5, dtype=dtype, device=device)
         with tempfile.NamedTemporaryFile() as f:
+            expected_filename = f.name if shared else None
             t.numpy().tofile(f)
             t_mapped = torch.from_file(f.name, shared=shared, size=t.numel(), dtype=dtype)
-            self.assertTrue(t_mapped.storage().filename == f.name)
+            self.assertTrue(t_mapped.untyped_storage().filename == expected_filename)
             self.assertEqual(torch.flatten(t), t_mapped)
 
             s = torch.UntypedStorage.from_file(f.name, shared, t.numel() * dtype.itemsize)
-            self.assertTrue(s.filename == f.name)
+            self.assertTrue(s.filename == expected_filename)
 
     @onlyCPU
     def test_storage_filename(self, device):
         t = torch.randn(2, 5, device=device)
-        self.assertIsNone(t.storage().filename)
+        self.assertIsNone(t.untyped_storage().filename)
 
 
 # Class for testing random tensor creation ops, like torch.randint

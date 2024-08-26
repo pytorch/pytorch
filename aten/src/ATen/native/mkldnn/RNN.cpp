@@ -168,10 +168,6 @@ struct RNNParams {
   }
 };
 
-static std::vector<int64_t> _hidden_size(const RNNParams& rnn) {
-  return {rnn.num_layers * rnn.num_directions, rnn.mini_batch, rnn.hidden_size};
-}
-
 template<bool is_single_direction>
 std::vector<int64_t> _output_size(const RNNParams& rnn) {
   auto output_channels = is_single_direction ? rnn.hidden_size
@@ -527,8 +523,7 @@ std::tuple<Tensor, Tensor> unpack_hidden(const std::tuple<Tensor, Tensor>& hidde
 
 template<typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
-  static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
-  AT_ERROR("NOT IMPLEMENTED");
+  static_assert(false && sizeof(hidden_type), "pack_hidden not implemented for this type");
 }
 
 template<>
