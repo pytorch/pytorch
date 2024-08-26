@@ -2,29 +2,24 @@
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-s390x-binary-manywheel
+name: linux-binary-manywheel
 
 
 on:
   push:
-    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
-      - nightly
+      - main
     tags:
-      # NOTE: Binary build pipelines should only get triggered on release candidate builds
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - 'ciflow/binaries/*'
-      - 'ciflow/binaries_wheel/*'
+      - 'ciflow/periodic/*'
   workflow_dispatch:
 
 env:
   # Needed for conda builds
-  ALPINE_IMAGE: "docker.io/s390x/alpine"
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
-  BUILD_ENVIRONMENT: linux-s390x-binary-manywheel
+  BUILD_ENVIRONMENT: linux-binary-manywheel
   BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -33,7 +28,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 0
 concurrency:
-  group: linux-s390x-binary-manywheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-binary-manywheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
