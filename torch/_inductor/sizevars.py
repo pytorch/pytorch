@@ -495,7 +495,7 @@ class SizeVarAllocator:
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
 
-    def evaluate_static_shapes(self, left: Sequence[Expr]) -> List[int]:
+    def evaluate_static_shapes(self, left: Sequence[Union[Expr, int]]) -> List[int]:
         return [self.evaluate_static_shape(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:

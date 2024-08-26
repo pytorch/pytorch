@@ -1238,6 +1238,7 @@ def _set_check_sparse_tensor_invariants(
 def _set_default_mobile_cpu_allocator() -> None: ...  # THPModule_setDefaultMobileCPUAllocator
 def _unset_default_mobile_cpu_allocator() -> None: ...  # THPModule_unsetDefaultMobileCPUAllocator
 def _is_torch_function_enabled() -> _bool: ...  # THPModule_isEnabledTorchFunction
+def _is_torch_function_all_disabled() -> _bool: ...  # THPModule_isAllDisabledTorchFunction
 def _has_torch_function(
     args: Iterable[Any],
 ) -> _bool: ...  # THPModule_has_torch_function
@@ -1298,6 +1299,7 @@ _has_magma: _bool
 _has_xpu: _bool
 _has_mkldnn: _bool
 _has_cudnn: _bool
+_has_cusparselt: _bool
 has_spectral: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool
 default_generator: Generator
@@ -1492,6 +1494,7 @@ class _DispatchOperatorHandle:
     def debug(self) -> str: ...
 
 class _DispatchModule:
+    def reset(self) -> None: ...
     def def_(self, schema: str, alias: str = "") -> _DispatchModule: ...
     def def_legacy(self, schema: str) -> _DispatchModule: ...
     def def_name_t_t(
@@ -1513,9 +1516,16 @@ class _DispatchModule:
         dispatch: str,
         debug: str = "impl_t_t",
     ) -> _DispatchModule: ...
-    def impl(self, name: str, dispatch: str, func: Callable) -> _DispatchModule: ...
-    def define(self, schema: str, alias: str = "") -> _DispatchModule: ...
+    def impl_with_aoti_compile(
+        self,
+        ns: str,
+        op_name_with_overload: str,
+        dispatch: _dispatchkey
+    ) -> None: ...
+    def impl(self, name: str, dispatch: _dispatchkey, func: Callable) -> None: ...
+    def define(self, schema: str, alias: str = "") -> str: ...
     def fallback_fallthrough(self, dispatch: str = "") -> _DispatchModule: ...
+    def fallback(self, dispatch: _dispatchkey, func: Callable, with_keyset: _bool = False) -> None: ...
 
 _after_ADInplaceOrView_keyset: DispatchKeySet
 _after_autograd_keyset: DispatchKeySet
