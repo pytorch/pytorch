@@ -1533,6 +1533,8 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
         or (isinstance(sample.args[-1], complex))
     )
     if rhs_arg_has_complex_number and dtype == torch.float64:
+        if op.name == "_foreach_lerp":
+            return False, "value cannot be converted to type double without overflow"
         if op.name in (
             "_foreach_clamp_max",
             "_foreach_clamp_min",
