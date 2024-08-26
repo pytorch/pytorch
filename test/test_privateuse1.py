@@ -15,9 +15,9 @@ class TestPrivateUse1(TestCase):
         Validate that no PrivateUse1 calls are made during `import torch` call
         """
 
-        # The Privateuse1 backend module must be registered before calling
-        # device-related APIs. The PrivateUse1 backend have the same behavior
-        # as CUDA or XPU in lazy_init call
+        # The PrivateUse1 backend have the same behavior as CUDA or XPU
+        # in lazy_init call. Its module must be registered before calling
+        # device-related APIs. See: https://github.com/pytorch/pytorch/pull/121379
         with self.assertRaises(ModuleNotFoundError):
             print(torch.rand(1, 4).to('privateuseone:0'))
 
