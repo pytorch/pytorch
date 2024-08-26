@@ -29,10 +29,10 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     run_tests,
     runOnRocmArch,
-    MI300_ARCH,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
