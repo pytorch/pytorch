@@ -1175,7 +1175,8 @@ def forward(self, add_1):
                     if node.target is operator.getitem:
                         getitems += 1
             self.assertEqual(getitems, 2)  # tuple return of len 2
-
+            print(inplace_ep)
+            print(inplace_ep.graph_signature)
             out_specs = inplace_ep.graph_signature.output_specs
             self.assertEqual(out_specs[0].arg.name, "b_state")  # state
             self.assertEqual(out_specs[1].arg.name, "getitem")  # tuple return 1
