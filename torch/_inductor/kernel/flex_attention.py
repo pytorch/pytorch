@@ -3,7 +3,7 @@
 
 import logging
 import math
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 import sympy
 
@@ -18,12 +18,13 @@ from ..ir import (
     FixedLayout,
     FlexibleLayout,
     InputBuffer,
+    IRNode,
     StorageBox,
     Subgraph,
     TensorBox,
 )
 from ..lowering import empty, empty_strided, lowerings, register_lowering
-from ..select_algorithm import autotune_select_algorithm, TritonTemplate
+from ..select_algorithm import autotune_select_algorithm, realize_inputs, TritonTemplate
 
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,11 @@ def create_placeholder(
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(name, FixedLayout(device, dtype, [], []))
     return TensorBox.create(input_buffer)
+
+
+def maybe_realize(args: List[Optional[IRNode]]):
+    """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
+    return tree_map(lambda x: realize_inputs(x) if x is not None else None, args)
 
 
 def build_subgraph_buffer(
@@ -134,6 +140,8 @@ compute_flex_attention = r"""
     #
     # Q: Query, K: Key, V: Value
     # M: Number of queries, N: Number of keys/values, D: Model dimension
+    # QK_HEAD_DIM: The dimension of the query and key embeddings
+    # V_HEAD_DIM: The dimension of the value embeddings
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
     # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
     #
@@ -200,7 +208,7 @@ compute_flex_attention = r"""
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, V_HEAD_DIM], dtype=tl.float32)
 
     offs_m = q_start * BLOCK_M + tl.arange(0, BLOCK_M)
 
@@ -211,10 +219,10 @@ compute_flex_attention = r"""
 
     Q_block_ptr = tl.make_block_ptr(
         base=Q,
-        shape=(Q_LEN, BLOCK_DMODEL),
+        shape=(Q_LEN, QK_HEAD_DIM),
         strides=(stride_qm, stride_qk),
         offsets=(q_start * BLOCK_M, 0),
-        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        block_shape=(BLOCK_M, QK_HEAD_DIM),
         order=(1, 0)
     )
 
@@ -235,18 +243,18 @@ compute_flex_attention = r"""
 
     K_block_ptr = tl.make_block_ptr(
         base=K,
-        shape=(BLOCK_DMODEL, KV_LEN),
+        shape=(QK_HEAD_DIM, KV_LEN),
         strides=(stride_kk, stride_kn),
         offsets=(0, kv_start),
-        block_shape=(BLOCK_DMODEL, BLOCK_N),
+        block_shape=(QK_HEAD_DIM, BLOCK_N),
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
         base=V,
-        shape=(KV_LEN, BLOCK_DMODEL),
+        shape=(KV_LEN, V_HEAD_DIM),
         strides=(stride_vn, stride_vk),
         offsets=(kv_start, 0),
-        block_shape=(BLOCK_N, BLOCK_DMODEL),
+        block_shape=(BLOCK_N, V_HEAD_DIM),
         order=(1, 0)
     )
     offs_n = kv_start + tl.arange(0, BLOCK_N)
@@ -274,18 +282,18 @@ compute_flex_attention = r"""
 
         K_block_ptr = tl.make_block_ptr(
             base=K,
-            shape=(BLOCK_DMODEL, KV_LEN),
+            shape=(QK_HEAD_DIM, KV_LEN),
             strides=(stride_kk, stride_kn),
             offsets=(0, kv_start),
-            block_shape=(BLOCK_DMODEL, BLOCK_N),
+            block_shape=(QK_HEAD_DIM, BLOCK_N),
             order=(0, 1)
         )
         V_block_ptr = tl.make_block_ptr(
             base=V,
-            shape=(KV_LEN, BLOCK_DMODEL),
+            shape=(KV_LEN, V_HEAD_DIM),
             strides=(stride_vn, stride_vk),
             offsets=(kv_start, 0),
-            block_shape=(BLOCK_N, BLOCK_DMODEL),
+            block_shape=(BLOCK_N, V_HEAD_DIM),
             order=(1, 0)
         )
         offs_n = kv_start + tl.arange(0, BLOCK_N)
@@ -302,13 +310,18 @@ compute_flex_attention = r"""
         )
 
 
-    # Store output and logsumexp
-    l_i = tl.where(l_i == 0, 1, l_i)
+    # [Note] Handle fully masked out rows:
+    # Li will be the sum(e^(-inf)) == 0.0 for masked out rows, mi will be -inf.
+    # We set Li to 1.0 which will result in lse/out = 0.0 | after the log(li) + mi(0.0) step
+    l_i = tl.where(l_i == 0.0, 1, l_i)
+    masked_out_rows = (m_i == float("-inf"))
+    m_i = tl.where(masked_out_rows, 0, m_i)
+
     acc = acc / l_i[:, None]
     idx_z = tl.program_id(1) // HQ
     idx_hq = tl.program_id(1) % HQ
     idx_m = offs_m[:, None]
-    idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
+    idx_d = tl.arange(0, V_HEAD_DIM)[None, :]
 
     mask = idx_m < Q_LEN
     # TODO generalize and add proper mask support
@@ -378,7 +391,7 @@ def forward_inner(
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
                 MATMUL_PRECISION, RCP_LN2,
-                IS_FULL_BLOCKS, IS_LAST_BLOCK=True,
+                IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
 
         # update pointers
@@ -407,7 +420,7 @@ def forward_block_mn(
     # Offsets
     off_z, off_h, offs_m, offs_n,
     MATMUL_PRECISION, RCP_LN2,
-    IS_FULL_BLOCKS, IS_LAST_BLOCK=False,
+    IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
     {{gen_defines() | indent_except_first(1)}}
@@ -422,7 +435,7 @@ def forward_block_mn(
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    if IS_LAST_BLOCK:
+    if CHECK_BLOCK_BOUNDARY:
         # If this is the last block of a non divisible seqlen, we still need to load [BLOCK_M, BLOCK_N] elements,
         # which is larger than the actual number of elements. To avoid access memory out of bound,
         # we need to mask out the elements that are out of Q_LEN & KV_LEN.
@@ -440,7 +453,7 @@ def forward_block_mn(
         out="qk"
     ) | indent_except_first(1) }}
 
-    if IS_LAST_BLOCK:
+    if CHECK_BLOCK_BOUNDARY:
         # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
         post_mod_scores = tl.where(offs_n < KV_LEN, post_mod_scores, float("-inf"))
 
@@ -455,7 +468,7 @@ def forward_block_mn(
             n="offs_n",
         ) | indent_except_first(2) }}
 
-        if IS_LAST_BLOCK:
+        if CHECK_BLOCK_BOUNDARY:
             mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, float("-inf"))
         # apply mask for partially unmasked blocks
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
@@ -507,9 +520,11 @@ flex_attention_template = TritonTemplate(
 )
 
 
-def _use_flex_decoding(query):
+def _use_flex_decoding(query, kernel_options):
     # Decide which kernel to use, return true if use flex decoding kernel.
-    return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
+    return (
+        not kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
+    ) and V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
 
 
 _h100_default_config = {
@@ -673,7 +688,7 @@ def flex_attention(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     kernel_options = dict(kernel_options)
-    if _use_flex_decoding(query):
+    if _use_flex_decoding(query, kernel_options):
         return create_flex_decoding_kernel(
             query,
             key,
@@ -686,50 +701,79 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-    for buf in [
+
+    (
         query,
         key,
         value,
         kv_num_blocks,
         kv_indices,
-        q_num_blocks,
-        q_indices,
         full_kv_num_blocks,
         full_kv_indices,
+        q_num_blocks,
+        q_indices,
         full_q_num_blocks,
         full_q_indices,
-    ]:
-        if buf is not None:
-            buf.realize()
+    ) = maybe_realize(
+        [
+            query,
+            key,
+            value,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            q_num_blocks,
+            q_indices,
+            full_q_num_blocks,
+            full_q_indices,
+        ]
+    )
 
+    Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
+    Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
+    assert Bq == Bkv, "Batch dimension must match"
+    B = Bq
+
+    if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
+        kernel_options.setdefault("IS_DIVISIBLE", False)
+    else:
+        kernel_options.setdefault("IS_DIVISIBLE", True)
+
+    # Reuse query strides for output layout despite different last dimension.
+    # This works because only the last dim differs and we check it is contiguous.
+    q_strides = query.get_stride()
+    assert q_strides[-1] == 1, "Query must be contiguous in the last dimension"
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
-        query.get_size(),
+        [B, Hq, seq_len_q, v_head_dim],
         query.get_stride(),
     )
     # see NOTE:[TritonTemplates with multiple outputs]
-    logsumexp_shape = query.get_size()[:-1]  # [B, Hq, Mq]
+    logsumexp_shape = [B, Hq, seq_len_q]
     logsumexp = empty_strided(
         logsumexp_shape,
         None,
         dtype=torch.float32,  # The logsumexp is always stored in fp32 regardless of the input dtype
         device=query.get_device(),
     )
-    kernel_options["SM_SCALE"] = scale
+    kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA broadcast factor.
-    gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
-    kernel_options["GQA_SHARED_HEADS"] = gqa_shared_heads
+    gqa_shared_heads = Hq // Hkv
+    kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is None if partial blocks are not computed
-    kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
-    if full_kv_num_blocks is None:
+    has_full_blocks = full_kv_num_blocks is not None
+    kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
+    if not has_full_blocks:
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
-    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
+    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
+    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -755,11 +799,11 @@ def flex_attention(
             continue
 
         # Performance tuning
-        kernel_options["BLOCK_M"] = BLOCK_M
-        kernel_options["BLOCK_N"] = BLOCK_N
+        kernel_options.setdefault("BLOCK_M", BLOCK_M)
+        kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
-        kernel_options["SPARSE_Q_BLOCK_SIZE"] = SPARSE_Q_BLOCK_SIZE
-        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
+        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -852,7 +896,9 @@ flex_attention_backward_template = TritonTemplate(
     # DO: Derivative of Output, DQ: Derivative of Query, DV: Derivative of Value
     # DK: Derivative of Key, is the written to via the store_output call due to some limitations with
     # inductor codegen
-    # M: Number of queries, N: Number of keys/values, D: Model dimension
+    # M: Number of queries, N: Number of keys/values
+    # QK_HEAD_DIM: The dimension of the query and key embeddings
+    # V_HEAD_DIM: The dimension of the value embeddings
     # z: Batch size, h: Number of heads, m: Number of queries or keys/values, d: Head dim
     # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
     # (Modifiable) Performance tuning options
@@ -916,7 +962,8 @@ flex_attention_backward_template = TritonTemplate(
     DV += dv_adj
 
     RCP_LN2 = 1.44269504
-    offs_k = tl.arange(0, BLOCK_DMODEL)
+    offs_k = tl.arange(0, QK_HEAD_DIM)
+    offs_v = tl.arange(0, V_HEAD_DIM)
 
     if pid >= NUM_KV_BLOCKS:
         off_pid = pid - NUM_KV_BLOCKS
@@ -950,7 +997,7 @@ flex_attention_backward_template = TritonTemplate(
         LSE2 = LSE + off_chz2
         DELTA2 = DELTA + off_chz2
 
-        dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
+        dq = tl.zeros([BLOCK_M2, QK_HEAD_DIM], dtype=tl.float32)
 
         start_m2 = start_m2_block * BLOCK_M2
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
@@ -958,10 +1005,10 @@ flex_attention_backward_template = TritonTemplate(
         # load Q and do: they stay in SRAM throughout the inner loop.
         if IS_DIVISIBLE:
             q = tl.load(Q2 + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
-            do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
+            do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_v[None, :] * stride_dod)
         else:
             q = tl.load(Q2 + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd, mask=offs_m2[:, None] < Q_LEN)
-            do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod, mask=offs_m2[:, None] < Q_LEN)
+            do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_v[None, :] * stride_dod, mask=offs_m2[:, None] < Q_LEN)
 
         if PRESCALE_QK:
             q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
@@ -1029,8 +1076,8 @@ flex_attention_backward_template = TritonTemplate(
         stride_q_idx_h = {{stride("Q_IDX", 1)}}
         stride_q_idx_n = {{stride("Q_IDX", 2)}}
 
-        dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
-        dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
+        dv = tl.zeros([BLOCK_N1, V_HEAD_DIM], dtype=tl.float32)
+        dk = tl.zeros([BLOCK_N1, QK_HEAD_DIM], dtype=tl.float32)
 
         start_n1 = pid * BLOCK_N1
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
@@ -1038,10 +1085,10 @@ flex_attention_backward_template = TritonTemplate(
         # load K and V: they stay in SRAM throughout the inner loop.
         if IS_DIVISIBLE:
             k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd)
-            v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
+            v = tl.load(V + offs_n1[:, None] * stride_vn + offs_v[None, :] * stride_vd)
         else:
             k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd, mask=offs_n1[:, None] < KV_LEN)
-            v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd, mask=offs_n1[:, None] < KV_LEN)
+            v = tl.load(V + offs_n1[:, None] * stride_vn + offs_v[None, :] * stride_vd, mask=offs_n1[:, None] < KV_LEN)
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
@@ -1106,7 +1153,7 @@ flex_attention_backward_template = TritonTemplate(
                 )
 
         # Write back dV and dK.
-        dv_ptrs = DV + offs_n1[:, None] * stride_dvm + offs_k[None, :] * stride_dvd
+        dv_ptrs = DV + offs_n1[:, None] * stride_dvm + offs_v[None, :] * stride_dvd
 
         index_n = offs_n1[:, None]
         index_k = offs_k[None, :]
@@ -1137,10 +1184,11 @@ def bwd_dq_inner(
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
 
-    offs_k = tl.arange(0, BLOCK_DMODEL)
+    offs_k = tl.arange(0, QK_HEAD_DIM)
+    offs_v = tl.arange(0, V_HEAD_DIM)
 
     kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
-    vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_k[:, None] * stride_vd
+    vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_v[:, None] * stride_vd
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
@@ -1176,7 +1224,7 @@ def bwd_dq_inner(
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
-                IS_FULL_BLOCKS, IS_LAST_BLOCK=True,
+                IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
     else:
         for start_n in range(0, hi):
@@ -1212,7 +1260,7 @@ def bwd_dq_block_mn(
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    IS_FULL_BLOCKS, IS_LAST_BLOCK=False,
+    IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 ):
     {{gen_defines() | indent_except_first(1)}}
 
@@ -1225,7 +1273,7 @@ def bwd_dq_block_mn(
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     pre_mod_scores = qk
-    if IS_LAST_BLOCK:
+    if CHECK_BLOCK_BOUNDARY:
         m = offs_m2[:, None] % Q_LEN
         n = offs_n2[None, :] % KV_LEN
     else:
@@ -1242,7 +1290,7 @@ def bwd_dq_block_mn(
         out="qk"
     ) | indent_except_first(1) }}
 
-    if IS_LAST_BLOCK:
+    if CHECK_BLOCK_BOUNDARY:
         # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
         post_mod_scores = tl.where(offs_n2[None, :] < KV_LEN, post_mod_scores, float("-inf"))
 
@@ -1257,7 +1305,7 @@ def bwd_dq_block_mn(
             n="n",
         ) | indent_except_first(2) }}
 
-        if IS_LAST_BLOCK:
+        if CHECK_BLOCK_BOUNDARY:
             mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
         # apply mask for partial masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
@@ -1283,13 +1331,13 @@ def bwd_dq_block_mn(
         n="n",
         grad_score_mod="ds"
     ) | indent_except_first(1) }}
-    if IS_LAST_BLOCK:
+    if CHECK_BLOCK_BOUNDARY:
         grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
 
     ds = grad_scores
 
     if not IS_FULL_BLOCKS:
-        if IS_LAST_BLOCK:
+        if CHECK_BLOCK_BOUNDARY:
             mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
         # (grads) apply mask for partially unmasked block
         ds = tl.where(mask_mod_output, ds, 0.0)
@@ -1318,10 +1366,11 @@ def bwd_dkdv_inner(
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
 
-    offs_k = tl.arange(0, BLOCK_DMODEL)
+    offs_k = tl.arange(0, QK_HEAD_DIM)
+    offs_v = tl.arange(0, V_HEAD_DIM)
 
     qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-    do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
+    do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
     hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(Q_LEN // BLOCK_M1, 1))
@@ -1356,7 +1405,7 @@ def bwd_dkdv_inner(
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
-                IS_FULL_BLOCKS, IS_LAST_BLOCK=True,
+                IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
     else:
         for start_m in range(0, hi):
@@ -1391,7 +1440,7 @@ def bwd_dkdv_block_mn(
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    IS_FULL_BLOCKS, IS_LAST_BLOCK=False,
+    IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 ):
     {{gen_defines() | indent_except_first(1) }}
 
@@ -1406,7 +1455,7 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    if IS_LAST_BLOCK:
+    if CHECK_BLOCK_BOUNDARY:
         m = offs_m1[None, :] % Q_LEN
         n = offs_n1[:, None] % KV_LEN
     else:
@@ -1424,7 +1473,7 @@ def bwd_dkdv_block_mn(
         out="qkT"
     ) | indent_except_first(1) }}
 
-    if IS_LAST_BLOCK:
+    if CHECK_BLOCK_BOUNDARY:
         # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
         post_mod_scores = tl.where(offs_n1[:, None] < KV_LEN, post_mod_scores, float("-inf"))
 
@@ -1438,7 +1487,7 @@ def bwd_dkdv_block_mn(
             m="m",
             n="n",
         ) | indent_except_first(2) }}
-        if IS_LAST_BLOCK:
+        if CHECK_BLOCK_BOUNDARY:
             mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
         # (grads) apply mask for fully masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
@@ -1471,12 +1520,12 @@ def bwd_dkdv_block_mn(
         n="n",
         grad_score_mod="dsT"
     ) | indent_except_first(1) }}
-    if IS_LAST_BLOCK:
+    if CHECK_BLOCK_BOUNDARY:
         grad_scores = tl.where(offs_n1[:, None] < KV_LEN, grad_scores, 0.0)
 
     dsT = grad_scores
     if not IS_FULL_BLOCKS:
-        if IS_LAST_BLOCK:
+        if CHECK_BLOCK_BOUNDARY:
             mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
@@ -1524,7 +1573,7 @@ def flex_attention_backward(*args, **kwargs):
         mask_graph,
     ) = block_mask
 
-    for buf in [
+    (
         query,
         key,
         value,
@@ -1537,15 +1586,38 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-    ]:
-        if buf is not None:
-            buf.realize()
+    ) = maybe_realize(
+        [
+            query,
+            key,
+            value,
+            grad_out,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            q_num_blocks,
+            q_indices,
+            full_q_num_blocks,
+            full_q_indices,
+        ]
+    )
 
-    if _use_flex_decoding(query):
+    if _use_flex_decoding(query, kernel_options):
         raise NotImplementedError("Flex decoding backward pass is not implemented. ")
 
     device = query.get_device()
     dtype = query.get_dtype()
+    Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
+    Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
+    assert Bq == Bkv, "Batch dimension must match"
+    B = Bq
+
+    kernel_options = dict(kernel_options)
+    if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
+        kernel_options.setdefault("IS_DIVISIBLE", False)
+    else:
+        kernel_options.setdefault("IS_DIVISIBLE", True)
 
     fwd_placeholder_inps = [
         create_placeholder(name, dtype, device)
@@ -1595,6 +1667,8 @@ def flex_attention_backward(*args, **kwargs):
     delta = lowerings[aten.sub](delta, grad_lse_exp2)
     delta = ExternKernel.require_contiguous(delta)
 
+    grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
+
     # see NOTE:[TritonTemplates with multiple outputs]
     grad_query = empty_strided(
         query.get_size(), query.get_stride(), dtype=dtype, device=device
@@ -1603,21 +1677,22 @@ def flex_attention_backward(*args, **kwargs):
         value.get_size(), value.get_stride(), dtype=dtype, device=device
     )
 
-    kernel_options = dict(kernel_options)
-    kernel_options["SM_SCALE"] = scale
+    kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA factor
-    gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
-    kernel_options["GQA_SHARED_HEADS"] = gqa_shared_heads
+    gqa_shared_heads = Hq // Hkv
+    kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is torch.zeros([1, 1, 1]) if partial blocks are not computed.
-    kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
-    if full_kv_num_blocks is None:
+    has_full_blocks = full_kv_num_blocks is not None
+    kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
+    if not has_full_blocks:
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
-    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
+    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
+    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -1644,13 +1719,13 @@ def flex_attention_backward(*args, **kwargs):
             continue
 
         # Performance tuning
-        kernel_options["BLOCK_M1"] = BLOCK1
-        kernel_options["BLOCK_N1"] = BLOCK2
-        kernel_options["BLOCK_M2"] = BLOCK2
-        kernel_options["BLOCK_N2"] = BLOCK1
+        kernel_options.setdefault("BLOCK_M1", BLOCK1)
+        kernel_options.setdefault("BLOCK_N1", BLOCK2)
+        kernel_options.setdefault("BLOCK_M2", BLOCK2)
+        kernel_options.setdefault("BLOCK_N2", BLOCK1)
         # Blocksparse options
-        kernel_options["SPARSE_Q_BLOCK_SIZE"] = SPARSE_Q_BLOCK_SIZE
-        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
+        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
