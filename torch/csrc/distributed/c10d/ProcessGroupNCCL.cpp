@@ -2659,9 +2659,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     OpType opType,
     const char* profilingTitle,
     bool avoidRecordStreams) {
-  if (enableNanCheck_) {
-    checkForNan(input);
-  }
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
   c10::cuda::CaptureStatus capture_status =
@@ -2716,6 +2713,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
+
+  if (enableNanCheck_) {
+    checkForNan(input, ncclStream);
+  }
 
   // Start event should only be recorded before the ncclGroupStart()
   if (work->timingEnabled_) {
@@ -3018,9 +3019,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     PreProcess pre,
     PostProcess post,
     const char* profilingTitle) {
-  if (enableNanCheck_) {
-    checkForNan(tensor);
-  }
   // avoidRecordStreams_ note:
   // send, recv, and irecv should be ok with avoidRecordStreams,
   // However, for isend, I don't think the API requires the user
@@ -3148,6 +3146,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   // is gpuGuard needed for the if block below, or can i swap them
   at::cuda::OptionalCUDAGuard gpuGuard;
+
+  if (enableNanCheck_) {
+    checkForNan(tensor, ncclStream);
+  }
 
   if (!coalescing_state_) {
     // Start event should only be recorded before the ncclGroupStart()
