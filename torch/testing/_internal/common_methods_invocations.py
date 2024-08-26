@@ -10801,22 +10801,8 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestMeta",
-                "test_dispatch_meta_inplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
                 "test_dispatch_meta_outplace",
                 dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta_outplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10827,22 +10813,8 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestMeta",
-                "test_dispatch_symbolic_meta_inplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
                 "test_dispatch_symbolic_meta_outplace",
                 dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta_outplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10853,29 +10825,15 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestMeta",
-                "test_meta_inplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
                 "test_meta_outplace",
                 dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta_outplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_parity",
                 device_type="cuda",
-                dtypes=complex_types() + (torch.bfloat16,),
+                dtypes=complex_types(),
                 active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
