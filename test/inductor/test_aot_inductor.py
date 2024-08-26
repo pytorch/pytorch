@@ -50,6 +50,7 @@ if HAS_CUDA:
         add_kernel,
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
+        add_kernel_autotuned_weird_param_order,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
         mul2_inplace_kernel,
@@ -2201,6 +2202,27 @@ class AOTInductorTestsTemplate:
             example_inputs,
             dynamic_shapes=dynamic_shapes,
         )
+
+    def test_triton_kernel_weird_param_order(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                out = torch.empty_like(x)
+                add_kernel_autotuned_weird_param_order[16,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    n_elements=x.numel(),
+                    out_ptr=out,
+                )
+                return out
+
+        x = torch.randn(16, 16, device=self.device)
+        self.check_model(Model(), (x,))
 
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
