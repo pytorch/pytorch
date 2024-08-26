@@ -1,28 +1,14 @@
-project(libshm C CXX)
+project(libshm LANGUAGES CXX)
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../)
 
-if(NOT LIBSHM_INSTALL_LIB_SUBDIR)
-  set(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
-endif()
-
-add_library(shm SHARED core.cpp)
-if(HAVE_SOVERSION)
-  set_target_properties(shm PROPERTIES
-      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-endif()
+add_library(shm OBJECT core.cpp)
+set_target_properties(shm PROPERTIES CXX_STANDARD 17)
 
 target_include_directories(shm PUBLIC
   ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
 )
-
-### Torch packages supposes libraries prefix is "lib"
-set_target_properties(shm PROPERTIES
-  PREFIX "lib"
-  IMPORT_PREFIX "lib"
-  CXX_STANDARD 17)
-target_link_libraries(shm PRIVATE ${TORCH_CPU_LIB})
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)
@@ -30,7 +16,7 @@ if(UNIX AND NOT APPLE)
   # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
   check_library_exists(rt clock_gettime "time.h" NEED_LIBRT)
   if(NEED_LIBRT)
-    target_link_libraries(shm PUBLIC rt)
+    target_link_libraries(shm INTERFACE rt)
   else()
     message(STATUS "Checking if rt requires pthread")
     # Sometimes, rt won't be available unless you also link against
@@ -54,10 +40,12 @@ if(UNIX AND NOT APPLE)
     unset(CMAKE_REQUIRED_LIBRARIES)
     if(NEED_RT_AND_PTHREAD)
       message(STATUS "Needs it, linking against pthread and rt")
-      target_link_libraries(shm PUBLIC rt Threads::Threads)
+      target_link_libraries(shm INTERFACE rt Threads::Threads)
     endif()
   endif()
 endif()
+
+target_link_libraries(shm INTERFACE torch_cpu)
 
 add_executable(torch_shm_manager manager.cpp)
 if(BUILD_LIBTORCHLESS)
@@ -69,6 +57,4 @@ endif()
 set_target_properties(torch_shm_manager PROPERTIES
   INSTALL_RPATH "${_rpath_portable_origin}/../lib")
 
-install(TARGETS shm LIBRARY DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
-install(FILES libshm.h DESTINATION "include")
 install(TARGETS torch_shm_manager DESTINATION "bin")
