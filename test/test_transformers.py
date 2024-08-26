@@ -2960,7 +2960,7 @@ class TestSDPACudaOnly(NNTestCase):
         grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
         grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
-        fudge_factors={
+        fudge_factors = {
             'out': 3.0 ,
             'grad_query': 150.0 ,
             'grad_key': 25.0,
@@ -3069,7 +3069,7 @@ class TestSDPACudaOnly(NNTestCase):
         grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value, attn_mask), upstream_grad)
         grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref, attn_mask_ref), upstream_grad)
 
-        fudge_factors={
+        fudge_factors = {
             "out": 4,
             "grad_query": 150.0,
             "grad_key": 25.0,
@@ -3216,7 +3216,6 @@ class TestSDPACudaOnly(NNTestCase):
             fudge_factors=fudge_factors,
         )
 
-    # @skipIfRocm  # FIXME: "capturing stream has unjoined work"
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [256, 1024])
