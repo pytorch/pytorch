@@ -20,13 +20,11 @@ def _reorder_placeholder_same_as_original_ep_pass(
     """
     node_to_metadata = {}
     original_order_to_node_name: Dict[int, str] = {}
-    node_name_to_original_order: Dict[str, int] = {}
     for node in old_gm.graph.nodes:
         if node.op == "placeholder":
             node_to_metadata[node.name] = node.meta
             cur_idx = len(original_order_to_node_name)
             original_order_to_node_name[len(original_order_to_node_name)] = node.name
-            node_name_to_original_order[node.name] = cur_idx
         else:
             break
 
