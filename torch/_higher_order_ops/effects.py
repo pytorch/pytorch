@@ -24,7 +24,7 @@ class _EffectType(Enum):
 OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 
 
-SIDE_EFFECTS: WeakKeyDictionary[OpType, _EffectType] = WeakKeyDictionary(
+SIDE_EFFECTS: "WeakKeyDictionary[OpType, _EffectType]" = WeakKeyDictionary(
     {
         torch.ops.aten._print.default: _EffectType.ORDERED,
         call_torchbind: _EffectType.ORDERED,
