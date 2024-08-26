@@ -3372,16 +3372,31 @@ class TilingSelect:
                     # when needed.
                     return [], []
 
-            if (
-                dtype in DTYPE_LOWP_FP
-                and _is_valid_indices(itervars, tiling_indices)
-                and not has_free_symbols(call_ranges)
-            ):
-                # For lower precision data type, if the call range in tiling_indicices
-                # is less than half of tiling_factor, use tiling_factor // 2 for better performance
+            if dtype in DTYPE_LOWP_FP and _is_valid_indices(itervars, tiling_indices):
+                # For lower precision data type, if the tiling_len is not long enough,
+                # use tiling_factor // 2 for better performance
                 for tiling_indice in tiling_indices:
-                    if call_ranges[tiling_indice] <= tiling_factor // 2:
-                        tiling_factor = tiling_factor // 2
+                    if has_free_symbols(call_ranges):
+                        # For dynamic shape, if tiling_len is less than cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype),
+                        # use tiling_factor // 2
+                        if V.graph.sizevars.size_hint(
+                            call_ranges[tiling_indice]
+                        ) < cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype):
+                            V.graph.sizevars.guard_lt(
+                                call_ranges[tiling_indice],
+                                cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype),
+                            )
+                            tiling_factor = (
+                                cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype) // 2
+                            )
+                            break
+                    elif (
+                        call_ranges[tiling_indice]
+                        < cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype) // 2 + 4
+                    ):
+                        tiling_factor = (
+                            cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype) // 2
+                        )
                         break
 
             if len(tiling_indices) == 1:
