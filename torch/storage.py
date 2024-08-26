@@ -39,7 +39,6 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
-    _serialize_data: _bool = True
 
     def __init__(self, *args, **kwargs):
         pass
@@ -650,7 +649,6 @@ def _get_device_from_module(module: str):
 
 class TypedStorage:
     is_sparse: _bool = False
-    _serialize_data: _bool = True
 
     dtype: torch.dtype
 

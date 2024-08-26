@@ -989,10 +989,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
                     storage_dtypes[storage.data_ptr()] = storage_dtype
 
             storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
-            if hasattr(storage, "_fake_device"):
-                location = str(storage._fake_device)
-            else:
-                location = location_tag(storage)
+            location = location_tag(storage)
             serialized_storages[storage_key] = storage
 
             return ("storage", storage_type, storage_key, location, storage_numel)
@@ -1018,17 +1015,14 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
     for key in sorted(serialized_storages.keys()):
         name = f"data/{key}"
         storage = serialized_storages[key]
-        num_bytes = storage.nbytes()
         # given that we copy things around anyway, we might use storage.cpu()
         # this means to that to get tensors serialized, you need to implement
         # .cpu() on the underlying Storage
-        if not storage._serialize_data:
-            zip_file.write_record_metadata(name, num_bytes)
-        else:
-            if storage.device.type != "cpu":
-                storage = storage.cpu()
-            # Now that it is on the CPU we can directly copy it into the zip file
-            zip_file.write_record(name, storage, num_bytes)
+        if storage.device.type != "cpu":
+            storage = storage.cpu()
+        # Now that it is on the CPU we can directly copy it into the zip file
+        num_bytes = storage.nbytes()
+        zip_file.write_record(name, storage, num_bytes)
 
 
 def load(
