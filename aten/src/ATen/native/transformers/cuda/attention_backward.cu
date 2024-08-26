@@ -394,7 +394,8 @@ _efficient_attention_backward(
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
     TORCH_CHECK(false,
-                "[AOTriton] Accelerated SDPA only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx942:sramecc+:xnack-)")
+                "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
+                " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   bool is_causal;
