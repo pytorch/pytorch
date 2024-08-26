@@ -64,7 +64,7 @@ jobs:
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
-      runs_on: linux.24xlarge
+      runs_on: linux.24xlarge.ephemeral
       {%- endif %}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
