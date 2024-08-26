@@ -5111,10 +5111,11 @@ def meta__scaled_dot_product_cudnn_attention(
     D_QK = query.size(-1)
     D_V = value.size(-1)
 
-    res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype)
+    res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
     logsum_exp = torch.empty(
         (B, H, S_Q),
         dtype=torch.float,
+        device=query.device,
     )
 
     # See Note [Seed and Offset]
