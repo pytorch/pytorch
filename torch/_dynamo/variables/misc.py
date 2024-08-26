@@ -107,10 +107,12 @@ class SuperVariable(VariableTracker):
         resolved_attr = None
         search_mro = type_to_use.__mro__
         start_index = search_mro.index(search_type) + 1
+        # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
+        # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
+        # attribute in the class __dict__
         for index in range(start_index, len(search_mro)):
-            if resolved_getattr := inspect.getattr_static(
-                search_mro[index], name, NO_SUCH_SUBOBJ
-            ):
+            # Dont call getattr, just check the __dict__ of the class
+            if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
                 if resolved_getattr is not NO_SUCH_SUBOBJ:
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
                     if type_to_use_source:
