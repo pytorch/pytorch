@@ -270,7 +270,7 @@ void onednn_matmul(
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
   auto result_unsqueezed = result.dim() == 1 ? result.unsqueeze(1) : result;
-  bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
+  bool bf32_usable = mat1.scalar_type() == at::kFloat && use_onednn_bf32_matmul();
 
   ideep::attr_t op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
