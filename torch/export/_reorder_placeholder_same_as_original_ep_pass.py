@@ -31,7 +31,6 @@ def _reorder_placeholder_same_as_original_ep_pass(
     name_to_node: Dict[str, torch.fx.Node] = {}
     corrected_name_to_old_name: Dict[str, str] = {}
     count = 0
-    non_user_inp_count = 0
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if new_graph_signature.input_specs[count].kind != InputKind.USER_INPUT:
@@ -41,7 +40,6 @@ def _reorder_placeholder_same_as_original_ep_pass(
                 node.meta = node_to_metadata[correct_name]
                 corrected_name_to_old_name[correct_name] = cur_name
                 name_to_node[node.name] = node
-                non_user_inp_count += 1
             count += 1
         else:
 
@@ -60,6 +58,11 @@ def _reorder_placeholder_same_as_original_ep_pass(
             node.kwargs = new_kwargs
 
     gm.recompile()
+    non_user_inp_count = len([x for x in new_graph_signature.input_specs if x.kind != InputKind.USER_INPUT])
+    # We only need to adjust the input specs for the non user inputs. For user inputs, it is bit annoying
+    # because our placeholder prettify pass adds kwargs_ to the kwarg input names. But when we run ep.module()
+    # there is no concept of kwargs anymore. We could fix it by manually adding kwargs to newly created ep after
+    # decomp, but that seems too overkill. 
     new_graph_signature = ExportGraphSignature(
         input_specs=old_graph_signature.input_specs[:non_user_inp_count] + new_graph_signature.input_specs[non_user_inp_count:],  # type: ignore[arg-type]
         output_specs=new_graph_signature.output_specs,  # type: ignore[arg-type]

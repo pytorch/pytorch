@@ -26,7 +26,7 @@ def _remove_unneccessary_copy_op_pass(
                             out.op == "call_function"
                             and out.target == torch.ops.aten.copy.default
                         ):
-                            out.replace_all_uses_with(out.args[1])
+                            out.replace_all_uses_with(out.args[1])  # type: ignore[arg-type]
                             gm.graph.erase_node(out)
         gm.recompile()
     return gm, new_graph_signature

@@ -480,7 +480,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace,
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
+    
+    # Directly call aot_export_module if we are tracing joint graph or 
+    # lowering joint graph to inference graph
     if (
         joint_loss_index is not None
         or ep.graph_signature.backward_signature is not None
