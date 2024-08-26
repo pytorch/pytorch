@@ -9,6 +9,9 @@ from torch.nn.modules.module import (
     register_module_forward_pre_hook,
 )
 from torch.utils._pytree import tree_flatten
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = ["ModuleTracker"]
@@ -93,9 +96,10 @@ class ModuleTracker:
             if is_bw:
                 self._maybe_set_engine_callback()
             if name in self.parents:
-                print(
-                    "The module hierarchy tracking seems to be messed up."
-                    "Please file a bug to PyTorch."
+                logger.info(
+                    "The module hierarchy tracking seems to be broken as this Module was already entered. %s during %s",
+                    name,
+                    "backward" if is_bw else "forward"
                 )
             self.parents.add(name)
 
@@ -105,11 +109,11 @@ class ModuleTracker:
         def fn(*args):
             if name in self.parents:
                 self.parents.remove(name)
-            elif not is_bw:
-                # Due to some input/output not requiring gradients, we cannot enforce
-                # proper nesting in backward
-                raise RuntimeError(
-                    "The Module hierarchy tracking is wrong. Report a bug to PyTorch"
+            else:
+                logger.info(
+                    "The Module hierarchy tracking is confused as we're exiting a Module that was never entered. %s during %s",
+                    name,
+                    "backward" if is_bw else "forward"
                 )
 
         return fn
