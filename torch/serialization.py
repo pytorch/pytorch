@@ -868,7 +868,6 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             # If storage is allocated, ensure that any other saved storages
             # pointing to the same data all have the same dtype. If storage is
             # not allocated, don't perform this check
-
             if storage.data_ptr() != 0:
                 if storage.data_ptr() in storage_dtypes:
                     if storage_dtype != storage_dtypes[storage.data_ptr()]:
@@ -1027,7 +1026,6 @@ def _save(
 
     # Write the pickle data for `obj`
     data_buf = io.BytesIO()
-
     pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
     pickler.persistent_id = persistent_id
     _serialization_tls.metadata_only = metadata_only
