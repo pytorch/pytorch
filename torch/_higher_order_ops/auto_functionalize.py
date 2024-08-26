@@ -358,7 +358,7 @@ auto_functionalized.fallthrough(DispatchKey.AutogradCPU)
 auto_functionalized.fallthrough(DispatchKey.AutogradCUDA)
 
 
-def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.JitType]]:
+def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.Type]]:
     """
     Returns the list of argument names that get mutated according to the
     schema and their types.
