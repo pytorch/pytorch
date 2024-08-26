@@ -170,6 +170,89 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    def test_random_object(self):
+        # test argument passing, mutation, reconstruction, state correctness
+        def fn(x, rand2):
+            r1 = random.randint(1, 9)
+            r2 = rand2.randint(1, 9)
+            rand3 = random.Random(42)
+            r3 = rand3.randint(1, 9)
+
+            y = x + r1 + r2 + r3
+            return y, rand2, rand3
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        random.seed(0)
+        y_1, rand2_1, rand3_1 = fn(inp, random.Random(12))
+        state_1 = random.getstate()
+        random.seed(0)
+        y_2, rand2_2, rand3_2 = opt_fn(inp, random.Random(12))
+        state_2 = random.getstate()
+        self.assertEqual(y_1, y_2)
+        self.assertEqual(state_1, state_2)
+        self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
+        self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
+
+    def test_random_object_methods(self):
+        def fn(x, rand1, rand2, rand3):
+            rand1.seed(42)
+            rand4 = random.Random(9002)
+            rand2.setstate(rand4.getstate())
+            r1 = rand1.random()
+            r2 = rand2.randint(1, 10)
+            r3 = rand3.randrange(10)
+            r4 = rand4.uniform(0, 1)
+            return x + r1 + r2 + r3 + r4
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        rand1_1 = random.Random(1)
+        rand2_1 = random.Random(2)
+        rand3_1 = random.Random(3)
+        rand1_2 = random.Random(1)
+        rand2_2 = random.Random(2)
+        rand3_2 = random.Random(3)
+        y1 = fn(inp, rand1_1, rand2_1, rand3_1)
+        y2 = opt_fn(inp, rand1_2, rand2_2, rand3_2)
+        self.assertEqual(y1, y2)
+        self.assertEqual(rand1_1.getstate(), rand1_2.getstate())
+        self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
+        self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
+
+    def test_random_object_overriden_methods(self):
+        # these will result in graph breaks, but we shouldn't crash
+        def get_rng():
+            rand1 = random.Random(1)
+            rand2 = random.Random(2)
+
+            orig_random = rand1.random
+
+            def custom_random():
+                return orig_random()
+
+            orig_getstate = rand2.getstate
+
+            def custom_getstate():
+                return orig_getstate()
+
+            rand1.random = custom_random
+            rand2.getstate = custom_getstate
+            return rand1, rand2
+
+        def fn(x, rand1, rand2):
+            r1 = rand1.random()
+            rand3 = random.Random()
+            rand3.setstate(rand2.getstate())
+            r2 = rand3.random()
+            return x + r1 + r2
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        y1 = fn(inp, *get_rng())
+        y2 = opt_fn(inp, *get_rng())
+        self.assertEqual(y1, y2)
+
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):

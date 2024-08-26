@@ -13576,7 +13576,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
            )),
     OpInfo('sparse.mm',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            variant_test_name='reduce',
            supports_autograd=True,
            supports_out=False,
@@ -13661,8 +13661,6 @@ op_db: List[OpInfo] = [
                    op=torch.frexp,
                    ref=np.frexp,
                    dtypes=floating_types_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half),
-                   # skip testing torch.frexp as it is not supported by ROCm platform yet
                    decorators=[],
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -15898,8 +15896,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
@@ -15923,8 +15920,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool2d',
            aten_name='max_unpool2d',
@@ -15933,8 +15929,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
@@ -15960,8 +15955,7 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool3d',
            aten_name='max_unpool3d',
@@ -15971,8 +15965,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
@@ -15995,8 +15988,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.linear',
            aten_name='linear',
@@ -16219,9 +16211,6 @@ op_db: List[OpInfo] = [
         decorators=[],
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
         ),
     ),
     OpInfo(

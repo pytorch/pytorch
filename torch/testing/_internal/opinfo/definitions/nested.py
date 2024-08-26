@@ -238,6 +238,17 @@ def sample_inputs_special_polygamma_n(n):
     return partial(sample_inputs_elementwise_njt_unary, op_kwargs={"n": n})
 
 
+def sample_inputs_masked_select(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2]
+    ):
+        yield SampleInput(
+            njt, kwargs={"mask": (torch.randn_like(njt, requires_grad=False) < 0.0)}
+        )
+
+
 sample_inputs_nn_functional_threshold = partial(
     sample_inputs_elementwise_njt_unary,
     op_kwargs={"threshold": float.fromhex("0x1.3ap-3"), "value": -9},
@@ -256,6 +267,7 @@ njt_sample_inputs = {
     "nn.functional.threshold": sample_inputs_nn_functional_threshold,
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
     "special.polygamma.special_polygamma_n_0": sample_inputs_special_polygamma_n(n=0),
+    "masked_select": sample_inputs_masked_select,
 }
 
 
