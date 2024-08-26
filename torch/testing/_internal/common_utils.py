@@ -104,6 +104,9 @@ except ImportError:
     has_pytest = False
 
 
+MI300_ARCH = ("gfx940", "gfx941", "gfx942")
+
+
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
 
