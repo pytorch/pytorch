@@ -358,12 +358,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.9"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -426,12 +421,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.9"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -494,12 +484,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.9"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -621,12 +606,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.10"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -689,12 +669,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.10"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -757,12 +732,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.10"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -884,12 +854,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.11"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -952,12 +917,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.11"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -1020,12 +980,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.11"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -1147,12 +1102,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.12"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -1215,12 +1165,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.12"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -1283,12 +1228,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.12"
-<<<<<<< HEAD
-      runs_on: linux.24xlarge
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       runs_on: linux.24xlarge.ephemeral
->>>>>>> ff77c67d16d (Use ephemeral runners for linux nightly builds (#134367))
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
     secrets:
