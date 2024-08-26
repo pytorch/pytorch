@@ -1,9 +1,8 @@
 # Owner(s): ["module: unknown"]
 import math
 import os
-import time
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Set
+from typing import Any, Callable, Dict, List, Set, Tuple
 from typing_extensions import Self
 
 import torch
@@ -197,37 +196,18 @@ class RuntimeEstimator(TorchDispatchMode):
             flat_args = [to_real_tensor(a) for a in flat_args]
             args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
             r = func(*args, **kwargs)
-            warmup_iters, total_iters = 2, 5
-            start_events = [
-                torch.cuda.Event(enable_timing=True) for _ in range(total_iters)
-            ]
-            end_events = [
-                torch.cuda.Event(enable_timing=True) for _ in range(total_iters)
-            ]
-            cpu_start_times: List[float] = []
-            cpu_end_times: List[float] = []
-
-            for i in range(total_iters):
-                cpu_start_times[i] = time.time()
-                start_events[i].record(torch.cuda.current_stream())
+            warmup_iters, actual_iters = 2, 3
+            for _ in range(warmup_iters):
                 func(*args, **kwargs)
-                end_events[i].record(torch.cuda.current_stream())
-                cpu_end_times[i] = time.time()
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+            start_event.record(torch.cuda.current_stream())
+            for _ in range(actual_iters):
+                func(*args, **kwargs)
+            end_event.record(torch.cuda.current_stream())
             torch.cuda.synchronize()
-            # We skip the time for warmup iterations
-            total_cuda_time = sum(
-                start_events[i].elapsed_time(end_events[i])
-                for i in range(warmup_iters, total_iters)
-            )
-            total_cpu_time = sum(
-                cpu_end_times[i] - cpu_start_times[i]
-                for i in range(warmup_iters, total_iters)
-            )
-            measured_iters = total_iters - warmup_iters
-            mean_cuda_time = total_cuda_time / measured_iters
-            # cpu times are in seconds so multiply by 1000 to get time in milliseconds
-            mean_cpu_time = (total_cpu_time / measured_iters) * 1e3
-            mean_op_time = mean_cuda_time - mean_cpu_time
+            cuda_time = start_event.elapsed_time(end_event)
+            mean_op_time = cuda_time / actual_iters
 
         storages = set()
 
@@ -262,7 +242,7 @@ class RuntimeEstimator(TorchDispatchMode):
         return (pytree.tree_map(map_out, r), mean_op_time)
 
     @classmethod
-    def _benchmark_estimate(cls, func, args, kwargs, res) -> float:  # type: ignore[no-untyped-def]
+    def _benchmark_estimate(cls, func, args, kwargs) -> Tuple[Any, float]:  # type: ignore[no-untyped-def]
         """
         Estimates the runtime of a function using benchmarking.
 
@@ -273,13 +253,14 @@ class RuntimeEstimator(TorchDispatchMode):
             res: The result of the function.
 
         Returns:
-            float: The estimated runtime of the function in milliseconds.
+            Tuple[Any, float]: A tuple containing the result of the function and
+                the mean operation time in milliseconds.
         """
         assert isinstance(
             cls.fake_mode, FakeTensorMode
         ), "Initialize/Assign FakeTensorMode before using this function"
         mean_op_time = 0.0
-        if func._overloadpacket not in _IGNORE_OPS:
+        if func._overloadpacket not in _VIEW_OPS:
             try:
                 res, mean_op_time = cls._maybe_run_and_benchmark_fallback_kernel(
                     func,
@@ -287,14 +268,15 @@ class RuntimeEstimator(TorchDispatchMode):
                     kwargs,
                     NotImplementedError,
                 )
-                return mean_op_time
+                return (res, mean_op_time)
             except NotImplementedError:
                 cls._no_fallback_kernel.add(func._overloadpacket)
-        return mean_op_time
+        res = func(*args, **kwargs or {})
+        return (res, mean_op_time)
 
     # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589  # noqa: PGH004,B950
     @classmethod
-    def _roofline_estimate(cls, func, args, kwargs, out) -> float:  # type: ignore[no-untyped-def]
+    def _roofline_estimate(cls, func, args, kwargs) -> Tuple[Any, float]:  # type: ignore[no-untyped-def]
         """
         Estimates the runtime of a function using a roofline cost model.
 
@@ -305,7 +287,8 @@ class RuntimeEstimator(TorchDispatchMode):
             out: The output of the function.
 
         Returns:
-            float: The estimated runtime of the function in milliseconds.
+            Tuple[Any, float]: A tuple containing the result of the function and
+                the mean operation time in milliseconds.
         """
 
         def get_num_bytes(t: torch.Tensor) -> int:
@@ -404,6 +387,8 @@ class RuntimeEstimator(TorchDispatchMode):
         # - transfer_time = op_bytes / beta
         # - estimated_op_time = max(compute_time, transfer_time)
 
+        kwargs = kwargs if kwargs else {}
+        out = func(*args, **kwargs)
         op_time = 0.0
         func_packet = func._overloadpacket
         if func_packet not in _VIEW_OPS:
@@ -425,7 +410,7 @@ class RuntimeEstimator(TorchDispatchMode):
             # compute time. We divide by 1e6 to get the time in ms
             op_time = max(transfer_time, compute_time) / 1e6
 
-        return op_time
+        return (out, op_time)
 
     def display_modulewise_stats(self, depth: int = 2) -> None:
         """
@@ -458,10 +443,9 @@ class RuntimeEstimator(TorchDispatchMode):
             )
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):  # type: ignore[no-untyped-def]
-        res = func(*args, **kwargs or {})
         # TODO: @sanketpurandare: Flatten tensors by desugaring the tensor subclasses
         # TODO: @sanketpurandare: Add logic for incorporating communication time
-        op_time = self._estimate(func, args, kwargs, res)
+        res, op_time = self._estimate(func, args, kwargs)
         for par in self._mod_tracker.parents:
             if self._mod_tracker.is_bw:
                 self.mod_runtimes[par]["bw"] += op_time

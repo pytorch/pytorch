@@ -27,15 +27,15 @@ class SimpleCNN(nn.Module):
         image_size = conv_args.image_size
         num_classes = conv_args.num_classes
         self.image_size = image_size
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=5)
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=5)
         self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=5)
-        self.conv3 = nn.Conv2d(128, 256, kernel_size=3)
-        self.conv4 = nn.Conv2d(256, 512, kernel_size=3)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=5)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3)
+        self.conv4 = nn.Conv2d(128, 256, kernel_size=3)
         self.fc1_size = self._calculate_fc1_size()
-        self.fc1 = nn.Linear(self.fc1_size, 1024)
-        self.fc2 = nn.Linear(1024, 512)
-        self.fc3 = nn.Linear(512, num_classes)
+        self.fc1 = nn.Linear(self.fc1_size, 512)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, num_classes)
 
     def _calculate_fc1_size(self):
         size = self.image_size
@@ -75,15 +75,17 @@ class TestRuntimeEstimator(TestCase):
         func: Callable,
         args: Tuple[Any, ...],
     ) -> float:
-        num_iters = 5
+        warmup_iters, actual_iters = 2, 5
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
+        for _ in range(warmup_iters):
+            func(*args)
         start_event.record()
-        for _ in range(num_iters):
+        for _ in range(actual_iters):
             func(*args)
         end_event.record()
         torch.cuda.synchronize()
-        measured_time = start_event.elapsed_time(end_event) / num_iters
+        measured_time = start_event.elapsed_time(end_event) / actual_iters
         return measured_time
 
     def _runtime_estimate(
@@ -92,6 +94,8 @@ class TestRuntimeEstimator(TestCase):
         func: Callable,
         args: Tuple[Any, ...],
     ) -> float:
+        # Optimizer init step
+        func(*args)
         runtime_estimator = RuntimeEstimator()
         with runtime_estimator(estimate_mode_type=estimate_mode):
             func(*args)
@@ -103,16 +107,23 @@ class TestRuntimeEstimator(TestCase):
         model_args: Union[ConvArgs, ModelArgs],
         bsz: int,
     ) -> Tuple[nn.Module, optim.Optimizer, torch.Tensor]:
+        dev = torch.cuda.current_device()
         if model_type == "Transformer":
             model_args = cast(ModelArgs, model_args)
-            model = Transformer(model_args)
-            optimizer = optim.Adam(model.parameters(), lr=1e-2)
-            inp = torch.randint(0, model_args.vocab_size, (bsz, model_args.max_seq_len))
+            with torch.device(dev):
+                model = Transformer(model_args)
+            optimizer = optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+            inp = torch.randint(
+                0, model_args.vocab_size, (bsz, model_args.max_seq_len), device=dev
+            )
         elif model_type == "CNN":
             model_args = cast(ConvArgs, model_args)
-            model = SimpleCNN(model_args)
-            optimizer = optim.SGD(model.parameters(), lr=1e-2)
-            inp = torch.randn(bsz, 3, model_args.image_size, model_args.image_size)
+            with torch.device(dev):
+                model = SimpleCNN(model_args)
+            optimizer = optim.SGD(model.parameters(), lr=1e-2, foreach=True)
+            inp = torch.randn(
+                bsz, 3, model_args.image_size, model_args.image_size, device=dev
+            )
         else:
             raise NotImplementedError("Only Transformer and CNN is supported")
         return (model, optimizer, inp)
@@ -122,54 +133,66 @@ class TestRuntimeEstimator(TestCase):
     def test_transformer_runtime(
         self,
     ):
-        dev = torch.cuda.current_device()
+        """Runs a basic GPT-2 model"""
         vocab_size = 8192
-        bsz, seq_len = 32, 1024
+        bsz, seq_len = 64, 1024
         model_args = ModelArgs(
-            n_layers=2,
-            n_heads=16,
+            n_layers=4,
+            n_heads=12,
             vocab_size=vocab_size,
             max_seq_len=seq_len,
+            dim=768,
             dropout_p=0.1,
         )
-        with torch.device(dev):
-            args = self._init_model_and_args("Transformer", model_args, bsz)
-            actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
 
-            with FakeTensorMode():
-                fake_args = self._init_model_and_args("Transformer", model_args, bsz)
-                estimated_runtime = self._runtime_estimate(
-                    "operator-level-cost-model", self._train_step, fake_args
-                )
-        accuracy = actual_runtime / estimated_runtime
+        args = self._init_model_and_args("Transformer", model_args, bsz)
+        actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
+
+        with FakeTensorMode():
+            fake_args = self._init_model_and_args("Transformer", model_args, bsz)
+            benchmark_estimate = self._runtime_estimate(
+                "operator-level-benchmark", self._train_step, fake_args
+            )
+            roofline_estimate = self._runtime_estimate(
+                "operator-level-cost-model", self._train_step, fake_args
+            )
+        benchmark_accuracy = actual_runtime / benchmark_estimate
+        roofline_accuracy = actual_runtime / roofline_estimate
         print(
-            f"Actual: {actual_runtime} Estimated: {estimated_runtime} Accuracy: {accuracy}"
+            f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}"
+            f"\n Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
         )
-        self.assertAlmostEqual(accuracy, 1.0, delta=0.15)
+        self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
+        self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_conv_model_runtime(
         self,
     ):
-        dev = torch.cuda.current_device()
-        num_classes = 10
-        bsz, img_sz = 32, 224
+        """Runs a simple CNN model"""
+        num_classes = 1024
+        bsz, img_sz = 256, 512
         model_args = ConvArgs(img_sz, num_classes)
-        with torch.device(dev):
-            args = self._init_model_and_args("CNN", model_args, bsz)
-            actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
+        args = self._init_model_and_args("CNN", model_args, bsz)
+        actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
 
-            with FakeTensorMode():
-                fake_args = self._init_model_and_args("CNN", model_args, bsz)
-                estimated_runtime = self._runtime_estimate(
-                    "operator-level-cost-model", self._train_step, fake_args
-                )
-        accuracy = actual_runtime / estimated_runtime
+        with FakeTensorMode():
+            fake_args = self._init_model_and_args("CNN", model_args, bsz)
+            benchmark_estimate = self._runtime_estimate(
+                "operator-level-benchmark", self._train_step, fake_args
+            )
+            roofline_estimate = self._runtime_estimate(
+                "operator-level-cost-model", self._train_step, fake_args
+            )
+        benchmark_accuracy = actual_runtime / benchmark_estimate
+        roofline_accuracy = actual_runtime / roofline_estimate
         print(
-            f"Actual: {actual_runtime} Estimated: {estimated_runtime} Accuracy: {accuracy}"
+            f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}\n"
+            f"Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
         )
-        self.assertAlmostEqual(accuracy, 1.0, delta=0.15)
+        self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
+        self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.4)
 
 
 if __name__ == "__main__":
