@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
 import dataclasses
@@ -66,6 +65,9 @@ def capture_pre_autograd_graph_warning():
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
     log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
+    log.warning("Please switch to use torch.export._trace._export_for_training instead.")
+    if config.is_fbcode():
+        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export._trace._export_for_training.")  # noqa: B950
 
 
 @compatibility(is_backward_compatible=False)
@@ -107,6 +109,7 @@ def capture_pre_autograd_graph(
 
     """
     from torch.export._trace import _extract_fake_inputs, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
+    from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
     from torch._export.non_strict_utils import make_constraints
     from torch._subclasses.functional_tensor import FunctionalTensor
     from torch.export._unlift import _create_stateful_graph_module
@@ -122,72 +125,79 @@ def capture_pre_autograd_graph(
     if kwargs is None:
         kwargs = {}
 
-    log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
+    if capture_pre_autograd_graph_using_training_ir():
+        @lru_cache
+        def print_export_warning():
+            log.warning("Using torch.export._trace._export_for_training(...,strict=True)")
+        print_export_warning()
+        module = torch.export._trace._export_for_training(f, args, kwargs, dynamic_shapes=dynamic_shapes, strict=True).module()
+    else:
+        log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
 
-    # Do not decompose dropout for exported models, because in eval mode the dropout
-    # op disappears from the graph, which makes it difficult to switch to train mode.
-    # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832.
-    decomp_table = {
-        op: op.decompose
-        for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
-        if op != torch.ops.aten.dropout.default
-    }
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)), _ignore_backend_decomps():
-        m = torch._dynamo.export(
-            f,
-            dynamic_shapes=dynamic_shapes,
-            assume_static_by_default=True,
-            tracing_mode="symbolic",
-            decomposition_table=decomp_table,
-            pre_dispatch=True,
-            aten_graph=True,
-            _log_export_usage=False,
-        )(
-            *args,
-            **kwargs,
-        )[0]
-
-        _, _, fake_mode = _extract_fake_inputs(m, args, kwargs)
-
-        m.meta["inline_constraints"] = {
-            k: v
-            for k, v in fake_mode.shape_env.var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
+        # Do not decompose dropout for exported models, because in eval mode the dropout
+        # op disappears from the graph, which makes it difficult to switch to train mode.
+        # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832.
+        decomp_table = {
+            op: op.decompose
+            for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
+            if op != torch.ops.aten.dropout.default
         }
+        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)), _ignore_backend_decomps():
+            m = torch._dynamo.export(
+                f,
+                dynamic_shapes=dynamic_shapes,
+                assume_static_by_default=True,
+                tracing_mode="symbolic",
+                decomposition_table=decomp_table,
+                pre_dispatch=True,
+                aten_graph=True,
+                _log_export_usage=False,
+            )(
+                *args,
+                **kwargs,
+            )[0]
 
-        if isinstance(f, torch.nn.Module):
-            from torch.export._trace import _restore_state_dict
-            _restore_state_dict(f, m)
+            _, _, fake_mode = _extract_fake_inputs(m, args, kwargs)
 
-        flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        combined_args = _combine_args(f, args, kwargs)
-        range_constraints = make_constraints(
-            fake_mode,
-            m,
-            combined_args,
-            dynamic_shapes,
-            0,
-        )
+            m.meta["inline_constraints"] = {
+                k: v
+                for k, v in fake_mode.shape_env.var_to_range.items()
+                if re.match(r"^[if]\d+$", str(k))
+            }
 
-        module = _create_stateful_graph_module(
-            m,
-            range_constraints=range_constraints,
-        )
+            if isinstance(f, torch.nn.Module):
+                from torch.export._trace import _restore_state_dict
+                _restore_state_dict(f, m)
 
-    error_message = \
-        """
-        Calling train() or eval() is not supported for exported models.
-        Alternatively, you may override these methods to do custom user behavior as follows:
+            flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
+            combined_args = _combine_args(f, args, kwargs)
+            range_constraints = make_constraints(
+                fake_mode,
+                m,
+                combined_args,
+                dynamic_shapes,
+                0,
+            )
 
-            def _my_train(self, mode: bool = True):
-                ...
+            module = _create_stateful_graph_module(
+                m,
+                range_constraints=range_constraints,
+            )
 
-            def _my_eval(self):
-                ...
+        error_message = \
+            """
+            Calling train() or eval() is not supported for exported models.
+            Alternatively, you may override these methods to do custom user behavior as follows:
 
-            model.train = types.MethodType(_my_train, model)
-            model.eval = types.MethodType(_my_eval, model)
-        """
+                def _my_train(self, mode: bool = True):
+                    ...
+
+                def _my_eval(self):
+                    ...
+
+                model.train = types.MethodType(_my_train, model)
+                model.eval = types.MethodType(_my_eval, model)
+            """
 
     def _train(self, mode: bool = True):
         raise NotImplementedError(error_message)

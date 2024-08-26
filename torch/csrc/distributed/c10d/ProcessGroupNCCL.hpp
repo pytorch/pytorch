@@ -37,6 +37,10 @@
 
 namespace c10d {
 
+// Control broadcasting of NCCL uniqueId
+static std::vector<std::string> TORCH_NCCL_BCAST_UNIQUEID = {
+    "TORCH_NCCL_BCAST_UNIQUEID"};
+
 // Control whether to always use high priority streams
 static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
     "TORCH_NCCL_HIGH_PRIORITY"};
@@ -261,6 +265,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Constructor takes a list of CUDA devices
     WorkNCCL(
+        const std::string& pgUID,
+        const std::string& pgDesc,
         at::Device& device,
         int rank,
         OpType opType,
@@ -329,6 +335,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::vector<at::Tensor> result() override;
 
    protected:
+    // The process group unique id
+    std::string pgUID_;
+
+    // The process group description
+    std::string pgDesc_;
+
     // The cached list of CUDA devices to operate on
     at::Device device_;
 
@@ -884,6 +896,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // timeout.
   virtual std::string getNCCLWatchdogDebugInfo();
 
+  std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
+
+  std::string getNCCLWatchdogTimeoutExitMsg(const std::string& exitReason);
+
   static const int64_t kWatchdogThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0. This store
@@ -961,10 +977,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>>
       inInitializationCommMap_;
 
-  // Map from ncclUniqueId to appropriate communicator.
-  std::unordered_map<std::string, std::shared_ptr<NCCLComm>> ncclIdToCommMap_;
-
-  // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
+  // Mutex to guard maps like devNCCLCommMap_.
   std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
@@ -1015,10 +1028,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // This is the signal from watchdog threads to indicate whether the monitor
   // thread should dump. Making it static so that it is accessiable from all the
   // PGs. With this flag, monitor thread would dump debug info under any one of
-  // the 3 conditions: 1: this flag is set to true by the watchdog thread when
-  // it detects a timeout. 2: timeout signal is received from
-  // other ranks through tcpstore 3: no heartbeat of watchdog Note that only the
-  // monitor thread from PG0 should dump the debug info and only once
+  // the three conditions:
+  //
+  // 1: watchdog thread of any PG detects a collective timeout.
+  // 2: timeout signal is received from other ranks through tcpstore.
+  // 3: current PG's watchdog heartbeat timeout occurs.
+  //
+  // Note that only the monitor thread from PG0 will dump the debug info for
+  // case one and two so that the debug info is only dumped once.
   static std::atomic<bool> shouldDump_;
 
   // Mutex to Guard workMetaList_
