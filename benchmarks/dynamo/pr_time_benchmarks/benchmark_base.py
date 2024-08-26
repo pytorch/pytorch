@@ -54,18 +54,18 @@ struct TorchBenchmarkCompileTimeLogEntry {
 
 class BenchmarkBase(ABC):
     # measure total number of instruction spent in _work.
-    _instruction_count = False
+    _enable_instruction_count = False
 
     # measure total number of instruction spent in convert_frame.compile_inner
     # TODO is there other parts we need to add ?
-    _compile_time_instruction_count = False
+    _enable_compile_time_instruction_count = False
 
     def enable_instruction_count(self):
-        self._instruction_count = True
+        self._enable_instruction_count = True
         return self
 
     def enable_compile_time_instruction_count(self):
-        self._compile_time_instruction_count = True
+        self._enable_compile_time_instruction_count = True
         return self
 
     def name(self):
@@ -128,14 +128,14 @@ class BenchmarkBase(ABC):
     def collect_all(self):
         self._prepare_once()
         self.results = []
-        if self._instruction_count:
+        if self._enable_instruction_count:
             r = self._count_instructions()
             self.results.append((self.name(), "instruction_count", r))
             scribe_log_torch_benchmark_compile_time(
                 name=self.name(),
                 instruction_count=r,
             )
-        if self._compile_time_instruction_count:
+        if self._enable_compile_time_instruction_count:
             r = self._count_compile_time_instructions()
             # TODO add logging to scribe.
             self.results.append(
