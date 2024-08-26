@@ -573,13 +573,8 @@ def run_test(
 
 def try_set_cpp_stack_traces(env, command, set=True):
     # Print full c++ stack traces during retries
-    # Don't do it for macos inductor tests as it makes them
-    # segfault for some reason
-    if not (
-        IS_MACOS and len(command) >= 2 and command[2].startswith(INDUCTOR_TEST_PREFIX)
-    ):
-        env = env or {}
-        env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if set else "0"
+    env = env or {}
+    env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if set else "0"
     return env
 
 
