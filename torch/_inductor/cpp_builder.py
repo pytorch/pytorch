@@ -268,6 +268,7 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
         status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         output = e.output.decode("utf-8")
+        print("Build failed: ", output)
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
         if openmp_problem and sys.platform == "darwin":
             instruction = (
