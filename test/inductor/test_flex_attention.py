@@ -1648,7 +1648,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (1, 1, 1, 16),
             device="cuda",
             dtype=torch.float32,
-            requires_grad=False,
+            requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         out_eager, lse_eager = flex_attention(query, key, value, return_lse=True)
@@ -1658,6 +1658,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         assert torch.equal(out_eager, out_compiled)
         assert torch.equal(lse_eager, lse_compiled)
+
+        grads_eager = torch.autograd.grad(out_eager.sum(), (query, key, value))
+        grads_compile = torch.autograd.grad(out_compiled.sum(), (query, key, value))
+
+        torch.testing.assert_close(grads_eager, grads_compile)
 
     @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
