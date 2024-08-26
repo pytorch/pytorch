@@ -4,7 +4,7 @@ Getting Started on Intel GPU
 Hardware Prerequisite
 ---------------------
 
-.. list-table:: 
+.. list-table::
    :widths: 50 50
    :header-rows: 1
 
@@ -12,7 +12,7 @@ Hardware Prerequisite
      - Supported OS
    * - Intel® Data Center GPU Max Series
      - Linux
-   * - (Prototype Support) Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (MTL-H) 
+   * - (Prototype Support) Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (MTL-H)
      - Windows/Linux
 
 
