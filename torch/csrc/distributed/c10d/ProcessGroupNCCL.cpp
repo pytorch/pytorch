@@ -3065,6 +3065,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   // Bump the logical operation counter regardless of whether this op is
   // coalesced or individual
+  seqCollective_++;
   op_id_++;
 
   auto ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
