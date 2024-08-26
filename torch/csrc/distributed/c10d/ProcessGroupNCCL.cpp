@@ -1103,8 +1103,15 @@ void ProcessGroupNCCL::abortCommsFromMap(
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
+    at::cuda::OptionalCUDAGuard gpuGuard;
     at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
-    at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
+    if (deviceIndex >= 0) {
+      // For P2P comms, the deviceIndex could be -1 (invalid), as the keys in
+      // the map could be non deviceIndex, but rank to rank numbers. So we
+      // indeed need to check if deviceIndex >= 0
+      // TODO: fix `getIndexFromDeviceKey` or fix `DeviceKey`
+      gpuGuard.set_index(deviceIndex);
+    }
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
               << ncclComm->ncclComm_ << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
