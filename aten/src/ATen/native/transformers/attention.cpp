@@ -847,9 +847,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
       : value;
   // for int8 - q/k/v dequantize
   if (origin_dtype == at::kByte) {
-    query_acc = (query_acc - q_zp) * q_scale;
-    key_acc = (key_acc - k_zp) * k_scale;
-    value_acc = (value_acc - v_zp) * v_scale;
+    query_acc = (query_acc - static_cast<float>(q_zp)) * q_scale;
+    key_acc = (key_acc - static_cast<float>(k_zp)) * k_scale;
+    value_acc = (value_acc - static_cast<float>(v_z)p) * v_scale;
   }
   auto attn_mask = attn_mask_;
   // Naive, composite implementation defined here.

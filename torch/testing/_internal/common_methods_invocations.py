@@ -16029,7 +16029,7 @@ op_db: List[OpInfo] = [
         op=lambda *args, **kwargs:
                wrapper_set_seed(torch.nn.functional.scaled_dot_product_attention, *args, **kwargs),
         sample_inputs_func=sample_inputs_scaled_dot_product_attention,
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16, torch.uint8),
         supports_out=False,
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=True,
