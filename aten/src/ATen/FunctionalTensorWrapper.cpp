@@ -281,7 +281,7 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   set_sizes_and_strides(sizes_, strides_, storage_offset_);
 }
 
-void FunctionalTensorWrapper::storage_resize_(c10::SymInt new_size) {
+void FunctionalTensorWrapper::storage_resize_(const c10::SymInt& new_size) {
   auto curr_storage_size = value_.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
   // storage resizing is severely limited: we only support resizing either to zero, or from zero bytes.
   TORCH_CHECK(new_size == 0 || curr_storage_size == 0, "new_size: ", new_size, ". curr_storage_size: ", curr_storage_size);
@@ -657,6 +657,21 @@ void propagate_xla_data(const ITensorListRef functional_tensor, ITensorListRef o
   auto other_it = other.begin();
   for (C10_UNUSED const auto i : c10::irange(functional_tensor.size())) {
     propagate_xla_data(*functional_tensor_it++, *other_it++);
+  }
+}
+
+void propagate_xla_data_direct(const Tensor& tensor, const Tensor& other) {
+  if (tensor.key_set().has(c10::DispatchKey::XLA)) {
+    at::_propagate_xla_data(tensor, other);
+  }
+ }
+
+void propagate_xla_data_direct(const ITensorListRef tensor,
+                               ITensorListRef other) {
+  auto tensor_it = tensor.begin();
+  auto other_it = other.begin();
+  for (C10_UNUSED const auto i : c10::irange(tensor.size())) {
+    propagate_xla_data_direct(*tensor_it++, *other_it++);
   }
 }
 

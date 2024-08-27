@@ -5,6 +5,7 @@ from typing import List, TYPE_CHECKING, Union
 
 import torch
 
+
 if TYPE_CHECKING:
     import io
 
@@ -16,7 +17,6 @@ def has_safetensors_and_transformers():
         # safetensors is not an exporter requirement, but needed for some huggingface models
         import safetensors  # type: ignore[import]  # noqa: F401
         import transformers  # type: ignore[import]  # noqa: F401
-
         from safetensors import torch as safetensors_torch  # noqa: F401
 
         return True
@@ -53,7 +53,7 @@ class ONNXTorchPatcher:
         `torch.fx._symbolic_trace._wrapped_methods_to_patch`
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # List of file paths processed by torch.load.
         self.paths: List[Union[str, io.BufferedIOBase]] = []
 

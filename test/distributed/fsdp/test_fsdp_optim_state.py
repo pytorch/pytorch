@@ -1587,7 +1587,7 @@ class TestFSDPOptimState(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_compatible_with_trec(self):
         class DenseModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
                 self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
@@ -1598,7 +1598,7 @@ class TestFSDPOptimState(FSDPTest):
                 return self.net4(self.net3(self.net2(self.net1(x))))
 
         class FakeMPModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(0)
                 self.dense = FSDP(DenseModel().cuda(), use_orig_params=True)
@@ -1673,7 +1673,7 @@ class TestFSDPOptimState(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_optim_state_without_param_groups(self):
         class SimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(0)
                 self.net1 = nn.Sequential(nn.Linear(2, 4), nn.ReLU())

@@ -20,7 +20,7 @@ from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
 
 
 class PT2ArchiveWriter:
-    def __init__(self, archive_path: str):
+    def __init__(self, archive_path: str) -> None:
         self.archive_path: str = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
@@ -55,7 +55,7 @@ class PT2ArchiveWriter:
 
 
 class PT2ArchiveReader:
-    def __init__(self, archive_path: str):
+    def __init__(self, archive_path: str) -> None:
         self.archive_path: str = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 

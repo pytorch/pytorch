@@ -52,7 +52,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -128,6 +128,7 @@ cdll.LoadLibrary("__lib_path__")
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
+                    cwd=output_dir,
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
@@ -251,6 +252,19 @@ class VecZVECTOR(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 
+@dataclasses.dataclass
+class VecVSX(VecISA):
+    _bit_width = 256  # VSX simd supports 128 bit_width, but aten is emulating it as 256
+    _macro = ["CPU_CAPABILITY_VSX"]
+    _arch_flags = "-mvsx"
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+
+    def __str__(self) -> str:
+        return "vsx"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
 class InvalidVecISA(VecISA):
     _bit_width = 0
     _macro = [""]
@@ -323,6 +337,8 @@ def valid_vec_isa_list() -> List[VecISA]:
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
                             isa_list.append(VecZVECTOR())
                             break
+    elif arch == "ppc64le":
+        isa_list.append(VecVSX())
     elif arch == "aarch64":
         isa_list.append(VecNEON())
     elif arch in ["x86_64", "AMD64"]:
@@ -338,7 +354,7 @@ def valid_vec_isa_list() -> List[VecISA]:
 
 
 def pick_vec_isa() -> VecISA:
-    if config.is_fbcode():
+    if config.is_fbcode() and (platform.machine() in ["x86_64", "AMD64"]):
         return VecAVX2()
 
     _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()

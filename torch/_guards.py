@@ -80,8 +80,8 @@ class TraceId(NamedTuple):
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
-    LOCAL_NN_MODULE = 2
-    GLOBAL_NN_MODULE = 3
+    LOCAL_SPECIALIZED_NN_MODULE = 2
+    GLOBAL_SPECIALIZED_NN_MODULE = 3
     CONSTANT = 4
     RANDOM_VALUE = 5
     SHAPE_ENV = 6
@@ -90,25 +90,46 @@ class GuardSource(enum.Enum):
     BACKWARD_STATE = 9
     EPHEMERAL = 10
     SYNTHETIC_LOCAL = 11
+    LOCAL_UNSPECIALIZED_NN_MODULE = 12
+    GLOBAL_UNSPECIALIZED_NN_MODULE = 13
+    LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 14
+    GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 15
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
-    def is_nn_module(self) -> bool:
+    def is_specialized_nn_module(self) -> bool:
         return (
             self
             in (
-                GuardSource.GLOBAL_NN_MODULE,
-                GuardSource.LOCAL_NN_MODULE,
+                GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+                GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             )
+            # TODO (anijain2305) - Investigate why is_fsdp_module required.
             or self.is_fsdp_module()
+        )
+
+    def is_unspecialized_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+        )
+
+    def is_unspecialized_builtin_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
     def is_local(self):
         return self in (
             GuardSource.LOCAL,
-            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
 
@@ -263,8 +284,8 @@ class Guard:
                 log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
 
-    def is_nn_module(self):
-        return self.source.is_nn_module()
+    def is_specialized_nn_module(self):
+        return self.source.is_specialized_nn_module()
 
     def is_fsdp_module(self):
         return self.source.is_fsdp_module()
@@ -294,11 +315,7 @@ class Guard:
         # invocation of set_export_info calls. So a dead weakref is also
         # acceptable.
         assert (
-            self.obj_weakref
-            in (
-                obj_weakref,
-                None,
-            )
+            self.obj_weakref in (obj_weakref, None)
             or callable(self.obj_weakref)
             and self.obj_weakref() is None
         ), "Guarded object must be identical, None or ephemeral (dead weakref)"
@@ -350,12 +367,10 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 
 class Checkpointable(Generic[T]):
     @abstractmethod
-    def copy_graphstate(self) -> T:
-        ...
+    def copy_graphstate(self) -> T: ...
 
     @abstractmethod
-    def restore_graphstate(self, state: T):
-        ...
+    def restore_graphstate(self, state: T): ...
 
 
 class GuardsCheckpointState:
@@ -407,7 +422,7 @@ class ModuleContextCheckpointState:
 
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.nn_modules: Dict[str, Any] = {}
 
     def copy_graphstate(self):
@@ -456,7 +471,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         "autocast_cache_enabled",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.global_state: Dict[str, Tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
@@ -524,7 +539,7 @@ class GuardsSet:
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: List[GuardEnvExpr] = []
 
@@ -820,8 +835,8 @@ class Source:
             raise NotImplementedError
         return Guard(self, fn)
 
-    def is_nn_module(self) -> bool:
-        return self.guard_source().is_nn_module()
+    def is_specialized_nn_module(self) -> bool:
+        return self.guard_source().is_specialized_nn_module()
 
     def subguards_allowed(self):
         """True if you can guard on attributes of this"""

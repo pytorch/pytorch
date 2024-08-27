@@ -3,7 +3,6 @@ import dataclasses
 import importlib
 import logging
 import os
-
 from typing import (
     Any,
     Callable,
@@ -32,6 +31,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.utils import _pytree
 
+
 if TYPE_CHECKING:
     import onnx
 
@@ -46,8 +46,8 @@ try:
 
     import torch.onnx
     import torch.onnx._internal
+    import torch.onnx._internal._exporter_legacy
     import torch.onnx._internal.diagnostics
-    import torch.onnx._internal.exporter
     import torch.onnx._internal.fx.decomposition_table
     import torch.onnx._internal.fx.passes
     from torch.onnx._internal.fx import fx_onnx_interpreter
@@ -303,7 +303,7 @@ def _get_onnx_devices(
             torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
         ],
         ...,
-    ]
+    ],
 ) -> Tuple["ORTC.OrtDevice", ...]:
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
@@ -402,7 +402,12 @@ def _adjust_scalar_from_onnx_to_fx(
         torch.SymBool,
         bool,
     ],
-) -> Union[torch.Tensor, int, float, bool,]:
+) -> Union[
+    torch.Tensor,
+    int,
+    float,
+    bool,
+]:
     """Helper function to wrap ORT-produced torch.Tensor as PyTorch variables"""
     assert isinstance(tensor, torch.Tensor), "ORT's output must be tensor."
     if isinstance(
@@ -560,9 +565,9 @@ class OrtExecutionInfoPerSession:
         self.output_devices: Tuple[ORTC.OrtDevice, ...] = output_devices
         # This is the outputs of executing the original torch.fx.GraphModule with example inputs
         # (i.e., args passed into OrtBackend._ort_acclerated_call).
-        self.example_outputs: Union[
-            Tuple[torch.Tensor, ...], torch.Tensor
-        ] = example_outputs
+        self.example_outputs: Union[Tuple[torch.Tensor, ...], torch.Tensor] = (
+            example_outputs
+        )
 
     def is_supported(self, *args):
         # Compare the args and the input schema in ONNX model and
@@ -601,7 +606,7 @@ class OrtExecutionInfoPerSession:
 
 @dataclasses.dataclass
 class OrtExecutionInfoForAllGraphModules:
-    def __init__(self):
+    def __init__(self) -> None:
         # All sessions (and their related information) created by exporting the same GraphModule
         # with different inputs.
         self.execution_info_per_graph_module: Dict[
@@ -739,7 +744,7 @@ class OrtBackend:
         # - self._resolved_onnx_exporter_options.onnx_registry records what
         #   aten/prim ops are supported by exporter and their exporters (type: callable).
         self._resolved_onnx_exporter_options = (
-            torch.onnx._internal.exporter.ResolvedExportOptions(
+            torch.onnx._internal._exporter_legacy.ResolvedExportOptions(
                 torch.onnx.ExportOptions()
                 if self._options.export_options is None
                 else self._options.export_options
@@ -928,7 +933,7 @@ class OrtBackend:
             try:
                 from onnxscript import optimizer  # type: ignore[import]
                 from onnxscript.rewriter import (  # type: ignore[import]
-                    onnxruntime as ort_rewriter,  # type: ignore[import]
+                    onnxruntime as ort_rewriter,
                 )
 
                 onnx_model = optimizer.optimize(onnx_model)
@@ -1111,7 +1116,6 @@ class OrtBackend:
         the ``compile`` method is invoked directly."""
         if self._options.use_aot_autograd:
             from functorch.compile import min_cut_rematerialization_partition
-
             from torch._dynamo.backends.common import aot_autograd
 
             return aot_autograd(

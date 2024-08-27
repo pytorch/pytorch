@@ -46,7 +46,7 @@ class BoundVars:
         # To access this variable call `get_bounds()`
         self._bounds: Dict[torch.fx.Node, ValueRanges[Expr]] = {}
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
             f"loop_body={self.loop_body},\n "

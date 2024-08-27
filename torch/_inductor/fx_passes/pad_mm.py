@@ -16,6 +16,8 @@ from torch._inductor.autoheuristic.autoheuristic import (
     LocalFeedback,
 )
 from torch._inductor.autoheuristic.autoheuristic_utils import (
+    context_add_strides,
+    context_add_using_tf32,
     pad_mm_operations,
     pad_mm_precondition,
 )
@@ -366,7 +368,7 @@ def should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
     do_bench = functools.partial(
-        torch._inductor.runtime.runtime_utils.do_bench_gpu,
+        torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
         warmup=5,
     )
     m_padded_length = 0
@@ -583,12 +585,8 @@ def get_context(
     context.add_feature("k", mat1.shape[1])
     context.add_feature("n", mat2.shape[1])
 
-    mat1_strides = mat1.stride()
-    mat2_strides = mat2.stride()
-    context.add_feature("mat1_stride_0", mat1_strides[0])
-    context.add_feature("mat1_stride_1", mat1_strides[1])
-    context.add_feature("mat2_stride_0", mat2_strides[0])
-    context.add_feature("mat2_stride_1", mat2_strides[1])
+    context_add_strides(context, "mat1", mat1.stride())
+    context_add_strides(context, "mat2", mat2.stride())
 
     context.add_feature("m_padded_length", m_padded_length)
     context.add_feature("k_padded_length", k_padded_length)
@@ -603,11 +601,7 @@ def get_context(
     context.add_feature("prepadded_mat1", mat1_pre_padded, is_categorical=True)
     context.add_feature("prepadded_mat2", mat2_pre_padded, is_categorical=True)
 
-    using_tf32 = "not_float_32"
-    if mat1.dtype == torch.float32:
-        using_tf32 = torch.backends.cuda.matmul.allow_tf32
-    context.add_feature("using_tf32", using_tf32, is_categorical=True)
-
+    context_add_using_tf32(context, mat1.dtype)
     return context
 
 

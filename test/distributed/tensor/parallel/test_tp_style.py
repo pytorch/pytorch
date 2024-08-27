@@ -210,7 +210,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
@@ -262,7 +262,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         class TestKwargModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
@@ -290,7 +290,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output.shape, (1 * self.world_size, 8))
 
         class TestKwargOnlyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
@@ -419,6 +419,22 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertIsInstance(sharded_out, DTensor)
             self.assertEqual(sharded_out.placements, (Shard(1),))
             self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # test sharded on non-sequence dim input
+        sharded_batch_input = distribute_tensor(global_input, mesh, [Shard(0)])
+        rmsnorm = RMSNormPython(embedding_dim).to(self.device_type)
+        sp_rmsnorm = parallelize_module(deepcopy(rmsnorm), mesh, SequenceParallel())
+
+        with comm_mode:
+            sharded_out = sp_rmsnorm(sharded_batch_input)
+            grad_out = torch.ones_like(sharded_out)
+            sharded_out.backward(grad_out)
+            self.assertIsInstance(sharded_out, DTensor)
+            # output still sharded on sequence dimension
+            self.assertEqual(sharded_out.placements, (Shard(1),))
+            self.assertEqual(sp_rmsnorm.weight.grad.placements, (_Partial(),))
+            # communication happens in both fwd/bwd to redistribute input
+            self.assertEqual(comm_mode.get_total_counts(), 2)
 
 
 if __name__ == "__main__":

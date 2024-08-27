@@ -36,8 +36,8 @@ class SubprocessHandler:
         entrypoint: str,
         args: Tuple,
         env: Dict[str, str],
-        stdout: str,
-        stderr: str,
+        stdout: Optional[str],
+        stderr: Optional[str],
         local_rank_id: int,
     ):
         self._stdout = open(stdout, "w") if stdout else None

@@ -2,10 +2,10 @@ import re
 from typing import Any, DefaultDict, Dict, List, Tuple, Union
 
 import numpy as np
-
 import sympy as sp
 
 import torch
+
 
 square_brackets_pattern = r"\[([^]]+)\]"
 parentheses_pattern = r"\((.*?)\)"

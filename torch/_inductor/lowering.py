@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import itertools
@@ -17,10 +18,7 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.associative_scan import associative_scan_op
-from torch._higher_order_ops.triton_kernel_wrap import (
-    triton_kernel_wrapper_functional,
-    triton_kernel_wrapper_mutation,
-)
+from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -47,6 +45,7 @@ from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
+    DtypeView,
     ExpandView,
     IndexingConstant,
     is_triton,
@@ -75,7 +74,10 @@ from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
-layout_constraints: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+# Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
+_maybe_layout_constraints: Dict[
+    torch._ops.OpOverload, Optional[Callable[..., Any]]
+] = {}
 fallbacks: Set[torch._ops.OpOverload] = set()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
@@ -85,6 +87,25 @@ foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
+
+
+def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., Any]]:
+    """Get layout constraints. Returns None if there are no layout constraints."""
+    if not isinstance(fn, torch._ops.OpOverload):
+        # Only OpOverloads have layout constraints.
+        return None
+    if fn in _maybe_layout_constraints:
+        return _maybe_layout_constraints[fn]
+    # OpOverload with custom lowerings override tag-based layout constraints
+    if fn in lowerings:
+        _maybe_layout_constraints[fn] = None
+        return None
+    # We lazily register tag-based layout constraints.
+    if torch._C.Tag.needs_fixed_stride_order in fn.tags:
+        _maybe_layout_constraints[fn] = constrain_to_fx_strides
+        return _maybe_layout_constraints[fn]
+    _maybe_layout_constraints[fn] = None
+    return None
 
 
 def assert_nyi(cond, msg):
@@ -105,9 +126,9 @@ def add_needs_realized_inputs(fn):
 def add_layout_constraint(fn, constraint):
     if isinstance(fn, torch._ops.OpOverloadPacket):
         for overload in fn.overloads():
-            layout_constraints[getattr(fn, overload)] = constraint
+            _maybe_layout_constraints[getattr(fn, overload)] = constraint
     else:
-        layout_constraints[fn] = constraint
+        _maybe_layout_constraints[fn] = constraint
 
 
 add_needs_realized_inputs(
@@ -420,7 +441,7 @@ def make_pointwise(
     override_return_dtype=None,
     override_device=None,
     override_fn_when_input_bool=None,
-    override_fn_when_cuda_float64=None,
+    override_fn_when_gpu_float64=None,
     allow_alpha=False,
     triton_fallback=None,
 ):
@@ -439,21 +460,50 @@ def make_pointwise(
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
-        is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
+        is_gpu_device = is_gpu(decode_device(inputs[0].get_device()).type)
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
                 other.get_size()
             ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
 
+        # in tracing, we will annotate pointwise nodes that correspond to the output of
+        # a pointwise node that would have been run in eager. intermediary pointwise nodes
+        # during decompositions are not annotated.
+        emulate_precision_casts = (
+            V.graph is not None
+            and getattr(V.graph, "current_node", None) is not None
+            and V.graph.current_node.meta is not None
+            and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
+            and dtype in (torch.bfloat16, torch.float16)
+        )
+
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
-            elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
-                return override_fn_when_cuda_float64(*[load(index) for load in loaders])
+            elif (
+                override_fn_when_gpu_float64
+                and is_gpu_device
+                and dtype == torch.float64
+            ):
+                return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
-                return fn(*[load(index) for load in loaders])
+                inputs_loaded = []
+                for load in loaders:
+                    out = load(index)
+                    if emulate_precision_casts:
+                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, dtype)
+                    inputs_loaded.append(out)
+
+                out = fn(*inputs_loaded)
+                if emulate_precision_casts:
+                    # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
+                    # then upcasting again, to emulate casts that eager would do.
+                    downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+                    return ops.to_dtype(downcast, dtype)
+                return out
 
         if not override_device:
             device = None
@@ -597,16 +647,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
         return fallback_handler(aten.view.dtype)(x, dtype)
-
-    def _to_dtype_bitcast(x):
-        # Because we may promote tensor type from float16 or bfloat16
-        # to float, we will need to pass the original src dtype (i.e. x_dtype),
-        # which is used for correctly constructing type conversion before bitcast,
-        # which requires the bitwidth of the input tensor type is the same as the
-        # target type.
-        return ops.to_dtype_bitcast(x, dtype, x_dtype)
-
-    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
+    else:
+        return TensorBox(DtypeView.create(x, dtype))
 
 
 @register_lowering(aten.view.dtype, type_promotion_kind=None)
@@ -615,7 +657,7 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
         return TensorBox.create(
             ir.ComplexView.create(torch.ops.aten.view.dtype, x, dtype)
         )
-    return to_dtype_bitcast(x, dtype, copy=True)
+    return to_dtype_bitcast(x, dtype)
 
 
 def to_device(x: TensorBox, device: torch.device, *, copy=False):
@@ -654,7 +696,7 @@ def register_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
-        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
+        override_fn_when_gpu_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
         allow_alpha=allow_alpha,
         triton_fallback=triton_fallback,
     )
@@ -680,10 +722,10 @@ def register_frexp():
     frexp = ops_wrapper("frexp")
 
     def frexp0(*args, **kwargs):
-        return frexp(*args, **kwargs)[0]
+        return frexp(*args, **kwargs)[0]  # type: ignore[index] # next PR
 
     def frexp1(*args, **kwargs):
-        return frexp(*args, **kwargs)[1]
+        return frexp(*args, **kwargs)[1]  # type: ignore[index] # next PR
 
     pw_fns = [
         make_pointwise(frexp0),
@@ -1654,7 +1696,7 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
+def unsupported_input_tensor(t: torch.Tensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
@@ -1668,7 +1710,7 @@ def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
     return False
 
 
-def unsupported_output_tensor(t: torch._subclasses.FakeTensor, parent=None):
+def unsupported_output_tensor(t: torch.Tensor, parent=None):
     "Do not support writing tensor but can read from it"
     if unsupported_input_tensor(t, parent):
         return True
@@ -2319,7 +2361,6 @@ make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
-make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
 
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
@@ -3374,7 +3415,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         ndim = len(shape)
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(
-            index_loader(idx), 1 if ndim == 0 else shape[dim]
+            index_loader(idx), 1 if ndim == 0 else shape[dim], wrap_neg=False
         )
         return indirect_idx
 
@@ -5574,7 +5615,7 @@ def cummax(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
     if values is None:
         return fallback_cummax(x, dim=axis)
     return values, indices
@@ -5604,7 +5645,7 @@ def cummin(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
     if values is None:
         return fallback_cummin(x, dim=axis)
     return values, indices
@@ -5678,8 +5719,11 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         return clone(x), _full(0, device, torch.int64, shape)
 
     dim_size = shape[dim] if len(shape) else 1
+    if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(torch.int16).max):
+        return sort_fallback(x, stable=stable, dim=dim, descending=descending)
+
     indices = iota(
-        dim_size, start=0, step=1, dtype=torch.int64, device=device, requires_grad=False
+        dim_size, start=0, step=1, dtype=torch.int16, device=device, requires_grad=False
     )
     view_shape = [1] * len(shape)
     if len(shape):
@@ -5699,7 +5743,8 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
     if values is None:
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
 
-    return values, indices
+    assert indices is not None
+    return values, to_dtype(indices, torch.int64)
 
 
 @register_lowering(aten.sort.default, type_promotion_kind=None)
@@ -6126,39 +6171,6 @@ def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
-@register_lowering(triton_kernel_wrapper_functional)
-def triton_kernel_wrap(
-    *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
-):
-    new_kwargs = {}
-    for name, value in kwargs.items():
-        if isinstance(value, ir.TensorBox):
-            x = value.data
-            has_non_rv_views = False
-            while isinstance(x, ir.BaseView):
-                if not isinstance(x, ir.ReinterpretView):
-                    has_non_rv_views = True
-                    break
-                x = x.data
-            if has_non_rv_views:
-                # we realize the inputs wrapped into any view which is not
-                # ReinterpretView to convert them into ReinterpretView during
-                # realization; all views being ReinterpretView is assumed by
-                # the downstream code (e.g., preserving ReinterpretView in
-                # cloning; layout should be available in mutation marking)
-                value = ir.TensorBox(ir.ExternKernel.realize_input(value))
-            if name in tensors_to_clone:
-                value = clone_preserve_reinterpret_view(value)
-        new_kwargs[name] = value
-
-    return triton_kernel_wrap_(
-        kernel_idx=kernel_idx,
-        constant_args_idx=constant_args_idx,
-        grid=grid,
-        kwargs=new_kwargs,
-    )
-
-
 @register_lowering(torch.ops.higher_order.cond)
 def cond(pred, true_fn, false_fn, operands):
     if is_triton(pred) or any(map(is_triton, operands)):
@@ -6191,7 +6203,7 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(input, input)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(

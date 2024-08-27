@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 """Utilities for converting and operating on ONNX, JIT and torch types."""
+
 from __future__ import annotations
 
 import enum
@@ -9,6 +10,7 @@ from typing import Literal
 import torch
 from torch._C import _onnx as _C_onnx
 from torch.onnx import errors
+
 
 if typing.TYPE_CHECKING:
     # Hack to help mypy to recognize torch._C.Value

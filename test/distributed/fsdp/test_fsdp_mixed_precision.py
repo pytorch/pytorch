@@ -353,7 +353,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         self, offload_params: bool, use_orig_params: bool
     ):
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin1 = nn.Linear(10, 10)
                 self.lin2 = nn.Linear(10, 10)
@@ -775,7 +775,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         low_prec_dtype = torch.float16
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Linear(5, 5)
 
@@ -1085,7 +1085,7 @@ instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
 
 
 class IgnoredModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l = nn.Linear(100, 100)
 
@@ -1094,7 +1094,7 @@ class IgnoredModule(nn.Module):
 
 
 class ModelWithIgnoredModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = nn.Linear(100, 100)
         self.ignored = IgnoredModule()

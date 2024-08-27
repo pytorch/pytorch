@@ -82,7 +82,7 @@ detectron2_fcos_r_50_fpn,pass,23
 
 
 
-detectron2_maskrcnn_r_101_c4,pass,57
+detectron2_maskrcnn_r_101_c4,fail_accuracy,57
 
 
 

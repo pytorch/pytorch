@@ -758,7 +758,7 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         # changes. It is still valuable until such a change to sanity check the
         # `use_orig_params=True` implementation.
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(42)
                 # 5 * 5 = 25 numel -> pad to 26 -> 13 on each rank

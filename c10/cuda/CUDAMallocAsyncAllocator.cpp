@@ -33,13 +33,9 @@ struct UsageStream {
   UsageStream() = default;
   UsageStream(cudaStream_t s, c10::DeviceIndex d) : stream(s), device(d) {}
   UsageStream(const UsageStream& us) = default;
-  UsageStream(const UsageStream&& us) noexcept
-      : stream(us.stream), device(us.device) {}
-  UsageStream& operator=(UsageStream other) {
-    stream = other.stream;
-    device = other.device;
-    return *this;
-  }
+  UsageStream(UsageStream&& us) noexcept = default;
+  UsageStream& operator=(const UsageStream& other) = default;
+  UsageStream& operator=(UsageStream&& other) noexcept = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {

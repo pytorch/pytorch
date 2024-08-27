@@ -131,6 +131,9 @@ std::string get_privateuse1_backend(bool lower_case) {
   // set, and will never be written to.
   auto backend_name =
       name_registered ? privateuse1_backend_name : "privateuseone";
+  auto op_case = lower_case ? ::tolower : ::toupper;
+  std::transform(
+      backend_name.begin(), backend_name.end(), backend_name.begin(), op_case);
   return backend_name;
 }
 

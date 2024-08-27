@@ -218,6 +218,43 @@ class TestWithNCCL(MultiProcessTestCase):
         assert output.eq(expect).all()
         assert output.completed
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # https://github.com/pytorch/pytorch/issues/126338
+    def test_inductor_dtypeview_memory_leak(self):
+        self._init_process_group()
+
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            ag0 = torch.ops._c10d_functional.all_gather_into_tensor.default(
+                arg,
+                self.world_size,
+                "default",
+            )
+            ag0_view = torch.ops.aten.view.dtype(ag0, torch.int32)
+            return funcol.wait_tensor(ag0_view)
+
+        arg = torch.full(
+            (10, 10),
+            float(self.rank),
+            device=self.device,
+            dtype=torch.float32,
+        )
+        compiled = torch.compile(func)
+        mem_usage = {}
+        # check if the aten.view.dtype is compiled to aten.view.dtype
+        code = run_and_get_triton_code(compiled, arg)
+        (
+            FileCheck()
+            .check("torch.ops._c10d_functional.wait_tensor.default(aten.view.dtype")
+            .run(code)
+        )
+        # check memory leak
+        for i in range(1, 10):
+            mem_usage[i] = torch.cuda.max_memory_allocated()
+            compiled(arg)
+
+        assert mem_usage[9] == mem_usage[8]
+
     @skip_if_lt_x_gpu(2)
     def test_all_gather_into_tensor_coalesced(self) -> None:
         self._init_process_group()
@@ -380,6 +417,22 @@ class TestWithNCCL(MultiProcessTestCase):
             "avg",
             "default",
         )
+
+    @skip_if_lt_x_gpu(2)
+    def test_py_work(self) -> None:
+        self._init_process_group()
+
+        wait_called = False
+
+        class MyWork(dist.Work):
+            def wait(self, _):
+                nonlocal wait_called
+                wait_called = True
+
+        tensor = torch.rand(2, 2)
+        torch._C._distributed_c10d._register_work(tensor, MyWork())
+        torch.ops._c10d_functional.wait_tensor(tensor)
+        self.assertTrue(wait_called)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)

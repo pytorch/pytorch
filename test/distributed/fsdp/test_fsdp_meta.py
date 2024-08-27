@@ -73,7 +73,7 @@ class MyLinear(nn.Linear):
 class MyBuffer(nn.Module):
     def __init__(self, device: torch.device):
         super().__init__()
-        self.register_buffer("buf", torch.empty((3, 3), device=device))
+        self.buf = torch.nn.Buffer(torch.empty((3, 3), device=device))
 
     def reset_parameters(self, *args, **kwargs):
         torch.manual_seed(42)

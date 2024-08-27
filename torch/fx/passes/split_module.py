@@ -82,7 +82,7 @@ def split_module(
             from torch.fx.passes.split_module import split_module
 
             class MyModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.param = torch.nn.Parameter(torch.rand(3, 4))
                     self.linear = torch.nn.Linear(4, 5)
@@ -162,14 +162,14 @@ def split_module(
             )
             if keep_original_node_name:
                 args = () if default_value is inspect.Signature.empty else (default_value,)
-                base_mod_env[node.name] = base_mod_graph.create_node('placeholder', node.name, args=args, type_expr=node.type)
+                base_mod_env[node.name] = base_mod_graph.create_node('placeholder', node.name, args=args, type_expr=node.type)  # type: ignore[arg-type]
             else:
                 base_mod_env[node.name] = base_mod_graph.placeholder(
-                    node.target, type_expr=node.type, default_value=default_value
+                    node.target, type_expr=node.type, default_value=default_value  # type: ignore[arg-type]
                 )
             base_mod_env[node.name].meta = node.meta.copy()
         elif node.op == "get_attr":
-            base_mod_env[node.name] = base_mod_graph.get_attr(node.target)
+            base_mod_env[node.name] = base_mod_graph.get_attr(node.target)  # type: ignore[arg-type]
             base_mod_env[node.name].meta = node.meta.copy()
             attr_val = m
             for atom in node.target.split("."):  # type: ignore[union-attr]

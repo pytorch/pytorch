@@ -4,14 +4,10 @@
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import gzip
-
 import logging
-
 from typing import Callable, Generator, Generic, Literal, Mapping, TypeVar
-
 from typing_extensions import Self
 
 from torch.onnx._internal.diagnostics import infra

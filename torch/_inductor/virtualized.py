@@ -91,8 +91,6 @@ class NullHandler:
     NullHandler it won't fail until you try to access an attribute on it.
     """
 
-    pass
-
 
 class Virtualized(Generic[T]):
     """
@@ -283,10 +281,10 @@ class OpsWrapper:
         return OpsValue(x)
 
     @staticmethod
-    def indirect_indexing(index, size, check=True):
+    def indirect_indexing(index, size, check=True, wrap_neg=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
-        return _ops.indirect_indexing(index, size, check)
+        return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
 ops = OpsWrapper()

@@ -2,9 +2,8 @@
 
 import torch
 import torch._dynamo.test_case
+from torch._C._dynamo.eval_frame import set_eval_frame
 from torch._guards import CompileId
-
-set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
 
 
 def target_with_varkwargs(arg1, /, positional_only_arg, *, keyword_only_arg, **kwargs):

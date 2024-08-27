@@ -400,7 +400,7 @@ class TestSubgraphRewriter(JitTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dtype = torch.float16
 
@@ -439,7 +439,7 @@ class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_replaces_referenced_submodules(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.sigmoid = torch.nn.Sigmoid()
                 self.submod = torch.nn.ReLU()
@@ -449,7 +449,7 @@ class TestSubgraphRewriter(JitTestCase):
                 return self.submod(self.sigmoid(x))
 
         class Pattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.sigmoid = torch.nn.Sigmoid()
                 self.submod = torch.nn.ReLU()
@@ -458,7 +458,7 @@ class TestSubgraphRewriter(JitTestCase):
                 return self.submod(self.sigmoid(x))
 
         class Replacement(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.tanh = torch.nn.Tanh()
                 self.submod = torch.nn.ReLU()
@@ -467,7 +467,7 @@ class TestSubgraphRewriter(JitTestCase):
                 return self.submod(self.tanh(x))
 
         class Comparison(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.tanh = torch.nn.Tanh()
                 self.submod = torch.nn.ReLU()
@@ -904,7 +904,7 @@ def forward(self, x):
 
     def test_replacement_with_attrs(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor([1])
                 self.b = torch.tensor([2])
@@ -913,7 +913,7 @@ def forward(self, x):
                 return x + self.a - self.b
 
         class Pattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor([1])
 
@@ -921,7 +921,7 @@ def forward(self, x):
                 return x + self.a
 
         class Replacement(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.c = torch.tensor([3])
 

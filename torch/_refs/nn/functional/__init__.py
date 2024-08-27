@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from functools import wraps
@@ -21,6 +22,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _make_inplace
+
 
 __all__ = [
     "alpha_dropout",

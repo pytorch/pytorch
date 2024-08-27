@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import warnings
 from itertools import chain
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -8,8 +9,8 @@ import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind, _recursive_getattr
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from ._remove_effect_tokens_pass import _remove_effect_tokens
 
+from ._remove_effect_tokens_pass import _remove_effect_tokens
 from .exported_program import (
     ExportedProgram,
     ExportGraphSignature,
@@ -114,6 +115,7 @@ def _insert_copy_for_mutations(
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
         new_output = gm.graph.output(tuple(output_args))
+        new_output.meta.update(output_node.meta)
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
 
@@ -277,7 +279,20 @@ def _create_stateful_graph_module(
     # We fix this by de-registering these buffers in lifted_tensor_constants
     # and call _assign_attr(attr_kind=CONSTANT) to register them as constants.
     for constant_fqn in graph_signature.lifted_tensor_constants:
+        # Sometimes, the constant can require gradient, this is probably a bug in user code,
+        # e.g. `self.const = torch.randn(2, 2, requires_grad=True)`.
+        # We call detach on the constant_val since they're tensor contants and we don't need to
+        # compute their gradients anyway.
+        # Users should properly register it as parameter if they want it to require gradient.
         buffer = stateful_gm.get_buffer(constant_fqn)
+        if buffer.requires_grad:
+            warnings.warn(
+                f"A model attribute `{constant_fqn}` requires gradient. "
+                f"but it's not properly registered as a parameter. "
+                f"torch.export will detach it and treat it as a constant tensor "
+                f"but please register it as parameter instead."
+            )
+            buffer = buffer.detach()
         *prefix, field = constant_fqn.rsplit(".")
         submod = _recursive_getattr(stateful_gm, prefix)
         delattr(submod, field)

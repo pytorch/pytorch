@@ -73,6 +73,8 @@ class TORCH_API Context {
       return at::detail::getPrivateUse1Hooks();
     } else if (device_type == at::kMTIA) {
       return at::detail::getMTIAHooks();
+    } else if (device_type == at::kHIP) {
+      return at::detail::getHIPHooks();
     } else {
       AT_ERROR(
           c10::DeviceTypeName(device_type), " device type not an accelerator.");
@@ -94,8 +96,22 @@ class TORCH_API Context {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-  static bool isPinnedPtr(const void* data) {
-    return detail::getCUDAHooks().isPinnedPtr(data);
+  bool isPinnedPtr(
+      const void* data,
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
+    auto opt_device_type =
+        device_type.has_value() ? device_type : at::getAccelerator();
+    if (!opt_device_type.has_value() || // there is no accelerator
+        !at::isAccelerator(
+            opt_device_type.value())) { // passed device not an accelerator
+      return false;
+    }
+    return getAcceleratorHooksInterface(opt_device_type.value())
+        .isPinnedPtr(data);
+  }
+  Allocator* getPinnedMemoryAllocator(
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
+    return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
   static bool hasOpenMP();
   static bool hasMKL();

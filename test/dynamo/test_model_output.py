@@ -3,12 +3,12 @@ import dataclasses
 import unittest.mock
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TEST_HPU, TestCase
+
 
 try:
     from transformers import modeling_outputs
@@ -269,7 +269,7 @@ class TestModelOutputBert(TestCase):
     @maybe_skip
     def test_HF_bert_model_output(self, device):
         class BertPooler(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dense = torch.nn.Linear(768, 768).to(device)
                 self.activation = torch.nn.Tanh()
@@ -283,7 +283,7 @@ class TestModelOutputBert(TestCase):
                 return pooled_output
 
         class BertEncoder(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(
@@ -299,7 +299,7 @@ class TestModelOutputBert(TestCase):
                 )
 
         class BertModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.encoder = BertEncoder()
                 self.pooler = BertPooler()

@@ -730,14 +730,17 @@ inline Vectorized<float> Vectorized<float>::frac() const {
   return *this - this->trunc();
 }
 
-// Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
-// either input is a NaN.
-template <>
-Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b) {
-  float32x4_t r0 = vmaxq_f32(a.get_low(), b.get_low());
-  float32x4_t r1 = vmaxq_f32(a.get_high(), b.get_high());
-  return Vectorized<float>(r0, r1);
-}
+//Added sleef Implementation for Maximum
+Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b)  {
+  if(!a.has_inf_nan() && !b.has_inf_nan()){
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_fmaxf4(a.get_low(), b.get_low()),Sleef_fmaxf4(a.get_high(), b.get_high())),
+      Vectorized<float>(vmaxq_f32(a.get_low(), b.get_low()),vmaxq_f32(a.get_high(), b.get_high())));
+  }
+  else{
+    return Vectorized<float>(vmaxq_f32(a.get_low(), b.get_low()),vmaxq_f32(a.get_high(), b.get_high()));
+  }
+  }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
