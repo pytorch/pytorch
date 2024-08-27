@@ -48,6 +48,7 @@ bool supports_large_kernel_arg() {
     *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major >= 7 &&
         func_attr.binaryVersion >= 70;
     LOG(WARNING) << "binary version: " << func_attr.binaryVersion;
+    LOG(WARNING) << "ptx version: " << func_attr.ptxVersion;
   }
   return *supports_large_kernel_arg_;
 #else
