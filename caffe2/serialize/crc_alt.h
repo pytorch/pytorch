@@ -25,7 +25,7 @@
 // using the aforementioned #defines the table is automatically fitted to your needs
 
 // uint8_t, uint32_t, int32_t
-#include <stdint.h>
+#include <cstdint>
 // size_t
 #include <cstddef>
 
