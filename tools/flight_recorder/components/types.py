@@ -138,8 +138,7 @@ COLLECTIVES = {
     "_reduce_scatter_base",
     "gather",
     "scatter",
-    "alltoall_base",
-    "alltoall",
+    "all_to_all",
 }
 
 P2P = {
@@ -158,7 +157,7 @@ class MatchState(Enum):
     - COLLECTIVE_STATE_MISMATCH:
         The states of the collective not same, such as one finished while another just started or scheduled.
     - UNDECIDED:
-        The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for alltoall_base.
+        The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for all_to_all.
     """
 
     FULLY_MATCHED = 1
@@ -171,6 +170,8 @@ class MatchState(Enum):
 def check_size_evenly_broadcasting(
     list1: List[Any], list2: List[Any], size: int
 ) -> bool:
+    if len(list1) != len(list2):
+        return False
     ratio = None
     for a, b in zip(list1, list2):
         current_ratio = int(a) / int(b)
@@ -283,7 +284,7 @@ class Op:
         elif self.type in COLLECTIVES:
             if self.type != other.type:
                 return MatchState.COLLECTIVE_TYPE_MISMATCH
-            if self.type in ["alltoall", "alltoall_base"]:
+            if self.type == "all_to_all":
                 return MatchState.UNDECIDED
             if self.type != "scatter" and self.input_sizes != other.input_sizes:
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH
@@ -297,14 +298,14 @@ class Op:
                 "all_gather",
                 "all_gather_base",
             ] and not check_size_evenly_broadcasting(
-                other.output_sizes, self.input_sizes, self.pg_size
+                other.output_sizes[0], self.input_sizes[0], self.pg_size
             ):
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH
             if self.type in [
                 "reduce_scatter",
                 "_reduce_scatter_base",
             ] and not check_size_evenly_broadcasting(
-                other.input_sizes, self.output_sizes, self.pg_size
+                other.input_sizes[0], self.output_sizes[0], self.pg_size
             ):
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH
             # TODO: need to add more checks for gather and scatter.
