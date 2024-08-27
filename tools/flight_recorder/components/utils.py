@@ -22,6 +22,20 @@ except ModuleNotFoundError:
     print("tabulate is not installed. Proceeding without it.")
 
 
+def format_frame(frame: Dict[str, str]) -> str:
+    name = frame["name"]
+    filename = frame["filename"]
+    line = frame["line"]
+    return f"{name} at {filename}:{line}"
+
+
+def format_frames(frames: List[Dict[str, str]]) -> str:
+    formatted_frames = []
+    for frame in frames:
+        formatted_frames.append(format_frame(frame))
+    return "\n".join(formatted_frames)
+
+
 def match_one_event(
     event_a: Dict[Any, Any],
     event_b: Dict[Any, Any],
@@ -198,7 +212,7 @@ def just_print_entries(
 
 
 def check_no_missing_dump_files(
-    entries: Dict[str, Any], memberships: List[Membership]
+    entries: Dict[int, Any], memberships: List[Membership]
 ) -> None:
     all_ranks = set()
     for membership in memberships:
@@ -216,16 +230,46 @@ def check_version(versions: Dict[str, Any]) -> None:
         # assert minor >= 0, f"Rank {rank} unsupported version {version}"
 
 
-# TODO: We need to revisit this function to see if we still need it.
-def check_trace_from_beginning(entries: Dict[str, Any]) -> bool:
-    for rank in entries:
-        first_record_id = entries[rank][0]["record_id"]
-        # TODO add more sequence information such that analysis can proceed even without complete buffer
+def sort_trace_from_beginning(
+    entries: Dict[int, List[Dict[str, Any]]]
+) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Sorts the trace entries by record ID for entries.
+    This function takes a dictionary of rank names to lists of trace entries as input.
+    Each trace entry is a dictionary containing information about a collective operation,
+    including its unique identifier (`record_id` is monotonically increasing as we write into the ring buffer).
+    The function first sorts the entries in each rank by their `record_id` values.
+    Then, it finds the largest starting point across all ranks by taking the maximum
+    `record_id` value of the first entry in each rank. Finally, it filters out any
+    entries with `record_id` values less than the maximum starting point.
+    The function returns the updated dictionary of sorted and filtered trace entries.
 
-        # assert first_record_id == 0, f"Rank {rank} trace does not start at time 0 (first record is {first_record_id}."
-        if first_record_id != 0:
-            print(
-                f"Rank {rank} trace does not start at time 0 (first record is {first_record_id}."
-            )
-            return False
-    return True
+    Args:
+        entries (Dict[str, List[Dict[str, Any]]]): A dictionary of rank names to lists of trace entries.
+
+    Returns:
+        entries (Dict[str, List[Dict[str, Any]]]): Entries sorted by record ID and filtered by the maximum starting point.
+    """
+
+    maximum_starting_record_id = 0
+    for rank in entries:
+        # Since this is a ring buffer, we want to first sort the entries by `record_id` to
+        # find the largest starting point. For example, if the buffer has the following entries:
+        # Rank 0: [0, 1, 2, 3, 4, 5, 6]
+        # Rank 1: [7, 1, 2, 3, 4, 5, 6]
+        # Rank 2: [7, 8, 2, 3, 4, 5, 6]
+        # Rank 3: [0, 1, 2, 3, 4, 5, None]
+        # Then we should start from collective 2 not 0 because any collective before,
+        # we don't have complete records from all ranks so we need to ignore them.
+        entries[rank] = sorted(entries[rank], key=lambda entry: entry["record_id"])
+        first_record_id = entries[rank][0]["record_id"]
+        maximum_starting_record_id = max(maximum_starting_record_id, first_record_id)
+
+    for rank in entries:
+        entries[rank] = [
+            entry
+            for entry in entries[rank]
+            if entry["record_id"] >= maximum_starting_record_id
+        ]
+
+    return entries

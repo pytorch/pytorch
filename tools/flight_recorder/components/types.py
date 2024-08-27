@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
 from enum import Enum
 from typing import (  # type: ignore[attr-defined]
     _eval_type,
@@ -12,6 +13,7 @@ from typing import (  # type: ignore[attr-defined]
     Generic,
     List,
     NamedTuple,
+    Optional,
     Set,
     Tuple,
     Type,
@@ -157,7 +159,7 @@ class MatchState(Enum):
     - COLLECTIVE_STATE_MISMATCH:
         The states of the collective not same, such as one finished while another just started or scheduled.
     - UNDECIDED:
-        The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for all_to_all.
+        The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for alltoall_base.
     """
 
     FULLY_MATCHED = 1
@@ -166,24 +168,13 @@ class MatchState(Enum):
     COLLECTIVE_STATE_MISMATCH = 4
     UNDECIDED = 5
 
+    def __call__(self, culprit: Optional[str] = None) -> "MatchState":
+        # Make the enum instance callable to add culprit.
+        self.culprit = culprit
+        return self
 
-def check_size_evenly_broadcasting(
-    list1: List[Any], list2: List[Any], size: int
-) -> bool:
-    if len(list1) != len(list2):
-        return False
-    ratio = None
-    for a, b in zip(list1, list2):
-        current_ratio = int(a) / int(b)
-        if current_ratio == 1:
-            continue
-        if current_ratio != size:
-            return False
-        elif ratio is None:
-            ratio = current_ratio
-        else:
-            return False
-    return True
+    def __str__(self) -> str:
+        return f"Error type: {self.name}, Detail finding {self.culprit if self.culprit else ''}"
 
 
 class Op:
@@ -283,34 +274,52 @@ class Op:
             )
         elif self.type in COLLECTIVES:
             if self.type != other.type:
-                return MatchState.COLLECTIVE_TYPE_MISMATCH
+                return MatchState.COLLECTIVE_TYPE_MISMATCH(
+                    f"Type '{self.type}' and '{other.type}' do not match"
+                )
+            if self.state != other.state:
+                # MatchState()
+                return MatchState.COLLECTIVE_STATE_MISMATCH(
+                    f"States '{self.state}' '{other.state}' do not match"
+                )
             if self.type == "all_to_all":
                 return MatchState.UNDECIDED
             if self.type != "scatter" and self.input_sizes != other.input_sizes:
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Input sizes '{self.input_sizes}' '{other.input_sizes}' do not match"
+                )
             if self.type != "gather" and self.output_sizes != other.output_sizes:
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Output sizes '{self.output_sizes}' '{other.output_sizes}' do not match"
+                )
             if self.type == "all_reduce" and self.input_sizes != other.output_sizes:
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Input sizes '{self.input_sizes}' do not match output sizes '{other.output_sizes}'"
+                )
             # TODO: need to consider uneven sharding for all-gather.
             # TODO: need to consider all_gather_into_tensor_coalesced (coalesced related)
             if self.type in [
                 "all_gather",
                 "all_gather_base",
-            ] and not check_size_evenly_broadcasting(
-                other.output_sizes[0], self.input_sizes[0], self.pg_size
+            ] and not (
+                math.prod(other.output_sizes[0])
+                == math.prod(self.input_sizes[0]) * self.pg_size
             ):
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Input numel '{math.prod(other.input_sizes[0])} * pg size {self.pg_size}' "
+                    f"do not match output numel '{math.prod(other.output_sizes[0])}'",
+                )
             if self.type in [
                 "reduce_scatter",
                 "_reduce_scatter_base",
-            ] and not check_size_evenly_broadcasting(
-                other.input_sizes[0], self.output_sizes[0], self.pg_size
+            ] and not (
+                math.prod(other.input_sizes[0])
+                == math.prod(self.output_sizes[0]) * self.pg_size
             ):
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
-            # TODO: need to add more checks for gather and scatter.
-            if self.state != other.state:
-                return MatchState.COLLECTIVE_STATE_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Input numel '{math.prod(other.input_sizes[0])}' do not match output numel "
+                    f"'{math.prod(other.output_sizes[0])} * pg size {self.pg_size}'",
+                )
         elif self.type == "coalesced":
             return (
                 MatchState.FULLY_MATCHED
