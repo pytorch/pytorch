@@ -80,7 +80,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     set_default_dtype,
     skipIfNNModuleInlined,
-    skipIfWindows,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -2877,9 +2876,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         else:
             self.assertExpectedInline(str(cnts.frame_count), """2""")
 
-    @skipIfWindows(
-        msg="AssertionError: Object comparison failed: dtype('int64') != <class 'int'>"
-    )
     def test_numpy_with_builtin_type(self):
         x = np.random.rand(5)
 
@@ -2953,9 +2949,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(fn(x), compiled_fn(x))
         self.assertEqual(counter.frame_count, 2)
 
-    @skipIfWindows(
-        msg="AssertionError: The values for attribute 'dtype' do not match: torch.int32 != torch.int64."
-    )
     def test_trace_ndarray_frame_2(self):
         # no tensors/ndarray as inputs in the frame
         def fn(x):
@@ -7225,8 +7218,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         )
         from torch import package
 
-        tmp_root = tempfile.gettempdir()
-        path = os.path.join(tmp_root, "MyPickledModule.pt")
+        path = "/tmp/MyPickledModule.pt"
         package_name = "MyPickledModule"
         resource_name = "MyPickledModule.pkl"
 
@@ -10073,6 +10065,22 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_tee(self):
+        counters.clear()
+
+        def fn(l):
+            a, b = itertools.tee(l)
+            return list(a), list(b)
+
+        l = [1, 2, 2, 3, 4, 4, 4, 1, 2]
+        eager = fn(l)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(l)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_list_iterator_contains(self):
         def fn(x):
             it = iter(["my_weight", "not_my_weight"])
@@ -10502,9 +10510,6 @@ ShapeEnv not equal: field values don't match:
             else:
                 res.backward(grad)
 
-    @skipIfWindows(
-        msg="AssertionError: False is not true : Encountered an unexpected fallback to 'aten pow' in dynamo compiled code"
-    )
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
             return x**2
@@ -10627,9 +10632,6 @@ ShapeEnv not equal: field values don't match:
             torch.compile(fn4, backend="eager")(x)
             self.assertEqual(3, len(torch._dynamo.utils.get_compilation_metrics()))
 
-    @skipIfWindows(
-        msg="TypeError: sequence item 0: expected str instance, NoneType found"
-    )
     def test_funcname_cache(self):
         src = """\
 import torch

@@ -35,16 +35,15 @@ struct OSSDynamicArg {
       int arg_index,
       DynamicArgType arg_type,
       int length,
-      std::optional<std::vector<std::string>> list_item_types = std::nullopt)
+      nlohmann::json serialized_arg_val)
       : arg_index(arg_index),
         arg_type(arg_type),
         length(length),
-        list_item_types(std::move(list_item_types)) {}
+        serialized_arg_val(std::move(serialized_arg_val)) {}
   int arg_index;
   DynamicArgType arg_type;
   int length;
-  std::optional<std::vector<std::string>>
-      list_item_types; // only used for parsing list of optional tensors
+  nlohmann::json serialized_arg_val;
 };
 
 struct OSSOpKernel {
@@ -83,7 +82,7 @@ class OSSProxyExecutor : public ProxyExecutor {
   void prefill_stack_with_static_arguments(
       int index,
       at::TypePtr schema_arg_type,
-      const nlohmann::json& serialized_arg,
+      const nlohmann::json& thrift_arg,
       OSSOpKernel& op_kernel);
 
   void get_input_info_from_serialized(

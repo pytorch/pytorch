@@ -209,9 +209,7 @@ class UnflattenedModule(torch.nn.Module):
         for name in self.graph_signature.parameters:  # this loop adds used params
             param = state_dict[name]
             if id(param) not in id_to_param:
-                id_to_param[id(param)] = torch.nn.Parameter(
-                    param.clone(), requires_grad=param.requires_grad
-                )
+                id_to_param[id(param)] = torch.nn.Parameter(param.clone())
 
             _assign_attr(
                 id_to_param[id(param)],

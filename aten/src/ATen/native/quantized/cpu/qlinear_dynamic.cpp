@@ -26,7 +26,6 @@
 
 #include <algorithm>
 #include <string>
-#include <type_traits>
 
 int register_linear_params();
 
@@ -531,19 +530,12 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
     x_min = t_min.item<float>();
   }
 #endif
-
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
-  // oneDNN+ACL has optimized kernels for s8s8 matmul, so input is signed
-  using input_qtype = int8_t;
-#else
-  using input_qtype = uint8_t;
-#endif
-
+  const int precision = 8;
   auto q_params = quant_utils::ChooseQuantizationParams(
       /*min=*/x_min,
       /*max=*/x_max,
-      /*qmin=*/std::numeric_limits<input_qtype>::min(),
-      /*qmax=*/std::numeric_limits<input_qtype>::max(),
+      /*qmin=*/0,
+      /*qmax=*/(1 << precision) - 1,
       /*preserve_sparsity=*/false,
       /*force_scale_power_of_two=*/false,
       /*reduce_range=*/reduce_range);
@@ -581,8 +573,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       ideep::matmul_forward::prepare</*is_dynamic=*/true>(
           params, x, w, b, y,
           src_scales, weights_scales, ideep::scale_t(),
-          src_zero_point, ideep::zero_point_t(), 1.0f, 1.0f, op_attr,
-          ideep::tensor::data_type::f32, std::is_signed_v<input_qtype> ? ideep::s8s8 : ideep::u8s8);
+          src_zero_point, ideep::zero_point_t(), 1.0f, 1.0f, op_attr);
       get_cache() = LinearPrimitiveCache(cache_key, params);
       w = w.reorder_if_differ_in(params.pd.weights_desc());
   });

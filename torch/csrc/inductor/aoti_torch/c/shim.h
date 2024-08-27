@@ -493,33 +493,11 @@ aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
 
 // This will soon be deprecated after ao_quantization is complete.
 // Please refrain from using this or increasing callsites.
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_wrapped_linear_prepack(
-    AtenTensorHandle weight,
-    AtenTensorHandle weight_scale,
-    AtenTensorHandle weight_zero_point,
-    AtenTensorHandle bias,
-    AtenTensorHandle* out);
-
-// This will soon be deprecated after ao_quantization is complete.
-// Please refrain from using this or increasing callsites.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
     AtenTensorHandle input,
     AtenTensorHandle weight,
     AtenTensorHandle bias,
-    int64_t out_channel,
-    AtenTensorHandle* out);
-
-// This will soon be deprecated after ao_quantization is complete.
-// Please refrain from using this or increasing callsites.
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu_wrapped_quantized_linear_prepacked(
-    AtenTensorHandle input,
-    AtenTensorHandle input_scale,
-    AtenTensorHandle input_zero_point,
-    AtenTensorHandle weight,
-    AtenTensorHandle out_scale,
-    AtenTensorHandle out_zeropoint,
     int64_t out_channel,
     AtenTensorHandle* out);
 

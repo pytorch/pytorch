@@ -48,13 +48,8 @@ def trace_wrapped(*args, **kwargs):
         return _trace_wrapped_op(*args, **kwargs)
 
 
-class TraceWrapped(HigherOrderOperator):
-    def __init__(self):
-        super().__init__("trace_wrapped")
-
-
 # TODO(jansel): need to ensure this does not get DCEed
-_trace_wrapped_op = TraceWrapped()
+_trace_wrapped_op = HigherOrderOperator("trace_wrapped")
 
 
 def _assert_meta(grad, size, stride, dtype):

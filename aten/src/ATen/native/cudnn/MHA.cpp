@@ -662,10 +662,7 @@ void run_cudnn_SDP_bprop(
         " Materializing a contiguous tensor which will increase memory usage...");
     dO_ = dO.contiguous();
   }
-  if ( // handle trivial transposed case with a transposed dim of size 1
-       // see also:  https://github.com/pytorch/pytorch/issues/134001
-      !(dO_.is_contiguous() && o.is_contiguous()) &&
-      !std::equal(
+  if (!std::equal(
           o.strides().begin(), o.strides().end(), dO.strides().begin())) {
     TORCH_WARN(
         "cuDNN SDPA backward got grad_output.strides() != output.strides(), "
@@ -677,9 +674,8 @@ void run_cudnn_SDP_bprop(
     }
   }
   TORCH_INTERNAL_ASSERT(
-      (dO_.is_contiguous() && o.is_contiguous()) ||
-          std::equal(
-              dO_.strides().begin(), dO_.strides().end(), o.strides().begin()),
+      std::equal(
+          dO_.strides().begin(), dO_.strides().end(), o.strides().begin()),
       "cuDNN SDPA expected grad_output.strides() == output.strides(), "
       "the previous step probably failed to materialize a grad_output "
       "with matching strides...");

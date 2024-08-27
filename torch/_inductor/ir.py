@@ -4740,8 +4740,6 @@ class ExternKernel(InputsKernel):
                 return cls.require_stride_order(x, order, allow_padding=allow_padding)
             except NotImplementedError:
                 pass
-        # Although this is a clone, inductor is good about fusing clones into previous
-        # operations if they weren't realized and their layouts were flexible.
         x = cls.copy_input(x)
         as_storage_and_layout(
             x,
@@ -5914,9 +5912,17 @@ class FallbackKernel(ExternKernelAlloc):
             if V.graph.cpp_wrapper:
                 from torchgen.aoti.fallback_ops import inductor_fallback_ops
 
-                if config.abi_compatible and str(kernel) not in inductor_fallback_ops:
+                if (
+                    config.is_fbcode()
+                    and kernel not in has_c_shim
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
-                    # If you do hit a missed op, please update fallback_ops.py.
+                    # If you do hit a missed op, please update gen_aoti_c_shim.py.
+                    and config.c_shim_version == "1"
+                ) or (
+                    config.abi_compatible
+                    and config.c_shim_version == "2"
+                    and str(kernel) not in inductor_fallback_ops
+                ):
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
                         kernel,

@@ -19,6 +19,7 @@ def define_targets(rules):
             "CAFFE2_BUILD_SHARED_LIBS",
             "CAFFE2_PERF_WITH_AVX",
             "CAFFE2_PERF_WITH_AVX2",
+            "CAFFE2_PERF_WITH_AVX512",
             "CAFFE2_USE_EXCEPTION_PTR",
             "CAFFE2_USE_CUDNN",
             "USE_MKLDNN",
