@@ -18,13 +18,10 @@ Tensor q_linear_pointwise(
     c10::optional<Tensor> bias,
     double output_scale,
     int64_t output_zero_point,
-    bool fp32_output,
-    std::string post_op_name,
-    torch::List<double> post_op_args,
-    std::string post_op_algorithm) {
-  TORCH_CHECK(
-      !fp32_output,
-      "ipex gpu currently does not support fp32 output int8 qlinear");
+    std::optional<c10::ScalarType> output_dtype,
+    c10::string_view post_op_name,
+    torch::List<std::optional<at::Scalar>> post_op_args,
+    c10::string_view post_op_algorithm) {
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
@@ -57,10 +54,20 @@ Tensor q_linear_pointwise(
 }
 
 
+at::Tensor q_linear_prepack_onednn(
+    at::Tensor weight,
+    c10::optional<torch::List<int64_t>> input_shape) {
+  return weight;
+}
+
+
 TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
       TORCH_FN(q_linear_pointwise));
+    m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qlinear_prepack"),
+      TORCH_FN(q_linear_prepack_onednn));
 }
 
 
