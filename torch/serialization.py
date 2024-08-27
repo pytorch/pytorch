@@ -90,7 +90,8 @@ else:
 # _serialization_tls is used to store thread local state specific to serialization
 # that needs to be propagated to other files, in particular we use this for
 # (1) map_location (needed for wrapper subclasses/third party devices to torch._utils)
-# (2) skip_data (needed for torch.Tensor.__reduce_ex__)
+# (2) skip_data (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
+# (3) materialize_fake_tensors (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
 _serialization_tls = threading.local()
 
 

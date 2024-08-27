@@ -4221,7 +4221,6 @@ class TestSerialization(TestCase, SerializationMixin):
             return converter.from_real_tensor(mode, t) if materialize_fake else t
 
         sd = {'t_v2': fn(t_v2), 't_v3': fn(t_v3), 'tt': fn(tt)}
-
         sd_expected = {
             't_v2': torch.zeros(2, 3, device=t_device),
             't_v3': torch.zeros(2, 3, dtype=torch.complex32, device=t_device),
@@ -4239,6 +4238,15 @@ class TestSerialization(TestCase, SerializationMixin):
             with safe_globals([TwoTensor]):
                 sd_loaded = torch.load(f, weights_only=True)
             self.assertEqual(sd_loaded, sd_expected, exact_device=True)
+            self.assertFalse(getattr(torch.serialization._serialization_tls, "materialize_fake_tensors", False))
+            self.assertFalse(getattr(torch.serialization._serialization_tls, "skip_data", False))
+
+        # Test that without materialize_fake_tensor, behavior for fake_tensors is not altered by ctx
+        if not materialize_fake:
+            ft = converter.from_real_tensor(mode, torch.randn(2, device=t_device))
+            with self.assertRaisesRegex(AttributeError, "Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'"):
+                with skip_data(), BytesIOContext() as f:
+                    torch.save(ft, f)
 
     def test_skip_data_serialization_error_cases(self):
         def _save_load(t):

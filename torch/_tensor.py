@@ -210,11 +210,18 @@ class Tensor(torch._C.TensorBase):
 
     def __reduce_ex__(self, proto):
         skip_data = getattr(torch.serialization._serialization_tls, "skip_data", False)
+        materialize_fake_tensors = getattr(
+            torch.serialization._serialization_tls, "materialize_fake_tensors", False
+        )
         state = torch._utils._get_obj_state(self)
         tensor_type = type(self)
         # Strip all state when using FakeTensor with skip_data because FakeTensor has
         # some state that cannot be pickled
-        if type(self) is torch._subclasses.fake_tensor.FakeTensor and skip_data:
+        if (
+            type(self) is torch._subclasses.fake_tensor.FakeTensor
+            and skip_data
+            and materialize_fake_tensors
+        ):
             state = None
             tensor_type = torch.Tensor
         if tensor_type is Tensor and not state:

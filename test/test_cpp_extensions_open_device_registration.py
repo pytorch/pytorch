@@ -574,9 +574,10 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with TemporaryFileName() as f:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "Cannot serialize tensors on backends with no storage with metadata_only=True",
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager",
                 ):
-                    torch.save(sd, f, metadata_only=True)
+                    with torch.serialization.skip_data():
+                        torch.save(sd, f)
 
 
 if __name__ == "__main__":
