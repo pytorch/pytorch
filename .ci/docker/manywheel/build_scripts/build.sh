@@ -117,6 +117,8 @@ find /opt/_internal \
   -print0 | xargs -0 rm -f
 
 for PYTHON in /opt/python/*/bin/python; do
+    # install setuptools since python 3.12 is required to use distutils
+    $PYTHON -m pip install setuptools==68.2.2
     # Smoke test to make sure that our Pythons work, and do indeed detect as
     # being manylinux compatible:
     $PYTHON $MY_DIR/manylinux1-check.py
