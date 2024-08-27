@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
@@ -33,9 +34,6 @@ static constexpr int64_t kBlockSize = 512;
 // the kernels for 4KB kernel argument size.
 //
 // https://developer.nvidia.com/blog/cuda-12-1-supports-large-kernel-parameters/
-
-__global__ void dummy_kernel(void*) {}
-
 bool supports_large_kernel_arg() {
 #if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
   static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
@@ -43,14 +41,11 @@ bool supports_large_kernel_arg() {
     int driver_ver = 0;
     cudaDriverGetVersion(&driver_ver);
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    cudaFuncAttributes func_attr;
-    cudaFuncGetAttributes(&func_attr, (void*)dummy_kernel);
-    *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major >= 7 &&
-        func_attr.binaryVersion >= 70;
-    // LOG(WARNING) << "binary version: " << func_attr.binaryVersion;
-    // LOG(WARNING) << "ptx version: " << func_attr.ptxVersion;
+    *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major;
   }
-  return *supports_large_kernel_arg_;
+  return c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+      c10::cuda::CaptureStatus::None &&
+      *supports_large_kernel_arg_;
 #else
   return false;
 #endif
@@ -199,7 +194,7 @@ struct FusedOptimizerTensorListMetadata {
 template <typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ typename std::enable_if<U::use_large_kernel_arg, void>::type
-multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args) {
+    multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args) {
   // Hand the chunk information to the user-supplied functor to process however
   // it likes.
   callable(kChunkSize, tensorListMeta, args...);
@@ -209,14 +204,14 @@ multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args) {
 template <typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ typename std::enable_if<U::use_large_kernel_arg, void>::type
-multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args);
+    multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args);
 #pragma nv_diag_default 114
 #endif
 
 template <typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ typename std::enable_if<!U::use_large_kernel_arg, void>::type
-multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args) {
+    multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args) {
   callable(kChunkSize, tensorListMeta, args...);
 }
 
