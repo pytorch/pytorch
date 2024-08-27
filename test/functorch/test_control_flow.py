@@ -1430,38 +1430,58 @@ def forward(self, L_x_ : torch.Tensor):
         with torch._dynamo.config.patch(automatic_dynamic_shapes=True):
             cnt = CompileCounter()
             x = torch.randn(3, 2, 5, device=device)
-            torch.compile(scan, backend=cnt)(add, x, dim)
+            torch.compile(scan, backend=cnt)(add, x, dim, reverse=reverse)
             self.assertEqual(cnt.frame_count, 1)
 
             x = torch.randn(3, 20, 5, device=device)
             # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim)
+            torch.compile(scan, backend=cnt)(add, x, dim, reverse=reverse)
             self.assertEqual(cnt.frame_count, 2)
 
             x = torch.randn(3, 40, 5, device=device)
             # No recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim)
+            torch.compile(scan, backend=cnt)(add, x, dim, reverse=reverse)
             self.assertEqual(cnt.frame_count, 2)
 
             x = torch.randn(3, 40, 5, device=device)
             # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, 2)
+            torch.compile(scan, backend=cnt)(add, x, 2, reverse=reverse)
             self.assertEqual(cnt.frame_count, 3)
 
             x = torch.randn(3, 40, 20, device=device)
             # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, 2)
+            torch.compile(scan, backend=cnt)(add, x, 2, reverse=reverse)
             self.assertEqual(cnt.frame_count, 4)
 
             x = torch.randn(3, 40, 40, device=device)
             # No recompilation
-            torch.compile(scan, backend=cnt)(add, x, 2)
+            torch.compile(scan, backend=cnt)(add, x, 2, reverse=reverse)
             self.assertEqual(cnt.frame_count, 4)
 
             x = torch.randn(3, 60, 40, device=device)
+            # No recompilation for reverse = False
+            # Recompilation for reverse = True
+            torch.compile(scan, backend=cnt)(add, x, 1, reverse=reverse)
+            if not reverse:
+                self.assertEqual(cnt.frame_count, 4)
+            else:
+                self.assertEqual(cnt.frame_count, 5)
+
+            x = torch.randn(3, 60, 40, device=device)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, 1, reverse=not reverse)
+            if not reverse:
+                self.assertEqual(cnt.frame_count, 5)
+            else:
+                self.assertEqual(cnt.frame_count, 6)
+
+            x = torch.randn(3, 60, 40, device=device)
             # No recompilation
-            torch.compile(scan, backend=cnt)(add, x, 1)
-            self.assertEqual(cnt.frame_count, 4)
+            torch.compile(scan, backend=cnt)(add, x, 1, reverse=not reverse)
+            if not reverse:
+                self.assertEqual(cnt.frame_count, 5)
+            else:
+                self.assertEqual(cnt.frame_count, 6)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
