@@ -62,9 +62,7 @@ test_failures_cuda_wrapper = {
 
 
 if config.abi_compatible:
-    xfail_list = [
-        "test_profiler_mark_wrapper_call_cuda",
-    ]
+    xfail_list = []
     for test_name in xfail_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=False
@@ -99,7 +97,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
+    @config.patch(cpp_wrapper=True)
     def fn(self):
         tests.setUpClass()
         tests.setUp()

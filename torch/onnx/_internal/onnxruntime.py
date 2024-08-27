@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import dataclasses
 import importlib
@@ -47,8 +46,8 @@ try:
 
     import torch.onnx
     import torch.onnx._internal
+    import torch.onnx._internal._exporter_legacy
     import torch.onnx._internal.diagnostics
-    import torch.onnx._internal.exporter
     import torch.onnx._internal.fx.decomposition_table
     import torch.onnx._internal.fx.passes
     from torch.onnx._internal.fx import fx_onnx_interpreter
@@ -304,7 +303,7 @@ def _get_onnx_devices(
             torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
         ],
         ...,
-    ]
+    ],
 ) -> Tuple["ORTC.OrtDevice", ...]:
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
@@ -403,7 +402,12 @@ def _adjust_scalar_from_onnx_to_fx(
         torch.SymBool,
         bool,
     ],
-) -> Union[torch.Tensor, int, float, bool,]:
+) -> Union[
+    torch.Tensor,
+    int,
+    float,
+    bool,
+]:
     """Helper function to wrap ORT-produced torch.Tensor as PyTorch variables"""
     assert isinstance(tensor, torch.Tensor), "ORT's output must be tensor."
     if isinstance(
@@ -561,9 +565,9 @@ class OrtExecutionInfoPerSession:
         self.output_devices: Tuple[ORTC.OrtDevice, ...] = output_devices
         # This is the outputs of executing the original torch.fx.GraphModule with example inputs
         # (i.e., args passed into OrtBackend._ort_acclerated_call).
-        self.example_outputs: Union[
-            Tuple[torch.Tensor, ...], torch.Tensor
-        ] = example_outputs
+        self.example_outputs: Union[Tuple[torch.Tensor, ...], torch.Tensor] = (
+            example_outputs
+        )
 
     def is_supported(self, *args):
         # Compare the args and the input schema in ONNX model and
@@ -740,7 +744,7 @@ class OrtBackend:
         # - self._resolved_onnx_exporter_options.onnx_registry records what
         #   aten/prim ops are supported by exporter and their exporters (type: callable).
         self._resolved_onnx_exporter_options = (
-            torch.onnx._internal.exporter.ResolvedExportOptions(
+            torch.onnx._internal._exporter_legacy.ResolvedExportOptions(
                 torch.onnx.ExportOptions()
                 if self._options.export_options is None
                 else self._options.export_options

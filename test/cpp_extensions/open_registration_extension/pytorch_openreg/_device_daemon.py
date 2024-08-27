@@ -110,9 +110,6 @@ class _Daemon:
         else:
             return res
 
-    def __del__(self):
-        print("DEL")
-
     @staticmethod
     def run_forever(req_queue, ans_queue):
         # Initialize our device

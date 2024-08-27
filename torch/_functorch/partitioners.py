@@ -29,6 +29,7 @@ from torch.utils.checkpoint import CheckpointPolicy
 
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
+from ._aot_autograd.utils import is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target
 
 
@@ -176,10 +177,8 @@ def _extract_graph_with_inputs_outputs(
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if (
-            node.meta.get("partitioner_tag", None) == "must_be_in_backward"
-            and subgraph != "backward"
-        ):
+        if _must_be_in_backward(node) and subgraph != "backward":
+            env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
         if node in env:
@@ -188,7 +187,7 @@ def _extract_graph_with_inputs_outputs(
             # joint_graph.nodes).
             continue
         elif node.op == "placeholder":
-            env[node] = InvalidNode
+            env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [
@@ -197,7 +196,7 @@ def _extract_graph_with_inputs_outputs(
                 if isinstance(x, fx.Node)
             ]
             if any(all_args):
-                env[node] = InvalidNode
+                env[node] = InvalidNode  # type: ignore[assignment]
                 continue
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "get_attr":
@@ -249,6 +248,20 @@ def _is_fwd_seed_offset(node: fx.Node) -> bool:
 
 def _is_backward_state(node: fx.Node) -> bool:
     return node.op == "placeholder" and isinstance(node.meta.get("val"), BackwardState)
+
+
+def _has_tag_is_backward(node: fx.Node) -> bool:
+    return node.meta.get("partitioner_tag", None) == "is_backward"
+
+
+def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
+    return node.meta.get("partitioner_tag", None) == "must_be_in_backward"
+
+
+def _must_be_in_backward(node: fx.Node) -> bool:
+    return _has_tag_must_be_in_backward(node) or (
+        _has_tag_is_backward(node) and is_with_effects(node)
+    )
 
 
 def _extract_fwd_bwd_outputs(
@@ -462,6 +475,11 @@ def _tensor_nbytes(numel: int, dtype) -> int:
 
 
 def _size_of(node: fx.Node) -> int:
+    def object_nbytes(x) -> int:
+        if not isinstance(x, torch.Tensor):
+            return 0
+        return _tensor_nbytes(hint_int(x.numel(), fallback=4096), x.dtype)
+
     if "val" in node.meta:
         val = node.meta["val"]
         if isinstance(val, py_sym_types):
@@ -470,13 +488,11 @@ def _size_of(node: fx.Node) -> int:
         # torch._inductor.config.unbacked_symint_fallback (but this is a
         # layering violation)
         elif isinstance(val, (list, tuple)):
-            return sum(
-                _tensor_nbytes(hint_int(n.numel(), fallback=4096), n.dtype)
-                for n in val
-                if isinstance(n, torch.Tensor)
-            )
+            return sum(object_nbytes(n) for n in val)
+        elif isinstance(val, dict):
+            return sum(object_nbytes(n) for _, n in val.items())
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(hint_int(val.numel(), fallback=4096), val.dtype)
+            return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
     if node.op == "get_attr":
@@ -791,10 +807,28 @@ def solve_min_cut(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
+    def can_fuse_into_auto_functionalized(a, b):
+        if b.target != torch.ops.higher_order.auto_functionalized:
+            return False
+        mutable_op = b.args[0]
+        mutable_arg_names = (
+            torch._higher_order_ops.auto_functionalize.get_mutable_arg_names(mutable_op)
+        )
+        for name in mutable_arg_names:
+            arg = b.kwargs[name]
+            if a is arg:
+                return True
+            if isinstance(arg, list):
+                if a in arg:
+                    return True
+        return False
+
     def is_fusible(a, b):
         # We can perform "memory fusion" into a cat, but cat cannot be a
         # producer to a fusion
         if get_aten_target(b) == aten.cat:
+            return True
+        if can_fuse_into_auto_functionalized(a, b):
             return True
         return op_types.is_fusible(a) and op_types.is_fusible(b)
 
@@ -1257,6 +1291,8 @@ def get_default_op_list() -> OpTypes:
         aten.full,
         aten.as_strided,
         aten.zeros,
+        aten.empty,
+        aten.empty_like,
         aten.argmax,
         aten.maximum,
         prims.iota,
@@ -1287,6 +1323,7 @@ def get_default_op_list() -> OpTypes:
         aten._flash_attention_forward,
         aten._efficient_attention_forward,
         aten.upsample_bilinear2d,
+        aten._scaled_mm,
     ]  # noqa: E501,B950
 
     fusible_ops = recomputable_ops | set(random_ops)
@@ -1456,7 +1493,9 @@ def estimate_runtime(node):
                 return hint_int(d, fallback=4096)
 
             shape = [realize_symbol(s) for s in shape]
-            return x.meta["val"].new_zeros(shape)
+            return x.meta["val"].new_empty_strided(
+                shape, stride=x.meta["tensor_meta"].stride
+            )
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
             return hint_int(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
@@ -1470,11 +1509,11 @@ def estimate_runtime(node):
         return 1
 
     elif RUNTIME_MODE == "profile":
-        from triton.testing import do_bench
-
         with no_dispatch():
+            from torch._inductor.runtime.benchmarking import benchmarker
+
             args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
-            ms = do_bench(lambda: node.target(*args, **kwargs))
+            ms = benchmarker.benchmark_gpu(lambda: node.target(*args, **kwargs))
             return ms
 
     elif RUNTIME_MODE == "flops":
@@ -1526,7 +1565,7 @@ def choose_saved_values_set(
         return runtime_optimized_saved_values
 
     def estimate_activations_size(saved_values: List[fx.Node]) -> float:
-        return sum([_size_of(i) for i in saved_values]) / 1e9
+        return sum(map(_size_of, saved_values)) / 1e9
 
     min_act_size = estimate_activations_size(node_info.inputs)
     max_act_size = estimate_activations_size(runtime_optimized_saved_values)
@@ -1728,6 +1767,9 @@ def min_cut_rematerialization_partition(
         for node in joint_module.graph.nodes:
             if node.op == "placeholder" and "tangents" in node.target:
                 required_bw_nodes.add(node)
+            elif _must_be_in_backward(node):
+                required_bw_nodes.add(node)
+
             if node in required_bw_nodes:
                 for user in node.users:
                     required_bw_nodes.add(user)

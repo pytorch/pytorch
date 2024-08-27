@@ -737,19 +737,15 @@ def squareCheckInputs(self: Tensor, f_name: str):
     assert (
         self.dim() >= 2
     ), f"{f_name}: The input tensor must have at least 2 dimensions."
-    assert self.size(-1) == self.size(
-        -2
+    assert (
+        self.size(-1) == self.size(-2)
     ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
 
 
 # Validates input shapes and devices
 # for linear solve methods (solve, cholesky_solve, lu_solve, triangular_solve)
 # From aten/src/ATen/native/LinearAlgebraUtils.h
-def linearSolveCheckInputs(
-    self: Tensor,
-    A: Tensor,
-    name: str,
-):
+def linearSolveCheckInputs(self: Tensor, A: Tensor, name: str):
     torch._check(
         self.device == A.device,
         lambda: (
@@ -810,12 +806,7 @@ def checkIsMatrix(A: Tensor, f_name: str, arg_name: str = "A"):
     )
 
 
-def checkInputsSolver(
-    A: Tensor,
-    B: Tensor,
-    left: bool,
-    f_name: str,
-):
+def checkInputsSolver(A: Tensor, B: Tensor, left: bool, f_name: str):
     squareCheckInputs(A, f_name)
     checkIsMatrix(B, f_name)
     torch._check(
@@ -853,11 +844,7 @@ def checkUplo(UPLO: str):
 
 @register_meta([aten._linalg_eigh.default, aten._linalg_eigh.eigenvalues])
 @out_wrapper("eigenvalues", "eigenvectors")
-def meta__linalg_eigh(
-    A: Tensor,
-    UPLO: str = "L",
-    compute_v: bool = True,
-):
+def meta__linalg_eigh(A: Tensor, UPLO: str = "L", compute_v: bool = True):
     squareCheckInputs(A, "linalg.eigh")
     checkUplo(UPLO)
 
@@ -1279,10 +1266,7 @@ def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
 
 @register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
 @out_wrapper("Q", "R")
-def linalg_qr_meta(
-    A: Tensor,
-    mode: str = "reduced",
-) -> Tuple[Tensor, Tensor]:
+def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> Tuple[Tensor, Tensor]:
     checkIsMatrix(A, "linalg.qr")
     checkFloatingOrComplex(A, "linalg.qr")
 
@@ -2076,6 +2060,12 @@ def meta_bernoulli_p(self, p=0.5, generator=None):
     return torch.empty_like(self).contiguous()
 
 
+@register_meta([aten.poisson.default, aten.poisson.out])
+@out_wrapper()
+def meta_poisson(self, generator=None):
+    return torch.empty_like(self)
+
+
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
 def meta__fused_moving_avg_obs_fq_helper(
     self,
@@ -2322,13 +2312,7 @@ if torch._C._has_mkldnn:
         )
 
         @register_meta(torch.ops.mkl._mkl_linear)
-        def meta_mkl_linear(
-            input_tensor,
-            packed_weight,
-            orig_weight,
-            bias,
-            batch_size,
-        ):
+        def meta_mkl_linear(input_tensor, packed_weight, orig_weight, bias, batch_size):
             return input_tensor.new_empty(
                 (*input_tensor.shape[:-1], orig_weight.shape[0])
             )
@@ -3166,7 +3150,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
-@register_meta([aten._fused_adam_.default])
+@register_meta([aten._fused_adam_.default, aten._fused_adamw_.default])
 def meta__fused_adam_(
     self,
     grads,
@@ -6036,12 +6020,15 @@ def nan_to_num(self, nan=None, posinf=None, neginf=None):
 
 @register_meta(torch.ops.aten.transpose_)
 def transpose_(self, dim0, dim1):
-    assert self.layout not in {
-        torch.sparse_csr,
-        torch.sparse_csc,
-        torch.sparse_bsr,
-        torch.sparse_bsc,
-    }, f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
+    assert (
+        self.layout
+        not in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }
+    ), f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
 
     ndims = self.ndim
 
@@ -6359,21 +6346,23 @@ def activate_meta():
                     "register meta function for it. Instead, we should let the decomposition run and write "
                     "meta kernels for the base operators."
                 )
-            pass
         elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
             # We shouldn't do this, because the output will report as not having aliased storages.
             # All view ops have meta kernels in C++ today, so we should use those instead.
             pass
-        elif op_overload.name() in {
-            "aten::empty_strided",  # causing infinite recursion, test_meta.py
-            "aten::clone",  # causing infinite recursion
-            "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
-            "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
-            "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
-            "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
-            "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32  # noqa: B950
-        }:
+        elif (
+            op_overload.name()
+            in {
+                "aten::empty_strided",  # causing infinite recursion, test_meta.py
+                "aten::clone",  # causing infinite recursion
+                "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
+                "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
+                "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
+                "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
+                "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32  # noqa: B950
+            }
+        ):
             pass
         else:
             if "mkldnn::" in op_overload.name():

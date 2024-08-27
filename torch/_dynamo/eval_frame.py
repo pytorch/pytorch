@@ -53,10 +53,11 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
-from torch.export.dynamic_shapes import _process_dynamic_shapes
+from torch.export.dynamic_shapes import _combine_args, _process_dynamic_shapes
 from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -1071,6 +1072,22 @@ def rewrite_signature(
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
     check_user_input_output(flat_results_traced, UserErrorType.INVALID_OUTPUT)
 
+    def check_optional_input_and_error(f_sig: inspect.Signature):
+        # Check if function has optional input.
+        for name, param in f_sig.parameters.items():
+            if param.default is not inspect.Parameter.empty:
+                from torch._dynamo.exc import Unsupported
+
+                log.error(
+                    "Parameter %s is optional with a default value of %s",
+                    name,
+                    param.default,
+                )
+                raise Unsupported(
+                    "Tracing through optional input is not supported yet",
+                    case_name="optional_input",
+                )
+
     def produce_matching(debug_type, sources, candidates):
         matched_elements_positions: List[Optional[int]] = []
         dict_of_source_vals = {}
@@ -1081,9 +1098,11 @@ def rewrite_signature(
             if isinstance(val, tuple(common_constant_types)):
                 matched_elements_positions.append(None)
             elif id(val) not in dict_of_source_vals:
+                if debug_type == "inputs":
+                    check_optional_input_and_error(f_sig)
                 raise AssertionError(
                     f"Unexpectedly found a {type(val)} in the {debug_type}.\n"
-                    'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"'
+                    'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"',
                 )
             else:
                 matched_elements_positions.append(dict_of_source_vals[id(val)])
@@ -1283,7 +1302,8 @@ def export(
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
-        constraints = _process_dynamic_shapes(_f, args, kwargs, dynamic_shapes)
+        combined_args = _combine_args(_f, args, kwargs)
+        constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
         f = _f
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
@@ -1424,7 +1444,6 @@ def export(
             and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
-            dim_constraints.remove_redundant_dynamic_results()
             forced_specializations = dim_constraints.forced_specializations()
             msg = dim_constraints.prettify_results(
                 original_signature,
@@ -1514,11 +1533,9 @@ def export(
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args):
                 with torch.fx.traceback.preserve_node_meta():
-                    return torch.fx.Interpreter(graph).run(*args)
+                    return torch.fx.Interpreter(graph).run(*args)  # type: ignore[arg-type]
 
-            with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
-                fake_mode
-            ):
+            with unset_fake_temporarily(), enable_python_dispatcher(), fake_mode:
                 try:
                     graph = make_fx(
                         graph_with_interpreter,
@@ -1538,14 +1555,21 @@ def export(
 
             assert graph is not None
             for node in graph.graph.find_nodes(op="get_attr"):
-                if isinstance(getattr(graph, node.target), torch.Tensor):
+                if isinstance(getattr(graph, node.target), torch.Tensor):  # type: ignore[arg-type]
                     node.meta["val"] = fake_mode.from_tensor(
-                        getattr(graph, node.target), static_shapes=True
+                        getattr(graph, node.target), static_shapes=True  # type: ignore[arg-type]
                     )
 
         if same_signature:
             flat_args_dynamic_dims = [
-                {c.dim for c in (constraints or ()) if c.w_tensor() is x}
+                {
+                    c.dim
+                    for c in (constraints or ())
+                    if (
+                        c.t_id == id(x)
+                        and c.constraint_range.vr.lower != c.constraint_range.vr.upper
+                    )
+                }
                 for x in flat_args
             ]
             graph = rewrite_signature(
@@ -1560,15 +1584,7 @@ def export(
                 result_traced,  # type: ignore[possibly-undefined]
                 flat_args_dynamic_dims,
             )
-        # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
-        assert graph is not None
-        graph.meta["input_shape_constraints"] = (
-            [constraint.serializable_spec for constraint in constraints]
-            if constraints
-            else []
-        )
-
-        return ExportResult(graph, out_guards)
+        return ExportResult(graph, out_guards)  # type: ignore[arg-type]
 
     if extra_args or extra_kwargs:
         warnings.warn(

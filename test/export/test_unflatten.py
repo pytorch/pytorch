@@ -20,14 +20,7 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import (
-    Constraint,
-    Dim,
-    dynamic_dim,
-    export,
-    FlatArgsAdapter,
-    unflatten,
-)
+from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -368,6 +361,7 @@ class TestUnflatten(TestCase):
         ):
             unflattened(torch.randn(6, 6))
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     def test_unflatten_with_inplace_compile(self):
         class NestedChild(torch.nn.Module):
             def forward(self, x):
@@ -413,10 +407,13 @@ class TestUnflatten(TestCase):
         unflattened = unflatten(export_module)
 
         # in-place compilation should work. Pass fullgraph to ensure no graph breaks.
-        unflattened.foo.compile(fullgraph=True)
+        from torch._dynamo.backends.debugging import ExplainWithBackend
 
-        inputs = (torch.rand(2, 3),)
+        eb = ExplainWithBackend("inductor")
+        unflattened.foo.compile(backend=eb, fullgraph=True)
+        inputs = (torch.randn(2, 3),)
         self.compare_outputs(orig_eager, unflattened, inputs)
+        self.assertEqual(len(eb.graphs), 1)
 
     def test_fx_trace(self):
         class MyModule(torch.nn.Module):
@@ -536,6 +533,24 @@ class TestUnflatten(TestCase):
         for m in unflattened.modules():
             check_meta(m)
 
+    def test_unflatten_requires_grad_param(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(3, 3), requires_grad=False)
+
+            def forward(self, x):
+                return self.p + x
+
+        with torch.device("meta"):
+            mod = M()
+
+        inputs = (torch.randn(3, 3, device="meta"),)
+        ep = export(mod, inputs)
+        unflattened = unflatten(ep)
+        self.assertTrue(unflattened.state_dict()["p"].requires_grad is False)
+        self.assertTrue(unflattened.p.requires_grad is False)
+
     def test_placeholder_and_get_attr_ordering_after_unflattened(self):
         class TransposeModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -628,6 +643,47 @@ class TestUnflatten(TestCase):
         self.compare_outputs(
             export_module.module(), unflattened, (torch.randn((2, 3)),)
         )
+
+    # skip connection is not supported yet
+    @unittest.expectedFailure
+    def test_unflatten_skipped_call_module(self):
+        class C(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return a.d(x.cos())
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = C()
+
+            def forward(self, x):
+                return self.c(x) + x
+
+        class D(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sin()
+
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = B()
+                self.d = D()
+
+            def forward(self, x):
+                return self.b(x)
+
+        a = A()
+
+        # The call chain looks like this:
+        # A -> B -> C -> A.d
+        ep = torch.export.export(a, (torch.randn(3),), strict=False)
+        unflattened = unflatten(ep)
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):

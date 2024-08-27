@@ -244,7 +244,7 @@ struct OptionalCUDAStreamGuard {
     if (r.has_value()) {
       return std::make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 
@@ -256,7 +256,7 @@ struct OptionalCUDAStreamGuard {
     if (r.has_value()) {
       return std::make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 

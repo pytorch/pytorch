@@ -142,13 +142,14 @@ class VectorizedN {
       int64_t count = size()) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] = Vectorized<T>::set(
-          a.values[i],
-          b.values[i],
-          std::min(count, (int64_t)Vectorized<T>::size()));
-      count -= Vectorized<T>::size();
-      if (count <= 0) {
-        break;
+      if (count > 0) {
+        result.values[i] = Vectorized<T>::set(
+            a.values[i],
+            b.values[i],
+            std::min(count, (int64_t)Vectorized<T>::size()));
+        count -= Vectorized<T>::size();
+      } else {
+        result.values[i] = a.values[i];
       }
     }
     return result;
@@ -220,6 +221,7 @@ class VectorizedN {
     return result;
   }
 
+  VECTORIZEDN_DEFINE_UNARY_OP(isnan)
   VECTORIZEDN_DEFINE_UNARY_OP(abs)
   VECTORIZEDN_DEFINE_UNARY_OP(sgn)
   VECTORIZEDN_DEFINE_UNARY_OP(angle)

@@ -25,16 +25,15 @@ from typing import (
 import torch
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
-
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
-
 from torch.utils._pytree import (
     FlattenFunc,
     FromDumpableContextFn,
     ToDumpableContextFn,
     UnflattenFunc,
 )
+
 
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
@@ -51,7 +50,6 @@ __all__ = [
     "ModuleCallEntry",
     "ModuleCallSignature",
     "dims",
-    "dynamic_dim",
     "export",
     "load",
     "register_dataclass",
@@ -62,7 +60,7 @@ __all__ = [
 ]
 
 
-from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim, ShapesCollection
+from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule

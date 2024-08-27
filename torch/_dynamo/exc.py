@@ -204,9 +204,15 @@ class ObservedKeyError(ObservedException):
     pass
 
 
+class ObservedAttributeError(ObservedException):
+    # An AttributeError exception to be raised from inside Dynamo tracing. This can happen on user defined object __getattr__
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     KeyError: ObservedKeyError,
+    AttributeError: ObservedAttributeError,
 }
 
 

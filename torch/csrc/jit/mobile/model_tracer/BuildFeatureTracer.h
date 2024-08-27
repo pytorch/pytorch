@@ -6,9 +6,7 @@
 #include <set>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 /* The BuildFeatureTracer class handles the attachment and removal of a
  * recording callback that traces the invocation of code that handles executing
@@ -36,6 +34,4 @@ struct BuildFeatureTracer final {
   }
 };
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

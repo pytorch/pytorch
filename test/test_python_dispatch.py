@@ -235,7 +235,7 @@ class TestPythonRegistration(TestCase):
                 self.assertFalse(torch.mul(x, y)._is_zerotensor())
 
                 # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
-                # combination if someone overrided the behavior for the same before them
+                # combination if someone overridden the behavior for the same before them
                 with self.assertRaisesRegex(
                     RuntimeError, "already a kernel registered from python"
                 ):
@@ -1204,7 +1204,8 @@ def forward(self, x_a_1, x_b_1, y_1):
             x = LoggingTensor(torch.randperm(3))
             torch.save(x, f)
             f.seek(0)
-            x_loaded = torch.load(f)
+            with torch.serialization.safe_globals([LoggingTensor]):
+                x_loaded = torch.load(f)
             self.assertTrue(type(x_loaded) is type(x))
             self.assertEqual(x, x_loaded)
             self.assertEqual(x.elem, x_loaded.elem)
@@ -1865,7 +1866,10 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                     wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
                 )
                 logging.getLogger("NonWrapperSubclass").info(
-                    f"{func.__module__}.{func.__name__}", args, kwargs, rs  # noqa: G004
+                    f"{func.__module__}.{func.__name__}",  # noqa: G004
+                    args,
+                    kwargs,
+                    rs,
                 )
                 return rs
 

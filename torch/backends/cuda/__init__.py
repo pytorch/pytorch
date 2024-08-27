@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
-
 from typing import Union
 from typing_extensions import deprecated
 
 import torch
+
 
 __all__ = [
     "is_built",
@@ -261,6 +261,7 @@ def preferred_blas_library(
 
 
 from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
+
 
 # Set the __module__ attribute
 SDPAParams.__module__ = "torch.backends.cuda"

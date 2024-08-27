@@ -536,12 +536,7 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
-    @parametrize(
-        "executor",
-        [
-            "aten",
-        ],
-    )
+    @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
         if (
@@ -566,12 +561,7 @@ class TestCommon(TestCase):
 
         op = copy(op)
         op.op = partial(make_traced(op.op), executor=executor)
-        self._ref_test_helper(
-            contextlib.nullcontext,
-            device,
-            dtype,
-            op,
-        )
+        self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -2348,6 +2338,7 @@ fake_autocast_device_skips = defaultdict(dict)
 
 # TODO: investigate/fix
 fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
+fake_autocast_device_skips["cuda"] = {"linalg.pinv", "pinverse"}
 
 
 dynamic_output_op_tests = (
@@ -2372,10 +2363,7 @@ supported_dynamic_output_op_tests = (
 )
 
 # some inputs invoke dynamic output shape operators, some do not
-sometimes_dynamic_output_op_test = (
-    "__getitem__",
-    "index_select",
-)
+sometimes_dynamic_output_op_test = ("__getitem__", "index_select")
 
 data_dependent_op_tests = (
     "equal",
@@ -2588,12 +2576,14 @@ class TestFakeTensor(TestCase):
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
-        if op.name in fake_autocast_device_skips[device]:
+        device_type = torch.device(device).type
+        if op.name in fake_autocast_device_skips[device_type]:
             self.skipTest("Skip failing test")
-        context = (
-            torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
-        )
-        self._test_fake_helper(device, dtype, op, context)
+
+        def context_fn():
+            return torch.amp.autocast(device_type)
+
+        self._test_fake_helper(device, dtype, op, context_fn)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)

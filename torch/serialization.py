@@ -54,6 +54,8 @@ __all__ = [
     "LoadEndianness",
     "get_default_load_endianness",
     "set_default_load_endianness",
+    "get_default_mmap_options",
+    "set_default_mmap_options",
     "clear_safe_globals",
     "get_safe_globals",
     "add_safe_globals",
@@ -163,9 +165,9 @@ def get_default_mmap_options() -> int:
     return _default_mmap_options
 
 
-def set_default_mmap_options(flags: int):
+class set_default_mmap_options:
     """
-    Set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
+    Context manager or function to set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
 
     For now, only either ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED`` are supported.
     Please open an issue if you need any other option to be added here.
@@ -176,17 +178,27 @@ def set_default_mmap_options(flags: int):
     Args:
         flags: ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED``
     """
-    global _default_mmap_options
-    if IS_WINDOWS:
-        raise RuntimeError(
-            "Changing the default mmap options is currently not supported for Windows"
-        )
-    if flags != MAP_PRIVATE and flags != MAP_SHARED:
-        raise ValueError(
-            "Invalid argument in function set_default_mmap_options, "
-            f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}"
-        )
-    _default_mmap_options = flags
+
+    def __init__(self, flags: int) -> None:
+        if IS_WINDOWS:
+            raise RuntimeError(
+                "Changing the default mmap options is currently not supported for Windows"
+            )
+        if flags != MAP_PRIVATE and flags != MAP_SHARED:
+            raise ValueError(
+                "Invalid argument in function set_default_mmap_options, "
+                f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}"
+            )
+        global _default_mmap_options
+        self.prev = _default_mmap_options
+        _default_mmap_options = flags
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        global _default_mmap_options
+        _default_mmap_options = self.prev
 
 
 def clear_safe_globals() -> None:
@@ -254,7 +266,6 @@ class safe_globals(_weights_only_unpickler._safe_globals):
         #          [-0.8234,  2.0500, -0.3657]])
         >>> assert torch.serialization.get_safe_globals() == []
     """
-    pass
 
 
 def _is_zipfile(f) -> bool:
@@ -766,7 +777,7 @@ def save(
         >>> # xdoctest: +SKIP("makes cwd dirty")
         >>> # Save to file
         >>> x = torch.tensor([0, 1, 2, 3, 4])
-        >>> torch.save(x, 'tensor.pt')
+        >>> torch.save(x, "tensor.pt")
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
@@ -1115,23 +1126,29 @@ def load(
 
     Example:
         >>> # xdoctest: +SKIP("undefined filepaths")
-        >>> torch.load('tensors.pt', weights_only=True)
+        >>> torch.load("tensors.pt", weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load('tensors.pt', map_location=torch.device('cpu'), weights_only=True)
+        >>> torch.load("tensors.pt", map_location=torch.device("cpu"), weights_only=True)
         # Load all tensors onto the CPU, using a function
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage, weights_only=True)
+        >>> torch.load(
+        ...     "tensors.pt", map_location=lambda storage, loc: storage, weights_only=True
+        ... )
         # Load all tensors onto GPU 1
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1), weights_only=True)  # type: ignore[attr-defined]
+        >>> torch.load(
+        ...     "tensors.pt",
+        ...     map_location=lambda storage, loc: storage.cuda(1),
+        ...     weights_only=True,
+        ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'}, weights_only=True)
+        >>> torch.load("tensors.pt", map_location={"cuda:1": "cuda:0"}, weights_only=True)
         # Load tensor from io.BytesIO object
         # Loading from a buffer setting weights_only=False, warning this can be unsafe
-        >>> with open('tensor.pt', 'rb') as f:
+        >>> with open("tensor.pt", "rb") as f:
         ...     buffer = io.BytesIO(f.read())
         >>> torch.load(buffer, weights_only=False)
         # Load a module with 'ascii' encoding for unpickling
         # Loading from a module setting weights_only=False, warning this can be unsafe
-        >>> torch.load('module.pt', encoding='ascii', weights_only=False)
+        >>> torch.load("module.pt", encoding="ascii", weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
@@ -1253,7 +1270,7 @@ def load(
                             overall_storage=overall_storage,
                             **pickle_load_args,
                         )
-                    except RuntimeError as e:
+                    except pickle.UnpicklingError as e:
                         raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
                 return _load(
                     opened_zipfile,
@@ -1277,7 +1294,7 @@ def load(
                     _weights_only_unpickler,
                     **pickle_load_args,
                 )
-            except RuntimeError as e:
+            except pickle.UnpicklingError as e:
                 raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
         return _legacy_load(
             opened_file, map_location, pickle_module, **pickle_load_args

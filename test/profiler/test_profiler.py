@@ -11,6 +11,7 @@ import re
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -508,6 +509,9 @@ class TestProfiler(TestCase):
         # rerun to avoid initial start overhead
         with _profile(use_cuda=use_cuda, use_kineto=True) as p:
             self.payload(use_cuda=use_cuda)
+
+        self.assertTrue("aten::mm" in str(p))
+
         output = p.key_averages().table(
             sort_by="self_cuda_time_total" if use_cuda else "self_cpu_time_total",
             row_limit=-1,
@@ -1166,6 +1170,17 @@ class TestProfiler(TestCase):
         # saving an empty trace
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
+            if use_kineto:
+                with open(fname) as f:
+                    contents = json.load(f)
+                    # Some builds may not have logger observer
+                    # so skip if not
+                    if "WARNING" in contents:
+                        found_empty_warning = False
+                        for warning in contents["WARNING"]:
+                            if "No Valid Trace Events" in warning:
+                                found_empty_warning = True
+                        self.assertTrue(found_empty_warning)
 
         # Same test but for cuda.
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -1830,15 +1845,21 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         "profiling out of range",
                     )
 
-    def _schedule_helper(self, warmup, active, repeat):
+    def _schedule_helper(self, warmup, active, repeat, acc_events=True):
         with profile(
             schedule=torch.profiler.schedule(
-                skip_first=0, wait=0, warmup=warmup, active=active, repeat=repeat
-            )
+                skip_first=0,
+                wait=0,
+                warmup=warmup,
+                active=active,
+                repeat=repeat,
+            ),
+            acc_events=acc_events,
         ) as prof:
             for i in range(100):
                 torch.add(1, 2)
                 prof.step()
+        # print(prof.key_averages())
         for ev in prof.key_averages():
             if ev.key == "aten::add":
                 return ev.count
@@ -1852,6 +1873,12 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertEqual(self._schedule_helper(warmup=1, active=5, repeat=0), 83)
         self.assertEqual(self._schedule_helper(warmup=10, active=10, repeat=4), 40)
         self.assertEqual(self._schedule_helper(warmup=50, active=1, repeat=0), 1)
+        self.assertEqual(
+            self._schedule_helper(warmup=0, active=5, repeat=0, acc_events=False), 0
+        )
+        self.assertEqual(
+            self._schedule_helper(warmup=10, active=10, repeat=4, acc_events=False), 10
+        )
 
     def _step_helper_func(self, prof):
         time.sleep(0.1)
@@ -1911,6 +1938,56 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(evt.is_user_annotation)
             else:
                 self.assertFalse(evt.is_user_annotation)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_dynamic_toggle(self):
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p:
+            with torch.profiler.record_function("test_user_annotation"):
+                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                torch.add(x, y)
+
+        self.assertTrue(any("aten" in e.name for e in p.events()))
+
+        self.assertTrue(any("cuda" in e.name for e in p.events()))
+
+        self.assertTrue(any("kernel" in e.name for e in p.events()))
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p1:
+            p1.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
+            with torch.profiler.record_function("test_user_annotation"):
+                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                torch.add(x, y)
+
+        self.assertTrue(any("aten" in e.name for e in p1.events()))
+
+        self.assertTrue(all("cuda" not in e.name for e in p1.events()))
+
+        self.assertTrue(all("kernel" not in e.name for e in p1.events()))
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p2:
+            p2.toggle_collection_dynamic(
+                False, [ProfilerActivity.CUDA, ProfilerActivity.CPU]
+            )
+            with torch.profiler.record_function("test_user_annotation"):
+                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                torch.add(x, y)
+        self.assertTrue(len(p2.events()) == 0)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_lazy_build_tree(self):
+        with profile() as p:
+            self.payload()
+
+        stats = p._stats()
+        # Test that the tree is not built
+        self.assertEqual(stats.function_events_build_tree_call_duration_us, 0)
+        self.assertEqual(stats.number_of_events, 0)
+
+        # Test that the tree is built on demand
+        p.events()
+        self.assertGreater(stats.function_events_build_tree_call_duration_us, 0)
+        self.assertGreater(stats.number_of_events, 0)
 
 
 class SimpleNet(nn.Module):
@@ -2517,9 +2594,11 @@ aten::mm""",
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
-        report_all_anti_patterns(prof, json_report_dir=".", print_enable=False)
-        try:
-            with open("./torchtidy_report.json") as f:
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_all_anti_patterns(prof, json_report_dir=tmpdir, print_enable=False)
+
+            with open(os.path.join(tmpdir, "torchtidy_report.json")) as f:
                 report = json.load(f)
 
             # It is platform dependent whether the path will include "profiler/"
@@ -2532,8 +2611,6 @@ aten::mm""",
             for event in entry:
                 actual_fields = sorted(event.keys())
                 self.assertEqual(expected_fields, actual_fields)
-        finally:
-            os.remove("torchtidy_report.json")
 
     @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_fuzz_symbolize(self):

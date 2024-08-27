@@ -44,7 +44,6 @@ if __name__ == "__main__":
         )
     ]
 
-    print(ext_modules)
     setup(
         name=PACKAGE_NAME,
         version=version,
