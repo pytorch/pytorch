@@ -82,10 +82,6 @@ from torch.utils.viz._cycles import observe_tensor_cycles
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-if not TEST_CUDA:
-    print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
-
 try:
     import torchvision.models  # noqa: F401
     from torchvision.models import resnet18  # noqa: F401
@@ -110,6 +106,7 @@ if TEST_CUDA:
 _cycles_per_ms = None
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
@@ -3482,6 +3479,7 @@ print(f"{{r1}}, {{r2}}")
                 file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
@@ -4455,6 +4453,7 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
     def test_mempool_id(self):
         pool1 = torch.cuda.graph_pool_handle()
@@ -4552,6 +4551,7 @@ class TestMemPool(TestCase):
         self.assertEqual(len(set(active_pool_ids)), 4)
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaOptims(TestCase):
     # These tests will be instantiate with instantiate_device_type_tests
     # to apply the new OptimizerInfo structure.
@@ -4725,6 +4725,7 @@ class TestCudaOptims(TestCase):
             self.assertEqual(scaler._growth_tracker, growth_tracker)
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestGDS(TestCase):
     def _get_tmp_dir_fs_type(self):
         my_path = os.path.realpath("/tmp")
@@ -4759,7 +4760,7 @@ class TestGDS(TestCase):
         torch.cuda.gds._gds_deregister_buffer(src2.untyped_storage())
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaAutocast(TestAutocast):
     def setUp(self):
         super().setUp()
