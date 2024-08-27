@@ -3710,6 +3710,13 @@ def forward(self, l_inp_, l_tmp_):
             torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, (torch.randn(4, 4),))
             self.assertEqual(cnt.frame_count, 3)
 
+    def test_hop_raises_if_not_overriding_call(self):
+        class WrongHop(torch._ops.HigherOrderOperator):
+            pass
+
+        with self.assertRaisesRegex(TypeError, "WrongHop"):
+            wrong_hop = WrongHop("wrong_hop")
+
 
 _hop_schema_test_schema_types = [
     "bool",
