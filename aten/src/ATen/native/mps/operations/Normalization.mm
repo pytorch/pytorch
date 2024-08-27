@@ -296,7 +296,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
       newCachedGraph->runningVarInplaceUpdate_ = runningVarInplaceUpdate;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self, input_shape);
+    auto inputPlaceholder =
+        Placeholder(cachedGraph->inputTensor_, self, input_shape, memory_format != MemoryFormat::ChannelsLast);
     auto weightPlaceholder = Placeholder();
     if (has_weight)
       weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
