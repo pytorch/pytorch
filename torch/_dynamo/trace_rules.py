@@ -3229,6 +3229,7 @@ MOD_INLINELIST = [
     "torch._functorch.functional_call",
     "torch._functorch.vmap",
     "torch._higher_order_ops.associative_scan",
+    "torch._higher_order_ops.scan",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
     "torch._inductor.test_operators",
@@ -3256,12 +3257,6 @@ MOD_INLINELIST = [
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
     "torch.utils.hooks",
-    "torch._tensor",
-    "torch._higher_order_ops.strict_mode",
-    "torch._higher_order_ops.while_loop",
-    "torch._higher_order_ops.associative_scan",
-    "torch._higher_order_ops.scan",
-    "torch._functorch.functional_call",
 ]
 assert sorted(set(MOD_INLINELIST)) == MOD_INLINELIST
 MOD_INLINELIST = set(MOD_INLINELIST)

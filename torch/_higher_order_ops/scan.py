@@ -130,7 +130,7 @@ def scan(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
     )
 
-    result_flat = scan_op(combine_fn, leaves, dim)
+    result_flat = scan_op(combine_fn, leaves, dim, reverse)
 
     if reverse:
         result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
@@ -138,7 +138,15 @@ def scan(
     return pytree.tree_unflatten(result_flat, spec)
 
 
-scan_op = HigherOrderOperator("scan")
+class ScanOp(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("scan")
+
+    def __call__(self, combine_fn, input, dim, reverse=False):
+        return super().__call__(combine_fn, input, dim, reverse)
+
+
+scan_op = ScanOp()
 
 
 def generic_scan(operator, elems_flat, dim=0):
@@ -224,7 +232,7 @@ def trace_scan(
 
 
 @scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_op_dense(combine_fn, input, dim):
+def scan_op_dense(combine_fn, input, dim, reverse):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return generic_scan(combine_fn, input, dim)
@@ -236,20 +244,20 @@ scan_op.py_impl(DispatchKey.Autograd)(
 
 
 @scan_op.py_impl(ProxyTorchDispatchMode)
-def scan_proxy_mode(mode, combine_fn, input, dim):
+def scan_proxy_mode(mode, combine_fn, input, dim, reverse):
     return trace_scan(mode, scan_op, combine_fn, input, dim)
 
 
 @scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim):
+def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim, reverse):
     with mode:
         return [x.clone() for x in input]
 
 
 @scan_op.py_functionalize_impl
-def scan_functionalize(ctx, combine_fn, input, dim):
+def scan_functionalize(ctx, combine_fn, input, dim, reverse):
     unwrapped_input = ctx.unwrap_tensors(input)
     with ctx.redispatch_to_next() as m:
         functional_combine_fn = ctx.functionalize(combine_fn)
-        ret = scan_op(functional_combine_fn, unwrapped_input, dim)
+        ret = scan_op(functional_combine_fn, unwrapped_input, dim, reverse)
     return ctx.wrap_tensors(ret)

@@ -1276,7 +1276,7 @@ def forward(self, L_x_ : torch.Tensor):
     child = x.new_empty((3, 10, 2), dtype = torch.float32, requires_grad = False);  child = None
     child_1 = x.new_empty((3, 10, 2), dtype = torch.float32, requires_grad = False);  child_1 = None
     scan_combine_0 = self.scan_combine_0
-    scan = torch.ops.higher_order.scan(scan_combine_0, [x], 0);  scan_combine_0 = x = None
+    scan = torch.ops.higher_order.scan(scan_combine_0, [x], 0, True);  scan_combine_0 = x = None
     elem = scan[0];  scan = None
     flip_1 = torch.flip(elem, [0]);  elem = None
     return (flip_1,)""",
