@@ -14,7 +14,19 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+#define CUDART_SUPPORTS_MULTICAST
+#endif
+
 namespace {
+
+bool has_multicast_support() {
+#if defined(CUDART_SUPPORTS_MULTICAST)
+  return c10::cuda::DriverAPI::get()->cuMulticastCreate_ != nullptr;
+#else
+  return false;
+#endif
+}
 
 class IpcChannel {
  public:
@@ -61,9 +73,7 @@ class IpcChannel {
     memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
 
     TORCH_CHECK(
-        sendmsg(socket_, &msg, 0) > 0,
-        "Failed to send fd: ",
-        strerror(errno));
+        sendmsg(socket_, &msg, 0) > 0, "Failed to send fd: ", strerror(errno));
   }
 
   int recv_fd() {
@@ -108,6 +118,25 @@ class IpcChannel {
       fds[src_rank] = fd;
     }
     return fds;
+  }
+
+  int broadcast_fds(
+      int rank,
+      int src_rank,
+      const std::vector<int>& pids,
+      int fd) {
+    size_t world_size = pids.size();
+
+    if (rank == src_rank) {
+      for (int dst_rank = 0; dst_rank < (int)world_size; ++dst_rank) {
+        if (dst_rank == rank) {
+          continue;
+        }
+        send_fd(pids[dst_rank], fd);
+      }
+      return fd;
+    }
+    return recv_fd();
   }
 
  private:
@@ -213,6 +242,8 @@ CUDASymmetricMemory::CUDASymmetricMemory(
     size_t block_size,
     std::vector<void*> buffers,
     std::vector<void*> signal_pads,
+    HandleType mc_handle,
+    void* mc_addr,
     size_t buffer_size,
     int local_device_idx,
     int rank,
@@ -221,6 +252,8 @@ CUDASymmetricMemory::CUDASymmetricMemory(
       block_size_(block_size),
       buffers_(std::move(buffers)),
       signal_pads_(std::move(signal_pads)),
+      mc_handle_(mc_handle),
+      mc_addr_(mc_addr),
       buffer_size_(buffer_size),
       local_device_idx_(local_device_idx),
       rank_(rank),
@@ -283,6 +316,14 @@ size_t CUDASymmetricMemory::get_buffer_size() {
 
 size_t CUDASymmetricMemory::get_signal_pad_size() {
   return signal_pad_size;
+}
+
+bool CUDASymmetricMemory::has_multicast_support() {
+  return ::has_multicast_support();
+}
+
+void* CUDASymmetricMemory::get_multicast_ptr() {
+  return mc_addr_;
 }
 
 at::Tensor CUDASymmetricMemory::get_buffer(
@@ -601,6 +642,46 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   store_barrier(store, rank, world_size);
   close(block_fd);
 
+  CUmemGenericAllocationHandle mc_handle{};
+  void* mc_addr = nullptr;
+#if defined(CUDART_SUPPORTS_MULTICAST)
+  // We have to further check if the driver supports multicast
+  if (has_multicast_support()) {
+    // Rank 0 creates a multicast object and share it with peers
+    if (rank == 0) {
+      CUmulticastObjectProp mc_prop{};
+      mc_prop.numDevices = world_size;
+      mc_prop.handleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+      mc_prop.size = block->block_size;
+
+      CUresult res = driver_api->cuMulticastCreate_(&mc_handle, &mc_prop);
+      TORCH_CHECK(res == CUDA_SUCCESS);
+
+      int mc_fd;
+      C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
+          &mc_fd, mc_handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+      ipc_channel.broadcast_fds(rank, 0, pids, mc_fd);
+      // Ref count is incremented as soon as SCM_RIGHTS send happens
+      close(mc_fd);
+    } else {
+      int mc_fd = ipc_channel.broadcast_fds(rank, 0, pids, -1);
+      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
+          &mc_handle,
+          (void*)(uintptr_t)mc_fd,
+          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+      close(mc_fd);
+    }
+    // All rank adds their physical allocation to the multicast object
+    C10_CUDA_DRIVER_CHECK(
+        driver_api->cuMulticastAddDevice_(mc_handle, block->device_idx));
+    C10_CUDA_DRIVER_CHECK(driver_api->cuMulticastBindMem_(
+        mc_handle, 0, block->handle, 0, block->block_size, 0));
+
+    map_block(&mc_addr, mc_handle, block->block_size, block->device_idx);
+    store_barrier(store, rank, world_size);
+  }
+#endif
+
   // Initializing CUDASymmetricMemory with an allocation transfers its
   // ownership to the CUDASymmetricMemory object. So that outstanding
   // references to the CUDASymmetricMemory object can keep the allocation
@@ -610,6 +691,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       block->block_size,
       std::move(buffers),
       std::move(signal_pads),
+      mc_handle,
+      mc_addr,
       block->buffer_size,
       block->device_idx,
       group_info.rank,
@@ -628,6 +711,10 @@ bool CUDASymmetricMemoryAllocator::is_rendezvous_completed(void* ptr) {
       "CUDASymmetricMemoryAllocator::is_rendezvous_completed: input must be allocated ",
       "via CUDASymmetricMemoryAllocator::alloc");
   return block->symm_mem != nullptr;
+}
+
+bool CUDASymmetricMemoryAllocator::has_multicast_support() {
+  return ::has_multicast_support();
 }
 
 c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
