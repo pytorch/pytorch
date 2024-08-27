@@ -121,7 +121,6 @@ class RuntimeEstimator(TorchDispatchMode):
                 runtime_estimator.display_modulewise_stats()
     """
 
-    _gpu_memory_bandwidth = get_gpu_dram_gbps()
     _float_types: Set[torch.dtype] = {
         torch.float16,
         torch.bfloat16,
@@ -290,6 +289,9 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
+        assert (
+            torch.cuda.is_available()
+        ), "Roofline estimation needs to access CUDA capabilities to make estimations"
 
         def get_num_bytes(t: torch.Tensor) -> int:
             """
@@ -350,6 +352,7 @@ class RuntimeEstimator(TorchDispatchMode):
             Returns:
                 float: The estimated memory transfer time in nanoseconds.
             """
+            gpu_memory_bandwidth = get_gpu_dram_gbps()
             read_bytes = sum(
                 get_num_bytes(t)
                 for t in flat_args_kwargs
@@ -360,7 +363,7 @@ class RuntimeEstimator(TorchDispatchMode):
             )
             counted_bytes = read_bytes + write_bytes
             # The GPU memory bandwidth is in GB/s so the transfer time is in nanoseconds
-            transfer_time = counted_bytes / cls._gpu_memory_bandwidth
+            transfer_time = counted_bytes / gpu_memory_bandwidth
             return transfer_time
 
         # Roofline Cost Model Explanation
