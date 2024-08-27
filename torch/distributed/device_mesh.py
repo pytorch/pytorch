@@ -38,6 +38,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        C10dBackend,
         get_backend,
         get_process_group_ranks,
         get_rank,
@@ -64,7 +65,7 @@ else:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
             self.mesh_dim_group_options: Dict[
-                int, Tuple[str, Optional[ProcessGroup.Options]]
+                int, Tuple[str, Optional[C10dBackend.Options]]
             ] = {}
             self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
@@ -220,7 +221,7 @@ else:
             self,
             dim: int,
             backend: str,
-            pg_options: Optional[ProcessGroup.Options] = None,
+            pg_options: Optional[C10dBackend.Options] = None,
         ) -> None:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
 
