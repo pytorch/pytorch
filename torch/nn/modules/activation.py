@@ -1503,9 +1503,6 @@ class PReLU(Module):
             unexpected_args = ', '.join(str(key) for key in kwargs.keys())
             raise TypeError(f"Unexpected keyword arguments: {unexpected_args}. "
                             "PReLU does not accept these arguments.")
-        else:
-          raise TypeError(f"Unexpected keyword arguments: {', '.join(kwargs.keys())}. "
-                            "PReLU does not accept these arguments.")
 
 
         # Validate num_parameters argument before any other operation
