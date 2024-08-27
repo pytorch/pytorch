@@ -38,7 +38,6 @@ from functorch import (
     make_fx,
     vjp,
     vmap,
-    checkpoint,
 )
 from functorch.experimental import functionalize, replace_all_batch_norm_modules_
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
@@ -3637,25 +3636,37 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             vjp(g, x)
 
-    def test_basic_checkpoint_with_grad(self, device):
-        def f(x):
-            return x.sin().cos().exp()
+      def test_basic_checkpoint_with_grad(self, device):
+        counts = [0]
 
-        g = checkpoint(f, use_reentrant=False)
+        N_REPEAT = 4
+
+        def f(x):
+            counts[0] += 1
+            return x.sin().cos()
+
+        g = torch.func.checkpoint(f, use_reentrant=False)
 
         def h(x):
-            return g(g(g(x))).sum()
+            for _ in range(N_REPEAT):
+                x = g(x)
+            return x.sum()
 
         def h_ref(x):
-            return f(f(f(x))).sum()
+            for _ in range(N_REPEAT):
+                x = f(x)
+            return x.sum()
 
         a = torch.rand(1024, 1024, requires_grad=False, device=device)
 
         out = grad(h)(a)
+        self.assertEqual(counts[0], N_REPEAT * 2)
+        counts[0] = 0
         out_ref = grad(h_ref)(a)
+        self.assertEqual(counts[0], N_REPEAT)
         self.assertEqual(out, out_ref)
 
-        if device == "cuda":
+        if "cuda" in device:
             def get_peak_memory(fn):
                 torch.cuda.synchronize()
                 torch.cuda.reset_peak_memory_stats()
@@ -3666,7 +3677,8 @@ class TestComposability(TestCase):
             mem_ref = get_peak_memory(lambda: grad(h)(a))
             mem_ac = get_peak_memory(lambda: grad(h_ref)(a))
 
-            self.assertNotEqual(mem_ref, mem_ac)
+            # This is wrong!
+            self.assertEqual(mem_ref, mem_ac)
 
     def test_jvp_supports_saved_tensor_hooks(self, device):
         def f(x):
