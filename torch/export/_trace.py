@@ -1377,17 +1377,6 @@ def _strict_export_lower_to_aten_ir(
     # 5. Rename constants nodes in graph module from buffers to constants
     _rename_constants_nodes(gm, export_graph_signature)
 
-    # Prettify names for placeholder nodes.
-    placeholder_naming_pass(
-        gm,
-        export_graph_signature,
-        mod,
-        fake_args,
-        fake_kwargs,
-        fake_params_buffers,
-        constants,
-    )
-
     return ExportArtifact(
         aten=aten_export_artifact,
         out_spec=orig_out_spec,
@@ -1716,17 +1705,6 @@ def _non_strict_export(
     )
 
     assert out_spec is not None
-
-    # Prettify names for placeholder nodes.
-    placeholder_naming_pass(
-        aten_export_artifact.gm,
-        aten_export_artifact.sig,
-        mod,
-        fake_args,
-        fake_kwargs,
-        fake_params_buffers,
-        aten_export_artifact.constants,
-    )
 
     return ExportArtifact(
         aten=aten_export_artifact,

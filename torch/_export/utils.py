@@ -728,6 +728,8 @@ def placeholder_naming_pass(
     def _strip_name(x):
         if x.startswith("L__self___"):
             x = x[len("L__self___") :]
+        elif x.startswith("self_"):
+            x = x[len("self_") :]
         x = re.sub(r"[^a-zA-Z0-9]", "_", x)
         return x
 
