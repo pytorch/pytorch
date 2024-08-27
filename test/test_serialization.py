@@ -4101,7 +4101,7 @@ class TestSerialization(TestCase, SerializationMixin):
             for v in result.values():
                 self.assertTrue(v.is_cuda)
 
-    def test_serialization_mmap_loading(self):
+    def test_serialization_mmap_loading_options(self):
         if IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "Changing the default mmap options is currently not supported"):
                 torch.serialization.set_default_mmap_options(2)
