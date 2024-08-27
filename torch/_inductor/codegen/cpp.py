@@ -231,7 +231,9 @@ def stride_at(index: sympy.Expr, var: sympy.Symbol):
 
 
 @functools.lru_cache
-def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
+def simplify_index_in_vec_range(
+    index: sympy.Expr, var: sympy.Expr, vec_length: Optional[int] = None
+):
     """
     Simplifies the index expression within the range of a vectorized loop.
     Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
@@ -260,7 +262,7 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     def visit_indexing_div(divisor):
         nonlocal div_freevar_id
         result = FloorDiv(var, divisor)
-        if sympy.gcd(divisor, vec_length) == vec_length:
+        if vec_length and sympy.gcd(divisor, vec_length) == vec_length:
             result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
             div_freevar_id += 1
         return result
@@ -268,10 +270,12 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     def visit_modular_indexing(divisor, modulus):
         nonlocal mod_freevar_id
         result = ModularIndexing(var, divisor, modulus)
-        if sympy.gcd(divisor, vec_length) == vec_length:
+        if vec_length and sympy.gcd(divisor, vec_length) == vec_length:
             result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
             mod_freevar_id += 1
-        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
+        elif (
+            vec_length and divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length
+        ):
             result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
             mod_freevar_id += 1
         return result
@@ -294,7 +298,9 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
 
 @functools.lru_cache
-def stride_at_vec_range(index: sympy.Expr, var: sympy.Symbol, vec_length: int):
+def stride_at_vec_range(
+    index: sympy.Expr, var: sympy.Symbol, vec_length: Optional[int] = None
+):
     index_vec_simplified = simplify_index_in_vec_range(index, var, vec_length)
     return stride_at(index_vec_simplified, var)
 
@@ -4222,6 +4228,16 @@ class CppScheduling(BaseScheduling):
         {'index0': 8847360*z0 + 960*z1 + 30*z2 + z3, 'index1': 32*z0 + z2, 'index2': 30*z2 + z3}.
         """
 
+        # No reduction and no mudular
+        if any(
+            len(node.group[1][1]) != 0
+            or any(
+                expr.has(ModularIndexing) for expr in node._body.indexing_exprs.values()
+            )
+            for node in nodes
+        ):
+            return nodes
+
         split_var = None
         split_number = None
         divide_index_name = None
@@ -4245,7 +4261,7 @@ class CppScheduling(BaseScheduling):
                         and isinstance(split_var, sympy.core.symbol.Symbol)
                         and divide_index_name is not None
                         and all(
-                            stride_at_vec_range(expr, split_var, 16) == 1
+                            stride_at_vec_range(expr, split_var) == 1
                             for name, expr in original_body.indexing_exprs.items()
                             if name != divide_index_name
                         )
@@ -4253,18 +4269,8 @@ class CppScheduling(BaseScheduling):
                         match_div = True
                         matched_node = node
 
-        if (
-            any(
-                len(node.group[1][1]) != 0
-                or any(
-                    expr.has(ModularIndexing)
-                    for expr in node._body.indexing_exprs.values()
-                )
-                for node in nodes
-            )
-            or not match_div
-            or num_div != 1
-        ):
+        # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
+        if not match_div:
             return nodes
 
         extra_indexing_constraints = None
