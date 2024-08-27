@@ -604,7 +604,7 @@ def _compile(
     tracer: Optional[InstructionTranslator] = None
 
     tf_mode_stack: List[
-        TorchFunctionMode
+        torch.overrides.TorchFunctionMode
     ] = torch.overrides._get_current_function_mode_stack()
 
     @preserve_global_state
