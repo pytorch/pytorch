@@ -1,6 +1,5 @@
 # Owner(s): ["module: cuda"]
 
-import collections
 import contextlib
 import gc
 import json
@@ -28,10 +27,7 @@ from torch.cuda._memory_viz import (
     segment_plot,
     trace_plot,
 )
-from torch.testing._internal.autocast_utils import (
-    AutocastTestLists,
-    TestAutocast
-)
+from torch.testing._internal.autocast_utils import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
@@ -58,7 +54,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     load_tests,
     NO_MULTIPROCESSING_SPAWN,
-    NoTest,
     parametrize,
     run_tests,
     serialTest,
@@ -4090,7 +4085,7 @@ def reconstruct_from_tensor_metadata(metadata):
     return t
 
 
-@unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
+@unittest.skipIf(not TEST_CUDA or TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
     @property

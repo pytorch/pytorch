@@ -3,10 +3,7 @@
 import unittest
 
 import torch
-from torch.testing._internal.autocast_utils import (
-    AutocastCPUTestLists,
-    TestAutocast,
-)
+from torch.testing._internal.autocast_utils import AutocastCPUTestLists, TestAutocast
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
