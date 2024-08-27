@@ -345,20 +345,6 @@ class StageTest(MultiProcContinousTest):
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):
             stage_with_dw_builder.backward_weight_one_chunk(bwd_chunk_id=0)
 
-        stage_without_dw_builder = PipelineStage(
-            stage_mod,
-            self.rank,
-            self.world_size,
-            self.device,
-            input_args=x.chunk(chunks)[0],
-            dw_builder=None,
-        )
-
-        with self.assertRaisesRegex(AssertionError, "dw_builder"):
-            stage_without_dw_builder.backward_one_chunk(
-                bwd_chunk_id=0, full_backward=False
-            )
-
 
 instantiate_parametrized_tests(StageTest)
 

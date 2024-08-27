@@ -16,7 +16,7 @@ from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch._streambase import _StreamBase
 
-from .. import config, polyfill, variables
+from .. import config, polyfills, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
     can_convert_to_tracable_parameter,
@@ -402,7 +402,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx: "InstructionTranslator", *args, **kwargs):
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.accumulate_grad), args, kwargs
+                SourcelessBuilder.create(tx, polyfills.accumulate_grad), args, kwargs
             )
 
         @register(math.radians)
@@ -410,7 +410,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfill.radians), args, kwargs
+                    SourcelessBuilder.create(tx, polyfills.radians), args, kwargs
                 )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
@@ -586,16 +586,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
-                # decompose foreach lerp into constituent ops, prevents a graph break due to
-                # converting a value to a scalar when arg[2] is a single tensor
-                result = TorchInGraphFunctionVariable(torch._foreach_sub).call_function(
-                    tx, [args[1], args[0]], {}
-                )
-                result = TorchInGraphFunctionVariable(torch._foreach_mul).call_function(
-                    tx, [result, args[2]], {}
-                )
-                return TorchInGraphFunctionVariable(torch._foreach_add_).call_function(
-                    tx, [args[0], result], {}
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_lerp_inplace),
+                    args,
+                    kwargs,
                 )
 
         @register(torch._foreach_pow)
@@ -605,10 +599,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
-                scalar_device = args[0].device
-                broadcast_arg_0 = ListVariable([args[0] for _ in args[1].items])
-                return TorchInGraphFunctionVariable(torch._foreach_pow).call_function(
-                    tx, [broadcast_arg_0, args[1]], {}
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_pow_scalar),
+                    args,
+                    kwargs,
                 )
 
         @register(torch._assert)
