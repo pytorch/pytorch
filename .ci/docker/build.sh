@@ -308,7 +308,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-xpu-2024.0-py3)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
