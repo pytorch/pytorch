@@ -29,6 +29,9 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
+# TODO: expose a single API
+__all__ = ["context_parallel"]
+
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 # Whether to upcast parameters and gradients to float32 to avoid accumulation

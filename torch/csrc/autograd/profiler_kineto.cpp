@@ -384,6 +384,14 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     eventPostProcessCb = std::move(cb);
   }
 
+  void pausePython() {
+    recordQueue.stop();
+  }
+
+  void resumePython() {
+    recordQueue.restart();
+  }
+
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
   finalizeTrace() {
     auto end_time = getTimeNs();
@@ -610,19 +618,69 @@ void prepareProfiler(
   }
 }
 
+static void toggleTorchOpCollectionDynamic(bool enable) {
+  auto state_ptr = ProfilerStateBase::get();
+  if (state_ptr) {
+    const auto& config = state_ptr->config();
+    if (enable) {
+      auto scopes = profiler_state_info_ptr->scopes;
+      config.global() ? pushProfilingCallbacks</*global=*/true>(scopes)
+                      : pushProfilingCallbacks</*global=*/false>(scopes);
+    } else {
+      state_ptr->removeCallback();
+    }
+  }
+}
+
+// Set this function to be unused as profiler implementation needs more
+// refactoring to support Python ops collection dynamic toggling
+#ifdef _MSC_VER
+#define UNUSED
+#else
+#define UNUSED __attribute__((unused))
+#endif
+static UNUSED void togglePythonCollectionDynamic(bool enable) {
+  auto state_ptr = ProfilerStateBase::get();
+  if (state_ptr) {
+    auto global = state_ptr->config().global();
+    KinetoThreadLocalState* kineto_thread_local_state_ptr =
+        KinetoThreadLocalState::get(global);
+    if (enable) {
+      kineto_thread_local_state_ptr->resumePython();
+    } else {
+      kineto_thread_local_state_ptr->pausePython();
+    }
+  }
+}
+
+static void toggleCPUCollectionDynamic(bool enable) {
+  toggleTorchOpCollectionDynamic(enable);
+  // For now we only support Torch Op collection dynamic toggling as
+  // implementing Python ops would require not only string parsing to get rid of
+  // the toggling events as well as other unfinished events as well as changes
+  // in stack logic
+  // togglePythonCollectionDynamic(enable);
+}
+
 void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  // TODO: CPU toggling should be done in this file to interface with collection
-  // similar to enableProfiler call GPU toggling is called in impl::kineto as is
+  if (activities.count(torch::autograd::profiler::ActivityType::CPU) > 0 &&
+      activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0) {
+    LOG(WARNING)
+        << "Toggling CPU activity with CUDA activity on may result in traces with CUDA events on artibrary tracks";
+  }
   for (auto act : activities) {
-    if (act != torch::autograd::profiler::ActivityType::CUDA) {
+    if (act == torch::autograd::profiler::ActivityType::CUDA) {
+      torch::profiler::impl::kineto::toggleCollectionDynamic(enable);
+    } else if (act == torch::autograd::profiler::ActivityType::CPU) {
+      toggleCPUCollectionDynamic(enable);
+    } else {
       LOG(WARNING)
-          << "Dynamic toggle is only supported for GPU activity, skipping toggling of "
+          << "Dynamic toggle is only supported for CPU/GPU activity, skipping toggling of "
           << actToString(act);
       continue;
     }
-    torch::profiler::impl::kineto::toggleCollectionDynamic(enable);
   }
 }
 
