@@ -1313,8 +1313,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu"):
         # No stacktrace found for following nodes
-        as_strided_default: "f32[3][1]cpu" = torch.ops.aten.as_strided.default(arg1_1, [3], [1], 0);  arg1_1 = None
-        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], as_strided_default, 2, arg0_1);  arg2_1 = arg3_1 = as_strided_default = arg0_1 = foo_default = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg2_1 = arg3_1 = arg1_1 = arg0_1 = foo_default = None
         return ()""",
                 )
 

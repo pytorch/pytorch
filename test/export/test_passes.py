@@ -1171,7 +1171,8 @@ def forward(self, add_1):
 graph():
     %b_state : [num_users=2] = placeholder[target=b_state]
     %x : [num_users=1] = placeholder[target=x]
-    %custom_mutator_tuple_default : [num_users=2] = call_function[target=torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator_tuple.default](args = (%x, %b_state), kwargs = {})
+    %custom_mutator_tuple_default : [num_users=2] = call_function[target=torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator_tuple.\
+default](args = (%x, %b_state), kwargs = {})
     %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%custom_mutator_tuple_default, 0), kwargs = {})
     %getitem_4 : [num_users=1] = call_function[target=operator.getitem](args = (%custom_mutator_tuple_default, 1), kwargs = {})
     return (b_state, getitem_3, getitem_4)""",
