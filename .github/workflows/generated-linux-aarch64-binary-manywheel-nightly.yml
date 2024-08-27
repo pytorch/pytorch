@@ -58,7 +58,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
       
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -124,7 +124,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda-aarch64
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
       
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -169,7 +169,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
       
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -235,7 +235,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda-aarch64
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
       
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -280,7 +280,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
       
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -346,7 +346,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda-aarch64
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
       
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -391,7 +391,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
       
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -457,7 +457,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda-aarch64
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
       
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"

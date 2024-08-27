@@ -53,10 +53,10 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-2.4
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-2.4
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -77,7 +77,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-2.4
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11

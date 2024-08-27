@@ -60,9 +60,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cpu.result == 'skipped' && pytorch/conda-builder:cpu-main || needs.calculate-conda-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cpu.result == 'skipped' && pytorch/conda-builder:cpu-2.4 || needs.calculate-conda-builder-cpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_9-cpu
@@ -83,7 +83,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
@@ -105,7 +105,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
     secrets:
@@ -129,9 +129,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda11.8.result == 'skipped' && pytorch/conda-builder:cuda11.8-main || needs.calculate-conda-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda11.8.result == 'skipped' && pytorch/conda-builder:cuda11.8-2.4 || needs.calculate-conda-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -154,7 +154,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
@@ -177,7 +177,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_8
     secrets:
@@ -201,9 +201,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.1.result == 'skipped' && pytorch/conda-builder:cuda12.1-main || needs.calculate-conda-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.1.result == 'skipped' && pytorch/conda-builder:cuda12.1-2.4 || needs.calculate-conda-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -226,7 +226,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
@@ -249,7 +249,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_1
     secrets:
@@ -273,9 +273,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.4.result == 'skipped' && pytorch/conda-builder:cuda12.4-main || needs.calculate-conda-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.4.result == 'skipped' && pytorch/conda-builder:cuda12.4-2.4 || needs.calculate-conda-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -298,7 +298,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
@@ -321,7 +321,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_4
     secrets:
@@ -344,9 +344,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cpu.result == 'skipped' && pytorch/conda-builder:cpu-main || needs.calculate-conda-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cpu.result == 'skipped' && pytorch/conda-builder:cpu-2.4 || needs.calculate-conda-builder-cpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_10-cpu
@@ -367,7 +367,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
@@ -389,7 +389,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
     secrets:
@@ -413,9 +413,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda11.8.result == 'skipped' && pytorch/conda-builder:cuda11.8-main || needs.calculate-conda-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda11.8.result == 'skipped' && pytorch/conda-builder:cuda11.8-2.4 || needs.calculate-conda-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -438,7 +438,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
@@ -461,7 +461,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_8
     secrets:
@@ -485,9 +485,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.1.result == 'skipped' && pytorch/conda-builder:cuda12.1-main || needs.calculate-conda-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.1.result == 'skipped' && pytorch/conda-builder:cuda12.1-2.4 || needs.calculate-conda-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -510,7 +510,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
@@ -533,7 +533,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_1
     secrets:
@@ -557,9 +557,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.4.result == 'skipped' && pytorch/conda-builder:cuda12.4-main || needs.calculate-conda-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.4.result == 'skipped' && pytorch/conda-builder:cuda12.4-2.4 || needs.calculate-conda-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -582,7 +582,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
@@ -605,7 +605,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_4
     secrets:
@@ -628,9 +628,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cpu.result == 'skipped' && pytorch/conda-builder:cpu-main || needs.calculate-conda-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cpu.result == 'skipped' && pytorch/conda-builder:cpu-2.4 || needs.calculate-conda-builder-cpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_11-cpu
@@ -651,7 +651,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
@@ -673,7 +673,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
     secrets:
@@ -697,9 +697,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda11.8.result == 'skipped' && pytorch/conda-builder:cuda11.8-main || needs.calculate-conda-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda11.8.result == 'skipped' && pytorch/conda-builder:cuda11.8-2.4 || needs.calculate-conda-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -722,7 +722,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
@@ -745,7 +745,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda11_8
     secrets:
@@ -769,9 +769,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.1.result == 'skipped' && pytorch/conda-builder:cuda12.1-main || needs.calculate-conda-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.1.result == 'skipped' && pytorch/conda-builder:cuda12.1-2.4 || needs.calculate-conda-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -794,7 +794,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
@@ -817,7 +817,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_1
     secrets:
@@ -841,9 +841,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.4.result == 'skipped' && pytorch/conda-builder:cuda12.4-main || needs.calculate-conda-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.4.result == 'skipped' && pytorch/conda-builder:cuda12.4-2.4 || needs.calculate-conda-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -866,7 +866,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
@@ -889,7 +889,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_4
     secrets:
@@ -912,9 +912,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cpu.result == 'skipped' && pytorch/conda-builder:cpu-main || needs.calculate-conda-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cpu.result == 'skipped' && pytorch/conda-builder:cpu-2.4 || needs.calculate-conda-builder-cpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_12-cpu
@@ -935,7 +935,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
@@ -957,7 +957,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.4
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cpu
     secrets:
@@ -981,9 +981,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda11.8.result == 'skipped' && pytorch/conda-builder:cuda11.8-main || needs.calculate-conda-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda11.8.result == 'skipped' && pytorch/conda-builder:cuda11.8-2.4 || needs.calculate-conda-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -1006,7 +1006,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
@@ -1029,7 +1029,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.4
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda11_8
     secrets:
@@ -1053,9 +1053,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.1.result == 'skipped' && pytorch/conda-builder:cuda12.1-main || needs.calculate-conda-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.1.result == 'skipped' && pytorch/conda-builder:cuda12.1-2.4 || needs.calculate-conda-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -1078,7 +1078,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
@@ -1101,7 +1101,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.4
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_1
     secrets:
@@ -1125,9 +1125,9 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.4.result == 'skipped' && pytorch/conda-builder:cuda12.4-main || needs.calculate-conda-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-conda-builder-cuda12.4.result == 'skipped' && pytorch/conda-builder:cuda12.4-2.4 || needs.calculate-conda-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -1150,7 +1150,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
@@ -1173,7 +1173,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-2.4
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_4
     secrets:

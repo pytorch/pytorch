@@ -58,7 +58,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.4
       
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -123,7 +123,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.4
       
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -188,7 +188,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.4
       
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -253,7 +253,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.4
       
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -318,7 +318,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DESIRED_PYTHON: "3.13"
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.4
       
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
