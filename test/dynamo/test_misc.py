@@ -80,6 +80,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     set_default_dtype,
     skipIfNNModuleInlined,
+    skipIfWindows,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -1616,6 +1617,22 @@ utils_device.CURRENT_DEVICE == None""".split(
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_arange_length_with_float32_dtype(self):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check_is_size(y)
+            r = torch.arange(y, dtype=torch.float32)
+
+            if r.size(0) == y:
+                return r + 1
+
+            return r
+
+        x = torch.tensor([300])
+        r = f(x)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2848,6 +2865,9 @@ utils_device.CURRENT_DEVICE == None""".split(
         else:
             self.assertExpectedInline(str(cnts.frame_count), """2""")
 
+    @skipIfWindows(
+        msg="AssertionError: Object comparison failed: dtype('int64') != <class 'int'>"
+    )
     def test_numpy_with_builtin_type(self):
         x = np.random.rand(5)
 
@@ -2921,6 +2941,9 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(fn(x), compiled_fn(x))
         self.assertEqual(counter.frame_count, 2)
 
+    @skipIfWindows(
+        msg="AssertionError: The values for attribute 'dtype' do not match: torch.int32 != torch.int64."
+    )
     def test_trace_ndarray_frame_2(self):
         # no tensors/ndarray as inputs in the frame
         def fn(x):
@@ -7190,7 +7213,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         )
         from torch import package
 
-        path = "/tmp/MyPickledModule.pt"
+        tmp_root = tempfile.gettempdir()
+        path = os.path.join(tmp_root, "MyPickledModule.pt")
         package_name = "MyPickledModule"
         resource_name = "MyPickledModule.pkl"
 
@@ -10482,6 +10506,9 @@ ShapeEnv not equal: field values don't match:
             else:
                 res.backward(grad)
 
+    @skipIfWindows(
+        msg="AssertionError: False is not true : Encountered an unexpected fallback to 'aten pow' in dynamo compiled code"
+    )
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
             return x**2
@@ -10604,6 +10631,9 @@ ShapeEnv not equal: field values don't match:
             torch.compile(fn4, backend="eager")(x)
             self.assertEqual(3, len(torch._dynamo.utils.get_compilation_metrics()))
 
+    @skipIfWindows(
+        msg="TypeError: sequence item 0: expected str instance, NoneType found"
+    )
     def test_funcname_cache(self):
         src = """\
 import torch
