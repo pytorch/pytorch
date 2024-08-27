@@ -439,8 +439,11 @@ def forward_block_mn(
         # If this is the last block of a non divisible seqlen, we still need to load [BLOCK_M, BLOCK_N] elements,
         # which is larger than the actual number of elements. To avoid access memory out of bound,
         # we need to mask out the elements that are out of Q_LEN & KV_LEN.
-        offs_m = offs_m % Q_LEN
-        offs_n = offs_n % KV_LEN
+        m = offs_m % Q_LEN
+        n = offs_n % KV_LEN
+    else:
+        m = offs_m
+        n = offs_n
 
     {{ modification(
         subgraph_number=0,
@@ -448,8 +451,8 @@ def forward_block_mn(
         score="qk",
         b="off_z",
         h="off_h",
-        m="offs_m",
-        n="offs_n",
+        m="m",
+        n="n",
         out="qk"
     ) | indent_except_first(1) }}
 
@@ -464,8 +467,8 @@ def forward_block_mn(
             score="qk",
             b="off_z",
             h="off_h",
-            m="offs_m",
-            n="offs_n",
+            m="m",
+            n="n",
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
@@ -1602,9 +1605,6 @@ def flex_attention_backward(*args, **kwargs):
             full_q_indices,
         ]
     )
-
-    if _use_flex_decoding(query, kernel_options):
-        raise NotImplementedError("Flex decoding backward pass is not implemented. ")
 
     device = query.get_device()
     dtype = query.get_dtype()
