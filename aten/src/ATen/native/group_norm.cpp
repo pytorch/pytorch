@@ -80,7 +80,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   auto memory_format = X.device().is_cpu() ?
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
-  TORCH_CHECK(X.is_contiguous(memory_format) || (X.device().is_xpu() && memory_format == at::MemoryFormat::Contiguous));
+  TORCH_CHECK(X.is_contiguous(memory_format));
 
   bool mixed_type = is_mixed_type(X, gamma, beta);
   if (mixed_type) {
@@ -197,8 +197,7 @@ Tensor group_norm(
 
   const Tensor kEmpty;
   auto memory_format = input.suggest_memory_format();
-  const auto& X = input.device().is_cpu() || input.device().is_xpu() ?
-      input.contiguous(memory_format) : input.contiguous();
+  const auto& X = input.device().is_cpu() ? input.contiguous(memory_format) : input.contiguous();
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.sym_numel() == C);
