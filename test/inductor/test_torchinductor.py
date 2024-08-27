@@ -7951,7 +7951,6 @@ class CommonTemplate:
         out = [torch.empty_like(x) for _ in range(2)]
         y = g(x)
 
-    @expectedFailureXPU
     def test_functionalize_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But
         # currently the plan is to introduce these operators at the partitioner
