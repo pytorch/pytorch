@@ -1652,10 +1652,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         kernel_options = {"FORCE_USE_FLEX_ATTENTION": True}
-        out_eager, lse_eager = flex_attention(query, key, value, return_lse=True, kernel_options=kernel_options)
+        out_eager, lse_eager = flex_attention(
+            query, key, value, return_lse=True, kernel_options=kernel_options
+        )
 
         flex_compile = torch.compile(flex_attention, fullgraph=True)
-        out_compiled, lse_compiled = flex_compile(query, key, value, return_lse=True, kernel_options=kernel_options)
+        out_compiled, lse_compiled = flex_compile(
+            query, key, value, return_lse=True, kernel_options=kernel_options
+        )
 
         assert torch.equal(out_eager, out_compiled)
         assert torch.equal(lse_eager, lse_compiled)
