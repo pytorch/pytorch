@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-from enum import Enum
+from enum import auto, Enum
 from typing import (  # type: ignore[attr-defined]
     _eval_type,
     Any,
@@ -158,15 +158,17 @@ class MatchState(Enum):
     - SIZE_OR_SYNTAX_MISMATCH: There is a mismatch in input/output sizes or violation of collective syntax.
     - COLLECTIVE_STATE_MISMATCH:
         The states of the collective not same, such as one finished while another just started or scheduled.
+    - COLLECTIVE_DTYPE_MISMATCH: The data types of the collective input/output differ.
     - UNDECIDED:
         The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for alltoall_base.
     """
 
-    FULLY_MATCHED = 1
-    COLLECTIVE_TYPE_MISMATCH = 2
-    SIZE_OR_SYNTAX_MISMATCH = 3
-    COLLECTIVE_STATE_MISMATCH = 4
-    UNDECIDED = 5
+    FULLY_MATCHED = auto()
+    COLLECTIVE_TYPE_MISMATCH = auto()
+    SIZE_OR_SYNTAX_MISMATCH = auto()
+    COLLECTIVE_STATE_MISMATCH = auto()
+    COLLECTIVE_DTYPE_MISMATCH = auto()
+    UNDECIDED = auto()
 
     def __call__(self, culprit: Optional[str] = None) -> "MatchState":
         # Make the enum instance callable to add culprit.
@@ -194,9 +196,7 @@ class Op:
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
         self.state = event["state"]
-
         self.pg_name, _ = event["process_group"]
-
         assert type in COLLECTIVES | P2P | {
             "coalesced"
         }, f"{type} is not a supported operation"
@@ -212,7 +212,6 @@ class Op:
         pg_name, pg_desc = event["process_group"]
         self._init_global_src_dst(memberships[pg_name])
         self.pg_size = len(memberships[pg_name])
-
         if type in P2P | COLLECTIVES:
             self.input_sizes = event["input_sizes"]
             self.output_sizes = event["output_sizes"]
@@ -220,6 +219,8 @@ class Op:
             self.input_sizes, self.output_sizes = None, None
         self.collective_seq_id = event["collective_seq_id"]
         self.p2p_seq_id = event["p2p_seq_id"]
+        self.input_dtypes = event["input_dtypes"]
+        self.output_dtypes = event["output_dtypes"]
 
     def _init_global_src_dst(self, pg_ranks: Set[Any]) -> None:
         pg_ranks = sorted(pg_ranks)
@@ -281,6 +282,14 @@ class Op:
                 # MatchState()
                 return MatchState.COLLECTIVE_STATE_MISMATCH(
                     f"States '{self.state}' '{other.state}' do not match"
+                )
+            if (
+                other.input_dtypes != other.output_dtypes
+                or self.input_dtypes != other.input_dtypes
+                or self.output_dtypes != other.output_dtypes
+            ):
+                return MatchState.COLLECTIVE_DTYPE_MISMATCH(
+                    f"Dtypes '{self.input_dtypes}/{other.input_dtypes}' '{self.output_dtypes}/{other.output_dtypes}' do not match"
                 )
             if self.type == "all_to_all":
                 return MatchState.UNDECIDED
