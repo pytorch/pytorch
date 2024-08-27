@@ -206,12 +206,28 @@ if RUN_CPU:
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise_binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise__binary.call"],
+            ],
         ),
         BaseTest(
             "test_conv2d_binary_inplace_fusion_pass",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise__binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise_binary.call"],
+            ],
         ),
         BaseTest(
             "test_conv2d_unary",
