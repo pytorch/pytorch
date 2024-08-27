@@ -969,15 +969,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def generate_causal_offset(offset: torch.Tensor):
             def causal_offset_mask(b, h, q_idx, kv_idx):
                 return (offset + q_idx) >= kv_idx
+
             return causal_offset_mask
 
         prefill = 128
         max_seq_new_tokens = 500
         B, H, HEAD_DIM = 1, 32, 64
         start_offset = torch.tensor(prefill, device="cuda", dtype=torch.int32)
-        query = torch.rand(B, 1, H, HEAD_DIM, device="cuda", dtype=torch.float16).transpose(
-            1, 2
-        )
+        query = torch.rand(
+            B, 1, H, HEAD_DIM, device="cuda", dtype=torch.float16
+        ).transpose(1, 2)
 
         for i in range(max_seq_new_tokens):
             key = torch.rand(
