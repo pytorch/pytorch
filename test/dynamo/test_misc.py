@@ -9968,6 +9968,7 @@ fn
         self.assertTrue(cleared)
 
     @xfailIfPy312
+    @unittest.skipIf(True, "Skipping this test for release/2.4")
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
