@@ -8948,7 +8948,6 @@ class TestNNDeviceType(NNTestCase):
                     else:
                         self.assertEqual(hx.grad, hx_device.grad)
 
-    @expectedFailureMPS  # TypeError: float64 https://github.com/pytorch/pytorch/issues/134423
     @dtypesIfMPS(torch.float)
     @dtypes(torch.double)
     def test_BatchNorm_empty(self, device, dtype):
