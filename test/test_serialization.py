@@ -4052,7 +4052,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @parametrize('path_type', (str, Path))
     @parametrize('weights_only', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_mmap_loading(self, weights_only, path_type):
+    def test_serialization_mmap_loading_options(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -4101,7 +4101,7 @@ class TestSerialization(TestCase, SerializationMixin):
             for v in result.values():
                 self.assertTrue(v.is_cuda)
 
-    def test_serialization_mmap_loading_options(self):
+    def test_serialization_mmap_loading(self):
         if IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "Changing the default mmap options is currently not supported"):
                 torch.serialization.set_default_mmap_options(2)
@@ -4232,6 +4232,7 @@ class TestWrapperSubclass(torch.Tensor):
 
     def clone(self):
         return type(self)(self.elem.clone())
+
 
 
 class TestGetStateSubclass(torch.Tensor):
