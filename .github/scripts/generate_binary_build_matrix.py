@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 CUDA_ARCHES = ["11.8", "12.1", "12.4"]
 
 
-CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1", "12.4": "12.4.0"}
+CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1", "12.4": "12.4.1"}
 
 
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.1": "9", "12.4": "9"}
@@ -68,18 +68,18 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "12.4": (
-        "nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        "nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
 
@@ -365,10 +365,9 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # TODO: Enable python 3.13 on rocm, xpu, aarch64, windows
+            # TODO: Enable python 3.13 on rocm, aarch64, windows
             if (
-                gpu_arch_type in ["rocm", "xpu"]
-                or (os != "linux" and os != "linux-s390x")
+                gpu_arch_type == "rocm" or (os != "linux" and os != "linux-s390x")
             ) and python_version == "3.13":
                 continue
 
