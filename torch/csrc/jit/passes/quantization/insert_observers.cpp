@@ -1120,8 +1120,7 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // offset of input for the caller node, since the first
         // input of CallFunction is the function node and the graph
         // for CallFunction start with actual input
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        size_t input_offset;
+        size_t input_offset = 0;
         if (n->kind() == prim::CallMethod) {
           auto m_opt = getInvokedModuleOpt(module, n, self);
           if (!m_opt.has_value()) {
@@ -1469,8 +1468,7 @@ InsertObserversHelper::insertObserversFor(
       if (n->kind() == prim::CallMethod || userDefinedCallFunction(n)) {
         script::Module m;
         std::shared_ptr<Graph> g;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        size_t input_offset;
+        size_t input_offset = 0;
         bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {
           auto m_opt = getInvokedModuleOpt(module, n, self);

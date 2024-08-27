@@ -1626,6 +1626,14 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
 
+        @torch.compile(backend="eager", fullgraph=True)
+        def g(x):
+            typ = type(Foo())
+            typ.__base__
+            return typ.__base__
+
+        self.assertEqual(g(torch.randn(1)), Multistreamable)
+
     @parametrize("dynamic", [False, True])
     def test_subclass_views(self, dynamic):
         def _get_views(t):  # returns (view: Tensor, expects_raises_false)
