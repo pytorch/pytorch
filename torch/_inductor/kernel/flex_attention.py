@@ -1606,9 +1606,6 @@ def flex_attention_backward(*args, **kwargs):
         ]
     )
 
-    if _use_flex_decoding(query, kernel_options):
-        raise NotImplementedError("Flex decoding backward pass is not implemented. ")
-
     device = query.get_device()
     dtype = query.get_dtype()
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
