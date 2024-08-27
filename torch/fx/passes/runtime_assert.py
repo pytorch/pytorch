@@ -44,18 +44,6 @@ def _get_example_value(node: fx.Node) -> Optional[str]:
         return None
 
 
-def _get_example_value_key(node: fx.Node) -> Optional[str]:
-    """
-    actually just run this once at start of pass, based on first node, and constantly use that.
-    """
-    if "example_value" in node.meta:
-        return "example_value"
-    elif "val" in node.meta:
-        return "val"
-    else:
-        return None
-
-
 def _get_sym_val(node: fx.Node) -> Optional["sympy.Expr"]:
     val = _get_example_value(node)
     if isinstance(val, py_sym_types):
@@ -171,7 +159,7 @@ def insert_deferred_runtime_asserts(
             _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
             for arg in node.args
         ]
-        node.meta[val_key] = node.target(*fake_args)
+        node.meta[val_key] = node.target(*fake_args)  # type: ignore[operator]
         if stack_trace is not None:
             node.meta["stack_trace"] = stack_trace
         if nn_module_stack is not None:
@@ -365,11 +353,12 @@ def insert_deferred_runtime_asserts(
                         node
                     ):  # reify from input shapes
                         with _set_node_metadata_hook(
-                            gm, functools.partial(
+                            gm,
+                            functools.partial(
                                 _node_metadata_hook,
                                 stack_trace=node.meta.get("stack_trace"),
                                 nn_module_stack=node.meta.get("nn_module_stack"),
-                            )
+                            ),
                         ):
                             expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)  # type: ignore[arg-type]
                         # won't try DCE-ing tensor compute here
@@ -568,7 +557,6 @@ def insert_deferred_runtime_asserts(
                             )
                         ):
                             if (min_val := convert(vr.lower)) is not None:
-                                
                                 ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
                                 graph.call_function(
                                     torch.ops.aten._assert_scalar.default,
