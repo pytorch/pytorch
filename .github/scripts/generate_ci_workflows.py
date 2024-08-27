@@ -122,7 +122,6 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
             isolated_workflow=True,
         ),
-        build_docker_images={}
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -137,7 +136,6 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
         ),
-        build_docker_images={}
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -152,7 +150,6 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
         ),
-        build_docker_images={}
     ),
 ]
 
