@@ -135,7 +135,7 @@ class TestRuntimeEstimator(TestCase):
     ):
         """Runs a basic GPT-2 model"""
         vocab_size = 8192
-        bsz, seq_len = 64, 1024
+        bsz, seq_len = 8, 1024
         model_args = ModelArgs(
             n_layers=4,
             n_heads=12,
@@ -147,7 +147,6 @@ class TestRuntimeEstimator(TestCase):
 
         args = self._init_model_and_args("Transformer", model_args, bsz)
         actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
-
         with FakeTensorMode():
             fake_args = self._init_model_and_args("Transformer", model_args, bsz)
             benchmark_estimate = self._runtime_estimate(
@@ -176,7 +175,6 @@ class TestRuntimeEstimator(TestCase):
         model_args = ConvArgs(img_sz, num_classes)
         args = self._init_model_and_args("CNN", model_args, bsz)
         actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
-        print(torch.cuda.max_memory_allocated())
         with FakeTensorMode():
             fake_args = self._init_model_and_args("CNN", model_args, bsz)
             benchmark_estimate = self._runtime_estimate(
