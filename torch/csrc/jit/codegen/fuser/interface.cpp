@@ -8,7 +8,8 @@
 #include <c10/util/Flags.h>
 #include <stdexcept>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace detail {
 
@@ -104,4 +105,5 @@ size_t nCompiledKernels() {
   return fuser::nCompiledKernels();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

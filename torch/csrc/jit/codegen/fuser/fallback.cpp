@@ -9,7 +9,9 @@
 
 #include <stdexcept>
 
-namespace torch::jit::fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 namespace {
 c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
@@ -44,4 +46,6 @@ void runFallback(int64_t key, Stack& stack) {
   InterpreterState{(*maybe_spec)->code()}.run(stack);
 }
 
-} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

@@ -3920,10 +3920,11 @@
   tags: core
 
 # For normal naming convention this should be `mean.out`. However since we already have `mean.out` we have to rename this.
-- func: mean.dtype_out(Tensor self, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  dispatch:
-    CompositeExplicitAutograd: mean_dtype_out
+# FIXME: fix CI jobs and re-enable this
+#- func: mean.dtype_out(Tensor self, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+#  device_check: NoCheck   # TensorIterator
+#  dispatch:
+#    CompositeExplicitAutograd: mean_dtype_out
 
 - func: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: mean.out
