@@ -1428,6 +1428,20 @@ class BuiltinVariable(VariableTracker):
         else:
             unimplemented(f"set(): {args} {kwargs}")
 
+    def call_frozenset(self, tx: "InstructionTranslator", *args, **kwargs):
+        assert not kwargs
+        if not args:
+            return SetVariable([])
+        assert len(args) == 1
+        arg = args[0]
+        if isinstance(arg, variables.SetVariable):
+            return arg.clone()
+        elif arg.has_unpack_var_sequence(tx):
+            items = arg.unpack_var_sequence(tx)
+            return SetVariable(items)
+        else:
+            unimplemented(f"frozenset(): {args} {kwargs}")
+
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
         if kwargs:
             assert len(kwargs) == 1 and "strict" in kwargs
