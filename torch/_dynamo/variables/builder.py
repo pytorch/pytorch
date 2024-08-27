@@ -1511,6 +1511,13 @@ class VariableBuilder:
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
             unimplemented("torch.compile does not support sparse Tensors")
 
+        if value.grad is not None and value.dtype != value.grad.dtype:
+            unimplemented(
+                "Inconsistent dtype between tensor and its gradient. "
+                "This can happen in FSDP and crashes meta tensor creation. "
+                "This is potentially a workaround. Fixing it correctly "
+                "requires some design around FSDP + torch.compile."
+            )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
