@@ -573,8 +573,7 @@ inline std::tuple<dim3, dim3, StackArray<int64_t>> check_shape_and_partition_(
   const auto jagged_folded_size =
       dense_tensor.numel() / (outer_dense_size * inner_dense_size);
 
-  const int64_t threads_x =
-      inner_dense_size >= kWarpSize / 2 ? kWarpSize : inner_dense_size;
+  const int threads_x = static_cast<int>(inner_dense_size >= kWarpSize / 2 ? kWarpSize : inner_dense_size);
   const int threads_y = kMaxThreads / kWarpSize;
   const dim3 blocks(
       div_round_up(static_cast<int32_t>(outer_dense_size * jagged_folded_size), threads_y));
@@ -846,7 +845,7 @@ __launch_bounds__(kMaxThreads) void jagged_dense_dense_elementwise_jagged_output
     if (!truncated) {
       const auto oidx = offset_temp;
       unsigned int iidx = 0;
-      for (iidx = threadIdx.x; iidx * 2 + 1 < inner_dense_size;
+      for (iidx = threadIdx.x; iidx * 2 + 1 < static_cast<unsigned int>(inner_dense_size);
            iidx += blockDim.x) {
         output_values[offset][2 * iidx] =
             f(x_values[offset][2 * iidx],
@@ -941,7 +940,7 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_search_kernel_(
   struct SharedMemory<index_t> smem;
   index_t* offsets_sh = smem.getPointer();
 
-  for (unsigned int i = threadIdx.x; i < B + 1; i += blockDim.x) {
+  for (auto i = threadIdx.x; i < static_cast<unsigned int>(B) + 1; i += blockDim.x) {
     offsets_sh[i] = offsets[i];
   }
   __syncthreads();
@@ -1073,13 +1072,13 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
     const at::PackedTensorAccessor32<c10::Half, 3, at::RestrictPtrTraits> y1,
     const at::PackedTensorAccessor32<int, 1, at::RestrictPtrTraits> rows,
     const at::PackedTensorAccessor32<int, 1, at::RestrictPtrTraits> cols,
-    const int nnz,
-    const int E,
+    const unsigned int nnz,
+    const unsigned int E,
     F f) {
   auto values_row = threadIdx.y + blockIdx.y * blockDim.y;
   if (values_row >= nnz)
     return;
-  for (int real_row = static_cast<int>(values_row); real_row < nnz;
+  for (int real_row = static_cast<int>(values_row); real_row < static_cast<int>(nnz);
        real_row += static_cast<int>(blockDim.y * gridDim.y)) {
     int dense_row = rows[real_row];
     int dense_col = cols[real_row];
