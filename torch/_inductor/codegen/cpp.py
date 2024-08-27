@@ -3269,6 +3269,7 @@ class TilingSelect:
                     )
                     < len(itervars)
                 )
+
             group, reduction_group = max(
                 var_sizes_list, key=lambda sizes: len(sizes[1])
             )
@@ -3382,7 +3383,9 @@ class TilingSelect:
                         tiling_len = V.graph.sizevars.size_hint(
                             call_ranges[tiling_indice], fallback=0
                         )
-                        if tiling_len < cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype):
+                        if tiling_len < cpu_vec_isa.pick_vec_isa().nelements(
+                            dtype=dtype
+                        ):
                             V.graph.sizevars.guard_lt(
                                 tiling_len,
                                 cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype),
