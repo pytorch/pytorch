@@ -642,6 +642,7 @@ class TORCH_API RecordQueue {
   bool tracePython() const;
   ThreadLocalSubqueue* getSubqueue();
   void stop();
+  void restart();
 
   // NB: This is a destructive operation.
   std::pair<
