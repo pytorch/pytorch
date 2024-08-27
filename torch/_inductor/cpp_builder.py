@@ -15,6 +15,7 @@ import subprocess
 import sys
 import sysconfig
 import warnings
+from ctypes import cdll
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
@@ -131,6 +132,9 @@ def check_compiler_exist_windows(compiler: str) -> None:
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+    except subprocess.SubprocessError:
+        # Expected that some compiler(clang, clang++) is exist, but they not support `/help` args.
+        pass
 
 
 def get_cpp_compiler() -> str:
@@ -158,6 +162,13 @@ def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
         return _is_apple_clang(cpp_compiler)
+    elif _IS_WINDOWS:
+        # clang suite have many compilers, and only clang-cl is supported.
+        if re.search(r"((clang$)|(clang\+\+$))", cpp_compiler):
+            raise RuntimeError(
+                "Please use clang-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
+            )
+        return bool(re.search(r"(clang-cl)", cpp_compiler))
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
@@ -412,7 +423,9 @@ def _get_cpp_std_cflag(std_num: str = "c++17") -> List[str]:
         """
         On Windows, only c++20 can support `std::enable_if_t`.
         Ref: https://learn.microsoft.com/en-us/cpp/overview/cpp-conformance-improvements-2019?view=msvc-170#checking-for-abstract-class-types # noqa: B950
-        TODO: discuss upgrade pytorch to c++20.
+        Note:
+            Only setup c++20 for Windows inductor. I tried to upgrade all project to c++20, but it is failed:
+            https://github.com/pytorch/pytorch/pull/131504
         """
         std_num = "c++20"
         return [f"std:{std_num}"]
@@ -598,11 +611,6 @@ def _use_fb_internal_macros() -> List[str]:
             create_tensor_from_blob_v1 = "AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
 
             fb_internal_macros.append(create_tensor_from_blob_v1)
-
-            # TODO: remove comments later:
-            # Moved to _get_openmp_args
-            # openmp_lib = build_paths.openmp_lib()
-            # return [f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"]
             return fb_internal_macros
         else:
             return []
@@ -764,6 +772,20 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+@functools.lru_cache(None)
+def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
+    try:
+        output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
+            "utf8"
+        )
+        omp_path = os.path.join(output.rstrip(), omp_name)
+        if os.path.isfile(omp_path):
+            os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+            omp_module = cdll.LoadLibrary(omp_path)
+    except subprocess.SubprocessError:
+        pass
+
+
 def _get_openmp_args(
     cpp_compiler: str,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
@@ -820,11 +842,16 @@ def _get_openmp_args(
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
     elif _IS_WINDOWS:
-        # /openmp, /openmp:llvm
-        # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
-        # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
-        cflags.append("openmp")
-        cflags.append("openmp:experimental")  # MSVC CL
+        if _is_clang(cpp_compiler):
+            cflags.append("openmp")
+            libs.append("libomp")
+            perload_clang_libomp_win(cpp_compiler, "libomp.dll")
+        else:
+            # /openmp, /openmp:llvm
+            # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
+            # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
+            cflags.append("openmp")
+            cflags.append("openmp:experimental")  # MSVC CL
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp())
@@ -1085,10 +1112,11 @@ def get_cpp_torch_cuda_options(
         else:
             include_dirs.append(os.path.join(build_paths.cuda(), "include"))
 
-    if aot_mode and cuda and config.is_fbcode() and not compile_only:
-        if torch.version.hip is None:
-            # TODO: make static link better on Linux.
-            passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+        if aot_mode and cuda:
+            if torch.version.hip is None:
+                if not compile_only:
+                    # Only add link args, when compile_only is false.
+                    passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
 
     return (
         definations,
@@ -1237,13 +1265,6 @@ class CppBuilder:
         self._use_absolute_path = BuildOption.get_use_absolute_path()
         self._aot_mode = BuildOption.get_aot_mode()
 
-        """
-        TODO: validate and remove:
-        if len(output_dir) == 0:
-            self._output_dir = os.path.dirname(os.path.abspath(__file__))
-        else:
-            self._output_dir = output_dir
-        """
         self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
