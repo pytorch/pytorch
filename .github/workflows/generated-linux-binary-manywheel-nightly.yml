@@ -270,7 +270,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-2.4 || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-main || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cpu
@@ -336,7 +336,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.4 || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cpu-cxx11-abi
@@ -404,7 +404,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda11_8
@@ -474,7 +474,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda11_8-split
@@ -545,7 +545,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_1
@@ -615,7 +615,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_1-split
@@ -686,7 +686,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_4
@@ -756,7 +756,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_4-split
@@ -827,7 +827,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.1.result == 'skipped' && pytorch/manylinux-builder:rocm6.1-2.4 || needs.calculate-manywheel-builder-rocm6.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.1.result == 'skipped' && pytorch/manylinux-builder:rocm6.1-main || needs.calculate-manywheel-builder-rocm6.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-rocm6_1
@@ -891,7 +891,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.1-2.4
+          docker-image: pytorch/manylinux-builder:rocm6.1-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -935,7 +935,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 6.2
       GPU_ARCH_TYPE: rocm
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.2.result == 'skipped' && pytorch/manylinux-builder:rocm6.2-2.4 || needs.calculate-manywheel-builder-rocm6.2.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.2.result == 'skipped' && pytorch/manylinux-builder:rocm6.2-main || needs.calculate-manywheel-builder-rocm6.2.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-rocm6_2
@@ -999,7 +999,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.2-2.4
+          docker-image: pytorch/manylinux-builder:rocm6.2-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1042,7 +1042,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-xpu.result == 'skipped' && pytorch/manylinux2_28-builder:xpu-2.4 || needs.calculate-manywheel-builder-xpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-xpu.result == 'skipped' && pytorch/manylinux2_28-builder:xpu-main || needs.calculate-manywheel-builder-xpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-xpu
@@ -1114,7 +1114,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.4
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -1156,7 +1156,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-2.4 || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-main || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cpu
@@ -1222,7 +1222,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.4 || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cpu-cxx11-abi
@@ -1290,7 +1290,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda11_8
@@ -1360,7 +1360,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda11_8-split
@@ -1431,7 +1431,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_1
@@ -1501,7 +1501,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_1-split
@@ -1573,7 +1573,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: False
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_1-full
@@ -1643,7 +1643,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_4
@@ -1713,7 +1713,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_4-split
@@ -1784,7 +1784,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.1.result == 'skipped' && pytorch/manylinux-builder:rocm6.1-2.4 || needs.calculate-manywheel-builder-rocm6.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.1.result == 'skipped' && pytorch/manylinux-builder:rocm6.1-main || needs.calculate-manywheel-builder-rocm6.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-rocm6_1
@@ -1848,7 +1848,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.1-2.4
+          docker-image: pytorch/manylinux-builder:rocm6.1-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1892,7 +1892,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 6.2
       GPU_ARCH_TYPE: rocm
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.2.result == 'skipped' && pytorch/manylinux-builder:rocm6.2-2.4 || needs.calculate-manywheel-builder-rocm6.2.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.2.result == 'skipped' && pytorch/manylinux-builder:rocm6.2-main || needs.calculate-manywheel-builder-rocm6.2.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-rocm6_2
@@ -1956,7 +1956,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.2-2.4
+          docker-image: pytorch/manylinux-builder:rocm6.2-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1999,7 +1999,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DESIRED_PYTHON: "3.10"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-xpu.result == 'skipped' && pytorch/manylinux2_28-builder:xpu-2.4 || needs.calculate-manywheel-builder-xpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-xpu.result == 'skipped' && pytorch/manylinux2_28-builder:xpu-main || needs.calculate-manywheel-builder-xpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-xpu
@@ -2071,7 +2071,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.4
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -2113,7 +2113,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-2.4 || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-main || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cpu
@@ -2179,7 +2179,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.4 || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cpu-cxx11-abi
@@ -2247,7 +2247,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda11_8
@@ -2317,7 +2317,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda11_8-split
@@ -2388,7 +2388,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_1
@@ -2458,7 +2458,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_1-split
@@ -2529,7 +2529,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_4
@@ -2599,7 +2599,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_4-split
@@ -2670,7 +2670,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.1.result == 'skipped' && pytorch/manylinux-builder:rocm6.1-2.4 || needs.calculate-manywheel-builder-rocm6.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.1.result == 'skipped' && pytorch/manylinux-builder:rocm6.1-main || needs.calculate-manywheel-builder-rocm6.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-rocm6_1
@@ -2734,7 +2734,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.1-2.4
+          docker-image: pytorch/manylinux-builder:rocm6.1-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -2778,7 +2778,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 6.2
       GPU_ARCH_TYPE: rocm
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.2.result == 'skipped' && pytorch/manylinux-builder:rocm6.2-2.4 || needs.calculate-manywheel-builder-rocm6.2.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.2.result == 'skipped' && pytorch/manylinux-builder:rocm6.2-main || needs.calculate-manywheel-builder-rocm6.2.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-rocm6_2
@@ -2842,7 +2842,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.2-2.4
+          docker-image: pytorch/manylinux-builder:rocm6.2-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -2885,7 +2885,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DESIRED_PYTHON: "3.11"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-xpu.result == 'skipped' && pytorch/manylinux2_28-builder:xpu-2.4 || needs.calculate-manywheel-builder-xpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-xpu.result == 'skipped' && pytorch/manylinux2_28-builder:xpu-main || needs.calculate-manywheel-builder-xpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-xpu
@@ -2957,7 +2957,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.4
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -2999,7 +2999,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-2.4 || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-main || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cpu
@@ -3065,7 +3065,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.4 || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cpu-cxx11-abi
@@ -3133,7 +3133,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda11_8
@@ -3203,7 +3203,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda11_8-split
@@ -3274,7 +3274,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_1
@@ -3344,7 +3344,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_1-split
@@ -3415,7 +3415,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_4
@@ -3485,7 +3485,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_4-split
@@ -3556,7 +3556,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.1.result == 'skipped' && pytorch/manylinux-builder:rocm6.1-2.4 || needs.calculate-manywheel-builder-rocm6.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.1.result == 'skipped' && pytorch/manylinux-builder:rocm6.1-main || needs.calculate-manywheel-builder-rocm6.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-rocm6_1
@@ -3620,7 +3620,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.1-2.4
+          docker-image: pytorch/manylinux-builder:rocm6.1-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3664,7 +3664,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 6.2
       GPU_ARCH_TYPE: rocm
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.2.result == 'skipped' && pytorch/manylinux-builder:rocm6.2-2.4 || needs.calculate-manywheel-builder-rocm6.2.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-rocm6.2.result == 'skipped' && pytorch/manylinux-builder:rocm6.2-main || needs.calculate-manywheel-builder-rocm6.2.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-rocm6_2
@@ -3728,7 +3728,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.2-2.4
+          docker-image: pytorch/manylinux-builder:rocm6.2-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3771,7 +3771,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DESIRED_PYTHON: "3.12"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-xpu.result == 'skipped' && pytorch/manylinux2_28-builder:xpu-2.4 || needs.calculate-manywheel-builder-xpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-xpu.result == 'skipped' && pytorch/manylinux2_28-builder:xpu-main || needs.calculate-manywheel-builder-xpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-xpu
@@ -3843,7 +3843,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.4
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -3885,7 +3885,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DESIRED_PYTHON: "3.13"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-2.4 || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-main || needs.calculate-manywheel-builder-cpu.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cpu
@@ -3951,7 +3951,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.13"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.4 || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cpu-cxx11-abi.result == 'skipped' && pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main || needs.calculate-manywheel-builder-cpu-cxx11-abi.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cpu-cxx11-abi
@@ -4019,7 +4019,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda11_8
@@ -4089,7 +4089,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.13"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-2.4 || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-manywheel-builder-cuda11.8.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda11_8-split
@@ -4160,7 +4160,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_1
@@ -4230,7 +4230,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.13"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-2.4 || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-manywheel-builder-cuda12.1.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_1-split
@@ -4301,7 +4301,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_4
@@ -4371,7 +4371,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.13"
-      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-2.4 || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manywheel-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-manywheel-builder-cuda12.4.outputs.docker-image }}
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_4-split

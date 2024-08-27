@@ -55,7 +55,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-2.4
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda11_8
@@ -101,7 +101,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-2.4
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda11_8-split
@@ -147,7 +147,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-2.4
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_1
@@ -193,7 +193,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-2.4
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_1-split
@@ -239,7 +239,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_4
@@ -285,7 +285,7 @@ hffelrvgnruhctuclrvugvdtnudtblej
       GPU_ARCH_TYPE: cuda
       use_split_build: True
       DESIRED_PYTHON: "3.9"
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_4-split
