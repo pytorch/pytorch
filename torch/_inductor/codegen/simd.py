@@ -1779,7 +1779,7 @@ class SIMDScheduling(BaseScheduling):
                 for node in EnableReduction.filter(node_schedule)
                 if isinstance(node, scheduler.SchedulerNode)
             ]
-            new_tilings: OrderedSet[Tuple[sympy.expr]] = OrderedSet()
+            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
             for node_range in node_ranges:
                 # Collapse leading dims, to fit in the maximum dimensionality.
                 num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)

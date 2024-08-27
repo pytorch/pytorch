@@ -45,14 +45,6 @@ class CKGemmTemplate(CKTemplate):
         auto gemm = {{instance_type}} {};
         auto invoker = gemm.MakeInvoker();
 
-        const ck::index_t M = {{M}};
-        const ck::index_t N = {{N}};
-        const ck::index_t K = {{K}};
-        const ck::index_t LDA = {{ld_a}};
-        const ck::index_t LDB = {{ld_b}};
-        const ck::index_t LDC = {{ld_c}};
-        constexpr auto LDD = ck::Number<{{ld_d}}>{};
-
         auto argument = gemm.MakeArgument(
             reinterpret_cast<const {{a_element_dtype}}*>(X),
             reinterpret_cast<const {{b_element_dtype}}*>(W),
@@ -79,7 +71,6 @@ class CKGemmTemplate(CKTemplate):
             *workspace_size = gemm.GetWorkSpaceSize(&argument);
             return 0;
         }
-        {{null_checks}}
         // run the kernel
         float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
         return 0;
@@ -298,7 +289,6 @@ class CKGemmTemplate(CKTemplate):
 * Generated code for CK inductor backend
 * See {type(self).__module__}.{type(self).__qualname__}
 *
-* Problem size M={X.get_layout().size[-2]} N={W.get_layout().size[-1]} K={X.get_layout().size[-1]}
 * Template instance {op}
 *
 * {torch.__version__=}
@@ -315,29 +305,22 @@ class CKGemmTemplate(CKTemplate):
                 outputs=[Y],
                 names_str="X, W, Bias, Y",
                 input_reorder=self.input_reorder,
+                size_args=[
+                    f"ck::index_t {arg}"
+                    for arg in ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+                ],
             ),
             instance_type=instance_type,
-            M=kernel.size(X, -2),
-            K=kernel.size(X, -1),
-            N=kernel.size(W, -1),
             a_element_dtype=op.a_element_dtype,
             b_element_dtype=op.b_element_dtype,
             c_element_dtype=op.c_element_dtype,
             bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
-            ld_a=kernel.leading_dimension(X),
-            ld_b=kernel.leading_dimension(W),
-            ld_c=kernel.leading_dimension(Y),
-            ld_d=kernel.leading_dimension(Bias),
             alpha=self.alpha,
             beta=self.beta,
             epilogue=f"Bilinear {{ {self.alpha}, {self.beta} }}"
             if Bias is not None
             else "PassThrough {}",
             has_bias=Bias is not None,
-            null_checks="".join(
-                kernel.check_not_null(node)
-                for node in (X, W, Y) + ((Bias,) if Bias is not None else ())
-            ),
             version_comment=version_comment,
         )
 
@@ -420,3 +403,23 @@ class CKGemmTemplate(CKTemplate):
                 choices,
                 op=op,
             )
+
+    def size_args(self):
+        X = self.input_nodes[0]
+        W = self.input_nodes[1]
+        Bias = self.input_nodes[2] if len(self.input_nodes) > 2 else None
+        Y = self.output_node
+
+        M = X.get_size()[0]
+        K = X.get_size()[1]
+        N = W.get_size()[1]
+        LDA = X.get_stride()[0 if X.get_stride()[1] == 1 else 1]
+        LDB = W.get_stride()[0 if W.get_stride()[1] == 1 else 1]
+        LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
+        LDD = (
+            0
+            if Bias is None
+            else Bias.get_stride()[0 if Bias.get_stride()[1] == 1 else 1]
+        )
+
+        return M, N, K, LDA, LDB, LDC, LDD
