@@ -4216,13 +4216,6 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     def test_full_bits_lowp(self):
-        from torch._dynamo.utils import detect_fake_mode
-        from torch._inductor.compile_fx import shape_env_from_inputs
-        from torch._inductor.debug import DebugContext
-        from torch._inductor.graph import GraphLowering
-        from torch._inductor.virtualized import V
-        from torch.fx.passes.fake_tensor_prop import FakeTensorProp
-
         def check_use_full_bits(func, shapes, dtype, mixed, check_vecn):
             example_inputs = [torch.randn(shape, dtype=dtype) for shape in shapes]
             if mixed:
@@ -4233,13 +4226,11 @@ class CPUReproTests(TestCase):
             _, code = run_and_get_cpp_code(f_opt, *example_inputs)
             if check_vecn:
                 self.assertTrue(
-                    "at::vec::VectorizedN" in code
-                    or "at::vec::convert<float,2" in code
+                    "at::vec::VectorizedN" in code or "at::vec::convert<float,2" in code
                 )
             else:
                 self.assertFalse(
-                    "at::vec::VectorizedN" in code
-                    or "at::vec::convert<float,2" in code
+                    "at::vec::VectorizedN" in code or "at::vec::convert<float,2" in code
                 )
 
         funcs = []
