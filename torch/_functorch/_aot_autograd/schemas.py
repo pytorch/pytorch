@@ -351,6 +351,10 @@ class ViewAndMutationMeta:
     # and backward output.
     bw_donated_idxs: Optional[List[int]] = None
 
+    # Number of tokens used in backward, appended at the end of backward outputs.
+    # Filled after tracing joint function.
+    num_backward_tokens: int = 0
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
@@ -566,6 +570,7 @@ class ViewAndMutationMeta:
                 x.shape == y.shape and x.dtype == y.dtype
                 for x, y, in zip(self.traced_tangents, other.traced_tangents)
             )
+            and self.num_backward_tokens == other.num_backward_tokens
         )
 
 

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
+from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Type, Union
 
 import torch
 import torch.nn as nn
@@ -21,6 +21,9 @@ from ._fsdp_init import (
 )
 from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
+
+
+cls_to_fsdp_cls: Dict[Type, Type] = {}
 
 
 # The decorator adds a state object to `module` that can be accessed via
@@ -144,8 +147,11 @@ def fully_shard(
     # Place FSDP leftmost for highest priority in the method resolution order
     for module in modules:
         cls = module.__class__
-        dct = {"__deepcopy__": unimplemented_deepcopy}
-        new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+        new_cls = cls_to_fsdp_cls.get(cls, None)
+        if not new_cls:
+            dct = {"__deepcopy__": unimplemented_deepcopy}
+            new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+            cls_to_fsdp_cls[cls] = new_cls
         module.__class__ = new_cls
     return arg_module
 
