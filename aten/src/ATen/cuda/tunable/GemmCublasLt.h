@@ -332,7 +332,7 @@ class CublasltGemmOp : public Callable<ParamsT> {
             cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
             cudaDataType_t scaleType = CUDA_R_32F;
 
-            if constexpr (std::is_same_v<ParamsT, GemmParams<T>> || std::is_same_v<ParamsT, GemmStridedBatchedParams<T>>) {
+            if constexpr (std::is_same_v<ParamsT, GemmParams<T>> || std::is_same_v<ParamsT, GemmAndBiasParams<T>> || std::is_same_v<ParamsT, GemmStridedBatchedParams<T>>) {
                 cudaDataType_t abcType = CUDA_R_32F;
                 if constexpr (std::is_same_v<T, double>) {
                     abcType = CUDA_R_64F;
