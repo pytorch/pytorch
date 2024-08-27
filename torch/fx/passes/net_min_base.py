@@ -490,10 +490,7 @@ class _MinimizerBase:
                 if len(node_list) == 0:
                     report.append(f"User exclusion : {node.name}")
                     self.print_report(report)
-                    if not self.settings.find_all:
-                        return culprits
-                    else:
-                        continue
+                    return culprits
 
             cur_nodes: NodeSet = {node}
 

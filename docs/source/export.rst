@@ -676,7 +676,6 @@ API Reference
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
-.. autoclass:: torch.export.dynamic_shapes.DIM
 .. autofunction:: torch.export.dynamic_shapes.Dim
 .. autofunction:: dims
 .. autoclass:: torch.export.dynamic_shapes.ShapesCollection
@@ -721,5 +720,3 @@ API Reference
 .. automodule:: torch.export.custom_obj
 
 .. automodule:: torch.export.experimental
-.. automodule:: torch.export.passes
-.. autofunction:: torch.export.passes.move_to_device_pass

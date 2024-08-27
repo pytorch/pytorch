@@ -72,7 +72,6 @@ import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
-from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
 from torch.nn import (
     ModuleDict,
@@ -97,11 +96,13 @@ from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
+
 try:
     import pytest
     has_pytest = True
 except ImportError:
     has_pytest = False
+
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -2867,44 +2868,7 @@ class TestCase(expecttest.TestCase):
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
 
-    def _remove_ansi_escape(self, input):
-        # 7-bit C1 ANSI sequences
-        ansi_escape = re.compile(r'''
-            \x1B  # ESC
-            (?:   # 7-bit C1 Fe (except CSI)
-                [@-Z\\-_]
-            |     # or [ for CSI, followed by a control sequence
-                \[
-                [0-?]*  # Parameter bytes
-                [ -/]*  # Intermediate bytes
-                [@-~]   # Final byte
-            )
-        ''', re.VERBOSE)
-        return ansi_escape.sub('', input)
-
-    def remove_comment_lines(self, input_string):
-        lines = input_string.split('\n')
-        filtered_lines = [line for line in lines if not line.strip().startswith('#')]
-        return '\n'.join(filtered_lines)
-
-    def remove_empty_lines(self, input_string):
-        lines = input_string.split('\n')
-        filtered_lines = [line for line in lines if not line.strip() == '']
-        return '\n'.join(filtered_lines)
-
-    # ignore comments will ignore lines that starts with # after being stripped
-    def assertExpectedInline(self, actual, expect, skip=0, ignore_comments=False, ignore_empty_lines=False):
-        actual = actual if isinstance(actual, str) else str(actual)
-        actual = self._remove_ansi_escape(actual)
-        expect = self._remove_ansi_escape(expect)
-        if ignore_comments:
-            actual = self.remove_comment_lines(actual)
-            expect = self.remove_comment_lines(expect)
-
-        if ignore_empty_lines:
-            actual = self.remove_empty_lines(actual)
-            expect = self.remove_empty_lines(expect)
-
+    def assertExpectedInline(self, actual, expect, skip=0):
         return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
 
     # Munges exceptions that internally contain stack traces, using munge_exc
@@ -5269,8 +5233,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if file is None:
         file = inspect.stack()[1 + skip].filename  # skip one frame
 
-    file = _as_posix_path(file)
-    s = _as_posix_path(str(e))
+    s = str(e)
 
     # Remove everything that looks like stack frames in NOT this file
     def repl_frame(m):
@@ -5286,8 +5249,9 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
-    s = re.sub(file, _as_posix_path(os.path.basename(file)), s)
-    s = re.sub(_as_posix_path(os.path.join(os.path.dirname(torch.__file__), "")), "", s)
+    s = re.sub(file, os.path.basename(file), s)
+    s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
+    s = re.sub(r"\\", "/", s)  # for Windows
     if suppress_suffix:
         s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)

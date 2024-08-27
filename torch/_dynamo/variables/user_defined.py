@@ -113,9 +113,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_python_constant(self):
         return self.value
 
-    def python_type(self):
-        return type(self.value)
-
     def as_proxy(self):
         return self.value
 

@@ -78,20 +78,19 @@ fi
     CONDA_COMMON_DEPS="astunparse pyyaml setuptools openblas==0.3.25=*openmp* ninja==1.11.1 scons==4.5.2"
 
     if [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-      NUMPY_VERSION=1.24.4
+      conda_install numpy=1.24.4 ${CONDA_COMMON_DEPS}
     else
-      NUMPY_VERSION=1.26.2
+      conda_install numpy=1.26.2 ${CONDA_COMMON_DEPS}
     fi
   else
     CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
 
     if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.12" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.13" ]; then
-      NUMPY_VERSION=1.26.0
+      conda_install numpy=1.26.0 ${CONDA_COMMON_DEPS}
     else
-      NUMPY_VERSION=1.21.2
+      conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
     fi
   fi
-  conda_install ${CONDA_COMMON_DEPS}
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
   # and libpython-static for torch deploy
@@ -113,7 +112,7 @@ fi
 
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
-  pip_install numpy=="$NUMPY_VERSION"
+
   pip_install -U scikit-learn
 
   if [ -n "$DOCS" ]; then

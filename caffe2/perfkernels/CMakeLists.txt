@@ -10,9 +10,11 @@ endif()
 file(GLOB common_srcs *.cc)
 file(GLOB avx_srcs *_avx.cc)
 file(GLOB avx2_srcs *_avx2.cc)
-# exclude avx and avx2 srcs from common_srcs
+file(GLOB avx512_srcs *_avx512.cc)
+# exclude avx, avx2, and avx512 srcs from common_srcs
 exclude(common_srcs "${common_srcs}" ${avx_srcs})
 exclude(common_srcs "${common_srcs}" ${avx2_srcs})
+exclude(common_srcs "${common_srcs}" ${avx512_srcs})
 
 # We will always build common srcs.
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${common_srcs})

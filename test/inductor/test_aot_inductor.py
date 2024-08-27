@@ -1003,39 +1003,6 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
-    @skipIfNoFBGEMM
-    def test_quanatized_int8_linear(self):
-        class Model(torch.nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.weight = torch.randn(10, 10, device=device)
-                self.bias = torch.randn(10, device=device)
-                self.input_scale = torch.tensor(0.1)
-                self.input_zero_point = torch.tensor(0)
-                self.weight_scale = torch.tensor(0.1)
-                self.weight_zero_point = torch.tensor(0)
-                self.output_scale = torch.tensor(0.1)
-                self.output_zero_point = torch.tensor(0)
-                self.out_channel = 10
-
-            def forward(self, x):
-                return torch.ops._quantized.wrapped_quantized_linear(
-                    x,
-                    self.input_scale,
-                    self.input_zero_point,
-                    self.weight,
-                    self.weight_scale,
-                    self.weight_zero_point,
-                    self.bias,
-                    self.output_scale,
-                    self.output_zero_point,
-                    self.out_channel,
-                )
-
-        example_inputs = (torch.randn(10, 10, device=self.device),)
-        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            self.check_model(Model(self.device), example_inputs)
-
     def test_zero_grid_with_unbacked_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -2554,137 +2521,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(m, args)
 
-    def test_custom_op_all_inputs(self) -> None:
-        class MyModel(torch.nn.Module):
-            # pyre-fixme[3]: Return type must be annotated.
-            def __init__(self):
-                super().__init__()
-
-            # pyre-fixme[3]: Return type must be annotated.
-            # pyre-fixme[2]: Parameter must be annotated.
-            def forward(self, x, y):
-                with torch.no_grad():
-                    x_dim0 = x.shape[0]
-                    x_dim1 = x.shape[1]
-                    y_dim0 = y.shape[0]
-                    y_dim1 = y.shape[1]
-                    symint_0 = x_dim0 + x_dim1
-                    symint_1 = y_dim0 * y_dim1
-
-                    z = torch.concat((x, x))
-
-                    _2547 = torch.ops.aoti_custom_ops.fn_with_all_inputs(
-                        tensor=x,
-                        tensors=[x, y],
-                        optional_tensors=[None, z],
-                        b8=False,
-                        b8s=[True, False],
-                        i64=42,
-                        i64s=[16, 17],
-                        symint=symint_0,
-                        symints=[symint_0, symint_1],
-                        f64=3.14,
-                        f64s=[2.2, 3.3],
-                        scalar=1.23,
-                        scalars=[45, 67],
-                        string="hello",
-                        strings=["ab", "cde"],
-                        # dtype=torch.float16,
-                        # memory_format=torch.contiguous_format,
-                        # layout=torch.strided,
-                        device=torch.device("cpu"),
-                        # optional
-                        o_tensor=None,
-                        o_tensors=[x, y],
-                        o_b8=False,
-                        o_b8s=[True, False],
-                        o_i64=None,
-                        o_i64s=[16, 17],
-                        o_symint=symint_1,
-                        o_symints=[symint_1, symint_0],
-                        o_f64=3.14,
-                        o_f64s=None,
-                        o_scalar=None,
-                        o_scalars=[89, 910],
-                        o_string="hello",
-                        o_strings=["ab", "cde"],
-                        # o_dtype=None,
-                        # o_memory_format=torch.contiguous_format,
-                        # o_layout=torch.strided,
-                        o_device=None,
-                    )
-
-                return _2547
-
-        m = MyModel().to(device=self.device)
-        x = torch.zeros(4, 8, device=self.device)
-        y = torch.ones(3, 9, device=self.device)
-        args = (x, y)
-        m(*args)
-
-        self.check_model(m, args)
-
-    def test_custom_op_with_multiple_outputs(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                out = x + y
-                # tuple of Tensor output
-                out3, out4 = torch.ops.aoti_custom_ops.fn_with_tuple_output(out, 1)
-                # TensorList output
-                out5, out6 = torch.ops.aoti_custom_ops.fn_with_list_output(
-                    [out3, out4], 1
-                )
-                # tuple of Tensor and TensorList
-                out7, [out8, out9] = torch.ops.aoti_custom_ops.fn_with_mix_outputs(
-                    out5, [out6, out4]
-                )
-                return out3, out4, out5, out6, out7, out8, out9
-
-        m = Model().to(device=self.device)
-        args = (
-            torch.randn(4, 4, device=self.device),
-            torch.randn(4, 4, device=self.device),
-        )
-        m(*args)
-
-        self.check_model(m, args)
-
-    def test_custom_op_with_reinterpret_view_inputs(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                out = x.permute([1, 0])
-                return torch.ops.aoti_custom_ops.fn_with_default_input(out, 1)
-
-        m = Model().to(device=self.device)
-        args = (torch.randn(2, 3, device=self.device),)
-
-        self.check_model(m, args)
-
-    def test_custom_op_with_concat_inputs(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                out = torch.concat([x, y], dim=0)
-                return torch.ops.aoti_custom_ops.fn_with_default_input(out, 1)
-
-        m = Model().to(device=self.device)
-        args = (
-            torch.randn(2, 3, device=self.device),
-            torch.randn(2, 3, device=self.device),
-        )
-
-        self.check_model(m, args)
-
-    def test_custom_op_missing_arg_with_default_value(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                # missing second arg
-                return torch.ops.aoti_custom_ops.fn_with_default_input(x)
-
-        m = Model().to(device=self.device)
-        args = (torch.randn(2, 3, device=self.device),)
-
-        self.check_model(m, args)
-
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -3532,18 +3368,9 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_add": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_all_inputs": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_with_multiple_outputs": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    "test_custom_op_with_reinterpret_view_inputs": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
+    "test_custom_op_add": fail_stack_allocation(is_skip=True)
+    if IS_FBCODE
+    else fail_minimal_arrayref_interface(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
@@ -3558,21 +3385,11 @@ CUDA_TEST_FAILURES = {
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
-    "test_quanatized_int8_linear": fail_cuda(is_skip=True),
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
     # fp8 to be re-enabled for AOTI
     "test_fp8": fail_cuda(is_skip=True),
     # non-abi compatible mode debug printer is not supported yet
     "test_aoti_debug_printer_codegen": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_missing_arg_with_default_value": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_custom_op_with_concat_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_with_reinterpret_view_inputs": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_custom_op_with_multiple_outputs": fail_non_abi_compatible_cuda(is_skip=True),
 }
 
 
@@ -3606,9 +3423,6 @@ if not IS_FBCODE:
             ),
             "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
             "test_quantized_linear": fail_minimal_arrayref_interface(is_skip=True),
-            "test_quanatized_int8_linear": fail_minimal_arrayref_interface(
-                is_skip=True
-            ),
             "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
             "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
             "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),
@@ -3729,21 +3543,6 @@ copy_tests(
         ),
         "test_custom_op_add": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_aoti_debug_printer_codegen": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_all_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_missing_arg_with_default_value": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_concat_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_multiple_outputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_reinterpret_view_inputs": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
     },

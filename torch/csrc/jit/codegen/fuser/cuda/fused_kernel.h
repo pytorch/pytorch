@@ -12,7 +12,10 @@
 #include <string>
 #include <vector>
 
-namespace torch::jit::fuser::cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 // query codegen output arch and target
 TORCH_CUDA_CU_API void codegenOutputQuery(
@@ -57,4 +60,7 @@ struct TORCH_CUDA_CU_API FusedKernelCUDA
   CUfunction function_;
 };
 
-} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

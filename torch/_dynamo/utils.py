@@ -269,14 +269,25 @@ def dynamo_timed(
     fail_type: Optional[str] = None
     fail_reason: Optional[str] = None
     time_spent = float("-inf")
-    start = time.time_ns()
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
+            start = time.time_ns()
             chromium_log.log_event_start(key, start, None)
             if phase_name:
                 chromium_log.log_event_start(phase_name, start)
             yield
+
+            if phase_name:
+                chromium_log.log_event_end(
+                    phase_name,
+                    time.time_ns(),
+                    {"cache_stats": get_cache_stats()},
+                    start,
+                )
+            chromium_log.log_event_end(
+                key, time.time_ns(), {"cache_stats": get_cache_stats()}, start
+            )
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
     except Exception as e:
@@ -284,17 +295,6 @@ def dynamo_timed(
         fail_reason = str(e)
         raise
     finally:
-        # Always log the end event even on exception
-        if phase_name:
-            chromium_log.log_event_end(
-                phase_name,
-                time.time_ns(),
-                {"cache_stats": get_cache_stats()},
-                start,
-            )
-        chromium_log.log_event_end(
-            key, time.time_ns(), {"cache_stats": get_cache_stats()}, start
-        )
         # Only record backward compilation metrics if phase_name is not None!
         if phase_name:
             frame_key = str(curr_frame)
@@ -841,15 +841,8 @@ class ChromiumEventLogger:
     a specification of the Chromium Event JSON format.
     """
 
-    def get_stack(self):
-        if hasattr(self.tls, "stack"):
-            return self.tls.stack
-        else:
-            self.tls.stack = ["__start__"]
-            return self.tls.stack
-
     def __init__(self):
-        self.tls = threading.local()
+        self.stack = ["__start__"]
         # Generate a unique id for this logger, which we can use in scuba to filter down
         # to a single python run.
         self.id_ = str(uuid.uuid4())
@@ -875,15 +868,14 @@ class ChromiumEventLogger:
             "B",
             metadata,
         )
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
-        self.get_stack().append(event_name)
+        log_chromium_event_internal(event, self.stack, self.id_)
+        self.stack.append(event_name)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
         # cleared the stack.
-        stack = self.get_stack()
-        stack.clear()
-        stack.append("__start__")
+        self.stack.clear()
+        self.stack.append("__start__")
 
     def log_event_end(
         self,
@@ -902,8 +894,7 @@ class ChromiumEventLogger:
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
         # overlaps in the future.
-        stack = self.get_stack()
-        if event_name not in stack:
+        if event_name not in self.stack:
             # Something went wrong, we never called start on this event,
             # or it was skipped due to overlapping events below
             log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
@@ -916,18 +907,18 @@ class ChromiumEventLogger:
             metadata,
         )
 
-        while event_name != stack[-1]:
+        while event_name != self.stack[-1]:
             # If the event isn't the most recent one to end, pop
             # off the stack until it is.
             # Since event_name in self.stack, this pop is always safe
             log.warning(
                 "ChromiumEventLogger: Detected overlapping events, fixing stack"
             )
-            stack.pop()
+            self.stack.pop()
 
-        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        log_chromium_event_internal(event, self.stack, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
-        stack.pop()
+        self.stack.pop()
 
     def _log_timed_event(
         self,
@@ -988,7 +979,7 @@ class ChromiumEventLogger:
             expect_trace_id=True,
         )
         # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
+        log_chromium_event_internal(event, self.stack, self.id_)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None

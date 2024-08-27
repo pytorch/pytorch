@@ -63,13 +63,7 @@ def disable(fn=None, recursive=True):
             fn = innermost_fn(fn)
             assert callable(fn)
             out = DisableContext()(fn)
-
-            # Do not cache Fx graph methods. These come from Dynamo itself. Caching such graphs can increase lifetime of
-            # held objects. Since these are coming from Dynamo itself, there is no benefit of caching.
-            if not (
-                inspect.ismethod(fn) and isinstance(fn.__self__, torch.fx.GraphModule)
-            ):
-                disabled_codes[id_fn] = out
+            disabled_codes[id_fn] = out
             return out
         return DisableContext()
     else:

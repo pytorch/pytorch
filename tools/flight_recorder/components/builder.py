@@ -244,7 +244,7 @@ def build_collectives(
                 nccl_calls.extend(reversed(reversed_calls))
         else:
             has_undecided_case = False
-            errors = set()
+            errors = Set()
             for o in expected_ranks.intersection(set(other_ranks)):
                 for i, e in enumerate(all_entries[o]):  # type: ignore[index]
                     # step over ops from other PGs
