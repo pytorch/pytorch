@@ -3,7 +3,7 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Tuple, Union
+from typing import Callable, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -19,6 +19,7 @@ from torch.distributed.pipelining import (
     Schedule1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
+    ScheduleFlexibleInterleaved1F1B,
     SplitPoint,
 )
 from torch.distributed.tensor.parallel import (
@@ -172,18 +173,20 @@ class Test3DComposability(FSDPTest):
         else:
             dp_degree, dp_rank = 1, 0
 
-        if parallel_dims.pp_enabled:
-            pp_mesh = world_mesh["pp"]
+        def loss_fn(pred, labels):
+            return torch.nn.functional.cross_entropy(
+                pred.flatten(0, 1), labels.flatten(0, 1)
+            )
 
         if parallel_dims.pp_enabled:
+            pp_mesh = world_mesh["pp"]
             pp_schedule, model_parts = self._pipeline_llama(
-                model, pp_mesh, parallel_dims, device, model_args
+                model, pp_mesh, parallel_dims, device, model_args, loss_fn
             )
             for m in model_parts:
                 self._parallelize_llama(m, world_mesh, parallel_dims)
                 m.to_empty(device="cuda")
-
-        if not parallel_dims.pp_enabled:
+        else:
             self._parallelize_llama(model, world_mesh, parallel_dims)
 
     def _parallelize_llama(
@@ -388,6 +391,7 @@ class Test3DComposability(FSDPTest):
         parallel_dims: ParallelDims,
         device: DeviceType,
         model_config: ModelArgs,
+        loss_fn: Callable[..., torch.Tensor],
     ):
         split_mode = "manual"
         valid_split_modes = ("manual", "tracer")
@@ -408,7 +412,7 @@ class Test3DComposability(FSDPTest):
             "interleaved_1f1b",
             "flexible_interleaved_1f1b",
         ]
-        pp_schedule = self._build_pipeline_schedule(schedule_class[0], stages)
+        pp_schedule = self._build_pipeline_schedule(parallel_dims.pp, schedule_class[3], stages, loss_fn)
 
         return pp_schedule, models
 
@@ -431,7 +435,7 @@ class Test3DComposability(FSDPTest):
         pp_rank = pp_mesh.get_local_rank()
         pp_size = pp_mesh.size()
         microbatches = parallel_dims.pp
-        splits = ["layers.4"]
+        splits = ["layers.1", "layers.2", "layers.3"]
 
         def _build_stage(
             stage_idx, pp_mesh, start_layer, stop_layer, is_first=False, is_last=False
@@ -595,7 +599,7 @@ class Test3DComposability(FSDPTest):
             )
         return stages, models
 
-    def _build_pipeline_schedule(self, pipeline_parallel_schedule, stages):
+    def _build_pipeline_schedule(self, pp_dim, pipeline_parallel_schedule, stages, loss_fn):
         looped_schedule = False
 
         if pipeline_parallel_schedule == "1f1b":
@@ -609,11 +613,12 @@ class Test3DComposability(FSDPTest):
             schedule_class = ScheduleFlexibleInterleaved1F1B
             looped_schedule = True
         self.logger.info(f"Using pipeline schedule {pipeline_parallel_schedule}")
-        n_microbatches = True
+        n_microbatches = pp_dim
 
         return schedule_class(
             stages if looped_schedule else stages[0],
             n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
         )
 
 if __name__ == "__main__":
