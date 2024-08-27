@@ -76,6 +76,12 @@ class AOTIRunnerUtil:
                 temp_so_path = os.path.join(temp_dir, "model.so")
                 shutil.copy(so_path, temp_so_path)
 
+                # We also need to copy over the serialized extern_kernel_nodes for custom ops
+                extern_kernel_nodes_path = f"{so_path[:-3]}.json"
+                if os.path.isfile(extern_kernel_nodes_path):
+                    temp_extern_kernel_nodes_path = os.path.join(temp_dir, "model.json")
+                    shutil.copy(extern_kernel_nodes_path, temp_extern_kernel_nodes_path)
+
                 return test_aot_inductor_model_runner_pybind.Runner(
                     temp_so_path, device == "cpu"
                 )
