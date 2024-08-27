@@ -14,9 +14,15 @@
 #include <optional>
 
 #include <algorithm>
+#include <iostream> // TODO: remove, debugging only
+#include <map>
+#include <stdexcept>
+#include <tuple>
 #include <vector>
 
-namespace torch::jit::fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 // Returns the "map size" for this run, which is the common size for all
 // intermediate tensors.
@@ -209,7 +215,8 @@ static void launchFusion(
 
   // Computes map_size, numel from the first input
   at::IntArrayRef map_size;
-  uint32_t numel = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint32_t numel;
   std::vector<int64_t> keep_alive_size;
   if (fusion.chunkDesc()[0].isNoop()) {
     map_size = inputs[0].sizes();
@@ -402,4 +409,6 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   return true;
 }
 
-} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

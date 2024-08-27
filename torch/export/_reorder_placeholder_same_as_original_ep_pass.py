@@ -38,7 +38,7 @@ def _reorder_placeholder_same_as_original_ep_pass(
                 node.name = node.target = correct_name
                 node.meta = node_to_metadata[correct_name]
                 corrected_name_to_old_name[correct_name] = cur_name
-                name_to_node[node.name] = node
+                name_to_node[cur_name] = node
             count += 1
         else:
 
