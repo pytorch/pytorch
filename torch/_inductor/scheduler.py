@@ -3300,7 +3300,7 @@ class Scheduler:
                 raise
 
         # small kernels are very likely to have speedup but hard to benchmark. So we skip benchmarking.
-        small_kernel = ms2_clone / ms2 > 0.6 and ms2 - ms2_clone < 0.2
+        small_kernel = ms2 - ms2_clone < 0.3 or ms1 < 0.3
         if fusion_log.isEnabledFor(logging.DEBUG):
             if ms1 > ms2 or small_kernel:
                 fusion_log.debug(
@@ -3312,8 +3312,8 @@ class Scheduler:
                     "cannot fuse (benchmark): fusing causes %sx slowdown",
                     red_text(f"{ms1 / ms2:.3f}"),
                 )
-
-        return ms2 < ms1 or small_kernel
+        # ms1 returned by benchmark_fused_nodes discounted clone time
+        return ms2 - ms2_clone < ms1 or small_kernel
 
     def get_buffer_layout(self, buf_name: str) -> ir.Layout:
         buf = self.name_to_buf[buf_name]
