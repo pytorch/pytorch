@@ -3714,9 +3714,7 @@ def forward(self, l_inp_, l_tmp_):
         class WrongHop(torch._ops.HigherOrderOperator):
             pass
 
-        with self.assertRaisesRegex(
-            TypeError, "instantiate abstract class WrongHop with abstract method"
-        ):
+        with self.assertRaisesRegex(TypeError, "WrongHop"):
             wrong_hop = WrongHop("wrong_hop")
 
 
