@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -1494,7 +1494,7 @@ class PReLU(Module):
 
     __constants__ = ["num_parameters"]
     num_parameters: int
-    weight: Optional[Parameter]
+    weight: Optional[Tensor]
     init: Union[float, int]
 
     def __init__(self, num_parameters: int = 1, init: float = 0.25,
