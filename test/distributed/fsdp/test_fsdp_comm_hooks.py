@@ -94,7 +94,6 @@ class DummyHook:
         of a flattened tensor to all processes in a group.
         Currently a no-op.
         """
-        pass
 
     def dummy_hook_for_sharded_fsdp(
         self, state: DummyState, grad: torch.Tensor, output: torch.Tensor
