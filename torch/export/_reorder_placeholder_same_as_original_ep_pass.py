@@ -1,4 +1,4 @@
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 import torch
 import torch.fx
@@ -19,12 +19,11 @@ def _reorder_placeholder_same_as_original_ep_pass(
     not guaranteed to be same.
     """
     node_to_metadata = {}
-    original_order_to_node_name: Dict[int, str] = {}
+    original_order_to_node_name: List[str] = []
     for node in old_gm.graph.nodes:
         if node.op == "placeholder":
             node_to_metadata[node.name] = node.meta
-            cur_idx = len(original_order_to_node_name)
-            original_order_to_node_name[len(original_order_to_node_name)] = node.name
+            original_order_to_node_name.append(node.name)
         else:
             break
 
