@@ -835,6 +835,8 @@ def _transform_shapes_for_default_dynamic(
                 if _marked_dynamic(tensor, i) or dim == DIM.AUTO:
                     # don't have to specify anything if dynamic
                     # None also works, since assume_static_by_default=False
+                    if dim == DIM.AUTO:
+                        torch._dynamo.maybe_mark_dynamic(tensor, i)  # avoid duck sizing
                     continue
                 elif isinstance(dim, _Dim):
                     out[i] = dim
@@ -851,6 +853,8 @@ def _transform_shapes_for_default_dynamic(
             for i, val in enumerate(tensor.shape):
                 dim = shape[i]
                 if _marked_dynamic(tensor, i) or dim == DIM.AUTO:
+                    if dim == DIM.AUTO:
+                        torch._dynamo.maybe_mark_dynamic(tensor, i)  # avoid duck sizing
                     out.append(None)
                 elif isinstance(dim, _Dim):
                     out.append(dim)
