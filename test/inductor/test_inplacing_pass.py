@@ -1,13 +1,22 @@
 # Owner(s): ["module: inductor"]
 
+from typing import List
+
 import torch
 from functorch import make_fx
+from torch import Tensor
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    subtest,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.logging_utils import logs_to_string
 
 
 aten = torch.ops.aten
@@ -21,9 +30,9 @@ def num_reinplacing_failures():
     return counters["inductor"]["possibly_missed_reinplacing_opportunities"]
 
 
-@torch.library.custom_op("_reinplacing::sin", mutates_args={"out"})
-def sin(x: torch.Tensor, out: torch.Tensor) -> None:
-    out.copy_(x.sin())
+@torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
+def sin(x: torch.Tensor, result: torch.Tensor) -> None:
+    result.copy_(x.sin())
 
 
 @torch.library.custom_op("_reinplacing::sin_cos", mutates_args={"out_sin", "out_cos"})
@@ -91,7 +100,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         def f(x):
             out = torch.empty_like(x)
-            _, new_out = auto_functionalized(sin._opoverload, x=x, out=out)
+            _, new_out = auto_functionalized(sin._opoverload, x=x, result=out)
             y = out * new_out
             return new_out, y
 
@@ -151,6 +160,66 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         result = torch.compile(f)(x)
         self.assertEqual(result, x.sin().sin().sin())
         self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_lists(self):
+        @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
+        def mutate_op(y: List[Tensor]) -> None:
+            y[0].add_(2)
+            y[1].add_(3)
+
+        @torch.compile(fullgraph=True, dynamic=False, backend="inductor")
+        def f(b):
+            mutate_op([b[0], b[1]])
+
+        x1 = torch.tensor([0.3, 0.4], device=device)
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            torch.compile(f, backend="inductor", fullgraph=True)(x1)
+        post_grad_graphs = "\n".join(
+            log_stream.getvalue().strip().split("\n")[3:]
+        ).strip()
+
+        # Can't reinplace on views yet (1 for the "entire list" failing to reinplace)
+        self.assertEqual(num_reinplacing_failures(), 1)
+
+        # Both list inputs failed to reinplace. So we should have emitted clones for them.
+        self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
+
+    @parametrize(
+        "factory_op",
+        [
+            subtest(torch.ones_like, name="ones_like"),
+            subtest(torch.empty_like, name="empty_like"),
+        ],
+    )
+    def test_partitioner_recomputes_factory(self, factory_op):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = factory_op(x)
+                sin(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = factory_op(grad)
+                sin(saved, out)
+                return out
+
+        @torch.compile(backend="inductor")
+        def f(x):
+            return MySin.apply(x)
+
+        x = torch.randn(3, requires_grad=True, device=device)
+        y = f(x)
+        self.assertEqual(num_reinplacing_failures(), 0)
+
+
+instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
 
 if __name__ == "__main__":
