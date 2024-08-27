@@ -1091,6 +1091,9 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_cuda_getAllocator", []() {
     return py::cast(torch::cuda::CUDAPluggableAllocator::getCurrentAllocator());
   });
+  m.def("_cuda_host_empty_cache", []() {
+    at::cuda::CachingHostAllocator_emptyCache();
+  });
 
   m.def(
       "_cuda_changeCurrentAllocator",
