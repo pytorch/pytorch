@@ -136,6 +136,10 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(dp_mesh.get_local_rank(), mesh_2d.get_local_rank("dp"))
         self.assertEqual(tp_mesh.get_local_rank(), mesh_2d.get_local_rank("tp"))
 
+        # Verify flattened mesh local rank correctness.
+        flattened_mesh = mesh_2d["dp", "tp"]._flatten()
+        self.assertEqual(flattened_mesh.get_local_rank(), self.rank)
+        
     @with_comms
     def test_device_mesh_2d(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
