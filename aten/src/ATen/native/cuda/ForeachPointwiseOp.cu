@@ -21,6 +21,31 @@
 
 namespace at::native {
 
+bool supports_large_kernel_arg() {
+#if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
+  static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
+  if (!supports_large_kernel_arg_.has_value()) {
+    int driver_ver = 0;
+    cudaDriverGetVersion(&driver_ver);
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major >= 7;
+    LOG(WARNING) << "driver_ver: " << driver_ver
+                 << ", prop->major: " << prop->major;
+  }
+  const bool is_capturing = at::cuda::currentStreamCaptureStatusMayInitCtx() !=
+      at::cuda::CaptureStatus::None;
+  LOG(WARNING) << "supports_large_kernel_arg: "
+               << (!is_capturing && *supports_large_kernel_arg_)
+               << ", is_capturing: " << is_capturing
+               << ", supports_large_kernel_arg_: "
+               << *supports_large_kernel_arg_;
+  return !is_capturing && *supports_large_kernel_arg_;
+#else
+  LOG(WARNING) << "supports_large_kernel_arg: false (CUDART_VERSION < 12010)";
+  return false;
+#endif
+}
+
 template <template <class> class Op>
 std::vector<Tensor> foreach_pointwise_op(
     TensorList input,

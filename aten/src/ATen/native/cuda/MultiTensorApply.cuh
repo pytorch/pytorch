@@ -9,6 +9,8 @@
 
 namespace at::native {
 
+bool supports_large_kernel_arg();
+
 namespace {
 
 static constexpr int64_t kILP = 4;
@@ -34,26 +36,26 @@ static constexpr int64_t kBlockSize = 512;
 // the kernels for 4KB kernel argument size.
 //
 // https://developer.nvidia.com/blog/cuda-12-1-supports-large-kernel-parameters/
-bool supports_large_kernel_arg() {
-#if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
-  static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
-  if (!supports_large_kernel_arg_.has_value()) {
-    int driver_ver = 0;
-    cudaDriverGetVersion(&driver_ver);
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major;
-  }
-  return c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
-      c10::cuda::CaptureStatus::None &&
-      *supports_large_kernel_arg_;
-#else
-  return false;
-#endif
-}
+// bool supports_large_kernel_arg() {
+// #if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
+//   static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
+//   if (!supports_large_kernel_arg_.has_value()) {
+//     int driver_ver = 0;
+//     cudaDriverGetVersion(&driver_ver);
+//     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+//     *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major;
+//   }
+//   return c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+//       c10::cuda::CaptureStatus::None &&
+//       *supports_large_kernel_arg_;
+// #else
+//   return false;
+// #endif
+// }
 
 #if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
 #define DISPATCH_MULTI_TENSOR_APPLY(...)                \
-  if (supports_large_kernel_arg()) {                    \
+  if (at::native::supports_large_kernel_arg()) {        \
     constexpr bool large_kernel_arg C10_UNUSED = true;  \
     __VA_ARGS__();                                      \
   } else {                                              \
