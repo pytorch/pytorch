@@ -3,7 +3,6 @@ import contextlib
 import dataclasses
 import functools
 import itertools
-import logging
 import math
 import re
 import sys
@@ -17,13 +16,11 @@ import torch
 import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype, is_integer_dtype
-from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
-from ..codegen.wrapper import WrapperCodeGen
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -1050,7 +1047,7 @@ class CppVecOverrides(CppOverrides):
             code = BracesBuffer()
             code.writeline("[&]()")
             vec_dtype = args[0].dtype
-            size = kernel.get_result_size(vec_dtype)
+            tiling_factor = kernel.tiling_factor
             scalar_args = []
             cdtype = DTYPE_TO_CPP[vec_dtype]
             output_bool_dtype = scalar_func.__name__ in (
@@ -1064,13 +1061,17 @@ class CppVecOverrides(CppOverrides):
                     assert arg.is_vec
                     assert arg.dtype == vec_dtype
                     code.writeline(
-                        f"__at_align__ std::array<{cdtype}, {size}> tmpbuf{argidx};"
+                        f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf{argidx};"
                     )
-                    code.writeline(f"{arg}.store(tmpbuf{argidx}.data(), {size});")
+                    code.writeline(
+                        f"{arg}.store(tmpbuf{argidx}.data(), {tiling_factor});"
+                    )
                     scalar_args.append(f"tmpbuf{argidx}[i]")
-                code.writeline(f"__at_align__ std::array<{octype}, {size}> tmpbuf_out;")
+                code.writeline(
+                    f"__at_align__ std::array<{octype}, {tiling_factor}> tmpbuf_out;"
+                )
                 res = scalar_func(*scalar_args)
-                code.writeline(f"for (int i = 0; i < {kernel.tiling_factor}; i++)")
+                code.writeline(f"for (int i = 0; i < {tiling_factor}; i++)")
                 with code.indent():
                     code.writeline(f"tmpbuf_out[i] = {res};")
                 if output_bool_dtype:
@@ -1080,7 +1081,7 @@ class CppVecOverrides(CppOverrides):
                     )
                 else:
                     code.writeline(
-                        f"return at::vec::Vectorized<{cdtype}>::loadu(tmpbuf_out.data(), {size});"
+                        f"return at::vec::Vectorized<{cdtype}>::loadu(tmpbuf_out.data(), {tiling_factor});"
                     )
             code.writeline("()")
             return code
@@ -2223,12 +2224,6 @@ class CppVecKernel(CppKernel):
             )
         return line
 
-    def get_result_size(self, dtype: torch.dtype) -> int:
-        if dtype.itemsize < 4:
-            return self.num_elems * (4 // dtype.itemsize)
-        else:
-            return self.num_elems
-
     def _load_or_store_non_contiguous(
         self,
         var: Optional[str],
@@ -2260,6 +2255,12 @@ class CppVecKernel(CppKernel):
         if buffer is None:
             buffer = self.loads
 
+        def get_result_size(dtype: torch.dtype) -> int:
+            if dtype.itemsize < 4:
+                return self.num_elems * (4 // dtype.itemsize)
+            else:
+                return self.num_elems
+
         def vec_to_array(vec_var: CppCSEVariable) -> CppCSEVariable:
             assert vec_var.is_vec
             code = BracesBuffer()
@@ -2269,7 +2270,7 @@ class CppVecKernel(CppKernel):
                 assert vec_dtype is not None
                 if vec_dtype == torch.bool:
                     vec_dtype = torch.float
-                result_size = self.get_result_size(vec_dtype)
+                result_size = get_result_size(vec_dtype)
                 code.writeline(
                     f"__at_align__ std::array<{DTYPE_TO_CPP[vec_dtype]}, {result_size}> tmpbuf;"
                 )
@@ -2284,7 +2285,7 @@ class CppVecKernel(CppKernel):
         code = BracesBuffer()
         code.writeline("[&]")
         with code.indent():
-            result_size = self.get_result_size(dtype)
+            result_size = get_result_size(dtype)
             result_declare = (
                 f"__at_align__ std::array<{DTYPE_TO_CPP[dtype]}, {result_size}> tmpbuf;"
             )
