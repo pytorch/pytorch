@@ -79,6 +79,7 @@ std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
 std::atomic<int32_t> num_threads_in_backwards;
 struct CompiledAutogradThreadingDebugCheck {
   CompiledAutogradThreadingDebugCheck() {
+    TORCH_INTERNAL_ASSERT(num_threads_in_backwards == 0);
     num_threads_in_backwards++;
   }
   ~CompiledAutogradThreadingDebugCheck() {

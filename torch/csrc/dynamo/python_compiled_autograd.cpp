@@ -694,9 +694,15 @@ variable_list compiled_autograd(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
   static std::mutex lock;
+  TORCH_INTERNAL_ASSERT(python_verbose_logger != nullptr, "Run with compiled_autograd_verbose on");
+  std::cout << "acquiring lock" << std::endl;
   std::lock_guard<std::mutex> lock_guard(lock);
+  std::cout << "acquiring gil" << std::endl;
   pybind11::gil_scoped_acquire gil;
+  VerboseLogger vlogger = VerboseLogger::maybe_create().value();
+  vlogger.verbose_log_fn("acquiring tls");
   at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
+  vlogger.verbose_log_fn("done acquiring resources");
 
   THPObjectPtr inputs;
   THPObjectPtr sizes;
@@ -712,6 +718,7 @@ variable_list compiled_autograd(
       &ivalue_args,
       &hooks);
 
+  vlogger.verbose_log_fn("calling into compiled fn");
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->runtime_wrapper.get(),
       cache->compiled_fn.get(),
@@ -721,6 +728,7 @@ variable_list compiled_autograd(
       hooks.get(),
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
+  vlogger.verbose_log_fn("returning outputs");
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;
 }
