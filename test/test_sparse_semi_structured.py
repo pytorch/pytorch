@@ -1023,7 +1023,6 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
 
 
 
-CUSPARSELT_NUM_ALG_IDS = 4
 CUSPARSELT_MIXED_DTYPE_SUPPORT = [torch.float16, torch.bfloat16, torch.int32]
 
 
@@ -1082,23 +1081,25 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    @parametrize("alg_id", range(CUSPARSELT_NUM_ALG_IDS))
     @inference_dtypes
-    def test_cslt_sparse_mm_alg_id(self, device, dtype, alg_id):
-        # alg_id=3 not supported for float32 dtype
-        if dtype == torch.float32 and alg_id == 3:
-            return
+    def test_cslt_sparse_mm_alg_id(self, device, dtype):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_compressed = torch._cslt_compress(A)
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id)
 
-        dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
-        dense_result = dense_result.to(dtype)
+        max_alg_id = torch._cslt_sparse_mm_max_alg_id(A_compressed, B.t())
+        for alg_id in range(max_alg_id):
+            # alg_id=3 not supported for float32 dtype
+            if dtype == torch.float32 and alg_id == 3:
+                return
+            sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id)
 
-        torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
+            dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
+            dense_result = dense_result.to(dtype)
+
+            torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     @inference_dtypes
     def test_cslt_sparse_mm_search(self, device, dtype):
@@ -1111,8 +1112,9 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # for cuSPARSELt v0.4.0 there is a bug where although there are 5 alg_ids, we run into an error
         # when setting using the last one (4)
         # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
-        # TODO Move this into the cuSPARSELt backendk
-        assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
+        # TODO Move this into the cuSPARSELt backend
+        max_alg_id = torch._cslt_sparse_mm_max_alg_id(A_compressed, B.t())
+        assert alg_id in range(max_alg_id + 1)
 
     def test_cusparselt_backend(self):
         version = _get_torch_cuda_version()

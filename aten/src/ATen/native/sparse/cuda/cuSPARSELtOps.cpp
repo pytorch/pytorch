@@ -98,7 +98,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     return compressed_tensor;
 }
 
-std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
+std::tuple<int64_t, at::Tensor, int64_t> _cslt_sparse_mm_impl(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
@@ -106,7 +106,8 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
     int alg_id,
-    bool search_alg_id
+    bool search_alg_id,
+    bool get_max_alg_id_only
 )
 {
   if (!handle_initialized){
@@ -291,41 +292,49 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   auto workspacePtr = allocator.allocate(workspace_size);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  if(search_alg_id){
-    // run matmul search
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulSearch(
-        &handle,
-        &plan,
-        alpha_ptr,
-        compressed_A.data_ptr(),
-        dense_B.data_ptr(),
-        &beta,
-        res.data_ptr(),
-        res.data_ptr(),
-        workspacePtr.get(),
-        // jank because of the way we want this to be an array of streams
-        &stream,
-        1));
 
-    // get alg_id used
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
-        &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
-  }
-  else {
-    // do normal matmul
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmul(
-        &handle,
-        &plan,
-        alpha_ptr,
-        compressed_A.data_ptr(),
-        dense_B.data_ptr(),
-        &beta,
-        res.data_ptr(),
-        res.data_ptr(),
-        workspacePtr.get(),
-        // jank because of the way we want this to be an array of streams
-        &stream,
-        1));
+  int max_alg_id = 0;
+
+  TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
+      &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID, &max_alg_id, sizeof(max_alg_id)));
+  // don't need to run the matmul
+  if(!get_max_alg_id_only) {
+      if(search_alg_id){
+        // run matmul search
+        TORCH_CUDASPARSE_CHECK(cusparseLtMatmulSearch(
+            &handle,
+            &plan,
+            alpha_ptr,
+            compressed_A.data_ptr(),
+            dense_B.data_ptr(),
+            &beta,
+            res.data_ptr(),
+            res.data_ptr(),
+            workspacePtr.get(),
+            // jank because of the way we want this to be an array of streams
+            &stream,
+            1));
+
+        // get alg_id used
+        TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
+            &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
+      }
+      else {
+        // do normal matmul
+        TORCH_CUDASPARSE_CHECK(cusparseLtMatmul(
+            &handle,
+            &plan,
+            alpha_ptr,
+            compressed_A.data_ptr(),
+            dense_B.data_ptr(),
+            &beta,
+            res.data_ptr(),
+            res.data_ptr(),
+            workspacePtr.get(),
+            // jank because of the way we want this to be an array of streams
+            &stream,
+            1));
+      }
   }
 
   //destroy descriptors
@@ -337,7 +346,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   // destroy plan
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
 
-  return {alg_id, res};
+  return {alg_id, res, (int64_t) max_alg_id};
 }
 
 at::Tensor _cslt_sparse_mm(
@@ -358,7 +367,8 @@ at::Tensor _cslt_sparse_mm(
         out_dtype_opt,
         transpose_result,
         (int) alg_id,
-        false);
+        false,
+	false);
     return std::get<1>(result);
 }
 
@@ -380,10 +390,33 @@ int64_t _cslt_sparse_mm_search(
         out_dtype_opt,
         transpose_result,
         alg_id_int,
-        true);
+        true,
+	false);
     return (int64_t) std::get<0>(result);
 }
 
+int64_t _cslt_sparse_mm_max_alg_id(
+    const Tensor& compressed_A,
+    const Tensor& dense_B,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& alpha_opt,
+    const std::optional<c10::ScalarType> out_dtype_opt,
+    bool transpose_result
+)
+{
+    int alg_id_int = 0;
+    auto result = _cslt_sparse_mm_impl(
+        compressed_A,
+        dense_B,
+        bias_opt,
+        alpha_opt,
+        out_dtype_opt,
+        transpose_result,
+        alg_id_int,
+        true,
+	true);
+    return (int64_t) std::get<2>(result);
+}
 
 } // namespace at::native
 
