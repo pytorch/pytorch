@@ -56,7 +56,6 @@ from typing import (
 from typing_extensions import Literal, TypeGuard
 
 import torch
-from torch._C import _instruction_counter
 import torch._functorch.config
 import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
@@ -64,6 +63,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._C import (
     _get_function_stack_at,
+    _instruction_counter,
     _len_torch_function_stack,
     _pop_torch_function_stack,
     _push_on_torch_function_stack,

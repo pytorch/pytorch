@@ -104,7 +104,7 @@ class BenchmarkBase(ABC):
         results = []
         for i in range(10):
             self._prepare()
-            # CompileTimeInstructionCounter.record is only called on convert_frame._compile_inner 
+            # CompileTimeInstructionCounter.record is only called on convert_frame._compile_inner
             # hence this will only count instruction count spent in compile_inner.
             CompileTimeInstructionCounter.clear()
             self._work()
