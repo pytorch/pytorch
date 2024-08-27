@@ -36,8 +36,14 @@ class MapWrapper(HigherOrderOperator):
         return map_wrapper(xs, *args)
 
 
+class MapImpl(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("map_impl")
+
+
 map = MapWrapper("map")
-map_impl = HigherOrderOperator("map_impl")
+
+map_impl = MapImpl()
 
 dummy_aot_config = AOTConfig(
     fw_compiler=None,  # type: ignore[arg-type]
