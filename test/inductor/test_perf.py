@@ -859,6 +859,35 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
     @requires_cuda
+    def test_inplace_custom_op_training(self):
+        @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
+        def sin(x: torch.Tensor, result: torch.Tensor) -> None:
+            result.copy_(x.sin())
+
+        factory_op = torch.empty_like
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = factory_op(x)
+                sin(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = factory_op(grad)
+                sin(saved, out)
+                return out
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel_train(f, x), """9""")
+
+    @requires_cuda
     def test_inplace_custom_op(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor x, Tensor(a!) out) -> ()")
