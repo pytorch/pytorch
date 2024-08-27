@@ -972,8 +972,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             return causal_offset_mask
 
-        prefill = 128
-        max_seq_new_tokens = 500
+        prefill = 7
+        max_seq_new_tokens = 60
         B, H, HEAD_DIM = 1, 32, 64
         start_offset = torch.tensor(prefill, device="cuda", dtype=torch.int32)
         query = torch.rand(
