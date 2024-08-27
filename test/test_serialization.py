@@ -4234,7 +4234,6 @@ class TestWrapperSubclass(torch.Tensor):
         return type(self)(self.elem.clone())
 
 
-
 class TestGetStateSubclass(torch.Tensor):
     elem: torch.Tensor
     __slots__ = ['elem']
