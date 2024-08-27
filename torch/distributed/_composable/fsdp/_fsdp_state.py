@@ -351,14 +351,12 @@ def _register_group_forward_hooks(
     """
     modules_set = set(modules)
 
-    @disable_if_config_true
     @functools.wraps(pre_hook)
     def wrapped_pre_hook(*args: Any, **kwargs: Any):
         if len(modules_to_run) == 0:  # first to run
             modules_to_run.update(modules_set)
             return pre_hook(*args, **kwargs)
 
-    @disable_if_config_true
     def get_wrapped_post_hook(module: nn.Module):
         @functools.wraps(post_hook)
         def wrapped_post_hook(*args: Any, **kwargs: Any):
