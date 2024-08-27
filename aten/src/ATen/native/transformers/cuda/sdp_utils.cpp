@@ -641,7 +641,12 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
-      check_head_dim_size_mem_efficient);
+#ifdef USE_ROCM
+      check_head_dim_size_flash
+#else
+      check_head_dim_size_mem_efficient
+#endif
+  );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;

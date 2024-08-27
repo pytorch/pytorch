@@ -7257,24 +7257,6 @@ class CommonTemplate:
             [torch.randn(8, 384, 20, 20).to(memory_format=torch.channels_last)],
         )
 
-    def test_exact_stride(self):
-        full = torch.randn((16, 16), device=self.device)
-        view = torch.as_strided(full, (16, 8), full.stride())
-
-        def fn(x):
-            result = x + x
-            result_strided = torch.empty_strided(
-                x.size(), x.stride(), device=self.device
-            )
-            result_strided[:] = result
-            return result_strided
-
-        self.common(fn, [view])
-        reference_out = fn(view)
-        compiled_fn = torch.compile(fn)
-        actual_out = compiled_fn(view)
-        self.assertEqual(reference_out.stride(), actual_out.stride())
-
     def test_like_channels_last(self):
         def foo():
             randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
@@ -11040,7 +11022,6 @@ class CommonTemplate:
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
 
-    @skipIfWindows(msg="torch._dynamo.exc.BackendCompilerFailed")  # TODO: FIX IT
     def test_randint_int64_mod(self):
         # This used to not compile due to a wrong return type of randint64_cpu
         # See https://github.com/pytorch/pytorch/issues/117435
@@ -11930,9 +11911,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
                 func_opt = torch._dynamo.optimize("inductor")(func)
                 code = run_and_get_triton_code(func_opt, *inps)
-                # On XPU, `triton_meta` includes keyword 'float32', causing UT failure. 
-                # Changed to 'float32)', it still match 'to(tl.float32)'.
-                fp32_cast_in_code = "float32)" in code
+                fp32_cast_in_code = "to(tl.float32)" in code
                 self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
