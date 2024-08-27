@@ -57,6 +57,9 @@ FROM patchelf as python
 # build python
 COPY manywheel/build_scripts /build_scripts
 ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
+# Install setuptools and wheel for python 3.12 and 3.13
+RUN /opt/python/cp312-cp312/bin/python -m pip install setuptools
+RUN /opt/python/cp313-cp313/bin/python -m pip install setuptools
 RUN bash build_scripts/build.sh && rm -r build_scripts
 
 FROM base as cuda
