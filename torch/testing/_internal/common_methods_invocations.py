@@ -9606,28 +9606,6 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
                 yield ForeachSampleInput([x], ord=ord, disable_fastpath=disable_fastpath)
 
 
-class foreach_lerp_sample_func(foreach_inputs_sample_func):
-    def _sample_rightmost_arg(
-        self,
-        opinfo,
-        rightmost_arg_type,
-        device,
-        dtype,
-        num_tensors,
-        allow_higher_dtype_scalars,
-        **_foreach_inputs_kwargs,
-    ):
-        return super()._sample_rightmost_arg(
-            opinfo,
-            rightmost_arg_type,
-            device,
-            dtype,
-            num_tensors,
-            allow_higher_dtype_scalars,
-            **_foreach_inputs_kwargs,
-        )
-
-
 class foreach_pointwise_sample_func(foreach_inputs_sample_func):
 
     def __init__(
@@ -11219,7 +11197,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
 foreach_other_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
-        sample_inputs_func=foreach_lerp_sample_func(3, True, False),
+        sample_inputs_func=foreach_inputs_sample_func(3, True, False),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
