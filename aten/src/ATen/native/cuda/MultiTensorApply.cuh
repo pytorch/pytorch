@@ -239,8 +239,10 @@ void multi_tensor_apply(
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
   using scalar_vals_t = typename T::opmath_t;
+  LOG(WARNING) << "Before allocating struct";
   TensorListScalarListMetadata<scalar_vals_t, depth, T::use_large_kernel_arg>
       tensorListMeta;
+  LOG(WARNING) << "After allocating struct";
 
   using Conf = DepthToMaxConfig<T::use_large_kernel_arg>;
 
@@ -283,6 +285,7 @@ void multi_tensor_apply(
           (loc_block_info == Conf::depth_to_max_blocks[depth - 1]);
 
       if (tensors_full || blocks_full) {
+        LOG(WARNING) << "Before kernel launch";
         multi_tensor_apply_kernel<<<
             loc_block_info,
             kBlockSize,
@@ -290,6 +293,7 @@ void multi_tensor_apply(
             at::cuda::getCurrentCUDAStream()>>>(
             tensorListMeta, callable, args...);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
+        LOG(WARNING) << "After kernel launch";
 
         // Reset.
         loc_block_info = 0;
@@ -315,12 +319,14 @@ void multi_tensor_apply(
   // if there's remaining work to be done but the tensors/blocks aren't full
   // yet we are at the end, submit the kernel to do the work!
   if (loc_block_info != 0) {
+    LOG(WARNING) << "Before kernel launch";
     multi_tensor_apply_kernel<<<
         loc_block_info,
         kBlockSize,
         0,
         at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+    LOG(WARNING) << "After kernel launch";
   }
 }
 
@@ -333,7 +339,9 @@ void multi_tensor_apply(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
+  LOG(WARNING) << "Before allocating struct";
   TensorListMetadata<depth, T::use_large_kernel_arg> tensorListMeta;
+  LOG(WARNING) << "After allocating struct";
   tensorListMeta.start_tensor_this_launch = 0;
 
   using Conf = DepthToMaxConfig<T::use_large_kernel_arg>;
@@ -368,6 +376,7 @@ void multi_tensor_apply(
           (loc_block_info == Conf::depth_to_max_blocks[depth - 1]);
 
       if (tensors_full || blocks_full) {
+        LOG(WARNING) << "Before kernel launch";
         multi_tensor_apply_kernel<<<
             loc_block_info,
             kBlockSize,
@@ -375,6 +384,7 @@ void multi_tensor_apply(
             at::cuda::getCurrentCUDAStream()>>>(
             tensorListMeta, callable, args...);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
+        LOG(WARNING) << "After kernel launch";
 
         // Reset.
         loc_block_info = 0;
@@ -397,12 +407,14 @@ void multi_tensor_apply(
 
   // see note: [finishing what we started]
   if (loc_block_info != 0) {
+    LOG(WARNING) << "Before kernel launch";
     multi_tensor_apply_kernel<<<
         loc_block_info,
         kBlockSize,
         0,
         at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+    LOG(WARNING) << "After kernel launch";
   }
 }
 
@@ -416,8 +428,10 @@ void multi_tensor_apply_for_fused_optimizer(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth");
   const auto num_tensors = tensor_lists[0].size();
+  LOG(WARNING) << "Before allocating struct";
   FusedOptimizerTensorListMetadata<depth, T::use_large_kernel_arg>
       tensorListMeta;
+  LOG(WARNING) << "After allocating struct";
 
   using Conf = DepthToMaxConfig<T::use_large_kernel_arg>;
 
@@ -454,6 +468,7 @@ void multi_tensor_apply_for_fused_optimizer(
           loc_block_info == Conf::depth_to_max_blocks[depth - 1];
 
       if (tensor_full || blocks_full) {
+        LOG(WARNING) << "Before kernel launch";
         multi_tensor_apply_kernel<<<
             loc_block_info,
             kBlockSize,
@@ -461,6 +476,7 @@ void multi_tensor_apply_for_fused_optimizer(
             at::cuda::getCurrentCUDAStream()>>>(
             tensorListMeta, callable, args...);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
+        LOG(WARNING) << "After kernel launch";
 
         // Reset.
         loc_block_info = 0;
@@ -483,12 +499,14 @@ void multi_tensor_apply_for_fused_optimizer(
 
   // see above note: [finishing what we've started]
   if (loc_block_info != 0) {
+    LOG(WARNING) << "Before kernel launch";
     multi_tensor_apply_kernel<<<
         loc_block_info,
         kBlockSize,
         0,
         at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+    LOG(WARNING) << "After kernel launch";
   }
 }
 
