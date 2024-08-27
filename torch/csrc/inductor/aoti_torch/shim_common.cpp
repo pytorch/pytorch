@@ -57,6 +57,8 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
 }
 } // namespace
 
+const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
+
 int32_t aoti_torch_device_type_cpu() {
   return (int32_t)c10::DeviceType::CPU;
 }
@@ -122,6 +124,7 @@ AOTI_TORCH_ITEM_IMPL(int32, int32_t)
 AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
 AOTI_TORCH_ITEM_IMPL(bfloat16, c10::BFloat16)
+AOTI_TORCH_ITEM_IMPL(complex64, c10::complex<float>)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
@@ -144,6 +147,7 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int16, int16_t, Short)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int32, int32_t, Int)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int64, int64_t, Long)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(bool, bool, Bool)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(complex64, c10::complex<float>, ComplexFloat)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
 bool aoti_torch_grad_mode_is_enabled() {
@@ -196,6 +200,20 @@ AOTITorchError aoti_torch_get_numel(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_numel = t->numel();
+  });
+}
+
+AOTITorchError aoti_torch_get_storage_numel(
+    AtenTensorHandle tensor,
+    int64_t* ret_numel) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    TORCH_INTERNAL_ASSERT(t->has_storage());
+    auto dtype_size = t->dtype().itemsize();
+    size_t nbytes = t->storage().nbytes();
+    TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
+    auto numel = nbytes / dtype_size;
+    *ret_numel = numel;
   });
 }
 
@@ -875,7 +893,7 @@ AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
-    const AtenTensorHandle& values,
+    const AtenTensorHandle values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;
@@ -918,11 +936,39 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     AtenTensorHandle self,
     const char* msg) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
+
+  auto device = t->device();
+
+  // Display message
   std::cout << "[";
   if (msg) {
-    std::cout << msg;
+    std::cout << "  " << msg;
   }
-  std::cout << "]:" << *t << "\n";
+  std::cout << "  "
+            << "]:" << std::endl;
+
+  // Print exact tensor values for small size tensors
+  const int64_t numel = t->numel();
+  if (numel <= AOTI_TORCH_MAX_NUMEL_TO_PRINT) {
+    std::cout << *t << "\n";
+  }
+
+  // Print summary stats of the tensor
+  std::cout << "Number of elements: " << numel << std::endl;
+  if (numel > 0) {
+    std::cout << "Mean value: " << t->mean().item() << std::endl;
+    std::cout << "Min value: " << t->min().item<float>() << std::endl;
+    std::cout << "Max value: " << t->max().item<float>() << std::endl;
+  }
+  std::cout << "Device: " << device << std::endl;
+  std::cout << "Size: " << t->sizes() << std::endl;
+  std::cout << "Stride: " << t->strides() << std::endl;
+  std::cout << "Dtype: " << t->dtype() << std::endl;
+  std::cout << "Layout: " << t->layout() << std::endl;
+  std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
+  std::cout << "Requires grad: " << t->requires_grad() << std::endl;
+
+  std::cout << std::endl;
 }
 
 // ProxyExecutor

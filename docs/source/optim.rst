@@ -223,7 +223,7 @@ Below table is showing the stability status for fused implementations:
 How to adjust learning rate
 ---------------------------
 
-:mod:`torch.optim.lr_scheduler` provides several methods to adjust the learning
+:class:`torch.optim.lr_scheduler.LRScheduler` provides several methods to adjust the learning
 rate based on the number of epochs. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
 
@@ -286,6 +286,7 @@ algorithms.
     :toctree: generated
     :nosignatures:
 
+    lr_scheduler.LRScheduler
     lr_scheduler.LambdaLR
     lr_scheduler.MultiplicativeLR
     lr_scheduler.StepLR
@@ -305,8 +306,7 @@ algorithms.
 Weight Averaging (SWA and EMA)
 ------------------------------
 
-:mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA) and Exponential Moving Average (EMA). In particular,
-the :class:`torch.optim.swa_utils.AveragedModel` class implements SWA and EMA models,
+:class:`torch.optim.swa_utils.AveragedModel` implements Stochastic Weight Averaging (SWA) and Exponential Moving Average (EMA),
 :class:`torch.optim.swa_utils.SWALR` implements the SWA learning rate scheduler and
 :func:`torch.optim.swa_utils.update_bn` is a utility function used to update SWA/EMA batch
 normalization statistics at the end of training.
@@ -333,9 +333,9 @@ EMA models are constructed by specifying the ``multi_avg_fn`` argument as follow
 >>> decay = 0.999
 >>> averaged_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 
-Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to ``get_ema_multi_avg_fn``, the default is 0.999.
+Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to :func:`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999.
 
-``get_ema_multi_avg_fn`` returns a function that applies the following EMA equation to the weights:
+:func:`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
 
 .. math:: W^\textrm{EMA}_{t+1} = \alpha W^\textrm{EMA}_{t} + (1 - \alpha) W^\textrm{model}_t
 
@@ -457,6 +457,17 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 >>> torch.optim.swa_utils.update_bn(loader, ema_model)
 >>> # Use ema_model to make predictions on test data
 >>> preds = ema_model(test_input)
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    swa_utils.AveragedModel
+    swa_utils.SWALR
+
+
+.. autofunction:: torch.optim.swa_utils.get_ema_multi_avg_fn
+.. autofunction:: torch.optim.swa_utils.update_bn
 
 
 .. This module needs to be documented. Adding here in the meantime

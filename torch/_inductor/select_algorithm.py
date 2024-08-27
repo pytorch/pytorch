@@ -40,8 +40,8 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
-from .runtime.runtime_utils import do_bench
 from .utils import (
     FakeIndentedBuffer,
     get_dtype_size,
@@ -952,7 +952,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return do_bench(algo, args, {})
+            return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -1256,11 +1256,6 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             if timings:
-                return no_op
-
-            if config.search_autotune_cache and not (
-                config.max_autotune or config.max_autotune_gemm
-            ):
                 return no_op
 
             precompile_key = create_precompile_key(name, inputs_key, choices)

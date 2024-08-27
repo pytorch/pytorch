@@ -350,6 +350,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
+        self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
         )
@@ -445,6 +446,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
         self.aligned_inputs: OrderedSet[str] = OrderedSet()
         self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
+
+        # Below field is related to printing debug intermediate tensor values info for debugging
+        self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
@@ -763,7 +767,7 @@ class GraphLowering(torch.fx.Interpreter):
             return self.graph_inputs[buffer_name].get_numel()
         raise KeyError(f"could not find {buffer_name}")
 
-    def run(self, *args: Any) -> Any:
+    def run(self, *args: Any) -> Any:  # type: ignore[override]
         with dynamo_timed("GraphLowering.run"):
             return super().run(*args)
 
@@ -908,9 +912,9 @@ class GraphLowering(torch.fx.Interpreter):
             )
 
     def placeholder(
-        self, target: str, args: Tuple[object], kwargs: Dict[str, object]
+        self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
-        example = super().placeholder(target, args, kwargs)
+        example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         self.graph_input_names.append(target)
         if isinstance(example, SymTypes):
             expr = example.node.expr
@@ -965,7 +969,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.aligned_inputs.add(target)
         return tensor
 
-    def call_function(self, target: Callable, args: Any, kwargs: Dict[str, Any]) -> Any:  # type: ignore[type-arg]
+    def call_function(self, target: Callable, args: Any, kwargs: Dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
@@ -987,12 +991,13 @@ class GraphLowering(torch.fx.Interpreter):
                 # We have to OrderedSet the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint
-                args, kwargs = constrain_to_fx_strides(
-                    self.current_node, *args, **kwargs
+                constrain_fn = functools.partial(
+                    constrain_to_fx_strides, ignore_mutated_args_FIXME=True
                 )
+                args, kwargs = constrain_fn(self.current_node, *args, **kwargs)
                 # Also register the layout constraint so when the fallback
                 # is used again, we can constrain the args to the same layout
-                layout_constraint = constrain_to_fx_strides
+                layout_constraint = constrain_fn
             return layout_constraint, args, kwargs
 
         if target not in lowerings:
@@ -1042,7 +1047,7 @@ class GraphLowering(torch.fx.Interpreter):
         return len(t.shape) == 1 and t.shape[0] <= 8
 
     def get_attr(
-        self, target: str, args: Tuple[()], kwargs: Dict[str, object]
+        self, target: str, args: Tuple[()], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
@@ -1082,9 +1087,9 @@ class GraphLowering(torch.fx.Interpreter):
         raise AssertionError
 
     def output(
-        self, target: str, args: Tuple[object], kwargs: Dict[str, object]
+        self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> None:
-        result = super().output(target, args, kwargs)
+        result = super().output(target, args, kwargs)  # type: ignore[arg-type]
         if not isinstance(result, (tuple, list)):
             # nested subgraphs can have singleton outputs
             result = (result,)
@@ -1522,7 +1527,7 @@ class GraphLowering(torch.fx.Interpreter):
                     fvs = free_unbacked_symbols(ra.expr)
                     missing = fvs - self.bound_unbacked_symbols
                     if missing:
-                        i1 = sorted(missing, key=lambda x: str(x))[0]
+                        i1 = min(missing, key=str)
                         self.ras_by_symbol.setdefault(i1, []).append(ra)
                     else:
                         make_assert(ra.expr, f"{ra.expr}")
@@ -1719,6 +1724,12 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
+
+        log.debug(
+            "Finished codegen for all nodes. The list of kernel names available: %s",
+            V.graph.all_codegen_kernel_names,
+        )
+
         result = self.wrapper_code.generate(self.is_inference)
         self.wrapper_code.pop_codegened_graph()
         return result
@@ -1858,4 +1869,4 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
-        )
+        ) or name in self.zero_dim_cpu_tensor_list

@@ -714,8 +714,6 @@ class _WorldMeta(type):
 class group(metaclass=_WorldMeta):
     """Group class. Placeholder."""
 
-    pass
-
 
 class GroupMember(metaclass=_WorldMeta):
     """Group member class."""
@@ -1706,10 +1704,12 @@ def _new_process_group_helper(
             return GroupMember.NON_GROUP_MEMBER, None
 
     prefix_store = PrefixStore(f"{group_name}/", store)
-    base_pg_options = ProcessGroup.Options(backend=str(backend))
-    base_pg_options._timeout = timeout
+    # The backend for PG will be set later based on what's inside BackendConfig
+    # and timeout are set in each backend's option.
     pg: ProcessGroup = ProcessGroup(
-        prefix_store, group_rank, group_size, base_pg_options
+        prefix_store,
+        group_rank,
+        group_size,
     )
     if device_id:
         pg.bound_device_id = device_id
@@ -1737,7 +1737,6 @@ def _new_process_group_helper(
                     backend_prefix_store,
                     backend_class.rank(),
                     backend_class.size(),
-                    base_pg_options,
                 )
         elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
@@ -3303,7 +3302,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         >>> tensor_list = [torch.zeros(2, dtype=torch.int64, device=device) for _ in range(2)]
         >>> tensor_list
         [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:0')] # Rank 0
-        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:1')] # Rank 1
+        [tensor([0, 0], device='cuda:1'), tensor([0, 0], device='cuda:1')] # Rank 1
         >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
         tensor([1, 2], device='cuda:0') # Rank 0
@@ -4443,10 +4442,11 @@ def split_group(
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
 
     prefix_store = PrefixStore(f"{group_name}/", default_store)
-    base_pg_options = ProcessGroup.Options(backend=str(backend))
-    base_pg_options._timeout = timeout
+    # We register the backend after initializing and timeout is set in pg_options.
     pg: ProcessGroup = ProcessGroup(
-        prefix_store, group_rank, len(my_group), base_pg_options
+        prefix_store,
+        group_rank,
+        len(my_group),
     )
     pg.bound_device_id = device_id
 
@@ -4509,12 +4509,21 @@ def new_group(
     should be created in the same order in all processes.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
+        Safe concurrent usage:
+        When using multiple process groups with the ``NCCL`` backend, the user
+        must ensure a globally consistent execution order of collectives across
+        ranks.
+
+        If multiple threads within a process issue collectives, explicit
+        synchronization is necessary to ensure consistent ordering.
+
+        When using async variants of torch.distributed communication APIs,
+        a work object is returned and the communication kernel is
+        enqueued on a separate CUDA stream, allowing overlap of communication
+        and computation. Once one or more async ops have been issued on one process
+        group, they must be synchronized with other cuda streams by calling `work.wait()`
+        before using another process group.
+
         See `Using multiple NCCL communicators concurrently <https://docs.nvid
         ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
         -multiple-nccl-communicators-concurrently>`_ for more details.
@@ -4717,15 +4726,8 @@ def new_subgroups(
         pass in ``group_size`` correctly.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
-        See `Using multiple NCCL communicators concurrently <https://docs.nvid
-        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
-        -multiple-nccl-communicators-concurrently>`_ for more details.
+        See warning `Safe concurrent usage` for `new_group` API for important details about
+        using multiple process groups concurrently in a safe manner.
 
     Args:
         group_size (int, optional): The size of each subgroup. If ``None``,
@@ -4828,15 +4830,8 @@ def new_subgroups_by_enumeration(
     if they are not going to be members of the group.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
-        See `Using multiple NCCL communicators concurrently <https://docs.nvid
-        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
-        -multiple-nccl-communicators-concurrently>`_ for more details.
+        See warning `Safe concurrent usage` for `new_group` API for important details about
+        using multiple process groups concurrently in a safe manner.
 
     Args:
         ranks_per_subgroup_list (list[list[int]]): A nested list of ranks of
@@ -4937,7 +4932,7 @@ def _find_or_create_pg_by_ranks_and_tag(
                 my_ranks = rank_set
         assert my_ranks is not None, "rankset doesn't include the current node"
 
-    my_ranks.sort()
+    my_ranks = sorted(my_ranks)
 
     pg = _find_pg_by_ranks_and_tag(tag, my_ranks)
     if pg is not None:

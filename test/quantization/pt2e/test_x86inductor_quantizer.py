@@ -560,9 +560,6 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        torch._export.utils.remove_proxy_from_state_dict(
-            m.__dict__["_buffers"], in_place=True
-        )
         prepare_model = copy.deepcopy(m)
         m = convert_pt2e(m)
         convert_model = copy.deepcopy(m)

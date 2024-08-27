@@ -651,7 +651,6 @@ def _export_to_aten_ir(
     _maybe_fixup_gm_and_output_node_meta(mod, gm)
 
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
-    from torch._guards import detect_fake_mode
 
     # Run produce guards before we handle runtime asserts.
     # This means we run the export solver before the runtime asserts pass.
@@ -668,7 +667,8 @@ def _export_to_aten_ir(
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    fake_mode = detect_fake_mode(flat_fake_args)
+    fake_mode = torch._export.utils._detect_fake_mode_from_gm(gm)
+    assert fake_mode is not None, "Cannot detect fake mode from graph"
 
     if not torch._dynamo.config.do_not_emit_runtime_asserts:
         stack_trace = (
@@ -681,7 +681,7 @@ def _export_to_aten_ir(
             if fake_mode:
                 insert_deferred_runtime_asserts(
                     gm,
-                    fake_mode.shape_env,
+                    fake_mode.shape_env,  # type: ignore[arg-type]
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
                 )
@@ -691,7 +691,7 @@ def _export_to_aten_ir(
     graph_signature.user_outputs = _graph_output_names(gm)
 
     def make_argument_spec(i, node) -> ArgumentSpec:
-        if isinstance(node, (int, bool, float, type(None))):
+        if isinstance(node, (int, bool, float, type(None), str)):
             # For const outputs we just directly return this
             return ConstantArgument(name="", value=node)
 
@@ -1651,8 +1651,6 @@ def _export_to_aten_ir_make_fx(
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
-    from torch._guards import detect_fake_mode
-
     fake_mode = detect_fake_mode(flat_args)
 
     if not torch._dynamo.config.do_not_emit_runtime_asserts:
@@ -2073,7 +2071,17 @@ def _export(
     if not _is_torch_jit_trace:
         _verify_placeholder_names(gm, export_graph_signature)
 
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    torch._export.utils.remove_proxy_from_state_dict(original_state_dict, in_place=True)
+
     from torch._export.verifier import Verifier
+
+    if (
+        isinstance(mod, torch.fx.GraphModule)
+        and hasattr(mod, "meta")
+        and "custom" in mod.meta
+    ):
+        gm.meta.update({"custom": mod.meta["custom"]})
 
     exported_program = ExportedProgram(
         root=gm,

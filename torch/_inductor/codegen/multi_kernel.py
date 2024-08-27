@@ -9,7 +9,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..codecache import get_path, TritonFuture
-from ..runtime.runtime_utils import do_bench_gpu
+from ..runtime.benchmarking import benchmarker
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
 from .common import TensorArg
@@ -323,7 +323,7 @@ class MultiKernelCall:
             return inner
 
         return [
-            do_bench_gpu(wrap_fn(kernel), rep=40, fast_flush=True)
+            benchmarker.benchmark_gpu(wrap_fn(kernel), rep=40, fast_flush=True)
             for kernel in self.kernels
         ]
 

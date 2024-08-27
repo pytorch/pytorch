@@ -3,9 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/mobile/function.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 class Module;
 
@@ -40,6 +38,4 @@ struct TORCH_API Method {
   Function* function_;
 };
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

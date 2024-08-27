@@ -1004,9 +1004,21 @@ class TraceableTritonKernelWrapper:
         return tracing_triton_hopifier_singleton.call_getitem(self, args)
 
     def run(self, *args, **kwargs):
-        return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
+        from torch._library.triton import is_capture_triton_enabled
+
+        if is_capture_triton_enabled():
+            return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
+        else:
+            assert self.kernel is not None
+            return self.kernel.run(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        return tracing_triton_hopifier_singleton.call_triton_kernel(
-            self, args, kwargs, None
-        )
+        from torch._library.triton import is_capture_triton_enabled
+
+        if is_capture_triton_enabled():
+            return tracing_triton_hopifier_singleton.call_triton_kernel(
+                self, args, kwargs, None
+            )
+        else:
+            assert self.kernel is not None
+            return self.kernel[self.grid](*args, **kwargs)

@@ -3,6 +3,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -303,6 +304,16 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, boo
   return str;
 }
 
+Tensor getTensorView(const Tensor& t, MPSShape* shape) {
+  std::vector<int64_t> res;
+  res.reserve([shape count]);
+  for (NSNumber* elem in shape) {
+    res.push_back(elem.longLongValue);
+  }
+  IntArrayRef r = IntArrayRef(res);
+  return t.view(res);
+}
+
 MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format) {
   return getMPSShape(t.sizes(), memory_format);
 }
@@ -359,26 +370,152 @@ MPSNDArray* ndArrayFromTensor(const Tensor& tensor, MPSShape* shape, MPSDataType
   return [tmpGraphTensorData mpsndarray];
 }
 
+static std::vector<int64_t> getSortedStrides(const IntArrayRef& s) {
+  std::vector<int64_t> idx(s.size());
+  iota(idx.begin(), idx.end(), 0);
+  sort(idx.begin(), idx.end(), [&s](size_t i1, size_t i2) { return s[i1] > s[i2]; });
+
+  return idx;
+}
+
+static std::vector<int64_t> inversePermutation(const std::vector<int64_t>& permuteOrder) {
+  auto size = permuteOrder.size();
+  std::vector<int64_t> inversePerm(permuteOrder.size());
+
+  for (int i = 0; i < size; i++) {
+    inversePerm[permuteOrder[i]] = i;
+  }
+  return inversePerm;
+}
+
+static MPSNDArray* permuteNDArray(MPSNDArray* inArray, const std::vector<int64_t>& permuteOrder_) {
+  auto permuteOrder = inversePermutation(permuteOrder_);
+  NSUInteger srcRank = [inArray numberOfDimensions];
+  if (srcRank != permuteOrder.size()) {
+    TORCH_INTERNAL_ASSERT(false);
+    return nil;
+  }
+  std::vector<NSUInteger> dimensionOrder(srcRank);
+  std::iota(std::begin(dimensionOrder), std::end(dimensionOrder), 0);
+  MPSNDArrayDescriptor* desc = [inArray descriptor];
+
+  for (int64_t i = srcRank - 1; i >= 0; i--) {
+    NSUInteger axis = permuteOrder[i];
+    auto axisIter = std::find(dimensionOrder.begin(), dimensionOrder.end(), axis);
+    NSUInteger axis1 = srcRank - i - 1;
+    NSUInteger axis2 = dimensionOrder.end() - axisIter - 1;
+    iter_swap(dimensionOrder.begin() + i, axisIter);
+    if (axis1 != axis2) {
+      [desc transposeDimension:axis1 withDimension:axis2];
+    }
+  }
+  C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wnonnull")
+  C10_CLANG_DIAGNOSTIC_IGNORE("-Wnonnull")
+#endif
+  MPSNDArray* result = [inArray arrayViewWithCommandBuffer:nil descriptor:desc aliasing:MPSAliasingStrategyShallAlias];
+  C10_CLANG_DIAGNOSTIC_POP()
+
+  TORCH_INTERNAL_ASSERT(result != nil);
+  return result;
+}
+
+MPSNDArray* getMPSNDArray(const at::Tensor& t, MPSShape* sizes, MPSShape* strides) {
+  id<MTLBuffer> srcBuf = getMTLBufferStorage(t);
+
+  MPSDataType mpsDataType = getMPSDataType(t.scalar_type());
+  MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType shape:sizes];
+  srcTensorDesc.preferPackedRows = YES;
+  MPSNDArray* srcNDArray = [[[MPSNDArray alloc] initWithBuffer:srcBuf
+                                                        offset:t.storage_offset() * t.element_size()
+                                                    descriptor:srcTensorDesc] autorelease];
+  if (strides != nil) {
+    srcNDArray = [srcNDArray arrayViewWithShape:sizes strides:strides];
+  }
+  return srcNDArray;
+}
+
+MPSNDArray* getMPSNDArray(const at::Tensor& t, const IntArrayRef& sizes, const IntArrayRef& strides) {
+  return getMPSNDArray(t, getMPSShape(sizes.empty() ? t.sizes() : sizes), strides.empty() ? nil : getMPSShape(strides));
+}
+
+static MPSNDArray* getStridedMPSNDArray(const at::Tensor& src, MPSNDArray* srcNDArray) {
+  auto strides = src.strides();
+  auto sizes = src.sizes();
+  auto nStrides = strides.size();
+  auto nonZeroStrides = src.strides();
+  int64_t crtNonZeroStride = 1;
+  bool hasZeroStrides = false;
+  auto sortedStridesIndices = getSortedStrides(nonZeroStrides);
+
+  NSMutableArray<NSNumber*>* sortedStridesShape = [NSMutableArray arrayWithCapacity:nStrides];
+  NSMutableArray<NSNumber*>* sortedMPSShape = [NSMutableArray arrayWithCapacity:nStrides];
+  for (const auto i : c10::irange(nStrides)) {
+    sortedStridesShape[i] = [NSNumber numberWithInteger:nonZeroStrides[sortedStridesIndices[i]]];
+    sortedMPSShape[i] = [NSNumber numberWithInteger:sizes[sortedStridesIndices[i]]];
+  }
+  MPSShape* originalSortedMPSShape = sortedMPSShape;
+  MPSShape* originalSortedStridesShape = sortedStridesShape;
+  bool hasNonZeroStrides = nStrides == 0 ? false : nonZeroStrides[sortedStridesIndices[nStrides - 1]] != 1;
+  if (hasNonZeroStrides) {
+    originalSortedMPSShape = [sortedMPSShape copy];
+    originalSortedStridesShape = [sortedStridesShape copy];
+    [sortedStridesShape addObject:[NSNumber numberWithInteger:1]];
+    [sortedMPSShape addObject:[NSNumber numberWithInteger:1]];
+  }
+  if (nStrides == 0) {
+    originalSortedMPSShape = getMPSShape(src);
+    originalSortedStridesShape = getMPSShape(src.strides());
+  }
+
+  srcNDArray = [srcNDArray arrayViewWithShape:sortedMPSShape strides:sortedStridesShape];
+  if (hasNonZeroStrides) {
+    MPSNDArrayIdentity* identity =
+        [[[MPSNDArrayIdentity alloc] initWithDevice:MPSDevice::getInstance()->device()] autorelease];
+    srcNDArray = [identity reshapeWithCommandBuffer:nil
+                                        sourceArray:srcNDArray
+                                              shape:originalSortedMPSShape
+                                   destinationArray:nil];
+  }
+  TORCH_INTERNAL_ASSERT(srcNDArray);
+
+  srcNDArray = permuteNDArray(srcNDArray, sortedStridesIndices);
+  TORCH_INTERNAL_ASSERT(srcNDArray);
+
+  return srcNDArray;
+}
+
+Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, MPSNDArray* mpsNDArray) {
+  _placeholder = mpsGraphTensor;
+  _value = [[[MPSGraphTensorData alloc] initWithMPSNDArray:mpsNDArray] autorelease];
+}
+
 Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
                          const Tensor& src,
-                         MPSShape* mpsShape,
+                         MPSShape* mpsShape_,
                          bool gatherTensorData,
-                         MPSDataType dataType)
+                         MPSDataType dataType,
+                         bool useMPSStridedAPI)
     : _tensor(src) {
   TORCH_CHECK(src.is_mps(), "Placeholder storage has not been allocated on MPS device!");
   // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
-  // a view tensor could be contiguous (e.g., slice ops) or non-contiguous (e.g., transpose())
-  if (needsGather(src) && gatherTensorData) {
-    Tensor emptyShell = Tensor();
-    // use "_tensor" from Placeholder to retain view's output during its usage in other ops
-    _tensor = gatherViewTensor(src, emptyShell);
-    if (!_tensor.has_storage()) {
-      // if we cannot gather, we make the tensor contiguous implicitly, and keep
-      // it in placeholder to be able to retrieve it when we return from constructor
-      _tensor = src.clone(MemoryFormat::Contiguous);
+
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  // Use gather kernel to solve strides for macOS < 15.0
+  // Starting with macOS 15.0, MPS supports native strides direclty in the kernels
+  if (!is_macOS_15_0_or_newer || !useMPSStridedAPI) {
+    if ((!src.is_contiguous() || src.storage_offset()) && gatherTensorData) {
+      Tensor emptyShell = Tensor();
+      // use "_tensor" from Placeholder to retain view's output during its usage in other ops
+      _tensor = gatherViewTensor(src, emptyShell);
+      if (!_tensor.has_storage()) {
+        // if we cannot gather, we make the tensor contiguous implicitly, and keep
+        // it in placeholder to be able to retrieve it when we return from constructor
+        _tensor = src.clone(MemoryFormat::Contiguous);
+      }
+      srcBuf = getMTLBufferStorage(_tensor);
     }
-    srcBuf = getMTLBufferStorage(_tensor);
   }
 
   // tensor.numel() could be zero, but tensor is valid as long as the buffer size is non-zero.
@@ -389,9 +526,66 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     const auto scalar_type = _tensor.scalar_type();
     dataType = _tensor.dim() == 0 ? getMPSScalarType(scalar_type) : getMPSDataType(scalar_type);
   }
-  _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
-                                                    shape:mpsShape ? mpsShape : getMPSShape(_tensor)
-                                                 dataType:dataType] autorelease];
+
+  // Tensor is contiguous and has no storage offset.
+  // Wrap it directly inside MPSGraphTensorData
+  if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI || !is_macOS_15_0_or_newer) {
+    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
+                                                      shape:mpsShape_ ? mpsShape_ : getMPSShape(_tensor)
+                                                   dataType:dataType] autorelease];
+  } else {
+    IntArrayRef view_shape;
+    if (mpsShape_) {
+      _tensor = getTensorView(src, mpsShape_);
+    }
+
+    MPSShape* mpsShape = getMPSShape(_tensor);
+    MPSShape* mpsStrides = getMPSShape(_tensor.strides());
+
+    IntArrayRef baseShape;
+    if (src.is_view()) {
+      baseShape = src._base().sizes();
+    } else {
+      baseShape = getIMPSAllocator()->getBufferShape(src.storage().data());
+    }
+    int flattenedShaped = 1;
+    for (const auto i : c10::irange(baseShape.size())) {
+      flattenedShaped *= baseShape[i];
+    }
+    MPSShape* mpsBaseShape = @[ @(flattenedShaped) ];
+    MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType shape:mpsBaseShape];
+    srcTensorDesc.preferPackedRows = YES;
+    MPSNDArray* srcNDArray = [[[MPSNDArray alloc] initWithBuffer:srcBuf
+                                                          offset:src.storage_offset() * src.element_size()
+                                                      descriptor:srcTensorDesc] autorelease];
+    TORCH_INTERNAL_ASSERT(srcNDArray);
+    if (src.dim() != 0) {
+      srcNDArray = getStridedMPSNDArray(_tensor, srcNDArray);
+    } else {
+      bool needsReshape = false;
+      NSMutableArray* mpsExpandedShape = nil;
+      NSMutableArray* mpsExpandedStrides = nil;
+
+      if (src.dim() > 0 && src.stride(-1) != 1) {
+        needsReshape = true;
+        mpsExpandedShape = [NSMutableArray arrayWithArray:mpsShape];
+        mpsExpandedStrides = [NSMutableArray arrayWithArray:mpsStrides];
+        [mpsExpandedShape addObject:@1];
+        [mpsExpandedStrides addObject:@1];
+      }
+      srcNDArray = [srcNDArray arrayViewWithShape:needsReshape ? mpsExpandedShape : getMPSShape(src)
+                                          strides:needsReshape ? mpsExpandedStrides : getMPSShape(src.strides())];
+      TORCH_INTERNAL_ASSERT(srcNDArray);
+
+      if (needsReshape) {
+        MPSNDArrayIdentity* identity =
+            [[[MPSNDArrayIdentity alloc] initWithDevice:MPSDevice::getInstance()->device()] autorelease];
+        srcNDArray = [identity reshapeWithCommandBuffer:nil sourceArray:srcNDArray shape:mpsShape destinationArray:nil];
+      }
+      TORCH_INTERNAL_ASSERT(srcNDArray);
+    }
+    _value = [[[MPSGraphTensorData alloc] initWithMPSNDArray:srcNDArray] autorelease];
+  }
 
   TORCH_INTERNAL_ASSERT(_value);
   _placeholder = mpsGraphTensor;

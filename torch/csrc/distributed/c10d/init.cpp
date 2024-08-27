@@ -13,7 +13,6 @@
 #include <vector>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
@@ -1047,6 +1046,20 @@ This class does not support ``__members__`` property.)");
           &::c10d::symmetric_memory::get_symmetric_memory)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
+      .def_property_readonly(
+          "buffer_ptrs_dev",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            return reinterpret_cast<uintptr_t>(symm_mem->get_buffer_ptrs_dev());
+          })
+      .def_property_readonly(
+          "signal_pad_ptrs_dev",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            return reinterpret_cast<uintptr_t>(
+                symm_mem->get_signal_pad_ptrs_dev());
+          })
+      .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
+      .def_property_readonly(
+          "signal_pad_size", &SymmetricMemory::get_signal_pad_size)
       .def(
           "get_buffer",
           &SymmetricMemory::get_buffer,
@@ -1798,8 +1811,7 @@ communication mechanism.
               py::init<
                   const c10::intrusive_ptr<::c10d::Store>&,
                   int,
-                  int,
-                  c10::intrusive_ptr<::c10d::ProcessGroup::Options>>(),
+                  int>(),
               py::call_guard<py::gil_scoped_release>())
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
@@ -1809,7 +1821,6 @@ communication mechanism.
               "_backend_id",
               &::c10d::ProcessGroup::getBackendID,
               py::arg("backend_type"))
-          .def_property_readonly("options", &::c10d::ProcessGroup::getOptions)
           .def(
               "broadcast",
               &::c10d::ProcessGroup::broadcast,
@@ -2220,37 +2231,6 @@ Arguments:
       .value("MPI", ::c10d::ProcessGroup::BackendType::MPI)
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
       .export_values();
-
-  // ProcessGroup::Options binding
-  intrusive_ptr_class_<::c10d::ProcessGroup::Options>(
-      processGroup, "Options", R"(Class for processes group options.)")
-      .def(
-          py::init([](const std::string& backend,
-                      const std::chrono::milliseconds& timeout) {
-            return c10::make_intrusive<::c10d::ProcessGroup::Options>(
-                backend, timeout);
-          }),
-          py::arg("backend"),
-          py::arg("timeout") = kProcessGroupDefaultTimeout,
-          py::call_guard<py::gil_scoped_release>())
-      .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
-      .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
-
-#ifndef _WIN32
-  module.def(
-      "_round_robin_process_groups",
-      [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
-          -> c10::intrusive_ptr<::c10d::ProcessGroup> {
-        if (processGroups.empty()) {
-          throw std::invalid_argument("Specify at least 1 process group");
-        }
-        const auto& first = processGroups.front();
-        return c10::make_intrusive<::c10d::ProcessGroupRoundRobin>(
-            first->getRank(), first->getSize(), std::move(processGroups));
-      },
-      py::arg("process_groups"),
-      py::call_guard<py::gil_scoped_release>());
-#endif
 
   // TODO: The collection definitions handles direct instantiation of
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
