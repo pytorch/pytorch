@@ -908,9 +908,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     // for int8 - softmax quantize
     if (origin_dtype == at::kByte) {
       attn = at::clamp_max(
-          at::clamp_min(at::round(attn / a_scale) + a_zp, 0), 255
+          at::clamp_min(at::round(attn / a_scale) + static_cast<float>(a_zp), 0), 255
       );
-      attn = (attn - a_zp) * a_scale;
+      attn = (attn - static_cast<float>(a_zp)) * a_scale;
     }
     auto res = at::matmul(attn, value_expanded);
     // for int8 - output quantize
