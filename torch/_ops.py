@@ -239,7 +239,7 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
 ]
 
 
-class HigherOrderOperator(abc.ABC, OperatorBase):
+class HigherOrderOperator(OperatorBase, abc.ABC):
     # The HigherOrderOperator will appear as torch.ops.higher_order.{name}
     #
     # If you're creating a new HigherOrderOperator, please do not change the
