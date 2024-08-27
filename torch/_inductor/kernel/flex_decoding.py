@@ -161,7 +161,7 @@ flex_decoding_template = TritonTemplate(
     # first kv block we're loading
 
     # last valid block according to sparse mask
-    block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+    block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
     K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
@@ -207,7 +207,7 @@ flex_decoding_template = TritonTemplate(
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
 
         # last valid block according to sparse mask
-        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
         K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
