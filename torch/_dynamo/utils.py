@@ -56,7 +56,7 @@ from typing import (
 from typing_extensions import Literal, TypeGuard
 
 import torch
-import torch._C._instruction_counter as _instruction_counter
+from torch._C import _instruction_counter
 import torch._functorch.config
 import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
