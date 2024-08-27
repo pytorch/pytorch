@@ -30,7 +30,7 @@ class ExecutorchCallDelegate(HigherOrderOperator):
         super().__init__("executorch_call_delegate")
 
     def __call__(self, lowered_module, *args):
-        return self.call_dispatch(lowered_module, *args)
+        return super().__call__(lowered_module, *args)
 
 
 executorch_call_delegate = ExecutorchCallDelegate()

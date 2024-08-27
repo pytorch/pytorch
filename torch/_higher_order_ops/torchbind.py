@@ -27,7 +27,7 @@ class CallTorchBind(HigherOrderOperator):
         super().__init__("call_torchbind")
 
     def __call__(self, obj, method, *args, **kwargs):
-        return self.call_dispatch(obj, method, *args, **kwargs)
+        return super().__call__(obj, method, *args, **kwargs)
 
 
 call_torchbind = CallTorchBind()

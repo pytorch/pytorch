@@ -4994,7 +4994,7 @@ def construct_sum_pyop():
             super().__init__("mysum")
 
         def __call__(self, *args, **kwargs):
-            return self.call_dispatch(*args, **kwargs)
+            return super().__call__(*args, **kwargs)
 
     mysum = MySum()
 

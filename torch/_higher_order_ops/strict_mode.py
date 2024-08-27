@@ -33,7 +33,7 @@ class StrictMode(HigherOrderOperator):
         super().__init__("strict_mode")
 
     def __call__(self, callable, operands):
-        return self.call_dispatch(callable, operands)
+        return super().__call__(callable, operands)
 
 
 strict_mode_op = StrictMode()

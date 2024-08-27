@@ -51,7 +51,7 @@ class CondOp(HigherOrderOperator):
         super().__init__("cond")
 
     def __call__(self, pred, true_fn, false_fn, operands):
-        return self.call_dispatch(pred, true_fn, false_fn, operands)
+        return super().__call__(pred, true_fn, false_fn, operands)
 
 
 cond_op = CondOp()

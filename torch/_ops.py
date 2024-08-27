@@ -411,7 +411,8 @@ class HigherOrderOperator(abc.ABC, OperatorBase):
         assert not isinstance(kernel, DispatchKey)
         return kernel(*args, **kwargs)
 
-    def call_dispatch(self, /, *args, **kwargs):
+    @abc.abstractmethod
+    def __call__(self, /, *args, **kwargs):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
         from torch._dynamo import disable
@@ -430,10 +431,6 @@ class HigherOrderOperator(abc.ABC, OperatorBase):
             )
 
         return wrapper()
-
-    @abc.abstractmethod
-    def __call__(self, /, *args, **kwargs):
-        pass
 
     def __str__(self):
         return f"{self.name()}"

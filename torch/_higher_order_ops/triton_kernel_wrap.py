@@ -523,7 +523,7 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
         super().__init__("triton_kernel_wrapper_mutation")
 
     def __call__(self, kernel_idx, constant_args_idx, grid, kwargs):
-        return self.call_dispatch(
+        return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grid,
@@ -540,7 +540,7 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
         super().__init__("triton_kernel_wrapper_functional")
 
     def __call__(self, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone):
-        return self.call_dispatch(
+        return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grid,

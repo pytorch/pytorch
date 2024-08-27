@@ -52,7 +52,7 @@ class WhileLoopOp(HigherOrderOperator):
                 "additional_inputs must be a tuple of tensors, ints, floats, or bools, got "
                 f"{additional_inputs}"
             )
-        return self.call_dispatch(cond_fn, body_fn, carried_inputs, additional_inputs)
+        return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
 while_loop_op = WhileLoopOp()

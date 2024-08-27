@@ -44,7 +44,7 @@ class MapImpl(HigherOrderOperator):
         super().__init__("map_impl")
 
     def __call__(self, *args, **kwargs):
-        return self.call_dispatch(*args, **kwargs)
+        return super().__call__(*args, **kwargs)
 
 
 map = MapWrapper()

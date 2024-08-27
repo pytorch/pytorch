@@ -13,7 +13,7 @@ class RunConstGraph(HigherOrderOperator):
         super().__init__("run_const_graph")
 
     def __call__(self, *args):
-        return self.call_dispatch(*args)
+        return super().__call__(*args)
 
 
 run_const_graph = RunConstGraph()

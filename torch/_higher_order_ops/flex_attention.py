@@ -59,7 +59,7 @@ class FlexAttentionHOP(HigherOrderOperator):
             for buf in score_mod_other_buffers + mask_mod_other_buffers
         ):
             raise RuntimeError("Other buffers must be tensors.")
-        return self.call_dispatch(
+        return super().__call__(
             query,
             key,
             value,
@@ -101,7 +101,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
             for buf in score_mod_other_buffers + mask_mod_other_buffers
         ):
             raise RuntimeError("Other buffers must be tensors.")
-        return self.call_dispatch(
+        return super().__call__(
             query,
             key,
             value,
