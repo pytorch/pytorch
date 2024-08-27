@@ -102,6 +102,7 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -148,6 +149,9 @@ compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
 compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
+
+
+PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 
 @dataclasses.dataclass
@@ -3342,6 +3346,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_VALUE(self, inst: Instruction):
         self.generated_items.append(self.pop())
+        if len(self.generated_items) > MAX_ITERATOR_LIMIT:
+            unimplemented(
+                "Too many yield values in generator. Maybe you are inlining an infinite generator. "
+                f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
+            )
         self.push(ConstantVariable.create(None))
 
     def GET_YIELD_FROM_ITER(self, inst):
