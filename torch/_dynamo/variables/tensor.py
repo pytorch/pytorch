@@ -294,7 +294,9 @@ class TensorVariable(VariableTracker):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
             # Note - at a certain point we may want to handle
-            return TypedGetAttrVariable(self, name, type(real_value), source=attr_source)
+            return TypedGetAttrVariable(
+                self, name, type(real_value), source=attr_source
+            )
 
         from .builder import VariableBuilder
 
