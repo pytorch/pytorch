@@ -19,7 +19,8 @@ class TestPrivateUse1(TestCase):
             print(torch.rand(1, 4).to("privateuseone:0"))
 
         torch._register_device_module("privateuseone", DummyPrivateUse1Module)
-        with self.assertRaises(NotImplementedError):
+        msg = r"This could be because the operator doesn't exist for this backend"
+        with self.assertRaisesRegex(NotImplementedError, msg):
             print(torch.rand(1, 4).to("privateuseone:0"))
 
 
