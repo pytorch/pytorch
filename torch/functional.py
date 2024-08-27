@@ -159,14 +159,14 @@ def split(
 ) -> Tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
-    If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
+    If :attr:split_size_or_sections is an integer type, then :attr:tensor will
     be split into equally sized chunks (if possible). Last chunk will be smaller if
-    the tensor size along the given dimension :attr:`dim` is not divisible by
-    :attr:`split_size`.
+    the tensor size along the given dimension :attr:dim is not divisible by
+    :attr:split_size.
 
-    If :attr:`split_size_or_sections` is a list, then :attr:`tensor` will be split
-    into ``len(split_size_or_sections)`` chunks with sizes in :attr:`dim` according
-    to :attr:`split_size_or_sections`.
+    If :attr:split_size_or_sections is a list, then :attr:tensor will be split
+    into `len(split_size_or_sections) chunks with sizes in :attr:dim according
+    to :attr:split_size_or_sections.
 
     Args:
         tensor (Tensor): tensor to split.
@@ -196,14 +196,27 @@ def split(
                  [6, 7],
                  [8, 9]]))
     """
-    if has_torch_function_unary(tensor):
-        return handle_torch_function(
+    if torch.has_torch_function_unary(tensor):
+        return torch.handle_torch_function(
             split, (tensor,), tensor, split_size_or_sections, dim=dim
         )
     # Overwriting reason:
     # This dispatches to two ATen functions depending on the type of
     # split_size_or_sections. The branching code is in _tensor.py, which we
     # call here.
+
+    # Handle the special case where split_size_or_sections is 0
+    if isinstance(split_size_or_sections, int) and split_size_or_sections == 0:
+        # Return an empty tuple if the tensor is empty or split size is 0
+        if tensor.numel() == 0:
+            return ()
+        else:
+            raise ValueError("split_size_or_sections must be greater than 0")
+
+    if isinstance(split_size_or_sections, list) and any(size == 0 for size in split_size_or_sections):
+        raise ValueError("List of split sizes must not contain 0")
+
+    # Default behavior
     return tensor.split(split_size_or_sections, dim)
 
 
