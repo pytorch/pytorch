@@ -800,13 +800,14 @@ class TensorVariable(VariableTracker):
 
         tx = InstructionTranslator.current_tx()
         if value is not None:
-            result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
-                tx, [tensor1, tensor2], {}
+            from .. import polyfills
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(tx, polyfills.addcmul_inplace),
+                [self, tensor1, tensor2, value],
+                {},
             )
-            result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
-                tx, [result, value], {}
-            )
-            return self.call_method(tx, "add_", [result], {})
 
     def method___setitem__(self, key, value):
         def has_bool_key(v):

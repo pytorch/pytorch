@@ -27,6 +27,17 @@ function install_cusparselt_052 {
     rm -rf tmp_cusparselt
 }
 
+function install_cusparselt_062 {
+    # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
+    mkdir tmp_cusparselt && pushd tmp_cusparselt
+    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.6.2.3-archive.tar.xz
+    tar xf libcusparse_lt-linux-x86_64-0.6.2.3-archive.tar.xz
+    cp -a libcusparse_lt-linux-x86_64-0.6.2.3-archive/include/* /usr/local/cuda/include/
+    cp -a libcusparse_lt-linux-x86_64-0.6.2.3-archive/lib/* /usr/local/cuda/lib64/
+    popd
+    rm -rf tmp_cusparselt
+}
+
 function install_118 {
     echo "Installing CUDA 11.8 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.4.0"
     rm -rf /usr/local/cuda-11.8 /usr/local/cuda
@@ -94,13 +105,13 @@ function install_121 {
 }
 
 function install_124 {
-  echo "Installing CUDA 12.4 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.5.2"
+  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.5.2"
   rm -rf /usr/local/cuda-12.4 /usr/local/cuda
-  # install CUDA 12.4.0 in the same container
-  wget -q https://developer.download.nvidia.com/compute/cuda/12.4.0/local_installers/cuda_12.4.0_550.54.14_linux.run
-  chmod +x cuda_12.4.0_550.54.14_linux.run
-  ./cuda_12.4.0_550.54.14_linux.run --toolkit --silent
-  rm -f cuda_12.4.0_550.54.14_linux.run
+  # install CUDA 12.4.1 in the same container
+  wget -q https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux.run
+  chmod +x cuda_12.4.1_550.54.15_linux.run
+  ./cuda_12.4.1_550.54.15_linux.run --toolkit --silent
+  rm -f cuda_12.4.1_550.54.15_linux.run
   rm -f /usr/local/cuda && ln -s /usr/local/cuda-12.4 /usr/local/cuda
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
@@ -121,7 +132,7 @@ function install_124 {
   cd ..
   rm -rf nccl
 
-  install_cusparselt_052
+  install_cusparselt_062
 
   ldconfig
 }

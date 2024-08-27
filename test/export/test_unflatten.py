@@ -20,14 +20,7 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import (
-    Constraint,
-    Dim,
-    dynamic_dim,
-    export,
-    FlatArgsAdapter,
-    unflatten,
-)
+from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -539,6 +532,24 @@ class TestUnflatten(TestCase):
 
         for m in unflattened.modules():
             check_meta(m)
+
+    def test_unflatten_requires_grad_param(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(3, 3), requires_grad=False)
+
+            def forward(self, x):
+                return self.p + x
+
+        with torch.device("meta"):
+            mod = M()
+
+        inputs = (torch.randn(3, 3, device="meta"),)
+        ep = export(mod, inputs)
+        unflattened = unflatten(ep)
+        self.assertTrue(unflattened.state_dict()["p"].requires_grad is False)
+        self.assertTrue(unflattened.p.requires_grad is False)
 
     def test_placeholder_and_get_attr_ordering_after_unflattened(self):
         class TransposeModule(torch.nn.Module):
