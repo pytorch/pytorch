@@ -2207,6 +2207,20 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # always safe to move, since we trace into the autograd::function bwd and can see if it's only used by aten ops
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
+    def test_reentrant_checkpointing(self):
+        def fn(x):
+            y = x.sin()
+            z = y.cos()
+            return (y * z).sum()
+
+        inp = torch.rand(10, 10, requires_grad=True)
+        out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "(e.g. reentrant checkpointing), this is not supported yet.",
+        ), torch._dynamo.compiled_autograd.enable(torch.compile):
+            out.backward()
+
     def test_verbose_logs_graph(self):
         def fn():
             model = torch.nn.Sequential(
@@ -2461,20 +2475,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         ]
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
-
-    def test_reentrant_checkpointing(self):
-        def fn(x):
-            y = x.sin()
-            z = y.cos()
-            return (y * z).sum()
-
-        inp = torch.rand(10, 10, requires_grad=True)
-        out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=True)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "(e.g. reentrant checkpointing), this is not supported yet.",
-        ), torch._dynamo.compiled_autograd.enable(torch.compile):
-            out.backward()
 
 
 def load_test_module(name):
