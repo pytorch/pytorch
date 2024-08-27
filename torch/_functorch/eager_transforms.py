@@ -43,7 +43,7 @@ from torch.utils._pytree import (
 )
 
 from .apis import vmap
-from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
+from .vmap import doesnt_support_saved_tensor_hooks_if_higher_order, get_chunk_sizes
 
 
 def lazy_dynamo_disallow(func):
@@ -368,7 +368,7 @@ def jvp_increment_nesting():
         exit_jvp_nesting()
 
 
-@doesnt_support_saved_tensors_hooks
+@doesnt_support_saved_tensor_hooks_if_higher_order
 def _vjp_with_argnums(
     func: Callable, *primals, argnums: Optional[argnums_t] = None, has_aux: bool = False
 ):
@@ -1393,7 +1393,7 @@ def hessian(func, argnums=0):
     return jacfwd(jacrev(func, argnums), argnums)
 
 
-@doesnt_support_saved_tensors_hooks
+@doesnt_support_saved_tensor_hooks_if_higher_order
 def grad_and_value_impl(func, argnums, has_aux, args, kwargs) -> Callable:
     with grad_increment_nesting() as level:
         output, aux, grad_input = None, None, None

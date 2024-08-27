@@ -22,9 +22,11 @@ from torch._C._functorch import (
     _vmap_decrement_nesting,
     _vmap_increment_nesting,
     is_batchedtensor,
+    TransformType
 )
 from torch.utils._pytree import (
     _broadcast_to_and_flatten,
+    tree_any_only,
     tree_flatten,
     tree_map_,
     tree_unflatten,
@@ -36,15 +38,36 @@ in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
 
 
-def doesnt_support_saved_tensors_hooks(f):
+def doesnt_support_saved_tensor_hooks_if_higher_order(f):
+    # TODO: update this error message to mention requires_grad
     message = (
-        "torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. "
-        "Please open an issue with your use case."
+        "Multiple layers of torch.func.{grad, vjp, jacrev, hessian} transforms "
+        "don't yet support saved tensor hooks. Please open an issue with your "
+        "use case."
     )
+    def fully_unwrap(x):
+        while torch._C._functorch.maybe_get_level(x) > 0:
+            x = torch._C._functorch.get_unwrapped(x)
+        return x
 
     @functools.wraps(f)
     def fn(*args, **kwargs):
-        with torch.autograd.graph.disable_saved_tensors_hooks(message):
+        any_requires_grad = tree_any_only(
+            torch.Tensor, lambda x: fully_unwrap(x).requires_grad, (args, kwargs)
+        )
+        cis = torch._C._functorch.get_interpreter_stack()
+        any_grad_layers = (
+            sum(ci.key() == TransformType.Grad for ci in cis) > 0
+            if cis is not None else False
+        )
+        context = (
+            torch.autograd.graph.disable_saved_tensors_hooks(message)
+            if
+            any_grad_layers or any_requires_grad
+            else
+            contextlib.nullcontext()
+        )
+        with context:
             return f(*args, **kwargs)
 
     return fn
