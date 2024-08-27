@@ -490,10 +490,6 @@ if(USE_SYSTEM_LIBS)
   endif()
 endif()
 
-# Used when building Caffe2 through setup.py
-option(BUILDING_WITH_TORCH_LIBS
-       "Tell cmake if Caffe2 is being built alongside torch libs" ON)
-
 # /Z7 override option When generating debug symbols, CMake default to use the
 # flag /Zi. However, it is not compatible with sccache. So we rewrite it off.
 # But some users don't use sccache; this override is for them.
