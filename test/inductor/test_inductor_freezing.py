@@ -490,9 +490,9 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(counters["inductor"]["binary_folding"], 4)
 
     @torch._inductor.config.patch(layout_optimization=False)
-    def test_folded_conv_bn_hardswish_autocast(self):
+    def test_folded_conv_bn_hardswish(self):
         for use_bias, dtype in itertools.product(
-            [True, False], [torch.float16, torch.bfloat16]
+            [True, False], [torch.float16, torch.bfloat16, torch.float32]
         ):
             if self.device == "cpu" and dtype == torch.float16:
                 continue
@@ -504,9 +504,10 @@ class OptimizeForInferenceTemplate(TestCase):
                 ConvBNHardswish(3, 32, bias=use_bias, kernel_size=3, stride=2)
                 .eval()
                 .to(self.device)
+                .to(dtype)
             )
 
-            x = torch.rand(3, 3, 32, 32).to(self.device)
+            x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
 
             torch._dynamo.reset()
             counters.clear()
@@ -518,7 +519,7 @@ class OptimizeForInferenceTemplate(TestCase):
             # TODO - bias is separate kernel right now, we should only unfuse it
             # from conv if it can be fused
 
-            with torch.no_grad(), self.autocast(dtype=dtype):
+            with torch.no_grad():
                 out_eager = mod(x)
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
