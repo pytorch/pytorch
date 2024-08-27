@@ -1,5 +1,6 @@
 # Owner(s): ["module: cpp-extensions"]
 
+import _codecs
 import os
 import shutil
 import sys
@@ -9,9 +10,12 @@ import unittest
 from typing import Union
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
+from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     skipIfTorchDynamo,
@@ -551,7 +555,18 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             )
             with TemporaryFileName() as f:
                 torch.save(sd, f)
-                sd_loaded = torch.load(f, map_location="cpu")
+                with safe_globals(
+                    [
+                        np.core.multiarray._reconstruct,
+                        np.ndarray,
+                        np.dtype,
+                        _codecs.encode,
+                        type(np.dtype(np.float32))
+                        if np.__version__ < "1.25.0"
+                        else np.dtypes.Float32DType,
+                    ]
+                ):
+                    sd_loaded = torch.load(f, map_location="cpu")
                 self.assertTrue(sd_loaded["x"].is_cpu)
 
 

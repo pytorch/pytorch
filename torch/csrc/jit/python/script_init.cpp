@@ -2443,6 +2443,12 @@ void initJitScriptBindings(PyObject* module) {
     return py::bytes(bytes.data(), bytes.size());
   });
 
+  m.def("_pickle_load_obj", [](const py::bytes& bytes) {
+    // https://github.com/pybind/pybind11/issues/2517
+    std::string buffer = bytes;
+    return torch::jit::pickle_load_obj(buffer);
+  });
+
   initScriptDictBindings(module);
   initScriptListBindings(module);
 }

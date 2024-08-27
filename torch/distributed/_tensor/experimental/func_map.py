@@ -14,6 +14,9 @@ except ImportError:
     from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 
+__all__ = ["local_map"]
+
+
 PlacementType = Optional[Sequence[Placement]]
 InputPlacements = Optional[Tuple[PlacementType, ...]]
 OutputPlacements = Union[PlacementType, Tuple[PlacementType, ...]]

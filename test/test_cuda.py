@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import ctypes
 import gc
 import json
 import os
@@ -16,6 +17,8 @@ import warnings
 from copy import deepcopy
 from itertools import product
 from random import randint
+
+import psutil
 
 import torch
 import torch.cuda
@@ -62,6 +65,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     slowTest,
     subtest,
+    TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TEST_NUMPY,
@@ -3998,6 +4002,16 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
+    def test_gds_fails_in_ci(self):
+        if IS_WINDOWS or TEST_WITH_ROCM:
+            error_msg = "is not supported on this platform"
+        else:
+            error_msg = "cuFileHandleRegister failed"
+        with TemporaryFileName() as f:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
@@ -4994,10 +5008,25 @@ class TestMemPool(TestCase):
 
         dummy_allocator_source = """
         #include <torch/extension.h>
+        #include <ATen/cuda/Exceptions.h>
+        #include <cuda_runtime_api.h>
+
         extern "C" {
+          C10_EXPORT int called_dummy_alloc = 0;
+          C10_EXPORT int called_dummy_free = 0;
+
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return (void*)123; }
-          C10_EXPORT void dummy_free(void* ptr) { }
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
+            called_dummy_alloc = 123;
+            void* ptr;
+            C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
+            return ptr;
+          }
+
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
+            called_dummy_free = 321;
+            C10_CUDA_CHECK(cudaFree(ptr));
+          }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
@@ -5018,12 +5047,17 @@ class TestMemPool(TestCase):
         # pool should point to the same allocator as the one passed into it
         self.assertEqual(allocator.allocator(), pool.allocator)
 
+        # no allocations happened yet, so called_dummy_alloc should be 0
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        self.assertEqual(called_dummy_alloc.value, 0)
+
         with torch.cuda.use_mem_pool(pool):
             out_0 = torch.randn(1, device="cuda")
 
-        # out_0.data_ptr() should be 123 if dummy_alloc was used to allocate
-        # out_0 tensor
-        self.assertEqual(out_0.data_ptr(), 123)
+        # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
+        # out tensor
+        self.assertEqual(called_dummy_alloc.value, 123)
 
         with torch.cuda.use_mem_pool(pool):
             out_1 = torch.randn(1, device="cuda")
@@ -5036,7 +5070,6 @@ class TestMemPool(TestCase):
         # pool's use count should now be 0, since release() calls releasePool
         # twice based on the use_count()
         self.assertEqual(pool.use_count(), 0)
-
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
@@ -5260,6 +5293,40 @@ class TestCudaOptims(TestCase):
             scaler.update()
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
+
+
+class TestGDS(TestCase):
+    def _get_tmp_dir_fs_type(self):
+        my_path = os.path.realpath("/tmp")
+        root_type = ""
+        for part in psutil.disk_partitions():
+            if part.mountpoint == "/":
+                root_type = part.fstype
+                continue
+            if part.mountpoint == my_path:
+                return part.fstype
+        return root_type
+
+    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
+    def test_gds_read_write_tensors(self):
+        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
+            self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
+        src1 = torch.randn(1024, device="cuda")
+        src2 = torch.randn(2, 1024, device="cuda")
+        torch.cuda.gds._gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds._gds_register_buffer(src2.untyped_storage())
+        dest1 = torch.empty(1024, device="cuda")
+        dest2 = torch.empty(2, 1024, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+            file.save_storage(src1.untyped_storage(), offset=0)
+            file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
+            file.load_storage(dest1.untyped_storage(), offset=0)
+            file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+        self.assertEqual(src1, dest1)
+        self.assertEqual(src2, dest2)
+        torch.cuda.gds._gds_deregister_buffer(src1.untyped_storage())
+        torch.cuda.gds._gds_deregister_buffer(src2.untyped_storage())
 
 
 instantiate_parametrized_tests(TestCuda)
