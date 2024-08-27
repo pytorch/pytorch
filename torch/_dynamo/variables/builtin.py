@@ -16,7 +16,7 @@ import torch
 from torch import sym_float, sym_int
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, polyfill, variables
+from .. import config, variables
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -92,19 +92,6 @@ IN_PLACE_DESUGARING_MAP = {
     operator.ior: operator.or_,
     operator.ixor: operator.xor,
 }
-
-
-def _polyfill_call_impl(name):
-    """Create a BuiltinVariable.call_{name} method that inlines through polyfill.{name}"""
-
-    def call_fn(self, tx: "InstructionTranslator", *args, **kwargs):
-        return tx.inline_user_function_return(
-            variables.UserFunctionVariable(fn), args, kwargs
-        )
-
-    fn = getattr(polyfill, name)
-    call_fn.__name__ = f"call_{name}"
-    return call_fn
 
 
 class BuiltinVariable(VariableTracker):
@@ -846,7 +833,7 @@ class BuiltinVariable(VariableTracker):
         def builtin_dispatch(tx: "InstructionTranslator", args, kwargs):
             for f in handlers:
                 rv = f(tx, args, kwargs)
-                if rv:
+                if rv is not None:
                     return rv
             unimplemented(f"builtin: {fn.__name__} {arg_types} {has_kwargs}")
 
@@ -1472,13 +1459,6 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx: "InstructionTranslator", arg, isinstance_type):
-        try:
-            arg_type = arg.python_type()
-        except NotImplementedError:
-            unimplemented(
-                f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
-            )
-
         isinstance_type = isinstance_type.as_python_constant()
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
@@ -1524,6 +1504,13 @@ class BuiltinVariable(VariableTracker):
         ):
             return variables.ConstantVariable.create(
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
+            )
+
+        try:
+            arg_type = arg.python_type()
+        except NotImplementedError:
+            unimplemented(
+                f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
             )
 
         try:
@@ -1641,6 +1628,7 @@ class BuiltinVariable(VariableTracker):
             UserFunctionVariable,
         )
         from .builder import SourcelessBuilder, VariableBuilder
+        from .misc import GetAttrVariable
 
         name = name_var.as_python_constant()
 
@@ -1711,6 +1699,21 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name)
+        elif isinstance(
+            obj,
+            (
+                variables.TensorVariable,
+                variables.NamedTupleVariable,
+                variables.ConstantVariable,
+                variables.DistributedVariable,
+                variables.UserDefinedClassVariable,
+                variables.UserDefinedObjectVariable,
+            ),
+        ):
+            try:
+                return obj.var_getattr(tx, name)
+            except NotImplementedError:
+                return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
@@ -2090,9 +2093,6 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ):
         return a.call_method(tx, "__contains__", [b], {})
-
-    call_all = _polyfill_call_impl("all")
-    call_any = _polyfill_call_impl("any")
 
 
 @contextlib.contextmanager

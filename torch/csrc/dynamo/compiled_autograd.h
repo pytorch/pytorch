@@ -229,17 +229,30 @@ class CompiledNodeArgs {
   void collect(const at::Tensor& t) {
     collect(_compiler.tensor_args.add(t));
   }
-  void collect(const SavedVariable& t) {
-    collect(_compiler.tensor_args.add(t, _node_call.node));
+  void collect(const SavedVariable& sv, bool is_output) {
+    collect(
+        _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
   }
   void collect(const c10::SymInt& t) {
     _compiler.add_size_input(t);
+  }
+  void collect(const std::vector<SavedVariable>& t, bool is_output) {
+    collect_size(t.size());
+    for (const SavedVariable& i : t) {
+      collect(i, is_output);
+    }
   }
   template <typename T>
   void collect(const std::vector<T>& t) {
     collect_size(t.size());
     for (const T& i : t) {
       collect(i);
+    }
+  }
+  void collect(const c10::ArrayRef<SavedVariable>& t, bool is_output) {
+    collect_size(t.size());
+    for (const SavedVariable& i : t) {
+      collect(i, is_output);
     }
   }
   template <typename T>
@@ -586,8 +599,10 @@ class SwapSavedVariables {
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_variables.save(&t, std::move(t));
     if (arg.defined()) {
+      bool prior = at::SavedTensorDefaultHooks::set_tracing(true);
       TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
       t = SavedVariable(arg.proxy_tensor, false);
+      at::SavedTensorDefaultHooks::set_tracing(prior);
     }
   }
   void after(SavedVariable& t) {

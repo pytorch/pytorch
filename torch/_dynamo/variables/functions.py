@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
@@ -765,7 +765,9 @@ class WrapperUserFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        return variables.UserFunctionVariable(polyfill.getattr_and_trace).call_function(
+        return variables.UserFunctionVariable(
+            polyfills.getattr_and_trace
+        ).call_function(
             tx, [self, variables.ConstantVariable(self.attr_to_trace), *args], kwargs
         )
 

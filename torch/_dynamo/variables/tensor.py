@@ -218,17 +218,27 @@ class TensorVariable(VariableTracker):
         return props
 
     def dynamic_getattr(self, tx: "InstructionTranslator", name):
+        from .misc import GetAttrVariable
+
+        class TypedGetAttrVariable(GetAttrVariable):
+            def __init__(self, obj, name, type, **kwargs) -> None:
+                super().__init__(obj, name, **kwargs)
+                self.type = type
+
+            def python_type(self):
+                return self.type
+
         fake_val = self.proxy.node.meta["example_value"]
+        example_value = getattr(fake_val, name)
+
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
         # if:
         # (1) the tensor is a traceable tensor subclass
         # (2) We are getattr'ing an inner tensor from that subclass
         if not self.source and is_traceable_wrapper_subclass(fake_val):
-            fake_val = self.proxy.node.meta["example_value"]
             attrs, ctx = fake_val.__tensor_flatten__()
             proxy = getattr(self.as_proxy(), name)
-            example_value = getattr(fake_val, name)
             if name in attrs:
                 # attrs returned from tensor_flatten are always tensors
                 assert isinstance(example_value, torch.Tensor)
@@ -243,6 +253,8 @@ class TensorVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
+            # FIXME(rec): I need somehow in this path to get a TypedGetAttrValue
+            # but I have no idea how.
             return
 
         from ..guards import CLOSURE_VARS, GuardBuilder
@@ -264,7 +276,7 @@ class TensorVariable(VariableTracker):
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
         except Exception as exc:
-            msg = f"{exc!r} raised in eval('{self.source.name()}', {scope})"
+            msg = f"{exc!r} raised in eval('{self.source.name()}')"
             raise NotImplementedError(msg) from exc
 
         if _input_associated_real_value is None:
@@ -276,16 +288,16 @@ class TensorVariable(VariableTracker):
         if get_custom_getattr(_input_associated_real_value):
             return
 
+        attr_source = AttrSource(self.source, name)
         real_value = getattr(_input_associated_real_value, name)
         if callable(real_value):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
             # Note - at a certain point we may want to handle
-            return
+            return TypedGetAttrVariable(self, name, type(real_value), source=attr_source)
 
         from .builder import VariableBuilder
 
-        attr_source = AttrSource(self.source, name)
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableBuilder(tx, attr_source)(real_value)
 
