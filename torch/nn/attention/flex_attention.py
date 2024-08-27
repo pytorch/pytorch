@@ -776,10 +776,6 @@ def create_block_mask(
             value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
-    mod_type = _get_mod_type(mask_mod)
-    assert (
-        mod_type == _ModificationType.MASK_MOD
-    ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
     inner_func = _create_block_mask_inner
     if B is None:
         B = 1
