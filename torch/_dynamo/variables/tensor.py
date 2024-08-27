@@ -218,16 +218,6 @@ class TensorVariable(VariableTracker):
         return props
 
     def dynamic_getattr(self, tx: "InstructionTranslator", name):
-        from .misc import GetAttrVariable
-
-        class TypedGetAttrVariable(GetAttrVariable):
-            def __init__(self, obj, name, type, **kwargs) -> None:
-                super().__init__(obj, name, **kwargs)
-                self.type = type
-
-            def python_type(self):
-                return self.type
-
         fake_val = self.proxy.node.meta["example_value"]
         example_value = getattr(fake_val, name)
 
@@ -253,8 +243,6 @@ class TensorVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
-            # FIXME(rec): I need somehow in this path to get a TypedGetAttrValue
-            # but I have no idea how.
             return
 
         from ..guards import CLOSURE_VARS, GuardBuilder
@@ -294,9 +282,7 @@ class TensorVariable(VariableTracker):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
             # Note - at a certain point we may want to handle
-            return TypedGetAttrVariable(
-                self, name, type(real_value), source=attr_source
-            )
+            return
 
         from .builder import VariableBuilder
 
