@@ -719,6 +719,7 @@ class AutogradFunctionApply(HigherOrderOperator):
     def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
         args_tensor_mask = fwd_kwargs["args_tensor_mask"]
+        non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
         is_setup_ctx_defined = fwd_kwargs["is_setup_ctx_defined"]
         original_generate_vmap_rule = fwd_kwargs["generate_vmap_rule"]
         length_of_tensor_args = sum(args_tensor_mask)
@@ -726,6 +727,15 @@ class AutogradFunctionApply(HigherOrderOperator):
         # lifted freevars should not be args of ApplyTemplate.apply
         # since we don't need to calculate the gradients of them.
         new_fwd_args = fwd_args[:length_of_tensor_args]
+
+        # If users call ctx.mark_non_differentiable() in the original fwd function.
+        def _ctx_mark_non_differentiable(ctx, output, non_differentiable_idx):
+            if len(non_differentiable_idx) > 0:
+                non_differentiable_output = []
+                for i, x in enumerate(output):
+                    if i in non_differentiable_idx:
+                        non_differentiable_output.append(x)
+                ctx.mark_non_differentiable(*non_differentiable_output)
 
         if is_setup_ctx_defined:
 
@@ -744,6 +754,8 @@ class AutogradFunctionApply(HigherOrderOperator):
                     nonlocal saved_values
                     ctx.save_for_backward(*saved_values)
 
+                    _ctx_mark_non_differentiable(ctx, output, non_differentiable_idx)
+
                 @staticmethod
                 def backward(ctx, *grad):
                     saved_values = ctx.saved_tensors
@@ -760,6 +772,9 @@ class AutogradFunctionApply(HigherOrderOperator):
                 def forward(ctx, *args):
                     nonlocal saved_values
                     output, saved_values = fwd(None, *fwd_args)
+
+                    _ctx_mark_non_differentiable(ctx, output, non_differentiable_idx)
+
                     return output
 
                 @staticmethod

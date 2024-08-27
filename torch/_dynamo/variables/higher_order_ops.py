@@ -1902,6 +1902,20 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # graph.output will append the output at the very end
         # This might be a behavior difference
 
+        # If users call ctx.mark_non_differentiable, we should capture these output tensors who
+        # are marked as non-differentiable and pass them to ApplyTemplate
+        # at torch._functorch.autograd_function.AutogradFunctionApply for reconstruction.
+        non_differentiable_idx = []
+        if ctx.non_differentiable is not None:
+            non_differentiable_set = set(ctx.non_differentiable)
+            assert isinstance(fwd_out, variables.BaseListVariable)
+            for i, x in enumerate(fwd_out.items):
+                if (
+                    isinstance(x, variables.TensorVariable)
+                    and x.as_proxy() in non_differentiable_set
+                ):
+                    non_differentiable_idx.append(i)
+
         # Rewrite the output of fwd_graph to (output, stuff_necessary_for_bwd)
         for node in fwd_graph.find_nodes(op="output"):
             fwd_graph.erase_node(node)
@@ -2028,6 +2042,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 args=p_args,
                 kwargs={
                     "args_tensor_mask": args_tensor_mask,
+                    "non_differentiable_idx": non_differentiable_idx,
                     "is_setup_ctx_defined": is_setup_ctx_defined,
                     "generate_vmap_rule": generate_vmap_rule,
                 },

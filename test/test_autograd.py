@@ -741,6 +741,7 @@ class TestAutograd(TestCase):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, 2 * x)
 
+    @skipIfTorchDynamo("Hit Dynamo exception handling bug")
     def test_custom_function_setup_context_multi_input(self):
         class MyReshape(Function):
             @staticmethod

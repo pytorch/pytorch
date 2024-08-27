@@ -559,7 +559,7 @@ class GraphModule(torch.nn.Module):
         function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True], is_setup_ctx_defined = False, generate_vmap_rule = False);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
+        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True], non_differentiable_idx = [], is_setup_ctx_defined = False, generate_vmap_rule = False);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
         return (autograd_function_apply,)
 
     class fwd_body_0(torch.nn.Module):
@@ -716,20 +716,6 @@ class GraphModule(torch.nn.Module):
     # In the future, we should make the Dynamo test suite actually
     # run on test_autograd.py (it's disabled right now) and delete these.
     def test_smoke_from_test_autograd(self):
-        class Func(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                out0 = x.clone()
-                out1 = x.clone()
-                ctx.mark_non_differentiable(out1)
-                ctx._materialize_non_diff_grads = False
-                return out0, out1
-
-            @staticmethod
-            def backward(ctx, g0, g1):
-                assert g1 is None
-                return g0
-
         def mult1(x):
             return x.prod(dim=-1).prod(dim=-1)
 
@@ -855,10 +841,6 @@ class GraphModule(torch.nn.Module):
                 return grad, None
 
         def test():
-            a = torch.tensor(1.0, requires_grad=True)
-            out = Func.apply(a)[0]
-            out.backward()
-
             x = torch.ones(2, 4, 4).requires_grad_()
             mult2(x)
 
@@ -1093,29 +1075,37 @@ class GraphModule(torch.nn.Module):
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
 
-    def test_mark_non_differentiable(self):
+    def test_mark_non_differentiable_with_tuple(self):
         from torch.autograd import Function
 
         class MyFunction(Function):
             @staticmethod
-            def forward(ctx, input):
-                output = input > 0
-                ctx.mark_non_differentiable(output)
-                return output
+            def forward(ctx, x, y):
+                out1 = x.sin()
+                out2 = y * 2
+                ctx.mark_non_differentiable(out2)
+                return out1, out2
 
             @staticmethod
-            def backward(ctx, grad_output):
-                return (grad_output * 0).to(torch.double)
+            def backward(ctx, grad1, grad2):
+                return grad1.cos(), grad2 * 0.0
 
         @torch.compile(backend="aot_eager", fullgraph=True)
-        def fn(x):
-            return MyFunction.apply(x)
+        def fn(x, y):
+            return MyFunction.apply(x, y)
 
-        x = torch.randn(5, 5, requires_grad=True)
-        mask = fn(x)
-        self.assertFalse(mask.requires_grad)
-        y = x.masked_fill(mask, 0)
-        y.sum().backward()
+        x = torch.tensor(10.0, requires_grad=True)
+        y = torch.tensor(20.0, requires_grad=True)
+        ref1, ref2 = MyFunction.apply(x, y)
+        res1, res2 = fn(x, y)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
+        # Ensure out1 requires gradients, out2 does not.
+        self.assertTrue(ref1.requires_grad)
+        self.assertTrue(res1.requires_grad)
+        self.assertFalse(ref2.requires_grad)
+        self.assertFalse(res2.requires_grad)
+        res1.sum().backward()
 
     def test_default_values(self):
         from torch.autograd import Function
