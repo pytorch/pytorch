@@ -668,7 +668,11 @@ def register_noop_decomp(targets, nop_arg=0):
 def slice_noop(self, dim=0, start=None, end=None, step=1):
     if start is None or end is None:
         return False
-    if start == 0 and end >= 2**63 - 1 and step == 1:
+    if (
+        statically_known_true(sym_eq(start, 0))
+        and statically_known_true(end >= 2**63 - 1)
+        and statically_known_true(sym_eq(step, 1))
+    ):
         return True
     return False
 
@@ -794,6 +798,13 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
 
 def decompose_auto_functionalized(graph):
+    """Decomposes auto_functionalized and triton_kernel_wrapper_functional
+    nodes into clones and the underlying mutation node.
+
+    We assume that the reinplacing pass runs before this; the reinplacing pass
+    tells us (via rewriting the arguments or .meta to those nodes) which
+    Tensors we should clone and which Tensors are safe to reinplace.
+    """
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -816,13 +827,38 @@ def decompose_auto_functionalized(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
-        match.replace_by_example(decomp, flat_args, run_dce=False)
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional_dense,
+        )
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
+
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
     for node in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
     ):
         raise AssertionError("auto_functionalized was not removed")
+    for node in graph.find_nodes(
+        op="call_function",
+        target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+    ):
+        raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
 @register_lowering_pattern(

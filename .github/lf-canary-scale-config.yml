@@ -121,6 +121,18 @@ runner_types:
         ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
       am2:
         ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
+  lf.c.linux.24xlarge.ephemeral:
+    disk_size: 150
+    instance_type: c5.24xlarge
+    is_ephemeral: true
+    max_available: 200
+    os: linux
+    ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
+    variants:
+      amz2023:
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
+      am2:
+        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.2xlarge:
     disk_size: 150
     instance_type: c5.2xlarge
@@ -269,6 +281,30 @@ runner_types:
     disk_size: 256
     instance_type: m7g.4xlarge
     is_ephemeral: false
+    max_available: 200
+    os: linux
+    ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
+    variants:
+      amz2023:
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
+      am2:
+        ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
+  lf.c.linux.arm64.2xlarge.ephemeral:
+    disk_size: 256
+    instance_type: t4g.2xlarge
+    is_ephemeral: true
+    max_available: 200
+    os: linux
+    ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
+    variants:
+      amz2023:
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
+      am2:
+        ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
+  lf.c.linux.arm64.m7g.4xlarge.ephemeral:
+    disk_size: 256
+    instance_type: m7g.4xlarge
+    is_ephemeral: true
     max_available: 200
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
