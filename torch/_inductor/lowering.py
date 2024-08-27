@@ -536,9 +536,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
         def group_args(arg_pairs):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
-                use_foreach = (
-                    not is_dynamic(*args) or config.combo_kernel_foreach_dynamic_shapes
-                )
+                use_foreach = not is_dynamic(*args)
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
