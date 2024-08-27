@@ -81,6 +81,7 @@ class TestKernelBenchmark(TestCase):
             compiled_module.__file__, f"{compiled_module.__file__}.cleaned"
         )
         self.assertTrue("@triton_heuristics" not in cleaned_triton)
+        self.assertTrue(".run(" not in cleaned_triton)
         try:
             out = subprocess.check_output(
                 f"{sys.executable} {compiled_module.__file__}.cleaned".split(),
@@ -467,6 +468,20 @@ class TestKernelBenchmark(TestCase):
 
         a = torch.randn(128, 128, device=GPU_TYPE)
         f(a)
+        compiled_module = self.get_compiled_module()
+        self.verify_remove_inductor_deps(compiled_module)
+
+    @config.patch("triton.unique_kernel_names", True)
+    @config.patch(benchmark_kernel=False)
+    @config.patch(compile_threads=1)
+    def test_remove_inductor_deps_scalar(self):
+        @torch.compile
+        def f(a, b):
+            return a + b
+
+        a = torch.tensor(1.0, device=GPU_TYPE)
+        b = torch.tensor(2.0, device=GPU_TYPE)
+        f(a, b)
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
