@@ -3552,6 +3552,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             )
         )
 
+    def test_use_embedding_twice(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = torch.nn.Embedding(4, 4)
+
+            def forward(self, x):
+                return self.embed(x) + self.embed.weight[x]
+
+        inputs = (torch.tensor([0, 1, 2, 3]),)
+        ep = export(Foo(), inputs)
+
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
