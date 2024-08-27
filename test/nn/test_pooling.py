@@ -1332,7 +1332,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)
-    @expectedFailureMPS  # test_adaptive_pooling_max_nhwc currently fails on MPS - ISSUE #
+    @expectedFailureMPS  # test_adaptive_pooling_max_nhwc currently fails on MPS - ISSUE#
     def test_adaptive_pooling_max_nhwc(self, device, dtype):
         def helper(input_size, output_plane_size, contig):
             n_plane_dims = len(output_plane_size)
@@ -1385,7 +1385,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)
-    @expectedFailureMPS  # test_pooling_max_nhwc currently fails on MPS - ISSUE #
+    @expectedFailureMPS  # test_pooling_max_nhwc currently fails on MPS - ISSUE#
     def test_pooling_max_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
             output_height = math.floor(

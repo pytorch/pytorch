@@ -1616,7 +1616,7 @@ class TestUnaryUfuncs(TestCase):
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
 
 
-instantiate_device_type_tests(TestUnaryUfuncs, globals())
+instantiate_device_type_tests(TestUnaryUfuncs, globals(), allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()

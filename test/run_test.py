@@ -1425,7 +1425,7 @@ def get_selected_tests(options) -> List[str]:
             "nn/test_dropout",
             "nn/test_pooling",
             "test_view_ops",
-            "test_nn"
+            "test_nn",
         ]
     else:
         # Exclude all mps tests otherwise
