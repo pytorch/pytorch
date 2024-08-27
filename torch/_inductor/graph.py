@@ -235,9 +235,7 @@ def mark_nodes_dislike_padding(
         op = _get_overload_packet(cur)
         if not op:
             continue
-        if op in ops_dislike_padding or (
-            user_visible_outputs and cur.name in user_visible_outputs
-        ):
+        if op in ops_dislike_padding:
             cur.meta["dislike_padding"] = True
 
         if cur.meta.get("dislike_padding", False):
@@ -248,6 +246,9 @@ def mark_nodes_dislike_padding(
                     continue
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
+        # We only want to mark output nodes. So, move it after the above prior nodes process.
+        if user_visible_outputs and cur.name in user_visible_outputs:
+            cur.meta["dislike_padding"] = True
 
 
 class GraphLowering(torch.fx.Interpreter):
