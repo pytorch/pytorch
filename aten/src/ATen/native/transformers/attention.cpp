@@ -916,7 +916,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     // for int8 - output quantize
     if (origin_dtype == at::kByte) {
       res = at::clamp_max(
-          at::clamp_min(at::round(res / o_scale) + o_zp, 0), 255
+          at::clamp_min(at::round(res / o_scale) + static_cast<float>(o_zp), 0), 255
       );
     }
     return std::make_tuple(res.to(origin_dtype), attn.to(origin_dtype));
