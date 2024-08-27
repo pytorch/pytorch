@@ -120,7 +120,8 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         os=OperatingSystem.LINUX,
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX, use_split_build=True,
+            OperatingSystem.LINUX,
+            use_split_build=True,
             arches=["11.8", "12.1", "12.4", "cpu"],
         ),
         ciflow_config=CIFlowConfig(
