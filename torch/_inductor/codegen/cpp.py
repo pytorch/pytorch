@@ -935,11 +935,14 @@ class CppOverrides(OpOverrides):
 
 CppOverrides._initialize_pointwise_overrides("cpp")
 
+FALLBACKOPS = []
+
 
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""
 
     def __new__(cls, *args, **kargs):
+        global FALLBACKOPS
         self = super().__new__(cls)
 
         def wrap(func):
@@ -1036,6 +1039,7 @@ class CppVecOverrides(CppOverrides):
             ):
                 if name == "constant":
                     continue
+                FALLBACKOPS.append(name)
                 setattr(self, name, CppVecOverrides.fallback(method.__func__))
 
         return self
@@ -1060,15 +1064,19 @@ class CppVecOverrides(CppOverrides):
             octype = "bool" if output_bool_dtype else cdtype
             with code.indent():
                 for argidx, arg in enumerate(args):
-                    assert arg.is_vec
-                    assert arg.dtype == vec_dtype
-                    code.writeline(
-                        f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf{argidx};"
-                    )
-                    code.writeline(
-                        f"{arg}.store(tmpbuf{argidx}.data(), {tiling_factor});"
-                    )
-                    scalar_args.append(f"tmpbuf{argidx}[i]")
+                    if isinstance(arg, CppCSEVariable):
+                        if not arg.is_vec:
+                            arg = kernel.broadcast(arg)
+                        assert arg.dtype == vec_dtype
+                        code.writeline(
+                            f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf{argidx};"
+                        )
+                        code.writeline(
+                            f"{arg}.store(tmpbuf{argidx}.data(), {tiling_factor});"
+                        )
+                        scalar_args.append(f"tmpbuf{argidx}[i]")
+                    else:
+                        scalar_args.append(arg)
                 code.writeline(
                     f"__at_align__ std::array<{octype}, {tiling_factor}> tmpbuf_out;"
                 )
@@ -2630,9 +2638,11 @@ class CppVecKernel(CppKernel):
             # Vertical reduction
             if out_dtype != dtype:
                 converted_value = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
-                code.writeline(
-                    f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
-                )
+                if out_dtype == torch.bool:
+                    convert = f"{value}.template cast<bool,{self._get_num_vectors(torch.bool)}>()"
+                else:
+                    convert = f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value})"
+                code.writeline(f"auto {converted_value} = {convert};")
                 value = converted_value
             code.splice(self._get_store_line(value, var, index, out_dtype))
         self.reduction_suffix.splice(code.map(lambda x: DeferredLine(name, x)))
