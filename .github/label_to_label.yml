@@ -1,13 +1,46 @@
 # Use this to auto apply labels based on other labels.  Applies to both PRs and
 # issues. Currently only supports any and all
 - any:
-  - "module: custom operators"
+  - "module: opcheck"
+  then:
+  - "module: custom-operators"
+- any:
+  - "module: custom-operators"
+  - "module: functionalization"
   - "module: aotdispatch"
+  - "module: higher order operators"
+  - "module: fakeTensor"
+  - "module: ProxyTensor"
+  - "module: library"
+  - "module: reinplacing"
   then:
   - "module: pt2-dispatcher"
+- any:
+  - "module: vmap"
+  then:
+  - "module: functorch"
+- any:
+  - "module: reinplacing"
+  then:
+  - "module: inductor"
+- any:
+  - "module: pt2 optimizer"
+  then:
+  - "module: dynamo"
+- any:
+  - "module: flex attention"
+  then:
+  - "module: higher order operators"
 - any:
   - "module: dynamo"
   - "module: pt2-dispatcher"
   - "module: inductor"
+  - "module: aotinductor"
+  - "module: cudagraphs"
+  - "oncall: export"
+  - "module: startup-tracing-compile"
+  - "module: compiled autograd"
+  - "module: flex attention"
+  - "module: dynamic shapes"
   then:
   - "oncall: pt2"
