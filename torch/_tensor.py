@@ -214,23 +214,19 @@ class Tensor(torch._C.TensorBase):
             torch.serialization._serialization_tls, "materialize_fake_tensors", False
         )
         state = torch._utils._get_obj_state(self)
-        tensor_type = type(self)
-        # Strip all state when using FakeTensor with skip_data because FakeTensor has
+        # Ignore all state when using FakeTensor with skip_data(materialize_fake_tensors) because FakeTensor has
         # some state that cannot be pickled
         if (
             type(self) is torch._subclasses.fake_tensor.FakeTensor
             and skip_data
             and materialize_fake_tensors
-        ):
-            state = None
-            tensor_type = torch.Tensor
-        if tensor_type is Tensor and not state:
+        ) or (type(self) is Tensor and not state):
             # Fast path for regular tensor without Python state.
             return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
-        return (_rebuild_from_type_v2, (func, tensor_type, args, state))
+        return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
         r"""
