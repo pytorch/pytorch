@@ -209,14 +209,12 @@ class Tensor(torch._C.TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        metadata_only = getattr(
-            torch.serialization._serialization_tls, "metadata_only", False
-        )
+        skip_data = getattr(torch.serialization._serialization_tls, "skip_data", False)
         state = torch._utils._get_obj_state(self)
         tensor_type = type(self)
-        # Strip all state when using FakeTensor with metadata_only because FakeTensor has
+        # Strip all state when using FakeTensor with skip_data because FakeTensor has
         # some state that cannot be pickled
-        if isinstance(self, torch._subclasses.fake_tensor.FakeTensor) and metadata_only:
+        if type(self) is torch._subclasses.fake_tensor.FakeTensor and skip_data:
             state = None
             tensor_type = torch.Tensor
         if tensor_type is Tensor and not state:
@@ -261,8 +259,9 @@ class Tensor(torch._C.TensorBase):
         warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
 
-        metadata_only = getattr(
-            torch.serialization._serialization_tls, "metadata_only", False
+        skip_data = getattr(torch.serialization._serialization_tls, "skip_data", False)
+        materialize_fake_tensors = getattr(
+            torch.serialization._serialization_tls, "materialize_fake_tensors", False
         )
 
         # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
@@ -282,9 +281,9 @@ class Tensor(torch._C.TensorBase):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
             # this would reconstruct the BFloat16 tensor from numpy.
-            if metadata_only:
+            if skip_data:
                 raise RuntimeError(
-                    "Cannot serialize tensors on backends with no storage with metadata_only=True"
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
                 )
             numpy_tensor = (
                 self.cpu().numpy()
@@ -298,9 +297,9 @@ class Tensor(torch._C.TensorBase):
         if self.device.type == "meta":
             # NB: This implementation BREAKS storage sharing.  Current
             # hypothesis is that no one cares for meta tensors.
-            if metadata_only:
+            if skip_data:
                 warnings.warn(
-                    "Serializing tensors on the meta device with metadata_only=True is a no-op"
+                    "Serializing tensors on the meta device under skip_data context manager is a no-op"
                 )
             arg_meta = (
                 self.dtype,
@@ -310,6 +309,10 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_meta_tensor_no_storage, arg_meta)
         if self.is_quantized:
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize qtensor under skip_data context manager, file an issue if you need this feature"
+                )
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[
                 Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]
@@ -391,9 +394,9 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
         elif self.is_nested:
-            if metadata_only:
+            if skip_data:
                 raise RuntimeError(
-                    "Cannot serialize NST with metadata_only=True, file an issue if you need this feature"
+                    "Cannot serialize NST under skip_data context manager, file an issue if you need this feature"
                 )
             args_nested = (
                 # NB: values() currently returns the storage as a buffer in an unsafe way.
@@ -415,7 +418,7 @@ class Tensor(torch._C.TensorBase):
                     )
                     or (
                         isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
-                        and not metadata_only
+                        and not (skip_data and materialize_fake_tensors)
                     )
                 )
                 or (
@@ -456,10 +459,7 @@ class Tensor(torch._C.TensorBase):
                     _internal=True,
                 )  # type: ignore[assignment]
 
-            if (
-                isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
-                and metadata_only
-            ):
+            if isinstance(self, torch._subclasses.fake_tensor.FakeTensor) and skip_data:
                 storage._fake_device = self.device
 
             args = (

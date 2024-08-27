@@ -59,6 +59,7 @@ __all__ = [
     "get_safe_globals",
     "add_safe_globals",
     "safe_globals",
+    "skip_data",
 ]
 
 
@@ -89,7 +90,7 @@ else:
 # _serialization_tls is used to store thread local state specific to serialization
 # that needs to be propagated to other files, in particular we use this for
 # (1) map_location (needed for wrapper subclasses/third party devices to torch._utils)
-# (2) metadata_only (needed for torch.Tensor.__reduce_ex__)
+# (2) skip_data (needed for torch.Tensor.__reduce_ex__)
 _serialization_tls = threading.local()
 
 
@@ -262,6 +263,48 @@ class safe_globals(_weights_only_unpickler._safe_globals):
         #          [-0.8234,  2.0500, -0.3657]])
         >>> assert torch.serialization.get_safe_globals() == []
     """
+
+
+class skip_data:
+    """
+    Context-manager that skips writing storages for ``torch.save`` calls.
+
+    Space will still be reserved for storages by ``torch.save``, but storage bytes will not be written.
+
+    Args:
+        materialize_fake_tensors: Whether to materialize FakeTensors.
+
+    Example:
+        >>> import tempfile
+        >>> t = torch.randn(2, 3)
+        >>> with tempfile.NamedTemporaryFile() as f:
+        >>>     with torch.serialization.skip_data():
+        >>>         torch.save(t, f.name)
+        >>>     torch.load(f.name, weights_only=True)
+    """
+
+    def __init__(self, materialize_fake_tensors: bool = False):
+        self._old_skip_data = getattr(_serialization_tls, "skip_data", False)
+        self._old_materialize_fake_tensors = getattr(
+            _serialization_tls, "materialize_fake_tensors", False
+        )
+        self.materialize_fake_tensors = materialize_fake_tensors
+
+    def __enter__(self):
+        _serialization_tls.skip_data = True
+        _serialization_tls.materialize_fake_tensors = self.materialize_fake_tensors
+        torch._C._stash_obj_in_tls("skip_data", _serialization_tls.skip_data)
+        torch._C._stash_obj_in_tls(
+            "materialize_fake_tensors", _serialization_tls.materialize_fake_tensors
+        )
+
+    def __exit__(self, type, value, tb):
+        _serialization_tls.skip_data = self._old_skip_data
+        _serialization_tls.materialize_fake_tensors = self._old_materialize_fake_tensors
+        torch._C._stash_obj_in_tls("skip_data", _serialization_tls.skip_data)
+        torch._C._stash_obj_in_tls(
+            "materialize_fake_tensors", _serialization_tls.materialize_fake_tensors
+        )
 
 
 def _is_zipfile(f) -> bool:
@@ -737,15 +780,13 @@ def save(
     pickle_protocol: int = DEFAULT_PROTOCOL,
     _use_new_zipfile_serialization: bool = True,
     _disable_byteorder_record: bool = False,
-    *,
-    metadata_only: bool = False,
 ) -> None:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True, *, metadata_only=False)  # noqa: B950
+    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)  # noqa: B950
 
     Saves an object to a disk file.
 
@@ -757,9 +798,6 @@ def save(
            os.PathLike object containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
-        metadata_only: specifies whether to reserve space for storages in
-            the checkpoint but skip writing their bytes, has special semantic of
-            creating space for storages when FakeTensors are passed
 
     .. note::
         A common PyTorch convention is to save tensors using .pt file extension.
@@ -795,13 +833,12 @@ def save(
                 pickle_module,
                 pickle_protocol,
                 _disable_byteorder_record,
-                metadata_only,
             )
             return
     else:
-        if metadata_only:
+        if getattr(_serialization_tls, "skip_data", False):
             raise RuntimeError(
-                "Cannot use metadata_only=True with _use_new_zipfile_serialization=False"
+                "Cannot use skip_data=True with _use_new_zipfile_serialization=False"
             )
         with _open_file_like(f, "wb") as opened_file:
             _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
@@ -967,7 +1004,6 @@ def _save(
     pickle_module,
     pickle_protocol,
     _disable_byteorder_record,
-    metadata_only,
 ):
     serialized_storages = {}
     id_map: Dict[int, str] = {}
@@ -1028,9 +1064,7 @@ def _save(
     data_buf = io.BytesIO()
     pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
     pickler.persistent_id = persistent_id
-    _serialization_tls.metadata_only = metadata_only
     pickler.dump(obj)
-    del _serialization_tls.metadata_only
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
 
@@ -1046,7 +1080,7 @@ def _save(
         name = f"data/{key}"
         storage = serialized_storages[key]
         num_bytes = storage.nbytes()
-        if metadata_only:
+        if getattr(_serialization_tls, "skip_data", False):
             zip_file.write_record_metadata(name, num_bytes)
         else:
             # given that we copy things around anyway, we might use storage.cpu()
@@ -1204,6 +1238,13 @@ def load(
                 )
             updated_message += message
         return updated_message + DOCS_MESSAGE
+
+    skip_data = getattr(_serialization_tls, "skip_data", False)
+    if skip_data:
+        raise RuntimeError(
+            "`torch.load` called within a torch.serialization.skip_data context manager "
+            "is not supported yet. Please call torch.load outside the skip_data context manager."
+        )
 
     if weights_only is None:
         weights_only, warn_weights_only = False, True

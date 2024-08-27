@@ -28,6 +28,7 @@ from torch.serialization import (
     LoadEndianness,
     safe_globals,
     set_default_load_endianness,
+    skip_data,
     SourceChangeWarning,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -4199,8 +4200,8 @@ class TestSerialization(TestCase, SerializationMixin):
             sd_loaded_ref = torch.load(f)
             self.assertEqual(sd_loaded, sd_loaded_ref)
 
-    @parametrize("fake", (True, False))
-    def test_metadata_only_serialization(self, fake):
+    @parametrize("materialize_fake", (True, False))
+    def test_skip_data_serialization(self, materialize_fake):
         # Create one tensor that uses each of the paths in __reduce_ex__ that should work
         t_device = "cuda" if torch.cuda.is_available() else "cpu"
         t_v2 = torch.randn(2, 3, device=t_device)
@@ -4208,58 +4209,58 @@ class TestSerialization(TestCase, SerializationMixin):
         i = torch.tensor([[0, 1, 1],
                           [2, 0, 2]])
         v = torch.tensor([3, 4, 5], dtype=torch.float32)
-        if not fake:
+        if not materialize_fake:
             # FakeTensorConverter messes up sizes of i and v for the sparse tensor
             st = torch.sparse_coo_tensor(i, v, (2, 4))
-        tt = TwoTensor(torch.randn(2), torch.randn(2))
-        with FakeTensorMode() as mode:
-            ft = torch.randn(2, 3, device=t_device)
+        tt = TwoTensor(torch.randn(2, device=t_device), torch.randn(2, device=t_device))
 
         mode = FakeTensorMode()
         converter = FakeTensorConverter()
 
         def fn(t):
-            return converter.from_real_tensor(mode, t) if fake else t
+            return converter.from_real_tensor(mode, t) if materialize_fake else t
 
-        sd = {
-            't_v2': fn(t_v2),
-            't_v3': fn(t_v3),
-            'tt': fn(tt),
-            'ft': fn(ft),
-        }
+        sd = {'t_v2': fn(t_v2), 't_v3': fn(t_v3), 'tt': fn(tt)}
 
         sd_expected = {
-            't_v2': torch.zeros(2, 3),
-            't_v3': torch.zeros(2, 3, dtype=torch.complex32),
-            'tt': TwoTensor(torch.zeros(2), torch.zeros(2)),
-            'ft': torch.zeros(2, 3),
+            't_v2': torch.zeros(2, 3, device=t_device),
+            't_v3': torch.zeros(2, 3, dtype=torch.complex32, device=t_device),
+            'tt': TwoTensor(torch.zeros(2, device=t_device), torch.zeros(2, device=t_device)),
         }
 
-        if not fake:
+        if not materialize_fake:
             sd['st'] = st
             sd_expected['st'] = torch.sparse_coo_tensor(torch.zeros(2, 3), torch.zeros(3), (2, 4))
 
         with BytesIOContext() as f:
-            torch.save(sd, f, metadata_only=True)
+            with skip_data(materialize_fake_tensors=materialize_fake):
+                torch.save(sd, f)
             f.seek(0)
             with safe_globals([TwoTensor]):
                 sd_loaded = torch.load(f, weights_only=True)
-            self.assertEqual(sd_loaded, sd_expected)
+            self.assertEqual(sd_loaded, sd_expected, exact_device=True)
 
-    def test_metadata_only_serialization_error_cases(self):
+    def test_skip_data_serialization_error_cases(self):
         def _save_load(t):
             with BytesIOContext() as f:
-                torch.save(t, f, metadata_only=True)
+                with skip_data():
+                    torch.save(t, f)
                 f.seek(0)
                 torch.load(f, weights_only=True)
 
         nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
         t = torch.randn(2, 3, device="meta")
-        with self.assertRaisesRegex(RuntimeError, "Cannot serialize NST with metadata_only=True"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot serialize NST under skip_data context manager"):
             _save_load(nt)
 
-        with self.assertWarnsRegex(UserWarning, "meta device with metadata_only=True is a no-op"):
+        with self.assertWarnsRegex(UserWarning, "meta device under skip_data context manager is a no-op"):
             _save_load(t)
+
+        with self.assertRaisesRegex(RuntimeError, "Please call torch.load outside the skip_data context manager"):
+            with skip_data(), BytesIOContext() as f:
+                torch.save(torch.randn(2, 3), f)
+                f.seek(0)
+                torch.load(f, weights_only=True)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
