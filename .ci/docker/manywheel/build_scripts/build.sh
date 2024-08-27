@@ -61,10 +61,6 @@ build_openssl $OPENSSL_ROOT $OPENSSL_HASH
 
 PY39_BIN=/opt/python/cp39-cp39/bin
 
-# Install setuptools and wheel for python 3.12 and 3.13
-/opt/python/cp312-cp312/bin/python -m pip install setuptools
-/opt/python/cp313-cp313/bin/python -m pip install setuptools
-
 # Our openssl doesn't know how to find the system CA trust store
 #   (https://github.com/pypa/manylinux/issues/53)
 # And it's not clear how up-to-date that is anyway
