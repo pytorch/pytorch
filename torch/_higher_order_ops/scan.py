@@ -23,6 +23,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
+
 aten = torch._ops.ops.aten
 
 
@@ -88,9 +89,14 @@ def scan(
     assert callable(combine_fn), "combine_fn must be a callable, but got {combine_fn}"
     assert isinstance(dim, int), "dim must be an int, but got {type(dim)}"
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    def _scan_op_wrapper(*args, **kwargs):
+        return scan(*args, **kwargs)
+
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(scan, fullgraph=True)(
+            return torch.compile(_scan_op_wrapper, backend="eager", fullgraph=True)(
                 combine_fn, input, dim, reverse=reverse
             )
 
@@ -143,24 +149,15 @@ def generic_scan(operator, elems_flat, dim=0):
 
     def _scan(elems):
         """Perform scan on `elems`."""
-        # num_elems = elems[0].shape[dim]
-        
-        def cond_fn(ind):
-            xs_new = [aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems]
-            if xs_new[0].shape[dim] == 0:
-                return False
-            else:
-                return xs_new
+        num_elems = elems[0].shape[dim]
 
         ind = 1
         xs = [aten.slice(elem, dim, 0, 1, 1) for elem in elems]
         outs = xs
-        # while ind < num_elems:
-        while xs_new := cond_fn(ind):
+        while ind < num_elems:
             xs = operator(
                 *xs,
-                # *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems],
-                *xs_new,
+                *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems],
             )
             ind += 1
 
