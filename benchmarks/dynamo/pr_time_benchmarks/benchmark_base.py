@@ -130,6 +130,14 @@ class BenchmarkBase(ABC):
     def collect_all(self):
         self._prepare_once()
         self.results = []
+        if (
+            self._enable_instruction_count
+            and self._enable_compile_time_instruction_count
+        ):
+            raise RuntimeError(
+                "not supported until we update the logger, both logs to the same field now"
+            )
+
         if self._enable_instruction_count:
             r = self._count_instructions()
             self.results.append((self.name(), "instruction_count", r))
@@ -139,12 +147,17 @@ class BenchmarkBase(ABC):
             )
         if self._enable_compile_time_instruction_count:
             r = self._count_compile_time_instructions()
-            # TODO add logging to scribe.
+
             self.results.append(
                 (
                     self.name(),
                     "compile_time_instruction_count",
                     r,
                 )
+            )
+            # TODO add a new field compile_time_instruction_count to the logger.
+            scribe_log_torch_benchmark_compile_time(
+                name=self.name(),
+                instruction_count=r,
             )
         return self
