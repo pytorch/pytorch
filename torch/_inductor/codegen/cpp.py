@@ -4205,7 +4205,7 @@ class CppScheduling(BaseScheduling):
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
 
-    def try_loop_split(self, nodes):
+    def try_loop_split(self, nodes: List[SchedulerNode]):
         """
         Apply loop split optimization.
         When one of the indexing_exprs contains a division, we eliminate the division by splitting the loop
