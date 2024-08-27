@@ -3139,7 +3139,9 @@ class CompileTimeInstructionCounter:
     @contextmanager
     def record(cls):
         try:
-            cls.start()
+            if config.record_compile_time_instruction_count:
+                cls.start()
             yield
         finally:
-            cls.end()
+            if config.record_compile_time_instruction_count:
+                cls.end()
