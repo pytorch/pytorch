@@ -324,7 +324,12 @@ class CppTemplateCaller(ir.ChoiceCaller):
         input_nodes: List[ir.Buffer],
         layout: ir.Layout,
         make_kernel_render: Callable[
-            [ir.CppTemplateBuffer, Optional[List[ir.IRNode]]], str
+            [
+                ir.CppTemplateBuffer,
+                bool,
+                Optional[List[ir.IRNode]],
+            ],
+            str,
         ],
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
