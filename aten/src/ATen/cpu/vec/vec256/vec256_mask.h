@@ -9,53 +9,70 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-template <typename T, typename mask_t, int mask_n>
+template <typename T, int dst_n, typename mask_t, int mask_n>
 struct VecMaskLoad<
     T,
-    1,
+    dst_n,
     mask_t,
     mask_n,
     typename std::enable_if_t<
-        (mask_n == 1 || mask_n == 2) &&
+        (mask_n == dst_n * 2 && dst_n >= 1) &&
             (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
              std::is_same_v<T, uint32_t>),
         void>> {
-  static inline VectorizedN<T, 1> apply(
+  static inline VectorizedN<T, dst_n> apply(
       const T* ptr,
       const VecMask<mask_t, mask_n>& vec_mask) {
-    auto int_mask = vec_mask.template cast<int, 1>()[0];
-    if constexpr (std::is_same_v<T, float>) {
-      return Vectorized<T>(_mm256_maskload_ps(ptr, int_mask));
-    } else {
-      return Vectorized<T>(_mm256_maskload_epi32(ptr, int_mask));
+    VecMask<mask_t, 2> tmp_mask;
+    VectorizedN<T, dst_n> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < dst_n; i++) {
+      tmp_mask[0] = vec_mask[2 * i];
+      tmp_mask[1] = vec_mask[2 * i + 1];
+      auto int_mask = tmp_mask.template cast<int, 1>()[0];
+      if constexpr (std::is_same_v<T, float>) {
+        result[i] = Vectorized<T>(
+            _mm256_maskload_ps(ptr + i * Vectorized<T>::size(), int_mask));
+      } else {
+        result[i] = Vectorized<T>(
+            _mm256_maskload_epi32(ptr + i * Vectorized<T>::size(), int_mask));
+      }
     }
+    return result;
   }
 };
 
-template <typename T, typename mask_t, int mask_n>
+template <typename T, int dst_n, typename mask_t, int mask_n>
 struct VecMaskLoad<
     T,
-    2,
+    dst_n,
     mask_t,
     mask_n,
     typename std::enable_if_t<
-        (mask_n == 2 || mask_n == 4) &&
+        (mask_n == dst_n && dst_n >= 1) &&
             (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
              std::is_same_v<T, uint32_t>),
         void>> {
-  static inline VectorizedN<T, 2> apply(
+  static inline VectorizedN<T, dst_n> apply(
       const T* ptr,
       const VecMask<mask_t, mask_n>& vec_mask) {
-    auto int_mask = vec_mask.template cast<int, 2>();
-    auto result = at::vec::VectorizedN<T, 2>();
-    if constexpr (std::is_same_v<T, float>) {
-      result[0] = _mm256_maskload_ps(ptr, int_mask[0]);
-      result[1] =
-          _mm256_maskload_ps(ptr + at::vec::Vectorized<T>::size(), int_mask[1]);
-    } else {
-      result[0] = _mm256_maskload_epi32(ptr, int_mask[0]);
-      result[1] = _mm256_maskload_epi32(
-          ptr + at::vec::Vectorized<T>::size(), int_mask[1]);
+    VecMask<mask_t, 1> tmp_mask;
+    VectorizedN<T, dst_n> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < dst_n; i++) {
+      tmp_mask[0] = vec_mask[i];
+      auto int_mask = tmp_mask.template cast<int, 1>()[0];
+      if constexpr (std::is_same_v<T, float>) {
+        result[i] = Vectorized<T>(
+            _mm256_maskload_ps(ptr + i * Vectorized<T>::size(), int_mask));
+      } else {
+        result[i] = Vectorized<T>(
+            _mm256_maskload_epi32(ptr + i * Vectorized<T>::size(), int_mask));
+      }
     }
     return result;
   }
@@ -237,8 +254,7 @@ struct VecMaskCheck<int64_t, N> {
   static inline bool all_zero(const VectorizedN<int64_t, N>& vec_mask) {
     bool all_zero = true;
     for (int i = 0; i < N; ++i) {
-      all_zero =
-          all_zero && (_mm256_testz_si256(vec_mask[i], vec_mask[i]) > 0);
+      all_zero = all_zero && (_mm256_testz_si256(vec_mask[i], vec_mask[i]) > 0);
       if (!all_zero) {
         return all_zero;
       }
