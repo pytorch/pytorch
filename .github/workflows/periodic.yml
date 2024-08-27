@@ -109,15 +109,9 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-<<<<<<< HEAD
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: parallelnative-linux-jammy-py3.8-gcc11
-      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
-=======
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: parallelnative-linux-jammy-py3.9-gcc11
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
->>>>>>> f9904f8c4b1 (Move py 3.8->3.9 pull, trunk, inductor, prerioric CI tests)
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
