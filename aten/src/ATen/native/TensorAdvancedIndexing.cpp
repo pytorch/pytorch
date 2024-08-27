@@ -2284,12 +2284,20 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
 }
 
 Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
-  return (self != 0).sum(dims);
+  auto reduce = self;
+  if (reduce.scalar_type() != kBool) {
+    reduce = reduce != 0;
+  }
+  return reduce.sum(dims);
 }
 
 Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
   if (!dims.empty()) {
-    return (self != 0).sum(dims);
+    auto reduce = self;
+    if (reduce.scalar_type() != kBool) {
+      reduce = reduce != 0;
+    }
+    return reduce.sum(dims);
   }
 
   // Optimized all-reduce
