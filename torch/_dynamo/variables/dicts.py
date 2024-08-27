@@ -355,13 +355,6 @@ class ConstDictVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return [x.vt for x in self.items.keys()]
 
-    def call_hasattr(self, tx, name):
-        # dict/OrderedDict do not allow setting arbitrary attributes. To check for hasattr, we can just check the
-        # __dict__ of the cls.
-        if name in self.user_cls.__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
-
 
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs) -> None:
