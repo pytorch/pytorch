@@ -147,7 +147,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
+    @config.patch(cpp_wrapper=True)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
