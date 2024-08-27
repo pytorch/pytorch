@@ -2526,7 +2526,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=True)
         with self.assertRaisesRegex(
             RuntimeError,
-            "(e.g. reentrant checkpointing), this is not supported yet.",
+            r"\(e.g. reentrant checkpointing\), this is not supported yet\.",
         ), torch._dynamo.compiled_autograd.enable(torch.compile):
             out.backward()
 
