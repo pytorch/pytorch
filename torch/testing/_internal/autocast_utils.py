@@ -375,6 +375,12 @@ class AutocastCPUTestLists:
 
 
 class TestAutocast(TestCase):
+    def args_maybe_kwargs(self, op_with_args):
+        if len(op_with_args) == 2:
+            return op_with_args[0], op_with_args[1], {}
+        else:
+            return op_with_args[0], op_with_args[1], op_with_args[2]
+
     def _run_autocast_outofplace(
         self,
         op,

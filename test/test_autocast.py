@@ -25,12 +25,6 @@ class TestAutocastCPU(TestAutocast):
         del self.autocast_lists
         super().tearDown()
 
-    def args_maybe_kwargs(self, op_with_args):
-        if len(op_with_args) == 2:
-            return op_with_args[0], op_with_args[1], {}
-        else:
-            return op_with_args[0], op_with_args[1], op_with_args[2]
-
     @skipIfTorchDynamo()
     def test_autocast_torch_expect_builtin_promote(self):
         for (
