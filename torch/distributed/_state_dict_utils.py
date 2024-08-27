@@ -627,16 +627,17 @@ def _distribute_state_dict(
             local_state_dict[key] = value.cpu()
         else:
             assert isinstance(value, torch.Tensor)
-            full_tensor = value.detach().to(device)
             local_state = local_state_dict.get(key, None)
             if local_state is None:
                 continue
             elif isinstance(local_state, DTensor):
-                local_state_dict[key] = (local_state, full_tensor)
+                local_state_dict[key] = distribute_tensor(
+                    value.detach().to(device),
+                    local_state.device_mesh,
+                    local_state.placements,
+                )
             else:
-                local_state_dict[key] = full_tensor
-
-            _distribute_tensors(local_state_dict, [key], device, pg)
+                local_state_dict[key] = value.detach().to(device)
 
 
 # These APIs are from torch.distributed.checkpoint.

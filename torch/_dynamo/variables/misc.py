@@ -4,7 +4,6 @@ import dataclasses
 import functools
 import inspect
 import itertools
-import os
 import random
 import re
 import sys
@@ -15,7 +14,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, polyfills, variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
@@ -30,7 +29,6 @@ from ..source import (
 )
 from ..utils import (
     check_unspec_or_constant_args,
-    hashable,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
@@ -43,10 +41,6 @@ from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObject
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-
-POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS = {
-    os.fspath: polyfills.fspath,
-}
 
 
 class NO_SUCH_SUBOBJ:
@@ -107,10 +101,12 @@ class SuperVariable(VariableTracker):
         resolved_attr = None
         search_mro = type_to_use.__mro__
         start_index = search_mro.index(search_type) + 1
+        # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
+        # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
+        # attribute in the class __dict__
         for index in range(start_index, len(search_mro)):
-            if resolved_getattr := inspect.getattr_static(
-                search_mro[index], name, NO_SUCH_SUBOBJ
-            ):
+            # Dont call getattr, just check the __dict__ of the class
+            if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
                 if resolved_getattr is not NO_SUCH_SUBOBJ:
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
                     if type_to_use_source:
@@ -1125,12 +1121,6 @@ class PythonModuleVariable(VariableTracker):
             attr_value = getattr(self.value, name)
         else:
             attr_value = self.value.__dict__[name]
-
-        if hashable(attr_value):
-            if polyfill_fn := POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS.get(
-                attr_value, None
-            ):
-                return variables.UserFunctionVariable(polyfill_fn)
 
         if self.source:
             new_source = AttrSource(self.source, name)
