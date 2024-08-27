@@ -1034,6 +1034,8 @@ class CppVecOverrides(CppOverrides):
             if getattr(method, "__class__", None) == staticmethod and name not in vars(
                 CppVecOverrides
             ):
+                if name == "constant":
+                    continue
                 setattr(self, name, CppVecOverrides.fallback(method.__func__))
 
         return self
