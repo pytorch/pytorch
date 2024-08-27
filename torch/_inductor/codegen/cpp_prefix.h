@@ -26,7 +26,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -252,6 +252,43 @@ inline IndexValue<T>& argmax_combine(IndexValue<T>& a, const IndexValue<T>& next
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
+
+template <typename scalar_t>
+inline at::vec::Vectorized<scalar_t> div_floor_floating_vec(
+    const at::vec::Vectorized<scalar_t>& a,
+    const at::vec::Vectorized<scalar_t>& b) {
+  using vec_t = at::vec::Vectorized<scalar_t>;
+  const auto basic_div = a / b;
+  vec_t inf(std::numeric_limits<scalar_t>::infinity());
+  auto mod = a.fmod(b);
+  // Fixup for a case that isn't properly handled by Sleef_fmod
+  auto floor = vec_t::blendv(a - mod, a, (basic_div.abs() == inf) & (a.abs() != inf));
+  auto div = floor / b;
+  const auto zero = vec_t(0);
+  auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
+  const auto one = vec_t(1);
+  div = vec_t::blendv(div, div - one, mask);
+  auto floordiv = div.floor();
+  mask = (div - floordiv) > vec_t(0.5);
+  floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
+  floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
+  floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
+  return floordiv;
+};
+
+template <typename scalar_t, int N>
+inline at::vec::VectorizedN<scalar_t, N> div_floor_floating_vec(
+    const at::vec::VectorizedN<scalar_t, N>& a,
+    const at::vec::VectorizedN<scalar_t, N>& b) {
+    at::vec::VectorizedN<scalar_t, N> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < N; ++i) {
+      result[i] = div_floor_floating_vec(a[i], b[i]);
+    }
+    return result;
+}
 
 template <typename T, int NV, int NI>
 struct IndexValueVec {
@@ -609,14 +646,29 @@ atomic_add(volatile T *addr, T offset) {
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T, int NI, int NV>
+void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::VectorizedN<T, NV> offset) {
+  constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
+  static_assert(len <= at::vec::VectorizedN<T, NV>::size());
+  __at_align__ std::array<T, len> tmpbuf;
+  __at_align__ std::array<int64_t, len> tmpidx;
+  offset.store(tmpbuf.data());
+  index.store(tmpidx.data());
+  for (int i = 0; i < len; i++){
+    atomic_add(addr + tmpidx[i], tmpbuf[i]);
+  }
+}
+#endif
+
 void mm_get_thread_blocking(
     int num_threads,
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t M0,
-    int64_t N0,
-    int64_t K0,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
     int64_t& Mt,
     int64_t& Nt,
     int64_t& Kt) {
@@ -659,12 +711,12 @@ void mm_get_thread_blocking(
                               int64_t Mt,
                               int64_t Nt,
                               int64_t Kt) {
-    return Mt == 0 || Mt_ * M0 + Nt_ * N0 < Mt * M0 + Nt * N0;
+    return Mt == 0 || Mt_ * Mr + Nt_ * Nr < Mt * Mr + Nt * Nr;
   };
 
-  int64_t m_blocks = (M + M0 - 1) / M0;
-  int64_t n_blocks = (N + N0 - 1) / N0;
-  int64_t k_blocks = (K + K0 - 1) / K0;
+  int64_t m_blocks = (M + Mr - 1) / Mr;
+  int64_t n_blocks = (N + Nr - 1) / Nr;
+  int64_t k_blocks = (K + Kr - 1) / Kr;
 
   auto [factors, count] = get_factors(num_threads);
   assert(count > 0);

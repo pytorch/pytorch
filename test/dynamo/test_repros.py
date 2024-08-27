@@ -12,6 +12,7 @@ import functools
 import gc
 import inspect
 import itertools
+import os
 import random
 import unittest
 import warnings
@@ -43,6 +44,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.two_tensor import TwoTensor
@@ -963,7 +965,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         # (dynamic shapes, static shapes)
         self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (94, 106, 121))
+        self.assertIn(cnt.op_count, (92, 106, 119))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -1924,6 +1926,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(b(y), y.sin().cos()))
 
+    @skipIfWindows(
+        msg="torch._dynamo.exc.TorchRuntimeError: Failed running call_function <class 'torch.LongTensor'>(*(FakeTensor(..., size=(10,), dtype=torch.int32),), **{}):"  # noqa: B950
+    )
     def test_longtensor_list(self):
         for partition in [0, 5, 10]:
 
@@ -4917,6 +4922,55 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    def test_super_staticmethod(self):
+        class Parent:
+            @staticmethod
+            def greet():
+                return 5
+
+        class Child(Parent):
+            @staticmethod
+            def greet(x):
+                return x * super(Child, Child).greet()
+
+        child = Child()
+
+        def fn(x):
+            return child.greet(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_super_diamond(self):
+        class A:
+            def __init__(self):
+                super().__init__()
+                self.a = 5
+
+        class Nothing:
+            pass
+
+        class B(Nothing, A):
+            def __init__(self):
+                super().__init__()
+                self.b = 10
+
+            def run(self, x):
+                return self.a * self.b * x
+
+        def fn(x):
+            b = B()
+            return b.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_vc_bumped_in_inference_graph(self):
         @torch.compile
         def f(x):
@@ -5016,6 +5070,28 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(v.foo, 200)
         self.assertEqual(v.data.shape, (10, 20))
         self.assertEqual(type(v), Matrix)
+
+    def test_classmethod_with_slots(self):
+        class Mock:
+            __slots__ = ("_a",)
+
+            def __init__(self):
+                self._a = 2
+
+            @classmethod
+            def _m(cls):
+                return 3
+
+            def run(self, x):
+                return torch.sin(x) * self._a * self._m()
+
+        def fn(x):
+            mock = Mock()
+            return mock.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_nn_parametrize(self):
         class Module(nn.Module):
@@ -5548,6 +5624,64 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertTrue(cnt.frame_count <= 2)
 
+    @torch._dynamo.config.patch(guard_nn_modules=False)
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_inlining_cornercase(self):
+        """
+        nn.Modules can be mapped to either NNModuleVariable or UnspecializedNNModuleVariable. For NNModuleVariable, the
+        tensor attributes become part of the Dynamo graph. For unspecialized, they are lifted as inputs.
+
+        But there is a cornercase. Suppose you have NNModuleVariable with a submodule that is
+        UnspecializedNNModuleVariable. Today, Dynamo will still consider the submodule as specialized (courtesy of
+        guard.source().is_nn_module()). In retrospect, this is a mistake but there are dependencies of export and also
+        cudagraphs which make it harder to fix the corner case right away. The long term solution is
+        inline_inbuilt_nn_modules anyways, so we might have to live with this cornercase in the short term.
+
+        We are starting to annotate the source of each nn module more precisely - NNModuleVariable attribute is marked
+        as NNModuleSource, UnspecilaizedNNModuleVariable attribute is marked as UnspecializedNNModuleSource. But this
+        changes the behavior for the cornercase. And fails some tests which have unfortunately relied on this behavior.
+
+
+        To solve this, we tag the source only when inline_inbuilt_nn_module flag is turned on.
+
+        In this test, we purposely turn the flag off, testing that the tagging is disabled.
+        """
+
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+                self.a = torch.randn(1, 1)
+                self.counter = 0
+                self.multipliers = [2.2, 3.3]
+
+            def forward(self, x):
+                self.counter += 1
+                return (
+                    self.linear(x) * self.a * self.multipliers[0] * self.multipliers[1]
+                )
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubMod()
+
+            def forward(self, x):
+                return self.submod(x)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager")
+
+        x = torch.randn(1, 1)
+        ref = mod(x)
+        res = opt_mod(x)
+
+        mod.submod.multipliers = [3.3, 4.4]
+        # Since guard_nn_modules is False, this will not recompile
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            ref = mod(x)
+            res = opt_mod(x)
+
     def test_optimized_module_training(self):
         mod = torch.nn.Linear(3, 3)
         mod.eval()
@@ -5609,6 +5743,14 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         del y
         mem_after = torch.cuda.memory_allocated()
         self.assertEqual(mem_before, mem_after)
+
+    def test_os_fspath(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            os.fspath(".")
+            return torch.sin(x)
+
+        fn(torch.randn(4))
 
 
 instantiate_parametrized_tests(ReproTests)

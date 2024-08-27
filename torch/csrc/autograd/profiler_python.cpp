@@ -680,6 +680,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
       PyObject* arg);
 
   void stop() override;
+  void restart() override;
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::vector<python_tracer::CompressedEvent>& enters,
@@ -808,6 +809,25 @@ void PythonTracer::stop() {
     auto lock_returned = active_lock_.compare_exchange_strong(active_, false);
     active_ = false;
     SOFT_ASSERT(lock_returned, "Failed to return python tracer lock.");
+  }
+}
+
+void PythonTracer::restart() {
+  gil_and_restore_thread gil;
+  active_ = active_lock_.compare_exchange_strong(active_, true);
+  if (!active_) {
+    TORCH_WARN(
+        "There is already an active Python tracer. "
+        "Refusing to register profile functions.");
+    return;
+  }
+  int cur_thread = 0;
+  for (const auto thread_state : interpreterThreads()) {
+    if (thread_state->c_profilefunc == nullptr) {
+      auto* ctx = thread_local_results_[cur_thread].ctx_;
+      PyThreadState_Swap(thread_state);
+      PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
+    }
   }
 }
 
