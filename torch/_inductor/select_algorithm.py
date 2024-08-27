@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import builtins
 import contextlib
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -12,7 +13,6 @@ import os
 import sys
 import textwrap
 import time
-from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -25,6 +25,7 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
@@ -105,14 +106,17 @@ class PartialRender:
 
 # This is used to store info needed for lowering each subgraph in triton
 # templates
-SubgraphInfo = namedtuple(
-    "SubgraphInfo",
-    [
-        "body",
-        "template_mask",
-        "template_out",
-    ],
-)
+
+
+@dataclasses.dataclass()
+class SubgraphInfo:
+    body: IndentedBuffer
+    template_mask: Optional[str] = None
+    template_out: Optional[str] = None
+    ops_handler: Optional[V.WrapperHandler] = None
+
+    def __iter__(self):
+        return iter(getattr(self, field.name) for field in dataclasses.fields(self))
 
 
 class TritonTemplateKernel(TritonKernel):
@@ -169,26 +173,60 @@ class TritonTemplateKernel(TritonKernel):
         self.body: IndentedBuffer = FakeIndentedBuffer()
         self.template_mask: Optional[str] = None
         self.template_out: Optional[str] = None
+        self.ops_handler: Optional[V.WrapperHandler] = None
+
+        self.prologue_replaced_args = []
+        self._inputs_with_prologue_fusion: OrderedSet[str] = OrderedSet()
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
-        old_body, old_mask, old_out = self.body, self.template_mask, self.template_out
-        assert body_name in self.subgraph_bodies, body_name
-        self.body, self.template_mask, self.template_out = self.subgraph_bodies[
-            body_name
-        ]
-        yield
-        self.subgraph_bodies[body_name] = SubgraphInfo(
-            self.body, self.template_mask, self.template_out
+        old_body, old_mask, old_out, old_ops_handler = (
+            self.body,
+            self.template_mask,
+            self.template_out,
+            self.ops_handler,
         )
-        self.body, self.template_mask, self.template_out = old_body, old_mask, old_out
+        assert body_name in self.subgraph_bodies, body_name
+        (
+            self.body,
+            self.template_mask,
+            self.template_out,
+            self.ops_handler,
+        ) = self.subgraph_bodies[body_name]
+        context = (
+            contextlib.nullcontext
+            if not self.ops_handler
+            else lambda: V.set_ops_handler(self.ops_handler(V.get_ops_handler()))
+        )
+        with context():
+            yield
+        self.subgraph_bodies[body_name] = SubgraphInfo(
+            self.body, self.template_mask, self.template_out, self.ops_handler
+        )
+        self.body, self.template_mask, self.template_out, self.ops_handler = (
+            old_body,
+            old_mask,
+            old_out,
+            old_ops_handler,
+        )
 
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str):
         assert body_name not in self.subgraph_bodies
-        self.subgraph_bodies[body_name] = SubgraphInfo(IndentedBuffer(), None, None)
+        self.subgraph_bodies[body_name] = SubgraphInfo(
+            IndentedBuffer(), None, None, None
+        )
         with self.set_subgraph_body(body_name):
             yield
+
+    @property
+    def inputs_with_prologue_fusion(self):
+        bufs = OrderedSet([inp.get_name() for inp in self.named_input_nodes.values()])
+        for name, buf in self.named_input_nodes.items():
+            if name not in self._inputs_with_prologue_fusion:
+                bufs.discard(buf.get_name())
+
+        return bufs
 
     def need_numel_args(self):
         return False
@@ -282,11 +320,16 @@ class TritonTemplateKernel(TritonKernel):
         for name, input_node in zip(argnames, named_args):
             arg_name = f"arg_{name}"
             self.named_input_nodes[name] = input_node
+            if input_node.get_name() in self.prologue_replaced_args:
+                continue
+
             self.args.input_buffers[input_node.get_name()] = arg_name
 
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
+            if input_node.get_name() in self.prologue_replaced_args:
+                continue
             arg_name = self.args.input_buffers[input_node.get_name()]
             if input_node.get_layout().offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
@@ -296,6 +339,8 @@ class TritonTemplateKernel(TritonKernel):
 
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order
+            if input_node.get_name() in self.prologue_replaced_args:
+                continue
             self.args.input(input_node.get_name())
 
         def hook():
@@ -403,6 +448,118 @@ class TritonTemplateKernel(TritonKernel):
             self.cse.invalidate(set())  # type: ignore[arg-type]
             return body_val
 
+    def load_input(
+        self,
+        input_name: str,
+        output_name: str,
+        indices: Union[List[Any], Tuple[Any]],
+        mask: Optional[str] = None,
+        other: Optional[Union[float, int]] = 0.0,
+        indent_width: int = 4,
+    ):
+        """Loads an input and applies any necessary preprocessing or masking.
+
+        Args:
+            input_name (str): The name of the input to load.
+            indices (Union[List, Tuple]): The index for each dimension of the input.
+            val (str): The name of the variable to store the loaded value.
+            mask (Optional[str]): An optional mask to use for the load operation.
+            other (Optional[Union[float, int]]): The value to use for masked elements. Default is 0.0.
+            indent_width (int): The number of spaces to use for indentation.
+        """
+
+        prologue_called = False
+        load_code = None
+
+        self._inputs_with_prologue_fusion.add(input_name)
+        with self.create_subgraph_body(f"<LOAD_INPUT_{input_name}>"):
+            assert isinstance(indices, (list, tuple))
+            assert isinstance(output_name, str)
+            assert isinstance(mask, (str, type(None)))
+            indices = list(map(TritonPrinter.paren, indices))
+            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
+            input_node = self.named_input_nodes[input_name]
+
+            lengths = [V.graph.sizevars.simplify(s) for s in input_node.get_size()]
+            assert len(indices) == len(lengths)
+
+            stride = self.named_input_nodes[input_name].get_stride()
+            indices = list(map(TritonPrinter.paren, indices))
+
+            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
+            lengths = [
+                V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
+            ]
+            assert len(indices) == len(lengths)
+
+            # glue to make generated code use same indexing from template
+            for name, range_tree_entry in zip(
+                indices, self.range_trees[0].construct_entries(lengths)
+            ):
+                range_tree_entry.set_name(name)
+            contiguous_index = sympy_dot(
+                ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
+            )
+            contiguous_index = self.rename_indexing(contiguous_index)
+            self.body.writeline("xindex = " + texpr(contiguous_index))
+            self.range_trees[0].lookup(
+                sympy.Integer(1), sympy_product(lengths)
+            ).set_name("xindex")
+            self.template_mask = mask
+            self.template_out = "xindex"
+            self.template_indices = indices
+            self.named_input_nodes[input_name].data.freeze_layout()
+            self.cse.invalidate(set())
+
+            from torch._inductor.codegen.triton import triton_store_type
+
+            class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
+                self.name = name
+
+                def store(
+                    self,
+                    name: str,
+                    index: sympy.Expr,
+                    value: "CSEVariable",
+                    mode: "StoreMode" = None,
+                ):
+                    nonlocal prologue_called
+                    prologue_called = True
+                    # TODO - use exact dtypes, not fp32, in kernel
+                    V.kernel.compute.writeline(
+                        f"{output_name} = {value}.to({triton_store_type(input_node.dtype)})"
+                    )
+
+            self.ops_handler = StoreOutputSubstitution
+
+            output_index = self.named_input_nodes[input_name].make_indexer()(
+                index_symbols
+            )
+            output_index = self.rename_indexing(output_index)
+            if output_index == contiguous_index:
+                output_index = sympy.Symbol("xindex", integer=True)
+
+            # Generate load code
+            load_code = f"{output_name} = tl.load({input_name} + ({output_index}))"
+            # load_code = f"{output_name} = tl.load({input_name} + {texpr(input_index)}"
+            # if mask:
+            #     load_code += f", {mask}, other={other})"
+            # else:
+            #     load_code += ")"
+        hook_key = f"<LOAD_INPUT_{input_name}>"
+
+        def hook():
+            with self.set_subgraph_body(hook_key):
+                self.codegen_body()
+                if not prologue_called:
+                    self.body.writeline(load_code)
+
+                return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
+
+        assert hook_key not in self.render_hooks
+        self.render_hooks[hook_key] = hook
+        return hook_key
+
     def store_output(
         self,
         indices: Union[List[Any], Tuple[Any]],
@@ -499,7 +656,7 @@ class TritonTemplateKernel(TritonKernel):
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
-        return f"tl.load({name} + ({index}), {mask}, other=0.0)"
+        return f"tl.load({name} + ({index}))"
 
     def template_env(self):
         """
@@ -512,6 +669,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.size,
                 self.stride,
                 self.store_output,
+                self.load_input,
                 self.make_load,
                 self.modification,
                 self.gen_argdefs,
@@ -776,6 +934,7 @@ class TritonTemplate(KernelTemplate):
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
             mutated_inputs=mutated_inputs,
+            allowed_prologue_inps=kernel.inputs_with_prologue_fusion.copy(),
         )
 
 
@@ -849,6 +1008,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
+        allowed_prologue_inps: Optional[OrderedSet[str]] = None,
     ) -> None:
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
@@ -866,6 +1026,9 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             }
         )
         self.mutated_inputs = mutated_inputs
+        self.allowed_prologue_inps = (
+            allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
+        )
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -897,6 +1060,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 make_kernel_render=self.make_kernel_render,
                 debug_extra=self.debug_extra,
                 mutated_inputs=self.mutated_inputs,
+                allowed_prologue_inps=self.allowed_prologue_inps,
             )
         )
 
@@ -1354,7 +1518,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
         precompile_fn = precompile(choices)
 
-        if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
+        any_triton_choices = any(isinstance(c, TritonTemplateCaller) for c in choices)
+        if (
+            any_triton_choices
+            and return_multi_template
+            and (config.max_autotune or config.max_autotune_gemm)
+        ):
 
             def get_timings():
                 timings = do_autotuning(precompile_fn)
@@ -1374,11 +1543,24 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 return timings
 
+            # Assume the same base template, with same prologue support.
+            # We could relax this assumption by taking union of allowed prologue inputs,
+            # and within benchmark fusion not allow prologue fusion for choices which dont support it
+            # No use case of that yet.
+            allowed_prologue_inps: Optional[OrderedSet[str]] = None
+            for c in choices:
+                if isinstance(c, TritonTemplateCaller):
+                    if allowed_prologue_inps is None:
+                        allowed_prologue_inps = c.allowed_prologue_inps
+                    else:
+                        assert allowed_prologue_inps == c.allowed_prologue_inps
+
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
                     layout,
                     input_nodes,
                     get_timings,
+                    allowed_prologue_inps,
                 )
             )
 

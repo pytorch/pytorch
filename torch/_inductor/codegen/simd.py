@@ -993,13 +993,14 @@ class SIMDScheduling(BaseScheduling):
                 )
                 return False
 
-            if node1.is_template():
-                # Only allow fusion for TritonTemplates for now.
-                # Fusion for CUDATemplates are not supported.
-                is_triton_template = isinstance(node1.node, TritonTemplateBuffer)
-                if not is_triton_template:
-                    why("node1 is not TritonTemplateBuffer")
-                return is_triton_template
+            for n, node_name in zip((node1, node2), ("node1", "node2")):
+                if n.is_template():
+                    # Only allow fusion for TritonTemplates for now.
+                    # Fusion for CUDATemplates are not supported.
+                    is_triton_template = isinstance(n.node, TritonTemplateBuffer)
+                    if not is_triton_template:
+                        why(f"{node_name} is not TritonTemplateBuffer")
+                    return is_triton_template
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
@@ -1484,7 +1485,7 @@ class SIMDScheduling(BaseScheduling):
                     node.codegen(index_vars)
 
     def codegen_template(
-        self, template_node, epilogue_nodes, only_gen_src_code=False
+        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
     ) -> Optional[str]:
         """
         Codegen a triton template
@@ -1494,14 +1495,42 @@ class SIMDScheduling(BaseScheduling):
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
+
+        buf_name_to_prologue_node = {}
+        for prologue in prologue_nodes:
+            names = prologue.get_buffer_names()
+            assert len(names) == 1
+            if not only_gen_src_code:
+                V.graph.removed_buffers.add(next(iter(names)))
+            buf_name_to_prologue_node[next(iter(names))] = prologue
+
         with kernel:
             if not only_gen_src_code:
+                # prologue nodes can only be fused if their only use is in the template,
+                # so they are necessarily not allocated
                 for node in [template_node, *epilogue_nodes]:
                     node.mark_run()
+
+            for buf_name in buf_name_to_prologue_node:
+                kernel.prologue_replaced_args.append(buf_name)
+
             partial_code = render()
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 for node in epilogue_nodes:
                     node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+
+            for input_name, buffer in kernel.named_input_nodes.items():
+                if prologue_node := buf_name_to_prologue_node.get(
+                    buffer.get_name(), None
+                ):
+                    subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                    # TODO - need better solution before turning on by default
+                    # this doesnt work with libdevice calls, potentially other bugs
+                    with config.patch("triton.codegen_upcast_to_fp32", False):
+                        with kernel.set_subgraph_body(subgraph_name):
+                            prologue_node.codegen(
+                                kernel.split_and_set_ranges(prologue_node.get_ranges())
+                            )
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
@@ -1509,13 +1538,18 @@ class SIMDScheduling(BaseScheduling):
         # finalize must be called after adding epilogue above
         with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+
+            for input_name in kernel.named_input_nodes.keys():
+                subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                partial_code.finalize_hook(subgraph_name, strict=False)
+
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 if isinstance(partial_code, str):
                     src_code = partial_code
                 else:
                     partial_code.finalize_hook("<STORE_OUTPUT>")
                     src_code = partial_code.code
-            node_schedule = [template_node, *epilogue_nodes]
+            node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:
                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9
@@ -1825,7 +1859,7 @@ class SIMDScheduling(BaseScheduling):
         for n in nodes:
             n.last_usage = OrderedSet()
 
-        if not nodes[0].is_template():
+        if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
 
@@ -1847,12 +1881,18 @@ class SIMDScheduling(BaseScheduling):
             ), V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
         else:
-            template_node = nodes[0]
-            epilogue_nodes = nodes[1:]
+            template_index = next(i for i, n in enumerate(nodes) if n.is_template())
+
+            prologue_nodes = nodes[:template_index]
+            template_node = nodes[template_index]
+            epilogue_nodes = nodes[template_index + 1 :]
 
             with config.patch("benchmark_kernel", benchmark_kernel):
                 src_code = self.codegen_template(
-                    template_node, epilogue_nodes, only_gen_src_code=True
+                    template_node,
+                    epilogue_nodes,
+                    prologue_nodes,
+                    only_gen_src_code=True,
                 )
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")

@@ -60,31 +60,32 @@ bmm_template = TritonTemplate(
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
-        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+        offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
     else:
-        ram = rm % M
+        offs_a_m = rm % M
     if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
-        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+        offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
     else:
-        rbn = rn % N
+        offs_b_n = rn % N
 
-    rk = tl.arange(0, BLOCK_K)
+    offs_k = tl.arange(0, BLOCK_K)
 
     idx_q = tl.program_id(1)  # batch dimension for BMM
-    A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q*stride_aq)
-    B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q*stride_bq)
+    # A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q*stride_aq)
+    # B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q*stride_bq)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k in range(K, 0, -BLOCK_K):
+    for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
+        A_ptr = A + (offs_a_m[:, None] * stride_am +  (offs_k[None, :] + (k_idx * BLOCK_K)) * stride_ak + idx_q*stride_aq)
+        B_ptr = B + ((offs_k[:, None] + (k_idx * BLOCK_K)) * stride_bk + offs_b_n[None, :] * stride_bn + idx_q*stride_bq)
+        k = (K - (BLOCK_K * k_idx))
         if EVEN_K:
-            a = tl.load(A)
-            b = tl.load(B)
+            a = tl.load(A_ptr)
+            b = tl.load(B_ptr)
         else:
-            a = tl.load(A, mask=rk[None, :] < k, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k, other=0.)
+            a = tl.load(A_ptr, mask=offs_k[None, :] < k, other=0.)
+            b = tl.load(B_ptr, mask=offs_k[:, None] < k, other=0.)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
-        A += BLOCK_K * stride_ak
-        B += BLOCK_K * stride_bk
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -98,6 +99,7 @@ bmm_template = TritonTemplate(
     {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask")}}
 """,
 )
+
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
 aten_baddbmm = ExternKernelChoice(torch.baddbmm, "at::baddbmm_out")
