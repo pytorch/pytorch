@@ -714,8 +714,6 @@ class _WorldMeta(type):
 class group(metaclass=_WorldMeta):
     """Group class. Placeholder."""
 
-    pass
-
 
 class GroupMember(metaclass=_WorldMeta):
     """Group member class."""
@@ -4930,7 +4928,7 @@ def _find_or_create_pg_by_ranks_and_tag(
                 my_ranks = rank_set
         assert my_ranks is not None, "rankset doesn't include the current node"
 
-    my_ranks.sort()
+    my_ranks = sorted(my_ranks)
 
     pg = _find_pg_by_ranks_and_tag(tag, my_ranks)
     if pg is not None:

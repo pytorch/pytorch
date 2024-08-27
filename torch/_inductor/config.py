@@ -314,8 +314,8 @@ autotune_fallback_to_aten = (
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
 
-# enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+# DEPRECATED, DO NOT USE
+search_autotune_cache = False
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
@@ -621,6 +621,11 @@ profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 # Specify a file where we print out the profiling results.
 # None means we do not dump results to a file.
 profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
+# Switch to do_bench_using_profiling to exclude the CPU overheads
+profile_bandwidth_with_do_bench_using_profiling = (
+    os.environ.get("TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING") == "1"
+)
+
 
 # TODO: remove later
 disable_cpp_codegen = False
@@ -738,12 +743,30 @@ class cpp:
         == "1"
     )
 
+    # Disable the tiling select heuristic
+    enable_tiling_heuristics = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC", "1") == "1"
+    )
+
     # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls
     # the maximal parallelism of K-slicing. Since K-slicing requires extra thread
     # synchronization and buffers,  the maximal number of slices is limited to
     # mitigate the sync overhead and memory usage.
     # When set to 0, the number of slices is unlimited.
     gemm_max_k_slices = int(os.environ.get("TORCHINDUCTOR_CPP_GEMM_MAX_K_SLICES", "1"))
+
+    # For perf tuning and debugging purpose, configure the pre-defined cache blocking for
+    # MxNxK dims respectively. The blockings are separated by comma and the unit is
+    # the number of register blocks.
+    # For example, "4,1,10" means 4 register blocks on M, 1 on N and 10 on K respectively.
+    gemm_cache_blocking = os.environ.get("TORCHINDUCTOR_CPP_GEMM_CACHE_BLOCKING", None)
+
+    # For perf tuning and debugging purpose, configure the pre-defined thread blocking factors for
+    # MxNxK dims respectively. The factors are separated by comma and their product
+    # should be the same as the total number of threads.
+    # For example, if the total number of threads is 56, "7,4,2" means the work is
+    # decomposed into 7x4x2 thread blocks along MxNxK of a GEMM.
+    gemm_thread_factors = os.environ.get("TORCHINDUCTOR_CPP_GEMM_THREAD_FACTORS", None)
 
 
 # config specific to codegen/triton.py
@@ -876,6 +899,9 @@ class triton:
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
+    # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
+    codegen_upcast_to_fp32 = True
+
 
 class aot_inductor:
     # AOTInductor output path
@@ -899,7 +925,9 @@ class aot_inductor:
     )
 
     # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
-    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
+    filtered_kernel_names = os.environ.get(
+        "AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "default"
+    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
