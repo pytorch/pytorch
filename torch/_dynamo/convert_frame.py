@@ -89,12 +89,14 @@ from .symbolic_convert import (
 from .trace_rules import is_numpy
 from .utils import (
     CleanupManager,
+    clear_torch_function_mode_stack,
     CompilationMetrics,
     counters,
     dynamo_timed,
     format_bytecode,
     frame_phase_timing,
     gen_record_file_name,
+    get_chromium_event_logger,
     increment_frame,
     is_namedtuple,
     istype,
@@ -102,6 +104,7 @@ from .utils import (
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
+    set_torch_function_mode_stack,
     setup_compile_debug,
     troubleshooting_url,
     write_record_to_file,
@@ -159,6 +162,7 @@ class Tracker:
 
 input_codes = Tracker()
 output_codes = Tracker()
+disabled_codes: Dict[int, Callable[..., Any]] = {}
 
 initial_global_state: Optional[GlobalStateGuard] = None
 
@@ -198,6 +202,8 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             py_rng_state = random.getstate()
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
+            prior_tf_mode_stack = torch.overrides._get_current_function_mode_stack()
+            clear_torch_function_mode_stack()
             if torch.cuda.is_available():
                 cuda_rng_state = torch.cuda.get_rng_state()
             allow_tf32 = torch._C._get_cublas_allow_tf32()
@@ -208,6 +214,10 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
+                assert (
+                    torch._C._len_torch_function_stack() == 0
+                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                set_torch_function_mode_stack(prior_tf_mode_stack)
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
                 torch.use_deterministic_algorithms(
@@ -593,6 +603,10 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
+    tf_mode_stack: List[
+        TorchFunctionMode
+    ] = torch.overrides._get_current_function_mode_stack()
+
     @preserve_global_state
     def transform(
         instructions: List[Instruction], code_options: Dict[str, object]
@@ -606,6 +620,7 @@ def _compile(
             locals,
             globals,
             builtins,
+            tf_mode_stack,
             code_options,
             compiler_fn,
             one_graph,
@@ -869,6 +884,9 @@ def _compile(
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
         convert_frame_intern = structured.intern_string(__file__)
+        # Initialize the ChromiumEventLogger on start
+        chromium_event_log = get_chromium_event_logger()
+        chromium_event_log.reset()
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {

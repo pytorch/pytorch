@@ -41,7 +41,7 @@ from torch.utils._triton import has_triton
 
 
 try:
-    from .mock_cache import PatchCaches
+    from .mock_cache import patch_fbcode, PatchCaches
 except ImportError:
     from mock_cache import PatchCaches  # @manual
 
@@ -774,6 +774,63 @@ class TestFxGraphCacheHashing(TestCase):
             assert cmd_parts[0] == "nvcc", cmd_parts
             assert "-Wsomething" in cmd_parts, cmd_parts
             assert "-DNDEBUG" in cmd_parts, cmd_parts
+
+
+@instantiate_parametrized_tests
+class TestAutotuneCache(TestCase):
+    device_type = GPU_TYPE
+
+    def setUp(self):
+        super().setUp()
+        counters.clear()
+        PatchCaches.setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        PatchCaches.tearDown()
+
+    def reset(self):
+        torch._dynamo.reset()
+        clear_inductor_caches()
+
+    @config.patch({"fx_graph_cache": False})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"autotune_local_cache": False})
+    @config.patch({"autotune_remote_cache": True})
+    @config.patch({"max_autotune": True})
+    @parametrize("fbcode", (False,) + (True,) * config.is_fbcode())
+    def test_autotune_cache(self, fbcode: bool):
+        if not fbcode:
+            self.skipTest("Redis for autotune is currently broken")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y, a, b):
+                return x + y, a + b
+
+        def f(x, y, a, b):
+            return Model()(x, y, a, b)
+
+        x = torch.randn(100, 100).cuda()
+        y = torch.randn(100, 100).cuda()
+        a = torch.randn(1000, 100).cuda()
+        b = torch.randn(1000, 100).cuda()
+        f_compiled = torch.compile(f, fullgraph=True)
+
+        with PatchCaches(), patch_fbcode(fbcode):
+            f_compiled(x, y, a, b)
+
+            PatchCaches.update()
+            self.assertEqual(PatchCaches.num_get_hit, 0)
+            self.assertEqual(PatchCaches.num_get_miss, 2)
+            self.assertEqual(PatchCaches.num_put, 2)
+
+            self.reset()
+            f_compiled(x, y, a, b)
+
+        PatchCaches.report()
+        self.assertEqual(PatchCaches.num_get_hit, 2)
+        self.assertEqual(PatchCaches.num_get_miss, 2)
+        self.assertEqual(PatchCaches.num_put, 2)
 
 
 class TestUtils(TestCase):

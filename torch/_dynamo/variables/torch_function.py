@@ -124,23 +124,33 @@ class TorchFunctionModeStackVariable(VariableTracker):
 
 
 class TorchFunctionModeVariable(ContextWrappingVariable):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, source=None, **kwargs):
         super().__init__(value, **kwargs)
+        assert source
         self.value = value
-
-    @staticmethod
-    def get_global_mangled_name(tx, val):
-        return get_safe_global_name(
-            tx, f"__torch_function_mode_{val.__class__.__name__}", val
-        )
+        self.source = source
 
     def reconstruct(self, codegen):
         # We don't support locally created torch function modes yet
         assert self.source
         self.source.reconstruct(codegen)
 
+    def python_type(self):
+        return type(self.value)
+
     def _call_func(self, tx, values):
         unimplemented("torch function mode context manager is not supported yet")
+
+    def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
+        return call_torch_function(
+            tx,
+            self,
+            build_torch_function_fn(tx, self.value, self.source),
+            fn,
+            types,
+            args,
+            kwargs,
+        )
 
 
 def _get_all_args(args, kwargs):
@@ -231,8 +241,11 @@ def build_torch_function_fn(tx: "InstructionTranslator", value, source):
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
-    return tx.output.torch_function_enabled and any(
+    has_overridden_args = any(
         has_torch_function(arg) for arg in _get_all_args(args, kwargs)
+    )
+    return (has_overridden_args and tx.torch_function_subclass_enabled) or (
+        tx.torch_function_mode_enabled and tx.in_torch_function_mode()
     )
 
 
@@ -245,11 +258,20 @@ def dispatch_torch_function(tx: "InstructionTranslator", fn, args, kwargs):
         _get_subclass_type,
     )
 
+    types = (
+        TupleVariable([_get_subclass_type_var(tx, arg) for arg in overloaded_args]),
+    )
+
+    if tx.in_torch_function_mode():
+        res = tx.call_torch_function_mode(fn, types, args, kwargs)
+        if not (isinstance(res, ConstantVariable) and res.value is NotImplemented):
+            return res
+
     for arg in overloaded_args:
         res = arg.call_torch_function(
             tx,
             fn,
-            TupleVariable([_get_subclass_type_var(tx, arg) for arg in overloaded_args]),
+            types,
             args,
             kwargs,
         )

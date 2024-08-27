@@ -324,6 +324,40 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             fn(inp)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_torch_function_mode_highest_priority(self):
+        class TestSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                if not kwargs:
+                    kwargs = {}
+                if func == torch.add:
+                    return torch.ones(2, 2)
+                return super().__torch_function__(func, types, args, kwargs)
+
+        class TestMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if not kwargs:
+                    kwargs = {}
+
+                if func == torch.add:
+                    return torch.zeros(2, 2)
+
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return torch.add(x, 3)
+
+        inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
+
+        fn_opt = torch.compile(fn, fullgraph=True)
+        with TestMode(), torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {TestSubclass}
+        ):
+            expected = fn(inp)
+            actual = fn_opt(inp)
+
+        self.assertEqual(expected, actual)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

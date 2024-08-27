@@ -55,7 +55,6 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
-from torch.distributed.utils import _replace_by_prefix
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
@@ -131,8 +130,6 @@ DONT_WRAP_FILES = {
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
 
-_OPTIMIZED_PREFIX = "_orig_mod."
-
 
 def _debug_get_cache_entry_list(
     code: Union[types.CodeType, Callable[..., Any]]
@@ -173,13 +170,6 @@ class OptimizedModule(torch.nn.Module):
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
-
-        # state_dict post hook to remove prefix to allow loading into a non-optimized wrapped module.
-        self._register_state_dict_hook(self._post_state_dict_hook)
-        # load_state_dict pre-hook to allow loading back into optimized module.
-        self._register_load_state_dict_pre_hook(
-            self._pre_load_state_dict_hook, with_module=True
-        )
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
@@ -256,36 +246,6 @@ class OptimizedModule(torch.nn.Module):
         return orig_mod_attrs + [
             attr for attr in super().__dir__() if attr not in orig_mod_attrs
         ]
-
-    @staticmethod
-    def _post_state_dict_hook(
-        module: torch.nn.Module,
-        state_dict: Dict[str, Any],
-        prefix: str,
-        *args: Any,
-    ) -> Dict[str, Any]:
-        _replace_by_prefix(state_dict, f"{prefix}{_OPTIMIZED_PREFIX}", prefix)
-        return state_dict
-
-    @staticmethod
-    def _pre_load_state_dict_hook(
-        module: torch.nn.Module,
-        state_dict: Dict[str, Any],
-        prefix: str,
-        *args: Any,
-    ) -> None:
-        ends_with_suffix = [
-            key.startswith(_OPTIMIZED_PREFIX) for key in state_dict.keys()
-        ]
-        all_end_with_suffix = all(ends_with_suffix)
-        any_end_with_suffix = any(ends_with_suffix)
-
-        if all_end_with_suffix:
-            return
-        elif any_end_with_suffix:
-            raise ValueError("some keys end with {_OPTIMIZED_PREFIX} while some don't")
-
-        _replace_by_prefix(state_dict, prefix, f"{prefix}{_OPTIMIZED_PREFIX}")
 
 
 def remove_from_cache(f):
@@ -1489,7 +1449,6 @@ def export(
             and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
-            dim_constraints.remove_redundant_dynamic_results()
             forced_specializations = dim_constraints.forced_specializations()
             msg = dim_constraints.prettify_results(
                 original_signature,
@@ -1579,7 +1538,7 @@ def export(
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args):
                 with torch.fx.traceback.preserve_node_meta():
-                    return torch.fx.Interpreter(graph).run(*args)
+                    return torch.fx.Interpreter(graph).run(*args)  # type: ignore[arg-type]
 
             with unset_fake_temporarily(), enable_python_dispatcher(), fake_mode:
                 try:
@@ -1601,14 +1560,14 @@ def export(
 
             assert graph is not None
             for node in graph.graph.find_nodes(op="get_attr"):
-                if isinstance(getattr(graph, node.target), torch.Tensor):
+                if isinstance(getattr(graph, node.target), torch.Tensor):  # type: ignore[arg-type]
                     node.meta["val"] = fake_mode.from_tensor(
-                        getattr(graph, node.target), static_shapes=True
+                        getattr(graph, node.target), static_shapes=True  # type: ignore[arg-type]
                     )
 
         if same_signature:
             flat_args_dynamic_dims = [
-                {c.dim for c in (constraints or ()) if c.w_tensor() is x}
+                {c.dim for c in (constraints or ()) if c.t_id == id(x)}
                 for x in flat_args
             ]
             graph = rewrite_signature(

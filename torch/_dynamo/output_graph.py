@@ -78,7 +78,6 @@ from .utils import (
     get_instruction_source_311,
     get_locals_to_steal,
     get_static_address_type,
-    get_torch_function_mode_stack,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -367,8 +366,6 @@ class OutputGraph:
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
-        # This records the initial torch function mode stack for guarding
-        self.torch_function_mode_stack = get_torch_function_mode_stack()
 
         # Tracks if the output graph has a user defined allowed function in the
         # graph. This is used later to determine if we should fallback to eager

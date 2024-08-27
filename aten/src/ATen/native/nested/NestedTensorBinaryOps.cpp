@@ -14,8 +14,6 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <tuple>
-
 namespace at::native {
 
 DEFINE_DISPATCH(nested_dense_elementwise_stub);
