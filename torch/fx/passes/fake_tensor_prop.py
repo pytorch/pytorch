@@ -3,10 +3,12 @@ from typing import Optional
 
 import torch.fx
 from torch.fx import Node
-from torch.fx.node import map_aggregate
+from torch.fx.node import map_aggregate, Argument, Target
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
 from torch.fx.experimental.proxy_tensor import snapshot_fake, py_sym_types
+
+from typing import Any, Dict, Tuple
 
 __all__ = ['FakeTensorProp']
 
@@ -68,3 +70,11 @@ class FakeTensorProp(torch.fx.Interpreter):
     def propagate_dont_convert_inputs(self, *args):
         with self._mode:
             return super().run(*args)
+
+    def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+        devices = [arg.device for arg in args if hasattr(arg, "device")]
+        if devices:
+            with torch.amp.autocast(devices[0].type, enabled=False):
+                return super().call_function(target, args, kwargs)
+        else:
+            return super().call_function(target, args, kwargs)

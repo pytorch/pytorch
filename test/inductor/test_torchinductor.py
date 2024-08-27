@@ -3355,6 +3355,27 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
 
+    def test_amp(self):
+        class Repro(torch.nn.Module):
+            def forward(self, a, b, c):
+                attn_output = torch._C._nn.scaled_dot_product_attention(
+                    a, b, c, attn_mask=None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+
+        mod = Repro().to(self.device)
+
+        requires_grad = True
+        buf0 = torch.zeros(
+            (1, 16, 1024, 64),
+            dtype=torch.float16,
+            requires_grad=requires_grad,
+            device=self.device,
+        )
+
+        with torch.amp.autocast(self.device, enabled=True):
+            self.common(mod, [buf0, buf0, buf0])
+
     def test_scalar_input(self):
         def fn(x, y):
             a = torch.div(x, y, rounding_mode="floor")
