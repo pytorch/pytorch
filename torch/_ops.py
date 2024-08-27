@@ -246,20 +246,17 @@ class HigherOrderOperator(OperatorBase):
     # practice due to name collisions.
     def __init__(self, name):
         super().__init__()
+        if type(self) is HigherOrderOperator:
+            raise RuntimeError(
+                "Direct instantiation of HigherOrderOperator is not allowed. Please subclass it."
+            )
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
         _higher_order_ops[name] = self
         self._ns = "higher_order"
-
-        # For a normal HigherOrderOperator instance, we will change its __module__ from torch._ops to
-        # torch._ops.higher_order.
-        # For an instance of subclass of HigherOrderOperator (e.g. customized higher order op),
-        # the __module__ attribute will be kept unchanged.
-        if self.__class__ is HigherOrderOperator:
-            self_name_space = "." + self.namespace if self.namespace else ""
-            self.__module__ = self.__module__ + self_name_space
+        self.__module__ = "torch.ops.higher_order"
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -334,8 +331,8 @@ class HigherOrderOperator(OperatorBase):
                         result = handler(mode, *args, **kwargs)
                 else:
                     raise NotImplementedError(
-                        "There was no rule registered for HOP {self._name} and mode {curr_mode}. "
-                        "We recommend filing an issue."
+                        f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
+                        f"We recommend filing an issue."
                     )
                 if result is not NotImplemented:
                     return result
@@ -355,8 +352,8 @@ class HigherOrderOperator(OperatorBase):
                     result = handler(*args, **kwargs)
                 else:
                     raise NotImplementedError(
-                        "There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
-                        "We recommend filing an issue."
+                        f"There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
+                        f"We recommend filing an issue."
                     )
                 if result is not NotImplemented:
                     return result

@@ -85,7 +85,7 @@ static uint32_t get_cache_size(int level) {
   if (!processors) {
     return 0;
   }
-  const struct cpuinfo_cache* cache = NULL;
+  const struct cpuinfo_cache* cache = nullptr;
   switch (level) {
     case 1:
       cache = processors[0].cache.l1d;

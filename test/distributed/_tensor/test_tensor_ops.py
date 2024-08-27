@@ -614,16 +614,16 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(bf16_sharded_dtensor1.dtype, torch.bfloat16)
         self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
 
-        from torch.distributed._tensor.debug import get_sharding_prop_cache_info
+        from torch.distributed._tensor.debug import _get_sharding_prop_cache_info
 
         # by this point we only have cache misses
-        hits, misses, _, _ = get_sharding_prop_cache_info()
+        hits, misses, _, _ = _get_sharding_prop_cache_info()
         self.assertEqual(hits, 0)
         self.assertEqual(misses, 2)
 
         # convert to fp32 again and see if there's cache hit
         fp32_sharded_dtensor1 = bf16_sharded_dtensor1.float()
-        hits, misses, _, _ = get_sharding_prop_cache_info()
+        hits, misses, _, _ = _get_sharding_prop_cache_info()
         # by now we should have cache hit
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)

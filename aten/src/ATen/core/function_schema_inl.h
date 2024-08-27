@@ -401,7 +401,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
     }
     auto it = kwargs.find(argument.name());
     if (it != kwargs.end()) {
-      checkArg<T>(it->second, argument, nullopt);
+      checkArg<T>(it->second, argument, std::nullopt);
       inputs.push_back(it->second);
       consumed_kwargs++;
       continue;

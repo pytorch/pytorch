@@ -14,6 +14,21 @@ namespace fs = std::filesystem;
 namespace fs = std::experimental::filesystem;
 #endif
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
+namespace {
+bool file_exists(std::string& path) {
+#ifdef _WIN32
+  return fs::exists(path);
+#else
+  struct stat rc;
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
+} // namespace
+
 namespace torch::inductor {
 
 AOTIModelContainerRunner::AOTIModelContainerRunner(
@@ -57,10 +72,10 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
       model_so_->sym("AOTInductorModelContainerGetCallSpec"));
 
   // Hack to find the json file name from the model so file
-  size_t lastindex = model_so_path.find_last_of('.');
+  size_t lastindex = model_so_path.find_last_of(".");
   std::string json_filename = model_so_path.substr(0, lastindex) + ".json";
 
-  if (fs::exists(json_filename)) {
+  if (file_exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
         json_filename, device_str == "cpu");
     proxy_executor_handle_ =
@@ -174,11 +189,18 @@ void AOTIModelContainerRunner::swap_constant_buffer() {
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
-  const char* in_spec = nullptr;
-  const char* out_spec = nullptr;
+  const char* in_spec;
+  const char* out_spec;
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       get_call_spec_func_(container_handle_, &in_spec, &out_spec));
   return {in_spec, out_spec};
+}
+
+std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&
+getAOTIModelRunnerRegistry() {
+  static std::unordered_map<std::string, CreateAOTIModelRunnerFunc>
+      aoti_model_runner_registry_;
+  return aoti_model_runner_registry_;
 }
 
 } // namespace torch::inductor

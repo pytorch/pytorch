@@ -421,7 +421,6 @@ static std::string THPStorage_bytesAsHandleString(PyObject* handle) {
   if (PyBytes_AsStringAndSize(handle, &buffer, &handle_size) == -1) {
     TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle");
   }
-  TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
   return std::string(buffer, handle_size);
   END_HANDLE_TH_ERRORS_RET("")
 }

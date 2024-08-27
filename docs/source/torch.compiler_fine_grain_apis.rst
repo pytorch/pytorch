@@ -9,7 +9,7 @@ TorchDynamo APIs for fine-grained tracing
 
 ``torch.compile`` performs TorchDynamo tracing on the whole user model.
 However, it is possible that a small part of the model code cannot be
-handeled by ``torch.compiler``. In this case, you might want to disable
+handled by ``torch.compiler``. In this case, you might want to disable
 the compiler on that particular portion, while running compilation on
 the rest of the model. This section describe the existing APIs that
 use to define parts of your code in which you want to skip compilation
@@ -22,7 +22,7 @@ disable compilation are listed in the following table:
    :header: "API", "Description", "When to use?"
    :widths: auto
 
-   "``torch.compiler.disable``", "Disables Dynamo on the decorated function as well as recursively invoked functions.", "Excellent for unblocking a user, if a small portion of the model cannot be handeled with ``torch.compile``."
+   "``torch.compiler.disable``", "Disables Dynamo on the decorated function as well as recursively invoked functions.", "Excellent for unblocking a user, if a small portion of the model cannot be handled with ``torch.compile``."
    "``torch._dynamo.disallow_in_graph``", "Disallows the marked op in the TorchDynamo graph. TorchDynamo causes graph break, and runs the op in the eager (no compile) mode.\n\nThis is suitable for the ops, while ``torch.compiler.disable`` is suitable for decorating functions.", "This API is excellent for both debugging and unblocking if a custom op like ``torch.ops.fbgemm.*`` is causing issues with the ``torch.compile`` function."
    "``torch.compile.allow_in_graph``", "The annotated callable goes as is in the TorchDynamo graph. For example, a black-box for TorchDynamo Dynamo.\n\nNote that AOT Autograd will trace through it, so the ``allow_in_graph`` is only a Dynamo-level concept.", "This API is useful for portions of the model which have known TorchDynamo hard-to-support features, like hooks or ``autograd.Function``. However, each usage of ``allow_in_graph`` **must be carefully screened** (no graph breaks, no closures)."
    "``torch._dynamo.graph_break``", "Adds a graph break. The code before and after the graph break goes through TorchDynamo.", "**Rarely useful for deployment** - If you think you need this, most probably you need either ``disable`` or ``disallow_in_graph``."

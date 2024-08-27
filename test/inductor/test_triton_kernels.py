@@ -18,6 +18,7 @@ from torch._library import capture_triton
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+from torch.testing._internal.logging_utils import logs_to_string
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -159,7 +160,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0'];  getitem = None
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
@@ -265,6 +266,57 @@ def forward(self, x_1, output_1):
         )
         self.assertEqual(2 * t_view, compiled_func(t).view(16))
         self.assertEqual(2 * t, compiled_func(t))
+
+    @requires_gpu
+    def test_no_nan_kernels(self):
+        @triton.jit
+        def add_one_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            output = x + 1
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def add_one(x, out):
+            n_elements = x.numel()
+            add_one_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=4)
+
+        class AddOne(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = torch.empty_like(x)
+                add_one(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = torch.empty_like(grad)
+                add_one(saved, out)
+                return out
+
+        @torch.compile
+        def f(x):
+            return AddOne.apply(x)
+
+        log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
+
+        x = torch.randn(3, requires_grad=True, device=GPU_TYPE)
+        with ctx():
+            y = f(x)
+
+        output_code = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+        self.assertTrue(len(output_code) > 0, msg="output code is not empty")
+        self.assertEqual(output_code.count('float("nan")'), 0)
+        self.assertEqual(output_code.count("float('nan')"), 0)
 
     @requires_gpu
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
@@ -672,6 +724,29 @@ def forward(self, x_1, output_1):
 
         output2 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
+
+    @requires_gpu
+    @skipIfRocm  # https://github.com/pytorch/pytorch/actions/runs/10051552819/job/27782048305?pr=131431
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @patch.object(
+        torch._inductor.config, "unsafe_ignore_unsupported_triton_autotune_args", True
+    )
+    def test_triton_kernel_autotune_with_unsupported_args(self, backend):
+        def call_triton(x: torch.Tensor, y: torch.Tensor):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            add_kernel_autotuned_with_unsupported_args[(n_elements,)](
+                x, y, output, n_elements
+            )
+            return output
+
+        t1 = torch.rand(256, device=GPU_TYPE)
+        t2 = torch.rand(256, device=GPU_TYPE)
+
+        torch_add = call_triton(t1, t2)
+        compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
+        compiled_add = compiled_func(t1, t2)
+        self.assertEqual(compiled_add, torch_add)
 
     @requires_gpu
     @common_utils.parametrize("grad", [False, True])
@@ -2388,6 +2463,62 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         out = f(x, y)
         expected = torch.empty_like(x)
         self.assertEqual(out, expected)
+
+    @requires_gpu
+    def test_capture_triton_disabled_in_triton_op(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        add_kernel_decorated = torch._library.capture_triton(add_kernel)
+
+        status = []
+
+        @torch._library.triton_op("mylib::add", mutates_args=())
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            import torch._higher_order_ops.triton_kernel_wrap
+
+            status.append(torch._library.triton.is_capture_triton_enabled())
+
+            # capture_triton should return the kernel directly if disabled
+            result = torch._library.capture_triton(add_kernel)
+            self.assertIs(result, add_kernel)
+
+            # Smoke test: check that with capture_triton disabled this still does something
+            output = torch.empty_like(x)
+            output2 = torch.empty_like(x)
+
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_decorated[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+
+            add_kernel_decorated.run(
+                x, y, output2, n_elements, BLOCK_SIZE=16, grid=grid, warmup=False
+            )
+
+            return output + output2
+
+        x = torch.randn(3, device=GPU_TYPE)
+        y = torch.randn(3, device=GPU_TYPE)
+        z = add(x, y)
+        self.assertEqual(status[-1], False)
+        self.assertEqual(z, (x + y) * 2)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])

@@ -8,6 +8,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
@@ -139,8 +140,10 @@ class FunctionalTensor(torch.Tensor):
             # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
             cls,
             elem.shape,  # sizes
-            elem.stride(),  # strides
-            elem.storage_offset(),  # storage_offset
+            elem.stride() if not is_sparse_any(elem) else None,  # strides
+            elem.storage_offset()
+            if not is_sparse_any(elem)
+            else None,  # storage_offset
             None,  # memory_format
             elem.dtype,  # dtype
             elem.layout,  # layout
@@ -275,6 +278,14 @@ class FunctionalTensor(torch.Tensor):
     int = _conversion_method_template(dtype=torch.int32)
     long = _conversion_method_template(dtype=torch.int64)
 
+    # TODO(sparse-team): fixes #133174 but can we do without the relay?
+    def to_dense(self):
+        return self.elem.to_dense()
+
+    @property
+    def layout(self):
+        return self.elem.layout
+
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
@@ -291,6 +302,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         # Map of effect type (ex. _EffectType.ORDERED) to a token. The tokens help keep
         # track of the ordering between side effectful operations.
         self._tokens: Dict[Any, torch.Tensor] = {}
+
+        # Filled after forward tracing.
+        self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
 
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to
@@ -736,3 +750,9 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def mark_mutation_hidden_from_autograd(self, tensor) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
+
+
+def mb_unwrap_functional_tensor(tensor: torch.Tensor):
+    if isinstance(tensor, FunctionalTensor):
+        return torch._from_functional_tensor(tensor.elem)
+    return tensor

@@ -11,10 +11,10 @@ import torch
 import torch.fx
 from torch._guards import Source
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
-from ..source import AttrSource, GetItemSource
+from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
@@ -29,7 +29,6 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
-from .iter import IteratorVariable
 
 
 if TYPE_CHECKING:
@@ -87,7 +86,7 @@ class BaseListVariable(VariableTracker):
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -96,17 +95,12 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
-            if self.source is not None:
-                return self.clone(
-                    items=self.items[index],
-                    source=GetItemSource(self.source, index),
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
-            else:
-                return self.clone(
-                    items=self.items[index],
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
+            # Set source to None because slicing a list gives a new local
+            return self.clone(
+                items=self.items[index],
+                source=None,
+                mutable_local=MutableLocal() if self.mutable_local else None,
+            )
         else:
             assert isinstance(index, (int, torch.SymInt))
             return self.items[index]
@@ -133,7 +127,7 @@ class BaseListVariable(VariableTracker):
                     unimplemented("__getitem__ with non-constant tensor")
             else:
                 value = args[0]
-            return self.getitem_const(value)
+            return self.getitem_const(tx, value)
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
@@ -142,7 +136,7 @@ class BaseListVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.index),
+                SourcelessBuilder.create(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
@@ -151,7 +145,7 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def list_compare(tx: "InstructionTranslator", op, left, right):
-        return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
+        return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
             tx, [variables.BuiltinVariable(op), left, right], {}
         )
 
@@ -286,7 +280,7 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self):
         return range(*[x.as_python_constant() for x in self.items])
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
         index = arg.as_python_constant()
 
@@ -340,11 +334,11 @@ class CommonListMethodsVariable(BaseListVariable):
             name == "extend"
             and self.mutable_local
             and args
-            and args[0].has_force_unpack_var_sequence(tx)
+            and args[0].has_unpack_var_sequence(tx)
         ):
             assert not kwargs
             (arg,) = args
-            seq = arg.force_unpack_var_sequence(tx)
+            seq = arg.unpack_var_sequence(tx)
             tx.output.side_effects.mutation(self)
             self.items.extend(seq)
             return ConstantVariable.create(None)
@@ -428,13 +422,11 @@ class ListVariable(CommonListMethodsVariable):
             key, value = args
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
-                if not value.has_force_unpack_var_sequence(tx):
+                if not value.has_unpack_var_sequence(tx):
                     unimplemented(
                         f"Missing dynamo support for expanding {value} into a list for slice assignment."
                     )
-                self.items[key.as_python_constant()] = value.force_unpack_var_sequence(
-                    tx
-                )
+                self.items[key.as_python_constant()] = value.unpack_var_sequence(tx)
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
@@ -462,12 +454,7 @@ class DequeVariable(CommonListMethodsVariable):
             )
         )
         codegen.foreach(self.items)
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_LIST", arg=len(self.items)),
-                *create_call_function(1, False),
-            ]
-        )
+        codegen.extend_output(create_call_function(len(self.items), False))
 
     def call_method(
         self,
@@ -490,15 +477,11 @@ class DequeVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
-        elif (
-            name == "extendleft"
-            and self.mutable_local
-            and args[0].has_force_unpack_var_sequence(tx)
-        ):
+        elif name == "extendleft" and self.mutable_local:
             assert not kwargs
 
             (arg,) = args
-            prefix = arg.force_unpack_var_sequence(tx)
+            prefix = arg.unpack_var_sequence(tx)
             prefix.reverse()
             tx.output.side_effects.mutation(self)
             self.items = prefix + list(self.items)
@@ -522,6 +505,9 @@ class DequeVariable(CommonListMethodsVariable):
 class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def debug_repr(self):
         return self.debug_repr_helper("(", ")")
@@ -796,10 +782,10 @@ class SliceVariable(BaseListVariable):
         return self.items[fields.index(name)]
 
 
-class ListIteratorVariable(IteratorVariable):
+class ListIteratorVariable(VariableTracker):
     _nonvar_fields = {
         "index",
-        *IteratorVariable._nonvar_fields,
+        *VariableTracker._nonvar_fields,
     }
 
     def __init__(self, items, index: int = 0, **kwargs) -> None:
@@ -849,9 +835,6 @@ class ListIteratorVariable(IteratorVariable):
 
     def unpack_var_sequence(self, tx):
         return list(self.items[self.index :])
-
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
-        return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen):
         remaining_items = self.items[self.index :]

@@ -8,12 +8,12 @@ import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-
+from torch import device as _device, Tensor
+from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
-from .. import device as _device, Tensor
-from .._utils import _dummy_type, _LazySeedTracker, classproperty
 from ._utils import _get_device_index
+
 
 _device_t = Union[_device, str, int, None]
 
@@ -64,7 +64,12 @@ def _lazy_init() -> None:
                 "multiprocessing, you must use the 'spawn' start method"
             )
         if not _is_compiled():
-            raise AssertionError("Torch not compiled with MTIA enabled")
+            raise AssertionError(
+                "Torch not compiled with MTIA enabled. "
+                "Ensure you have `import mtia.host_runtime.torch_mtia` in your python "
+                "src file and include `//mtia/host_runtime/torch_mtia:torch_mtia` as "
+                "your target dependency!"
+            )
 
         torch._C._mtia_init()
         # Some of the queued calls may reentrantly call _lazy_init();
@@ -306,7 +311,6 @@ def set_rng_state(
         UserWarning,
         stacklevel=2,
     )
-    pass
 
 
 __all__ = [

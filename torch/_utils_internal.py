@@ -82,6 +82,10 @@ def compile_time_strobelight_meta(phase_name):
         def wrapper_function(*args, **kwargs):
             if "skip" in kwargs:
                 kwargs["skip"] = kwargs["skip"] + 1
+
+            if not StrobelightCompileTimeProfiler.enabled:
+                return function(*args, **kwargs)
+
             return StrobelightCompileTimeProfiler.profile_compile_time(
                 function, phase_name, *args, **kwargs
             )
@@ -147,7 +151,7 @@ def log_torch_jit_trace_exportability(
     return
 
 
-def export_api_rollout_check() -> bool:
+def capture_pre_autograd_graph_using_training_ir() -> bool:
     return False
 
 
@@ -182,6 +186,10 @@ def justknobs_getval_int(name: str) -> int:
     Read warning on justknobs_check
     """
     return 0
+
+
+def is_fb_unit_test() -> bool:
+    return False
 
 
 @functools.lru_cache(None)
@@ -228,4 +236,8 @@ REQUIRES_SET_PYTHON_MODULE = False
 
 def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
     print("Uploading profile stats (fb-only otherwise no-op)")
+    return None
+
+
+def log_chromium_event_internal(event, stack, logger_uuid, start_timestamp=None):
     return None

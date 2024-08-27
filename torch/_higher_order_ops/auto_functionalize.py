@@ -69,6 +69,7 @@ class AutoFunctionalized(HigherOrderOperator):
 
 
 auto_functionalized = AutoFunctionalized()
+auto_functionalized.__module__ = "torch.ops.higher_order"
 
 
 def can_auto_functionalize(op: OperatorBase) -> bool:
@@ -169,9 +170,6 @@ def auto_functionalized_proxy(
     _mutable_op: OpOverload,
     **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
-    if not mode.enable_tracing:
-        return auto_functionalized(_mutable_op, **kwargs)
-
     with disable_proxy_modes_tracing():
         out = auto_functionalized(_mutable_op, **kwargs)
 

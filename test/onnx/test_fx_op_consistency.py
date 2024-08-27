@@ -46,6 +46,7 @@ from typing import (
     Optional,
     Tuple,
     Type,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -63,7 +64,10 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
-from torch.testing._internal.opinfo import core as opinfo_core  # noqa: TCH001
+
+
+if TYPE_CHECKING:
+    from torch.testing._internal.opinfo import core as opinfo_core
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,
@@ -1970,7 +1974,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     """
 
     opset_version = -1
-    op_level_debug: bool = False
     dynamic_shapes: bool = False
     model_type: pytorch_test_common.TorchModelType = (
         pytorch_test_common.TorchModelType.TORCH_NN_MODULE

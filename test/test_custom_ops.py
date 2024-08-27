@@ -353,16 +353,11 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            torch.library.opcheck(
-                op.op,
-                args,
-                kwargs,
-            )
+            torch.library.opcheck(op.op, args, kwargs)
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            ...
+        def foo(x: torch.Tensor) -> torch.Tensor: ...
 
         @foo.impl(["cpu", "cuda"])
         def foo_impl(x):
@@ -1927,9 +1922,7 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
     def test_autogen_aten_ops_are_pt2_compliant(self):
-        for op in [
-            torch.ops.aten.fill.Tensor_out,
-        ]:
+        for op in [torch.ops.aten.fill.Tensor_out]:
             self.assertIn(torch.Tag.generated, op.tags)
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
@@ -2656,9 +2649,7 @@ class TestCustomOpAPI(TestCase):
         with self.assertRaisesRegex(ValueError, "string"):
 
             @torch.library.custom_op("_torch_testing::f3", mutates_args="x")
-            def f3(
-                x: Tensor,
-            ) -> None:
+            def f3(x: Tensor) -> None:
                 return
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
@@ -3356,9 +3347,7 @@ Please use `add.register_fake` to add an fake impl.""",
             return x + 1
 
         self.assertEqual(f(x), x + 1)
-        with self.assertLogs(
-            "torch._library.custom_ops",
-        ) as captured:
+        with self.assertLogs("torch._library.custom_ops") as captured:
             with f.set_kernel_enabled("gpu", enabled=False):
                 self.assertEqual(f(x), x + 1)
             self.assertIn(
@@ -3371,9 +3360,7 @@ Please use `add.register_fake` to add an fake impl.""",
 
         self.assertEqual(f(x), x + 2)
 
-        with self.assertLogs(
-            "torch._library.custom_ops",
-        ) as captured:
+        with self.assertLogs("torch._library.custom_ops") as captured:
             with f.set_kernel_enabled("cpu", enabled=True):
                 self.assertEqual(f(x), x + 2)
             self.assertIn("already enabled", captured.output[0])
@@ -3381,9 +3368,7 @@ Please use `add.register_fake` to add an fake impl.""",
         with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
 
-            with self.assertLogs(
-                "torch._library.custom_ops",
-            ) as captured:
+            with self.assertLogs("torch._library.custom_ops") as captured:
                 with f.set_kernel_enabled("cpu", enabled=False):
                     self.assertEqual(f(x), x + 1)
                 self.assertIn("already disabled", captured.output[0])
@@ -3464,24 +3449,13 @@ Please use `add.register_fake` to add an fake impl.""",
                 return result, 0
 
             if mode == "function":
-                torch.library.register_vmap(
-                    f,
-                    fvmap,
-                )
+                torch.library.register_vmap(f, fvmap)
             elif mode == "qualname":
-                torch.library.register_vmap(
-                    "mylib::f",
-                    fvmap,
-                )
+                torch.library.register_vmap("mylib::f", fvmap)
             elif mode == "opoverload":
-                torch.library.register_vmap(
-                    torch.ops.mylib.f.default,
-                    fvmap,
-                )
+                torch.library.register_vmap(torch.ops.mylib.f.default, fvmap)
             elif mode == "c_opdef":
-                f.register_vmap(
-                    fvmap,
-                )
+                f.register_vmap(fvmap)
 
             x = torch.randn(2, 2)
             y = torch.randn(2, 2)
@@ -3649,10 +3623,7 @@ class MiniOpTestOther(CustomOpTestCaseBase):
 optests.generate_opcheck_tests(
     MiniOpTest,
     ["aten", "mini_op_test"],
-    get_file_path_2(
-        os.path.dirname(__file__),
-        "minioptest_failures_dict.json",
-    ),
+    get_file_path_2(os.path.dirname(__file__), "minioptest_failures_dict.json"),
     additional_decorators={
         "test_pt2_compliant_tag_mini_op_test_no_abstract": [unittest.expectedFailure]
     },
@@ -3662,10 +3633,7 @@ optests.generate_opcheck_tests(
 optests.generate_opcheck_tests(
     MiniOpTestOther,
     ["aten", "mini_op_test"],
-    get_file_path_2(
-        os.path.dirname(__file__),
-        "minioptest_failures_dict.json",
-    ),
+    get_file_path_2(os.path.dirname(__file__), "minioptest_failures_dict.json"),
     test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
@@ -3827,12 +3795,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         result = torch.library.opcheck(
             torch.ops.aten.sin.default, (x,), test_utils="test_schema"
         )
-        self.assertEqual(
-            result,
-            {
-                "test_schema": "SUCCESS",
-            },
-        )
+        self.assertEqual(result, {"test_schema": "SUCCESS"})
 
         result = torch.library.opcheck(
             torch.ops.aten.sin.default,

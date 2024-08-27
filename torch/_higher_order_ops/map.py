@@ -36,8 +36,14 @@ class MapWrapper(HigherOrderOperator):
         return map_wrapper(xs, *args)
 
 
+class MapImpl(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("map_impl")
+
+
 map = MapWrapper("map")
-map_impl = HigherOrderOperator("map_impl")
+
+map_impl = MapImpl()
 
 dummy_aot_config = AOTConfig(
     fw_compiler=None,  # type: ignore[arg-type]
@@ -218,10 +224,7 @@ def map_autograd(f, xs, pos_args):
 
 @map_impl.py_impl(ProxyTorchDispatchMode)
 def map_proxy_torch_dispatch_mode(mode, f, xs, args):
-    if mode.enable_tracing:
-        return trace_map(mode, map_impl, f, xs, args)
-    else:
-        return map_impl(f, xs, args)
+    return trace_map(mode, map_impl, f, xs, args)
 
 
 @map_impl.py_impl(FakeTensorMode)

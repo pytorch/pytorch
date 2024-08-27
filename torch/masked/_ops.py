@@ -10,6 +10,7 @@ from torch.masked import _docs
 from torch.masked.maskedtensor.core import is_masked_tensor, MaskedTensor
 from torch.masked.maskedtensor.creation import as_masked_tensor
 
+
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 

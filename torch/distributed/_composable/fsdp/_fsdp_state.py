@@ -290,7 +290,11 @@ class FSDPState(_State):
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
-                self._comm_ctx.reduce_scatter_state = None
+                if self._comm_ctx.reduce_scatter_state is not None:
+                    torch.cuda.current_stream().wait_event(
+                        self._comm_ctx.reduce_scatter_state.event
+                    )
+                    self._comm_ctx.reduce_scatter_state = None
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
@@ -313,12 +317,9 @@ class FSDPState(_State):
         if not torch.is_grad_enabled():
             return output
         flat_outputs, _ = tree_flatten(output)
-        tensors = tuple(
-            t for t in flat_outputs if (torch.is_tensor(t) and t.requires_grad)
-        )
-        if tensors:
-            for tensor in tensors:
-                tensor.register_hook(self._pre_backward)
+        for t in flat_outputs:
+            if torch.is_tensor(t) and t.requires_grad:
+                t.register_hook(self._pre_backward)
         return output
 
     def _register_root_post_backward_final_callback(self):

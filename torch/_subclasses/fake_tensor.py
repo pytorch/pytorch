@@ -474,7 +474,7 @@ class FakeTensorConverter:
 
 
 @functools.lru_cache(None)
-def init_cuda_context() -> None:
+def init_gpu_context() -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
         (
@@ -482,6 +482,9 @@ def init_cuda_context() -> None:
             if torch.version.hip is None
             else torch.zeros(1, device="cuda")
         )
+
+    if torch.xpu.is_available():
+        (torch.empty(1, device="xpu"))
 
 
 @contextlib.contextmanager
@@ -528,8 +531,18 @@ class FakeTensorConfig:
 # Making this a descriptor may seem overly fancy, but actually it's the most
 # convenient way to make sure we have access to FakeTensor during access,
 # which is required for testing version counter and epoch validity
-class UnbackedMemoDescriptor:
+class SymIntMemoDescriptor:
     _name: str
+
+    # By default, SymInts in this memo are invalidated across versions/epochs.
+    # nested_ints however are preserved across epochs and across versions.
+    # Preserving across versions is okay for nested int since the association
+    # of a nested int is agnostic to the underlying data and nested ints are not
+    # shared across multiple distinct tensors.
+    _is_nested_int: bool
+
+    def __init__(self, *, is_nested_int: bool = False) -> None:
+        self._is_nested_int = is_nested_int
 
     def __set_name__(self, owner: str, name: str) -> None:
         self._name = name
@@ -549,27 +562,30 @@ class UnbackedMemoDescriptor:
 
     def __get__(
         self, obj: FakeTensor, objtype: Optional[Type[FakeTensor]] = None
-    ) -> Optional[object]:
+    ) -> Optional[torch.SymInt]:
         if (r := getattr(obj, self._memo(obj))) is None:
             return None
         # Version counter based tracking isn't 100% sound but it's close
         # enough
         if (
-            getattr(obj, self._memo_vc(obj)) != obj._version
-            or getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
+            not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version
+        ) or (
+            not self._is_nested_int
+            and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
         ):
             setattr(obj, self._memo(obj), None)
             return None
         return r
 
-    def __set__(self, obj: FakeTensor, value: Optional[object]) -> None:
+    def __set__(self, obj: FakeTensor, value: Optional[torch.SymInt]) -> None:
         if value is None:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
             setattr(obj, self._memo_epoch(obj), None)
-        elif not torch.is_inference_mode_enabled():
+        elif not obj.is_inference() or self._is_nested_int:
             setattr(obj, self._memo(obj), value)
-            setattr(obj, self._memo_vc(obj), obj._version)
+            if not self._is_nested_int:
+                setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
 
@@ -590,9 +606,14 @@ class FakeTensor(Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
     # memo mechanism here won't work)
-    nonzero_memo = UnbackedMemoDescriptor()
-    item_memo = UnbackedMemoDescriptor()
-    unique_memo = UnbackedMemoDescriptor()
+    nonzero_memo = SymIntMemoDescriptor()
+    item_memo = SymIntMemoDescriptor()
+    unique_memo = SymIntMemoDescriptor()
+
+    # We expect nested_int_memo to be None when an offsets is a graph
+    # intermediate, or an input that has never been associated with a
+    # nested int.
+    nested_int_memo = SymIntMemoDescriptor(is_nested_int=True)
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -668,8 +689,8 @@ class FakeTensor(Tensor):
         if not fake_mode.allow_meta:
             assert device.type != "meta"
         # normalize device.
-        if device.type == "cuda":
-            init_cuda_context()
+        if device.type in ["cuda", "xpu"]:
+            init_gpu_context()
 
         if (
             device.type
@@ -690,6 +711,7 @@ class FakeTensor(Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
+        self.nested_int_memo = None
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -860,6 +882,17 @@ class FakeTensor(Tensor):
 
         return common_device, has_scalar_only_inputs
 
+    def get_nested_int(
+        self,
+        *,
+        coeff: Union[int, torch.SymInt] = 1,
+    ) -> torch.SymInt:
+        if self.nested_int_memo is None:
+            self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(
+                nt_tensor_id=None
+            )
+        return self.nested_int_memo * coeff
+
     # We must handle tolist in a special way for FakeTensors here in the case
     # where tolist is called from torch dispatch for tensor subclasses.
     # Ordinarily, if a program calls .tolist compiling still works because there is
@@ -957,7 +990,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         memory_format,
         storage_offset,
         # Only set storage_bytes for tensors that have storage (not sparse)
-        t.untyped_storage().nbytes() if not t.is_sparse else None,
+        t.untyped_storage().nbytes() if not is_sparse_any(t) else None,
         t.requires_grad,
         t.is_quantized,
         t.is_conj(),
@@ -965,8 +998,8 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_inference(),
         t.is_sparse,
         t.is_coalesced() if t.is_sparse else None,
-        t.dense_dim() if t.is_sparse else None,
-        t.sparse_dim() if t.is_sparse else None,
+        t.dense_dim() if is_sparse_any(t) else None,
+        t.sparse_dim() if is_sparse_any(t) else None,
     )
 
 
@@ -1060,6 +1093,16 @@ class FakeTensorMode(TorchDispatchMode):
     _stack: Optional[str]
     allow_meta: bool
 
+    # NestedTensor uses a tensor_id_counter to uniquely identify offsets.
+    # This counter is incremented when an offsets is used to create an NJT
+    # for the first time. To avoid mutating eager state if we construct NJT
+    # during tracing, we maintain a separate counter on the FakeTensorMode.
+    # The initial count is set to the current eager tensor_id_counter value
+    # upon initialization, and every time you retrace using the same fake tensor
+    # mode, you should reset the counter to the initial count.
+    nt_tensor_id_counter: int = -1
+    nt_tensor_id_initial_count: int = -1
+
     def __init__(
         self,
         *,
@@ -1148,6 +1191,16 @@ class FakeTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FAKE
 
+        import torch.nested._internal.nested_tensor
+
+        self.nt_tensor_id_initial_count = (
+            torch.nested._internal.nested_tensor._tensor_id_counter
+        )
+        self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+
+    def reset_nt_tensor_id_counter(self) -> None:
+        self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be
     # TWO fake tensor modes.  The canonical example of this is exporting
@@ -1170,6 +1223,10 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
+        if torch.xpu._is_compiled():
+            assert not torch.cuda._is_compiled()
+            return not torch.xpu.is_available()
+
         return not torch.cuda.is_available()
 
     @property
@@ -1198,6 +1255,8 @@ class FakeTensorMode(TorchDispatchMode):
 
     # No-op if FakeTensorMode is already in use
     def __enter__(self) -> Self:
+        import torch.nested._internal.nested_tensor
+
         prev_only_lift_cpu_tensors = None
         if self.avoid_device_init:
             # See NOTE: [torch.tensor, lift_fresh, and device movement]
@@ -1402,24 +1461,12 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("not our fake")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
-                if arg.is_sparse:
-                    raise _BypassDispatchCache("sparse tensor")
-                if arg.layout in [
-                    torch.sparse_csr,
-                    torch.sparse_csc,
-                    torch.sparse_bsr,
-                    torch.sparse_bsc,
-                ]:
-                    # Does this subsume arg.is_sparse?
-                    raise _BypassDispatchCache("sparse tensor layout")
-                # sparse tensors don't have storage, so check is after
-
+                if is_sparse_any(arg):
+                    raise _BypassDispatchCache(f"{arg.layout} tensor")
                 # FIXME: For now back out caching when there are symbolic nbytes
                 # - this doesn't seem to play nice with set(). See T196779132 for examples.
                 if isinstance(arg.untyped_storage().nbytes(), SymInt):
                     raise _BypassDispatchCache("symbolic nbytes")
-                if is_sparse_compressed(arg):
-                    raise _BypassDispatchCache("sparse compressed tensor")
                 metadata = extract_tensor_metadata(arg)
                 metadata._flatten_into(result, self, state)
             elif isinstance(arg, Tensor):
@@ -1545,7 +1592,7 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata is None:
             return None
 
-        assert not metadata.is_sparse
+        assert not is_sparse_any(metadata)
 
         def check_value(
             value: _MetadataIntLike, state: _CacheKeyState
@@ -1899,7 +1946,7 @@ class FakeTensorMode(TorchDispatchMode):
                     # TODO: Remove these exclusions, so that we can remove
                     # this leg entirely
                     torch_decomp_decompositions(func)
-                    and all(not e.is_sparse for e in flat_arg_fake_tensors)
+                    and all(not is_sparse_any(e) for e in flat_arg_fake_tensors)
                 )
             ):
                 with self:
@@ -2105,6 +2152,31 @@ class FakeTensorMode(TorchDispatchMode):
 
         return tree_map(wrap, r)
 
+    def create_symbolic_nested_int(
+        self, *, nt_tensor_id: Optional[int] = None
+    ) -> torch.SymInt:
+        # See Note: [Creating symbolic nested int]
+        # Returned nested int always has coeff=1; multiply the result by coeff if needed
+        import torch.nested._internal.nested_tensor
+
+        if nt_tensor_id is None:
+            nt_tensor_id = self.nt_tensor_id_counter
+            assert self.enter_stack, "should only called while FakeTensorMode is active"
+            self.nt_tensor_id_counter += 1
+        hint = torch._C._get_nested_int(nt_tensor_id, 1)
+
+        src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
+        assert self.shape_env is not None
+        ret = self.shape_env.create_symintnode(
+            sym=self.shape_env.create_symbol(
+                val=hint,
+                source=src,
+            ),
+            hint=hint,
+            source=src,
+        )
+        return ret
+
     _cpp_meta_supports_symint = ordered_set(
         aten.empty.memory_format,
         aten.empty_strided.default,
@@ -2129,7 +2201,7 @@ class FakeTensorMode(TorchDispatchMode):
     def may_turn_const(self, t: Tensor) -> bool:
         return (
             t.numel() <= CONSTANT_NUMEL_LIMIT
-            and not t.is_sparse
+            and not is_sparse_any(t)
             and not self.is_our_fake(t)
             and not t.device.type == "meta"
         )
@@ -2144,8 +2216,8 @@ class FakeTensorMode(TorchDispatchMode):
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
-            _, new_kwargs = normalize_function(
-                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            _, new_kwargs = normalize_function(  # type: ignore[misc]
+                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
             )
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"
@@ -2224,7 +2296,7 @@ def run_fallback_kernel(
 
     for e in flat_args:
         if isinstance(e, Tensor):
-            if not e.is_sparse:
+            if not is_sparse_any(e):
                 storages.add(e._typed_storage()._cdata)
 
     # TODO: also check metadata change on inputs
@@ -2235,7 +2307,7 @@ def run_fallback_kernel(
     def map_out(e: T) -> Union[T, FakeTensor]:
         if id(e) not in inp_impls and (
             isinstance(e, Tensor)
-            and not e.is_sparse
+            and not is_sparse_any(e)
             and e._typed_storage()._cdata in storages
         ):
             raise orig_not_implemented_exception

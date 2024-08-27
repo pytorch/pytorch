@@ -161,7 +161,7 @@ ExprPtr IRCloner::mutate(const BufPtr& v) {
 }
 
 ExprPtr IRCloner::mutate(const BroadcastPtr& v) {
-  int lanes = v->lanes();
+  auto lanes = v->lanes();
   ExprPtr value_new = v->value()->accept_mutator(this);
   return alloc<Broadcast>(value_new, lanes);
 }

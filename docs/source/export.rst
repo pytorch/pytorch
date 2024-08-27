@@ -505,7 +505,7 @@ Input Tensor Shapes
 
 By default, ``torch.export`` will trace the program specializing on the input
 tensors' shapes, unless a dimension is specified as dynamic via the
-``dynamic_shapes`` argumen to ``torch.export``. This means that if there exists
+``dynamic_shapes`` argument to ``torch.export``. This means that if there exists
 shape-dependent control flow, ``torch.export`` will specialize on the branch
 that is being taken with the given sample inputs. For example:
 
@@ -538,7 +538,7 @@ The conditional of (``x.shape[0] > 5``) does not appear in the
 shape of (10, 2). Since ``torch.export`` specializes on the inputs' static
 shapes, the else branch (``x - 1``) will never be reached. To preserve the dynamic
 branching behavior based on the shape of a tensor in the traced graph,
-:func:`torch.export.dynamic_dim` will need to be used to specify the dimension
+:func:`torch.export.Dim` will need to be used to specify the dimension
 of the input tensor (``x.shape[0]``) to be dynamic, and the source code will
 need to be :ref:`rewritten <Data/Shape-Dependent Control Flow>`.
 
@@ -673,10 +673,10 @@ API Reference
 
 .. automodule:: torch.export
 .. autofunction:: export
-.. autofunction:: torch.export.dynamic_shapes.dynamic_dim
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
+.. autoclass:: torch.export.dynamic_shapes.DIM
 .. autofunction:: torch.export.dynamic_shapes.Dim
 .. autofunction:: dims
 .. autoclass:: torch.export.dynamic_shapes.ShapesCollection
@@ -721,3 +721,5 @@ API Reference
 .. automodule:: torch.export.custom_obj
 
 .. automodule:: torch.export.experimental
+.. automodule:: torch.export.passes
+.. autofunction:: torch.export.passes.move_to_device_pass

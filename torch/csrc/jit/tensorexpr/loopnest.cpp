@@ -2226,7 +2226,7 @@ ForPtr LoopNest::getLoopAt(ForPtr root, const std::vector<int>& indices) const {
     throw malformed_input("root loop is null");
   }
 
-  ForPtr curr = root;
+  ForPtr curr = std::move(root);
   for (auto i : indices) {
     if (i < 0 || curr->body()->nstmts() <= static_cast<size_t>(i)) {
       return nullptr;
