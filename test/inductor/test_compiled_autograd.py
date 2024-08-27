@@ -1431,13 +1431,13 @@ torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node, m) {
+TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
         module = torch.utils.cpp_extension.load_inline(
-            name="test_autograd_cpp_node",
+            name="test_non_traceable_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -1445,7 +1445,9 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
 
         def fn():
             x = torch.ones(10, 10, requires_grad=True)
-            out = torch.ops.test_autograd_cpp_node.custom_op_backed_by_autograd_fn(x)
+            out = torch.ops.test_non_traceable_autograd_cpp_node.custom_op_backed_by_autograd_fn(
+                x
+            )
             loss = out.sum()
             loss.backward()
 
