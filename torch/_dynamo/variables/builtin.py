@@ -16,7 +16,7 @@ import torch
 from torch import sym_float, sym_int
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, polyfill, variables
+from .. import config, variables
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -92,19 +92,6 @@ IN_PLACE_DESUGARING_MAP = {
     operator.ior: operator.or_,
     operator.ixor: operator.xor,
 }
-
-
-def _polyfill_call_impl(name):
-    """Create a BuiltinVariable.call_{name} method that inlines through polyfill.{name}"""
-
-    def call_fn(self, tx: "InstructionTranslator", *args, **kwargs):
-        return tx.inline_user_function_return(
-            variables.UserFunctionVariable(fn), args, kwargs
-        )
-
-    fn = getattr(polyfill, name)
-    call_fn.__name__ = f"call_{name}"
-    return call_fn
 
 
 class BuiltinVariable(VariableTracker):
@@ -1698,20 +1685,29 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if name == "__bases__":
+        if name in {"__bases__", "__base__", "__flags__"}:
             try:
                 value = obj.as_python_constant()
                 if isinstance(value, type):
-                    bases = value.__bases__
-                    if source is not None:
-                        tuple_args = [
-                            VariableBuilder(tx, GetItemSource(source, i))(b)
-                            for i, b in enumerate(bases)
-                        ]
-                    else:
-                        tuple_args = [SourcelessBuilder.create(tx, b) for b in bases]
-
-                    return variables.TupleVariable(tuple_args, **options)
+                    if name == "__bases__":
+                        bases = value.__bases__
+                        if source is not None:
+                            tuple_args = [
+                                VariableBuilder(tx, GetItemSource(source, i))(b)
+                                for i, b in enumerate(bases)
+                            ]
+                        else:
+                            tuple_args = [
+                                SourcelessBuilder.create(tx, b) for b in bases
+                            ]
+                        return variables.TupleVariable(tuple_args, **options)
+                    if name == "__base__":
+                        base = value.__base__
+                        if source is not None:
+                            return VariableBuilder(tx, source)(base)
+                        return SourcelessBuilder.create(tx, base)
+                    if name == "__flags__":
+                        return ConstantVariable.create(value.__flags__)
             except NotImplementedError:
                 pass
 
@@ -2114,9 +2110,6 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ):
         return a.call_method(tx, "__contains__", [b], {})
-
-    call_all = _polyfill_call_impl("all")
-    call_any = _polyfill_call_impl("any")
 
 
 @contextlib.contextmanager

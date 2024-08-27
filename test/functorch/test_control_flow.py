@@ -3711,6 +3711,143 @@ def forward(self, l_inp_, l_tmp_):
             self.assertEqual(cnt.frame_count, 3)
 
 
+_hop_schema_test_schema_types = [
+    "bool",
+    "int",
+    "float",
+    "str",
+    "Tensor",
+    "SymInt",
+    "SymBool",
+    "GraphModule",
+    "ScriptObj",
+]
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+class TestHopSchema(TestCase):
+    def _get_example_val(self, ty: str):
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def create_symtype(cls, pytype, shape_env, val):
+            from torch._dynamo.source import ConstantSource
+
+            symbol = shape_env.create_symbol(
+                val,
+                source=ConstantSource(
+                    f"__testing_hop_schema{len(shape_env.var_to_val)}"
+                ),
+            )
+            return cls(SymNode(symbol, shape_env, pytype, hint=val))
+
+        if ty == "bool":
+            return True
+        elif ty == "int":
+            return 1
+        elif ty == "float":
+            return 1.0
+        elif ty == "str":
+            return "foo"
+        elif ty == "Tensor":
+            return torch.tensor(1)
+        elif ty == "SymInt":
+            shape_env = ShapeEnv()
+            return create_symtype(torch.SymInt, int, shape_env, 1)
+        elif ty == "SymBool":
+            shape_env = ShapeEnv()
+            return create_symtype(torch.SymBool, bool, shape_env, True)
+        elif ty == "GraphModule":
+
+            def f(x):
+                return x.sin()
+
+            return make_fx(f)(torch.ones(1))
+        elif ty == "ScriptObj":
+            from torch.testing._internal.torchbind_impls import (
+                init_torchbind_implementations,
+            )
+
+            init_torchbind_implementations()
+            foo = torch.classes._TorchScriptTesting._Foo(3, 4)
+            return foo
+        else:
+            raise NotImplementedError(ty)
+
+    @parametrize("schema_type", _hop_schema_test_schema_types)
+    def test_type_gen(self, schema_type):
+        from torchgen.gen_schema_utils import TypeGen
+
+        example_val = self._get_example_val(schema_type)
+        ty = TypeGen.from_example(example_val)
+        # Test the generated type can be parsed
+        self.assertEqual(ty.parse(str(ty)), ty)
+
+    @parametrize("schema_type", _hop_schema_test_schema_types)
+    def test_list_gen(self, schema_type):
+        from torchgen.gen_schema_utils import TypeGen
+
+        example_val = self._get_example_val(schema_type)
+        li1 = [example_val]
+        li2 = [example_val, example_val]
+        ty1 = TypeGen.from_example(li1)
+        ty2 = TypeGen.from_example(li1)
+        self.assertEqual(ty1.parse(str(ty1)), ty1)
+        self.assertEqual(ty2.parse(str(ty2)), ty2)
+
+    def test_function_schema_gen(self):
+        from torchgen.gen_schema_utils import FunctionSchemaGen
+
+        inps = [
+            (schema_type + "_v", self._get_example_val(schema_type))
+            for schema_type in _hop_schema_test_schema_types
+        ]
+        op_name = "test_op"
+        schema1 = FunctionSchemaGen.from_example("test_op1", inps, torch.ones(1))
+        schema2 = FunctionSchemaGen.from_example(
+            "test_op2",
+            inps,
+            [
+                torch.ones(1),
+            ],
+        )
+        schema3 = FunctionSchemaGen.from_example(
+            "test_op3", inps, [torch.ones(1), torch.ones(1)]
+        )
+        self.assertExpectedInline(
+            str(schema1),
+            """test_op1(bool bool_v, int int_v, float float_v, str str_v, Tensor Tensor_v, SymInt SymInt_v, SymBool SymBool_v, GraphModule GraphModule_v, __torch__.torch.classes._Foo ScriptObj_v) -> Tensor""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            str(schema2),
+            """test_op2(bool bool_v, int int_v, float float_v, str str_v, Tensor Tensor_v, SymInt SymInt_v, SymBool SymBool_v, GraphModule GraphModule_v, __torch__.torch.classes._Foo ScriptObj_v) -> Tensor""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            str(schema3),
+            """test_op3(bool bool_v, int int_v, float float_v, str str_v, Tensor Tensor_v, SymInt SymInt_v, SymBool SymBool_v, GraphModule GraphModule_v, __torch__.torch.classes._Foo ScriptObj_v) -> (Tensor, Tensor)""",  # noqa: B950,
+        )
+        self.assertEqual(schema1.parse(str(schema1)), schema1)
+        self.assertEqual(schema2.parse(str(schema2)), schema2)
+        self.assertEqual(schema3.parse(str(schema3)), schema3)
+
+    def test_while_loop_schema_gen(self):
+        fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
+        graph = make_fx(fn)(*inp).graph
+        while_loop_node = next(
+            node
+            for node in graph.nodes
+            if node.op == "call_function"
+            and node.target is torch.ops.higher_order.while_loop
+        )
+        schema = torch._library.utils.hop_schema_from_fx_node(while_loop_node)
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(GraphModule cond_fn, GraphModule body_fn, Tensor[2] carried_inputs, Tensor[3] additional_inputs) -> Tensor[2]""",  # noqa: B950
+        )
+        self.assertEqual(schema.parse(str(schema)), schema)
+
+
+instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
 
 instantiate_parametrized_tests(TestControlFlow)
