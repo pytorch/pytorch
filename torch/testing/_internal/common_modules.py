@@ -3438,9 +3438,6 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm1d,
                skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
                    DecorateInfo(
@@ -3459,9 +3456,6 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
                skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
                    DecorateInfo(
