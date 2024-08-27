@@ -652,9 +652,7 @@ class CachingAutotuner(KernelInterface):
             return float("inf")
 
         device_interface = self.get_device_interface()
-        stream = device_interface.get_raw_stream(  # type: ignore[call-arg]
-            device_interface.current_device()
-        )
+        stream = device_interface.get_raw_stream(device_interface.current_device())
 
         def kernel_call():
             if launcher.config.pre_hook is not None:
