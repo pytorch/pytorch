@@ -272,6 +272,9 @@ class skip_data:
 
     Space will still be reserved for storages by ``torch.save``, but storage bytes will not be written.
 
+    ..warning::
+        The ``skip_data`` context manager is an early prototype and is subject to change.
+
     Args:
         materialize_fake_tensors: Whether to materialize FakeTensors.
 
