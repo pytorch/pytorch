@@ -4246,6 +4246,7 @@ class CppScheduling(BaseScheduling):
         matched_node = None
 
         for node in nodes:
+            assert isinstance(node.node, ir.ComputedBuffer)
             _, original_body, _ = node.node.get_default_sizes_body()
             for name, expr in original_body.indexing_exprs.items():
                 num_div += expr.count(FloorDiv)
