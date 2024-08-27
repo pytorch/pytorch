@@ -548,6 +548,31 @@ class BlockMask:
         )
         return BlockMask(*mapped_attributes)
 
+    def get_mask(
+        self, index: torch.Tensor, mask_mod: _mask_mod_signature
+    ) -> "BlockMask":
+        """
+        Returns a new BlockMask instance with the specified mask_mod applied to the given row index.
+        """
+        block_index = index // self.BLOCK_SIZE[0]
+        new_kv_num_blocks = self.kv_num_blocks[:, :, block_index]
+        new_kv_indices = self.kv_indices[:, :, block_index, :]
+        if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
+            new_full_kv_num_blocks = self.full_kv_num_blocks[:, :, block_index]
+            new_full_kv_indices = self.full_kv_indices[:, :, block_index, :]
+        else:
+            new_full_kv_num_blocks = None
+            new_full_kv_indices = None
+        return BlockMask.from_kv_blocks(
+            new_kv_num_blocks,
+            new_kv_indices,
+            new_full_kv_num_blocks,
+            new_full_kv_indices,
+            BLOCK_SIZE=self.BLOCK_SIZE,
+            mask_mod=mask_mod,
+        )
+
 
 def _broadcast_to_dim(x, dim):
     while x.dim() < dim:
