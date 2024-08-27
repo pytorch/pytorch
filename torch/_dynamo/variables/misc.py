@@ -795,6 +795,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         proxy=None,
         saved_tensors=None,
         needs_input_grad=None,
+        non_differentiable=None,
         **kwargs,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -802,6 +803,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.proxy = proxy
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
+        self.non_differentiable = non_differentiable
 
     @staticmethod
     def create(tx: "InstructionTranslator", args=None, kwargs=None):
@@ -844,6 +846,11 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
+        elif name == "mark_non_differentiable":
+            assert len(kwargs) == 0
+            self.non_differentiable = proxy_args_kwargs(args, {})[0]
+            return variables.ConstantVariable.create(None)
+
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:
@@ -863,7 +870,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        if name == "save_for_backward":
+        if name in ["save_for_backward", "mark_non_differentiable"]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             )
