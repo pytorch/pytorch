@@ -8785,6 +8785,7 @@ for shape in [(1,), ()]:
 
         gradcheck(Func.apply, (a,), check_forward_ad=True)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_custom_function_forward_mode_non_differentiable(self):
         # returns differentiable type, marked non-differentiable
         class Func(torch.autograd.Function):
