@@ -28,4 +28,3 @@ The main next step would be to:
 Longer term:
 - Replace the current `open_registration_extension.cpp` test in PyTorch CI with this.
 - Build this module in the CI environment and enable Device-generic tests on this device.
-
