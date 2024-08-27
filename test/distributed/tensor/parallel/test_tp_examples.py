@@ -3,6 +3,7 @@
 
 import itertools
 from copy import deepcopy
+from typing import Dict, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -43,6 +44,17 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
+reduce_scatter, all_gather, all_reduce = (
+    c10d_functional.reduce_scatter_tensor,
+    c10d_functional.all_gather_into_tensor,
+    c10d_functional.all_reduce,
+)
+
+
+class ExpCommCounts(NamedTuple):
+    fwd: Optional[Dict] = None
+    bwd: Optional[Dict] = None
+    optim: Optional[Dict] = None
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
@@ -188,110 +200,253 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         with torch.inference_mode():
             self._test_mlp_inference(device_mesh)
 
-    @with_comms
-    @skip_unless_torch_gpu
-    @parametrize("is_seq_parallel", [True, False])
-    @parametrize("dtype", [torch.float64, torch.float32])
-    def test_transformer_training(self, is_seq_parallel, dtype: torch.dtype):
-        # Step 1: Initialize single-gpu models and optimizers.
+    def _setup_single_gpu_model(self, model_args, dtype):
+        return Transformer(model_args).to(device=self.device_type, dtype=dtype)
 
-        # Disable dropout in the test since we cannot reproduce the same random
-        # behaviors when comparing single-gpu models with multi-gpu models.
-        model_args = ModelArgs(dropout_p=0.0)
-
-        model = Transformer(model_args).to(device=self.device_type, dtype=dtype)
+    def _setup_tp_model(self, model, is_seq_parallel, dtype):
         model_tp = deepcopy(model)
         self._check_module(model, model_tp)
-
-        # Step 2: Set up and execute the parallelize plan to shard the test model
-        # onto the device mesh.
-
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, NUM_DEVICES))
         local_output_for_attn = dtype is torch.float64
-        model_tp = Transformer.parallelize(
+        return Transformer.parallelize(
             model_tp,
             device_mesh,
             is_seq_parallel,
             local_output_for_attn=local_output_for_attn,
         )
 
+    def _setup_optimizer(self, model, model_tp):
         # Step 3: Run test by comparing outputs from single-gpu and multi-gpu models.
-
         LR = 0.25
         optim = torch.optim.Adam(model.parameters(), lr=LR)
         optim_tp = torch.optim.Adam(model_tp.parameters(), lr=LR)
+        return optim, optim_tp
+
+    def _validate_fwd(
+        self, model, model_tp, inp, expected_comms_dict=None, check_comms=True
+    ):
+        # Compare outputs on the same input.
+        output = model(inp)
+        with CommDebugMode() as comm_mode:
+            output_tp = model_tp(inp)
+        self.assertEqual(output, output_tp)
+        if check_comms:
+            self.assertDictEqual(comm_mode.get_comm_counts(), expected_comms_dict or {})
+        return output, output_tp
+
+    def _validate_bwd(
+        self,
+        model,
+        model_tp,
+        output,
+        output_tp,
+        expected_comms_dict=None,
+        check_comms=True,
+    ):
+        # Ensure gradients are equal.
+        output.sum().backward()
+        with CommDebugMode() as comm_mode:
+            output_tp.sum().backward()
+        self._check_module(model, model_tp, check_grad=True)
+        if check_comms:
+            self.assertDictEqual(comm_mode.get_comm_counts(), expected_comms_dict or {})
+
+    def _validate_optim_step(
+        self,
+        model,
+        model_tp,
+        optim,
+        optim_tp,
+        expected_comms_dict=None,
+        check_comms=True,
+    ):
+        optim.step()  # Ensure model weights are still the same after update.
+        from torch.distributed._tensor.experimental import implicit_replication
+
+        with implicit_replication():
+            with CommDebugMode() as comm_mode:
+                optim_tp.step()
+        self._check_module(model, model_tp)
+        if check_comms:
+            self.assertDictEqual(comm_mode.get_comm_counts(), expected_comms_dict or {})
+
+    @staticmethod
+    def _thaw_params(thaw_params, model, model_tp):
+        if not thaw_params:
+            return
+        for target_model in [model, model_tp]:
+            for n, p in target_model.named_parameters():
+                if n not in thaw_params:
+                    p.requires_grad_(False)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize("is_seq_parallel", [True, False])
+    @parametrize("dtype", [torch.float64, torch.float32])
+    def test_transformer_training(self, is_seq_parallel, dtype: torch.dtype):
+        EXP_BASE_CC = ExpCommCounts(
+            fwd={all_reduce: 6, all_gather: 1}, bwd={all_reduce: 9}
+        )
+        EXP_SEQ_PARALLEL_CC = ExpCommCounts(
+            fwd={reduce_scatter: 6, all_gather: 6},
+            bwd={reduce_scatter: 5, all_gather: 6},
+            optim={all_reduce: 30},
+        )
+
+        # Disable dropout in the test since we cannot reproduce the same random
+        # behaviors when comparing single-gpu models with multi-gpu models.
+        model_args = ModelArgs(dropout_p=0.0)
+        model = self._setup_single_gpu_model(
+            model_args, dtype
+        )  # Step 1: Initialize single-gpu models.
+        model_tp = self._setup_tp_model(
+            model, is_seq_parallel, dtype
+        )  # Step 2: Setup tp model, place onto device mesh.
+        optim, optim_tp = self._setup_optimizer(
+            model, model_tp
+        )  # Step 3: Setup optimizers for both models
 
         # Initialize input and make sure all ranks have the same input.
         inp_size = [8, 8]  # [batch_size, seq_len]
         if is_seq_parallel:
             assert inp_size[1] % self.world_size == 0
+
         torch.manual_seed(0)
-        steps = 10 if dtype is torch.float64 else 1
+        steps = 10 if type(model) is torch.float64 else 1
         for iter in range(steps):
             inp = torch.randint(
                 model_args.vocab_size, inp_size, device=self.device_type
             )
+            expected_fwd_comms = (
+                EXP_SEQ_PARALLEL_CC.fwd if is_seq_parallel else EXP_BASE_CC.fwd
+            )
+            output, output_tp = self._validate_fwd(
+                model, model_tp, inp, expected_fwd_comms
+            )
+            expected_bwd_comms = (
+                EXP_SEQ_PARALLEL_CC.bwd if is_seq_parallel else EXP_BASE_CC.bwd
+            )
+            self._validate_bwd(model, model_tp, output, output_tp, expected_bwd_comms)
+            expected_optim_comms = (
+                EXP_SEQ_PARALLEL_CC.optim if is_seq_parallel else EXP_BASE_CC.optim
+            )
+            self._validate_optim_step(
+                model, model_tp, optim, optim_tp, expected_optim_comms
+            )
 
-            # Compare outputs on the same input.
-            output = model(inp)
-            with CommDebugMode() as comm_mode:
-                output_tp = model_tp(inp)
-            self.assertEqual(output, output_tp)
-            if is_seq_parallel:
-                self.assertDictEqual(
-                    comm_mode.get_comm_counts(),
-                    {
-                        c10d_functional.reduce_scatter_tensor: 6,
-                        c10d_functional.all_gather_into_tensor: 6,
-                    },
-                )
-            else:
-                self.assertDictEqual(
-                    comm_mode.get_comm_counts(),
-                    {
-                        c10d_functional.all_reduce: 6,
-                        c10d_functional.all_gather_into_tensor: 1,
-                    },
-                )
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize(
+        "thaw_params, is_seq_parallel, dtype, exp_cnts",
+        [
+            (
+                None,  # all require grad seq_parallel float32 baseline
+                True,
+                torch.float32,
+                ExpCommCounts(
+                    bwd={reduce_scatter: 5, all_gather: 6}, optim={all_reduce: 30}
+                ),
+            ),
+            (
+                None,  # all require grad no seq_parallel float64 baseline
+                False,
+                torch.float64,
+                ExpCommCounts(bwd={all_reduce: 9}),
+            ),
+            # test a subset of LayerNorm bwd output_masks
+            (
+                ("output.weight", "norm.weight", "norm.bias"),  # [False, True, True]
+                True,
+                torch.float32,
+                ExpCommCounts(bwd={reduce_scatter: 1}, optim={all_reduce: 6}),
+            ),
+            (
+                ("tok_embeddings.weight", "output.weight"),  # [True, False, False]
+                True,
+                torch.float32,
+                ExpCommCounts(bwd={reduce_scatter: 5, all_gather: 5}),
+            ),
+            (
+                (
+                    "tok_embeddings.weight",
+                    "output.weight",
+                    "norm.weight",
+                    "norm.bias",
+                ),  # [True, True, True]
+                True,
+                torch.float32,
+                ExpCommCounts(
+                    bwd={reduce_scatter: 5, all_gather: 5}, optim={all_reduce: 6}
+                ),
+            ),
+            (
+                (
+                    "tok_embeddings.weight",
+                    "output.weight",
+                    "norm.weight",
+                    "norm.bias",
+                    "layers.1.ffn_norm.weight",
+                    "layers.1.ffn_norm.bias",
+                ),  # a single transformerblock layernorm
+                True,
+                torch.float32,
+                ExpCommCounts(
+                    bwd={reduce_scatter: 5, all_gather: 5}, optim={all_reduce: 12}
+                ),
+            ),
+            (
+                (
+                    "tok_embeddings.weight",
+                    "layers.0.attention.wv.weight",
+                    "layers.0.feed_forward.w1.bias",
+                    "layers.1.ffn_norm.bias",
+                    "layers.1.feed_forward.w2.weight",
+                    "output.weight",
+                ),  # varied layer/param types
+                True,
+                torch.float32,
+                ExpCommCounts(
+                    bwd={reduce_scatter: 5, all_gather: 5}, optim={all_reduce: 3}
+                ),
+            ),
+        ],
+        name_fn=lambda thaw, seq, dtype, *_: f"{'seq_parallel_' if seq else ''}"
+        + f"{str(dtype).split('.')[-1]}_"
+        + f"thaw_{'__'.join(sorted({n.rpartition('.')[0].replace('.', '_') for n in thaw})) if thaw else 'all'}",
+    )
+    def test_transformer_req_grad(self, thaw_params, is_seq_parallel, dtype, exp_cnts):
+        # Sample a subset of `requires_grad` patterns
 
-            # Ensure gradients are equal.
-            output.sum().backward()
-            with CommDebugMode() as comm_mode:
-                output_tp.sum().backward()
-            self._check_module(model, model_tp, check_grad=True)
-            if is_seq_parallel:
-                self.assertDictEqual(
-                    comm_mode.get_comm_counts(),
-                    {
-                        c10d_functional.reduce_scatter_tensor: 5,
-                        c10d_functional.all_gather_into_tensor: 6,
-                    },
-                )
-            else:
-                self.assertDictEqual(
-                    comm_mode.get_comm_counts(),
-                    {
-                        c10d_functional.all_reduce: 9,
-                    },
-                )
+        # disabling dropout to facilitate single gpu to multi-device comparison
+        # disable weight-tying to enable more fine-tuning configurations
+        model_args = ModelArgs(dropout_p=0.0, weight_tying=False)
+        model = self._setup_single_gpu_model(
+            model_args, dtype
+        )  # Step 1: Initialize single-gpu models.
+        model_tp = self._setup_tp_model(
+            model, is_seq_parallel, dtype
+        )  # Step 2: Setup tp model, place onto device mesh.
+        optim, optim_tp = self._setup_optimizer(
+            model, model_tp
+        )  # Step 3: Setup optimizers for both models
+        DistTensorParallelExampleTest._thaw_params(
+            thaw_params, model, model_tp
+        )  # Step 4: set `requires_grad` patterns
 
-            # Ensure model weights are still the same after update.
-            optim.step()
-            from torch.distributed._tensor.experimental import implicit_replication
+        # Initialize input and make sure all ranks have the same input.
+        inp_size = [8, 8]  # [batch_size, seq_len]
+        if is_seq_parallel:
+            assert inp_size[1] % self.world_size == 0
 
-            with implicit_replication():
-                with CommDebugMode() as comm_mode:
-                    optim_tp.step()
-            self._check_module(model, model_tp)
-            if is_seq_parallel:
-                self.assertDictEqual(
-                    comm_mode.get_comm_counts(),
-                    {
-                        c10d_functional.all_reduce: 30,
-                    },
-                )
-            else:
-                self.assertDictEqual(comm_mode.get_comm_counts(), {})
+        torch.manual_seed(0)
+        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+        output, output_tp = self._validate_fwd(model, model_tp, inp, check_comms=False)
+        self._validate_bwd(
+            model, model_tp, output, output_tp, exp_cnts.bwd, check_comms=True
+        )
+        self._validate_optim_step(
+            model, model_tp, optim, optim_tp, exp_cnts.optim, check_comms=True
+        )
 
     @with_comms
     def test_weight_tying(self):

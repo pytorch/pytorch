@@ -763,6 +763,45 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             masked_tensor(d, m, requires_grad=True)
 
+    def test_any_true_dtype(self):
+        mt = torch.masked.MaskedTensor(
+            torch.rand(2, 2),
+            torch.rand(2, 2) > 0.5
+        )
+        msg = "expected a boolean tensor"
+        with self.assertRaisesRegex(ValueError, msg):
+            mt._is_any_true()
+
+    def test__is_any_true(self):
+        mt = torch.masked.MaskedTensor(
+            torch.tensor([[True, True, False], [False, False, True]]),
+            torch.tensor([[True, False, False], [False, True, False]]),
+        )
+        _compare_mts(
+            masked_tensor(torch.tensor(True), torch.tensor(True)),
+            mt._is_any_true(),
+        )
+
+    def test__is_any_true_false(self):
+        mt = torch.masked.MaskedTensor(
+            torch.tensor([[True, True, False], [False, False, True]]),
+            torch.tensor([[False, False, False], [False, False, False]]),
+        )
+        _compare_mts(
+            masked_tensor(torch.tensor(False), torch.tensor(True),),
+            mt._is_any_true(),
+        )
+
+    def test_backward(self):
+        # See https://github.com/pytorch/pytorch/issues/128557
+        with torch.autograd.detect_anomaly():
+            mt = torch.masked.MaskedTensor(
+                torch.rand(2, 2),
+                torch.rand(2, 2) > 0.5,
+                requires_grad=True
+            )
+            mt.sum().backward()
+
 
 def is_unary(op):
     return op.name in UNARY_NAMES
