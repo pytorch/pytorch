@@ -3715,7 +3715,7 @@ def forward(self, l_inp_, l_tmp_):
             pass
 
         with self.assertRaisesRegex(
-            TypeError, "Can't instantiate abstract class WrongHop with abstract method"
+            TypeError, "instantiate abstract class WrongHop with abstract method"
         ):
             wrong_hop = WrongHop("wrong_hop")
 
