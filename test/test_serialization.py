@@ -4052,7 +4052,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @parametrize('path_type', (str, Path))
     @parametrize('weights_only', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_mmap_loading_options(self, weights_only, path_type):
+    def test_serialization_mmap_loading(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
