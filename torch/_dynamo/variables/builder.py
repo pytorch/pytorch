@@ -16,7 +16,16 @@ import re
 import sys
 import types
 import weakref
-from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    List,
+    MutableMapping,
+    NamedTuple,
+    Optional,
+    Set,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 from torch import SymInt
@@ -312,10 +321,8 @@ class FrameStateSizeEntry:
     stride: Optional[List[int]]
 
 
-ITERTOOLS_POLYFILLED_CLASSES = {
-    itertools.chain,
-    itertools.count,
-}
+# Will be updated later in torch/_dynamo/polyfills/itertools.py
+ITERTOOLS_POLYFILLED_CLASSES: Set[type] = set()
 
 
 class VariableBuilder:
