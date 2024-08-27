@@ -609,12 +609,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # for each base in all_bases check if its in-placable.
             inplaceable_bases = [can_inplace(node, arg) for arg in all_bases]
 
-            # In general if a base satisfy inplace requirements then all views on top it is also inplacable.
+            # In general if a base satisfy inplace requirements then all views on top it are also inplacable.
 
             # Note1: One exception is when two bases in all_bases shares storage, in that case this means thats some pass
-            # have changed auto_functionalize, like CSE. To avoid mutating same storage by the custom op. we only
-            # allow inplacing one arg in such condition. storage_to_inplace_once tracks storages where only one tensors
-            # of that storage should be inplaced  and inplaced_storage tracked inplaced storages.
+            # have changed auto_functionalize, like CSE and added such aliasing, because when auto_functionalize is created, it
+            # assert that all_bases have unique storages.
+
+            # To avoid mutating same storage by the custom op that was not originally mutated in the original program,
+            # we only allow inplacing one arg in such condition. `storage_to_inplace_once`` tracks identify tensors such that only
+            # one tensors of that storage should be inplaced and `inplaced_storage` tracks inplaced storages.
 
             storage_to_inplace_once = set()
             seen_storage = set()
@@ -661,7 +664,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         possibly_missed_reinplacing_opportunities.append(arg_name)
                         continue
 
-                    # if any of the item in the list has non inplaceable base we do not inplace.
+                    # if any of the items in the list has non inplaceable base we do not inplace.
                     if any(
                         not inplaceable_bases[item_view.base_index]
                         for item_view in view_info_no_none
@@ -680,6 +683,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 else:
                     # arg is a single tensor
                     storage = get_node_storage(view_info.base)
+
+                    # see Note1
                     if (
                         storage in storage_to_inplace_once
                         and storage in inplaced_storage

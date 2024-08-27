@@ -141,9 +141,9 @@ class FunctionalTensor(torch.Tensor):
             cls,
             elem.shape,  # sizes
             elem.stride() if not is_sparse_any(elem) else None,  # strides
-            (
-                elem.storage_offset() if not is_sparse_any(elem) else None
-            ),  # storage_offset
+            elem.storage_offset()
+            if not is_sparse_any(elem)
+            else None,  # storage_offset
             None,  # memory_format
             elem.dtype,  # dtype
             elem.layout,  # layout
@@ -587,7 +587,7 @@ class BaseFunctionalizeAPI(ABC):
     @abstractmethod
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
+    ) -> Any:
         pass
 
     @abstractmethod
