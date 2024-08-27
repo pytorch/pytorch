@@ -32,9 +32,7 @@ struct THPEngine {
 
 static bool _reinitialize_engine = false;
 
-namespace torch {
-namespace autograd {
-namespace python {
+namespace torch::autograd::python {
 
 PythonEngine::PythonEngine() = default;
 
@@ -102,7 +100,7 @@ void PythonEngine::thread_init(
 }
 
 void PythonEngine::thread_on_exception(
-    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<GraphTask>& graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   // See Note [ Persisting PyErr state across autograd engine threads ]
@@ -110,7 +108,7 @@ void PythonEngine::thread_on_exception(
   if (python_err) {
     python_err->persist();
   }
-  Engine::thread_on_exception(std::move(graph_task), fn, e);
+  Engine::thread_on_exception(graph_task, fn, e);
 }
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
@@ -160,9 +158,7 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     throw;
   }
 }
-} // namespace python
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::python
 
 PyObject* THPEngineClass = nullptr;
 

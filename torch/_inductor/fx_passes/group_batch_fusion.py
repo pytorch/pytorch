@@ -36,7 +36,6 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
-    pass
 
 aten = torch.ops.aten
 
@@ -157,15 +156,11 @@ class GroupFusion(GroupBatchFusionBase):
     Fuse ops in a group way, e.g, fuse mm/addmm of arbitrary input shapes with fbgemm.gmm.
     """
 
-    pass
-
 
 class BatchFusion(GroupBatchFusionBase):
     """
     Fuse ops in a batch way, e.g, fuse mm/addmm of same input shapes with bmm.
     """
-
-    pass
 
 
 class BatchPointwiseOpsFusionFactory(BatchFusion):
@@ -510,8 +505,8 @@ class BatchLinearLHSFusion(BatchFusion):
     def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
         batch_nodes = []
         batch_input = None
-        batch_weights = []
-        batch_biases = []
+        batch_weights, batch_weights_meta = [], []
+        batch_biases, batch_biases_meta = [], []
         split_sections = []
         for node in subset:
             input = get_arg_value(node, 0, "input")
@@ -523,29 +518,45 @@ class BatchLinearLHSFusion(BatchFusion):
             else:
                 assert batch_input is input
             batch_weights.append(weight)
+            batch_weights_meta.append(weight.meta["example_value"])
             if bias:
                 batch_biases.append(bias)
+                batch_biases_meta.append(bias.meta["example_value"])
             split_sections.append(weight.meta["example_value"].shape[0])
 
         with graph.inserting_before(subset[0]):
             cat_weights = graph.call_function(
                 torch.cat, args=(batch_weights,), kwargs={"dim": 0}
             )
+            cat_weights.meta["example_value"] = torch.cat(batch_weights_meta, dim=0)
             transposed_weights = graph.call_function(
                 torch.transpose, args=(cat_weights, 0, 1)
+            )
+            transposed_weights.meta["example_value"] = torch.transpose(
+                cat_weights.meta["example_value"], 0, 1
             )
             if len(batch_biases) > 0:
                 cat_biases = graph.call_function(
                     torch.cat, args=(batch_biases,), kwargs={"dim": 0}
                 )
+                cat_biases.meta["example_value"] = torch.cat(batch_biases_meta, dim=0)
                 fused_lhs = graph.call_function(
                     torch.addmm,
                     args=(cat_biases, batch_input, transposed_weights),
+                )
+                fused_lhs.meta["example_value"] = torch.addmm(
+                    cat_biases.meta["example_value"],
+                    batch_input.meta["example_value"],  # type: ignore[union-attr]
+                    transposed_weights.meta["example_value"],
                 )
             else:
                 fused_lhs = graph.call_function(
                     torch.mm,
                     args=(batch_input, transposed_weights),
+                )
+                fused_lhs.meta["example_value"] = torch.mm(
+                    batch_input.meta["example_value"],  # type: ignore[union-attr]
+                    transposed_weights.meta["example_value"],
                 )
             fused_lhs_list = graph.call_function(
                 torch.split, args=(fused_lhs, split_sections), kwargs={"dim": 1}
@@ -668,11 +679,19 @@ class PreGradBatchLinearFusion(BatchFusion):
             transpose_weight = graph.call_function(
                 torch.transpose, args=(stack_weights, 1, 2)
             )
+            transpose_weight.meta["example_value"] = torch.transpose(
+                stack_weights.meta["example_value"], 1, 2
+            )
             if all(bias is None for bias in batch_biases):
                 bmm = graph.call_function(
                     torch.bmm,
                     args=(stack_inputs, transpose_weight),
                 )
+                bmm.meta["example_value"] = torch.bmm(
+                    stack_inputs.meta["example_value"],
+                    transpose_weight.meta["example_value"],
+                )
+                bmm_meta = bmm.meta["example_value"]
             else:
                 stack_biases = graph.call_function(
                     torch.stack, args=(batch_biases,), kwargs={"dim": 0}
@@ -681,12 +700,22 @@ class PreGradBatchLinearFusion(BatchFusion):
                 unsqueeze_biases = graph.call_function(
                     torch.unsqueeze, args=(stack_biases, 1)
                 )
+                unsqueeze_biases.meta["example_value"] = torch.unsqueeze(
+                    stack_biases.meta["example_value"], 1
+                )
                 bmm = graph.call_function(
                     torch.baddbmm,
                     args=(unsqueeze_biases, stack_inputs, transpose_weight),
                 )
+                bmm.meta["example_value"] = torch.baddbmm(
+                    unsqueeze_biases.meta["example_value"],
+                    stack_inputs.meta["example_value"],
+                    transpose_weight.meta["example_value"],
+                )
+                bmm_meta = bmm.meta["example_value"]
 
             bmm = graph.call_function(torch.unbind, args=(bmm,), kwargs={"dim": 0})
+            bmm.meta["example_value"] = torch.unbind(bmm_meta, dim=0)
             for i, linear in enumerate(batch_nodes):
                 with graph.inserting_after(bmm):
                     getitem = graph.call_function(operator.getitem, args=(bmm, i))
