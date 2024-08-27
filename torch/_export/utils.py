@@ -154,7 +154,10 @@ def _check_input_constraints_for_graph(
                                 )
                 else:
                     if arg_dim != node_dim:
-                        if isinstance(node_dim, torch.SymInt):
+                        if (
+                            isinstance(node_dim, torch.SymInt)
+                            and not node_dim.node.expr.is_number
+                        ):
                             # this means we deferred a guard from export analysis to runtime, let this pass
                             # we'll add a runtime assert checking equality to this replacement expression
                             continue
