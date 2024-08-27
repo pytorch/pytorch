@@ -206,7 +206,9 @@ class TestForeach(TestCase):
             _, _, func, ref = self._get_funcs(op)
         else:
             func, ref, _, _ = self._get_funcs(op)
-        for sample in op.sample_inputs(device, dtype, noncontiguous=noncontiguous):
+        for sample in op.sample_inputs(
+            device, dtype, noncontiguous=noncontiguous, allow_higher_dtype_scalars=True
+        ):
             ref_kwargs = sample.kwargs
             # div promotes ints to floats, so we cannot go on the fastpath there
             div_slowpath = (
@@ -305,7 +307,12 @@ class TestForeach(TestCase):
 
         scalar_self_arg_test_complete = False
         for i, sample in enumerate(
-            op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)
+            op.sample_inputs(
+                device,
+                dtype,
+                noncontiguous=not is_fastpath,
+                allow_higher_dtype_scalars=True,
+            )
         ):
             (rhs_arg,) = sample.args
             kwargs = {} or sample.kwargs
@@ -347,7 +354,12 @@ class TestForeach(TestCase):
     def test_pointwise_op_with_tensor_of_scalarlist_overload(
         self, device, dtype, op, is_fastpath
     ):
-        for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
+        for sample in op.sample_inputs(
+            device,
+            dtype,
+            noncontiguous=not is_fastpath,
+            allow_higher_dtype_scalars=True,
+        ):
             assert isinstance(sample.args, tuple)
             assert len(sample.args) == 2
             inputs = [sample.input, *sample.args]
@@ -816,7 +828,14 @@ class TestForeach(TestCase):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
         # tensors: ['cuda', 'cpu]
         tensors = next(
-            iter(op.sample_inputs(device, dtype, num_input_tensors=[2]))
+            iter(
+                op.sample_inputs(
+                    device,
+                    dtype,
+                    num_input_tensors=[2],
+                    allow_higher_dtype_scalars=True,
+                )
+            )
         ).input
         tensors[1] = tensors[1].to("cpu")
         if not op.supports_out:
@@ -844,10 +863,26 @@ class TestForeach(TestCase):
     @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         _cuda_tensors = next(
-            iter(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))
+            iter(
+                op.sample_inputs(
+                    device,
+                    dtype,
+                    num_input_tensors=[2],
+                    same_size=True,
+                    allow_higher_dtype_scalars=True,
+                )
+            )
         ).input
         _cpu_tensors = next(
-            iter(op.sample_inputs("cpu", dtype, num_input_tensors=[2], same_size=True))
+            iter(
+                op.sample_inputs(
+                    "cpu",
+                    dtype,
+                    num_input_tensors=[2],
+                    same_size=True,
+                    allow_higher_dtype_scalars=True,
+                )
+            )
         ).input
         tensors1, tensors2 = list(zip(_cuda_tensors, _cpu_tensors))
 
@@ -877,10 +912,24 @@ class TestForeach(TestCase):
         # tensors3: ['cuda', 'cpu]
         # first tensorlist is zero-size when float32
         _cuda_tensors = list(
-            op.sample_inputs(device, dtype, num_input_tensors=[3], same_size=True)
+            op.sample_inputs(
+                device,
+                dtype,
+                num_input_tensors=[3],
+                same_size=True,
+                allow_higher_dtype_scalars=True,
+            )
         )[int(dtype == torch.float32)].input
         _cpu_tensors = next(
-            iter(op.sample_inputs("cpu", dtype, num_input_tensors=[3], same_size=True))
+            iter(
+                op.sample_inputs(
+                    "cpu",
+                    dtype,
+                    num_input_tensors=[3],
+                    same_size=True,
+                    allow_higher_dtype_scalars=True,
+                )
+            )
         ).input
         tensors1, tensors2, tensors3 = list(zip(_cuda_tensors, _cpu_tensors))
 
@@ -1220,7 +1269,9 @@ class TestForeach(TestCase):
         foreach_copy_ = op.inplace_variant
         copy_ = op.ref_inplace
         for non_blocking in (False, True):
-            for sample in op.sample_inputs(device, dtype, noncontiguous=False):
+            for sample in op.sample_inputs(
+                device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
+            ):
                 with torch.no_grad():
                     ref_input = [t.clone().detach() for t in sample.input]
                 foreach_copy_(sample.input, sample.args[0], non_blocking)
@@ -1240,7 +1291,9 @@ class TestForeach(TestCase):
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
         # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
         foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
-        for sample in op.sample_inputs(device, dtype, noncontiguous=False):
+        for sample in op.sample_inputs(
+            device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
+        ):
             for src_dtype in floating_types_and(torch.half, torch.bfloat16):
                 if src_dtype == dtype:
                     continue
@@ -1307,6 +1360,7 @@ class TestForeach(TestCase):
             dtype,
             requires_grad=True,
             num_input_tensors=[5],
+            allow_higher_dtype_scalars=True,
             **value_range,
         ):
             # Skip `_foreach_pow.ScalarAndTensor(Scalar, Tensor[])`
