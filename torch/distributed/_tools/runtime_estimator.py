@@ -394,7 +394,7 @@ class RuntimeEstimator(TorchDispatchMode):
         out = func(*args, **kwargs)
         op_time = 0.0
         func_packet = func._overloadpacket
-        if func_packet not in _VIEW_OPS:
+        if func_packet not in _IGNORE_OPS:
             flat_args_kwargs, args_spec = pytree.tree_flatten((args, kwargs))
             flat_outs, out_spec = pytree.tree_flatten(out)
             transfer_time = get_transfer_time(flat_args_kwargs, flat_outs)

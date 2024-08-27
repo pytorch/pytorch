@@ -171,12 +171,12 @@ class TestRuntimeEstimator(TestCase):
         self,
     ):
         """Runs a simple CNN model"""
-        num_classes = 1024
-        bsz, img_sz = 256, 512
+        num_classes = 100
+        bsz, img_sz = 256, 128
         model_args = ConvArgs(img_sz, num_classes)
         args = self._init_model_and_args("CNN", model_args, bsz)
         actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
-
+        print(torch.cuda.max_memory_allocated())
         with FakeTensorMode():
             fake_args = self._init_model_and_args("CNN", model_args, bsz)
             benchmark_estimate = self._runtime_estimate(
