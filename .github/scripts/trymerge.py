@@ -1116,15 +1116,20 @@ class GitHubPR:
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
         msg += msg_body
 
-        # Mention PR co-authors
-        for author_login, author_name in self.get_authors().items():
-            if author_login != self.get_pr_creator_login():
-                msg += f"\nCo-authored-by: {author_name}"
-
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         if ghstack_deps:
             msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
+
+        # Mention PR co-authors, which should be at the end of the message
+        # And separated from the body by two newlines
+        first_coauthor = True
+        for author_login, author_name in self.get_authors().items():
+            if author_login != self.get_pr_creator_login():
+                if first_coauthor:
+                    msg, first_coauthor = (msg + "\n", False)
+                msg += f"\nCo-authored-by: {author_name}"
+
         return msg
 
     def add_numbered_label(self, label_base: str, dry_run: bool) -> None:

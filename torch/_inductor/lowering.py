@@ -422,7 +422,7 @@ def make_pointwise(
     override_return_dtype=None,
     override_device=None,
     override_fn_when_input_bool=None,
-    override_fn_when_cuda_float64=None,
+    override_fn_when_gpu_float64=None,
     allow_alpha=False,
     triton_fallback=None,
 ):
@@ -441,7 +441,7 @@ def make_pointwise(
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
-        is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
+        is_gpu_device = is_gpu(decode_device(inputs[0].get_device()).type)
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
@@ -463,8 +463,12 @@ def make_pointwise(
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
-            elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
-                return override_fn_when_cuda_float64(*[load(index) for load in loaders])
+            elif (
+                override_fn_when_gpu_float64
+                and is_gpu_device
+                and dtype == torch.float64
+            ):
+                return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
                 inputs_loaded = []
                 for load in loaders:
@@ -673,7 +677,7 @@ def register_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
-        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
+        override_fn_when_gpu_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
         allow_alpha=allow_alpha,
         triton_fallback=triton_fallback,
     )
@@ -2063,12 +2067,43 @@ def require_channels_last(_, *args, **kwargs):
     return args, kwargs
 
 
-def constrain_to_fx_strides(fx_node, *args, **kwargs):
+def constrain_to_fx_strides(fx_node, *args, ignore_mutated_args_FIXME=False, **kwargs):
     def apply_constraint(arg, fx_arg):
         if isinstance(arg, ir.IRNode):
             stride_order = ir.get_stride_order(fx_arg.meta["val"].stride())
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         return arg
+
+    # There's a silent incorrectness bug where we if we constrain a mutated arg,
+    # we may end up cloning it, writing in-place to the clone, and then using
+    # the original value (instead of the cloned value). Our short-term fix for this
+    # is to never constrain mutated args; longer term we do want to fix this.
+    # https://github.com/pytorch/pytorch/issues/128084
+    if ignore_mutated_args_FIXME:
+        assert isinstance(fx_node.target, torch._ops.OpOverload)
+        schema = fx_node.target._schema
+
+        def maybe_apply_constraint(schema_arg, arg, fx_arg):
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write:
+                return arg
+            return apply_constraint(arg, fx_arg)
+
+        new_args = []
+        new_kwargs = {}
+
+        for idx, (arg, fx_arg) in enumerate(zip(args, fx_node.args)):
+            schema_arg = schema.arguments[idx]
+            new_args.append(maybe_apply_constraint(schema_arg, arg, fx_arg))
+
+        schema_kwargs = {arg.name: arg for arg in schema.arguments}
+
+        for key in kwargs.keys():
+            arg = kwargs[key]
+            fx_arg = fx_node.kwargs[key]
+            schema_arg = schema_kwargs[key]
+            new_kwargs[key] = maybe_apply_constraint(schema_arg, arg, fx_arg)
+
+        return tuple(new_args), new_kwargs
 
     args = tuple(
         apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)

@@ -11,10 +11,10 @@ import torch
 import torch.fx
 from torch._guards import Source
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
-from ..source import AttrSource, GetItemSource
+from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
@@ -86,7 +86,7 @@ class BaseListVariable(VariableTracker):
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -95,17 +95,12 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
-            if self.source is not None:
-                return self.clone(
-                    items=self.items[index],
-                    source=GetItemSource(self.source, index),
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
-            else:
-                return self.clone(
-                    items=self.items[index],
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
+            # Set source to None because slicing a list gives a new local
+            return self.clone(
+                items=self.items[index],
+                source=None,
+                mutable_local=MutableLocal() if self.mutable_local else None,
+            )
         else:
             assert isinstance(index, (int, torch.SymInt))
             return self.items[index]
@@ -132,7 +127,7 @@ class BaseListVariable(VariableTracker):
                     unimplemented("__getitem__ with non-constant tensor")
             else:
                 value = args[0]
-            return self.getitem_const(value)
+            return self.getitem_const(tx, value)
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
@@ -141,7 +136,7 @@ class BaseListVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.index),
+                SourcelessBuilder.create(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
@@ -150,7 +145,7 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def list_compare(tx: "InstructionTranslator", op, left, right):
-        return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
+        return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
             tx, [variables.BuiltinVariable(op), left, right], {}
         )
 
@@ -285,7 +280,7 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self):
         return range(*[x.as_python_constant() for x in self.items])
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
         index = arg.as_python_constant()
 
@@ -510,6 +505,9 @@ class DequeVariable(CommonListMethodsVariable):
 class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def debug_repr(self):
         return self.debug_repr_helper("(", ")")

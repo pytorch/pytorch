@@ -344,6 +344,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
     @parametrize("dim", [0, 1, 2])
     def test_optimal_layout(self, dim: int) -> None:
         t = torch.rand(8, 64, 32, 16)
@@ -356,6 +357,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self.assertTrue(x.movedim(dim, 0).is_contiguous())
         self.assertTrue(torch.allclose(x, t))
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
@@ -382,6 +384,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("reduce_op", ["sum", "avg"])
     @parametrize("symm_mem_input", [True, False])

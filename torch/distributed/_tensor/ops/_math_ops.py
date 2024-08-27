@@ -15,6 +15,7 @@ from torch.distributed._tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
+from torch.distributed._tensor._utils import normalize_to_torch_size
 from torch.distributed._tensor.ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -22,7 +23,6 @@ from torch.distributed._tensor.ops.utils import (
     is_tensor_evenly_shardable,
     normalize_dim,
     normalize_dims,
-    normalize_to_torch_size,
     register_op_strategy,
 )
 from torch.distributed._tensor.placement_types import (
@@ -425,6 +425,8 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
         aten.diag_embed.default,
         aten.diag.default,
         aten.diagonal.default,
+        aten.tril.default,
+        aten.triu.default,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
@@ -457,10 +459,11 @@ def linalg_replicate_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
 
 
 @register_op_strategy(
-    [aten._log_softmax.default, aten._softmax.default], schema_info=RuntimeSchemaInfo(1)
+    [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
+    schema_info=RuntimeSchemaInfo(1),
 )
 def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    input_strategy, softmax_dim, _ = op_schema.args_schema
+    input_strategy, softmax_dim, *_ = op_schema.args_schema
     input_strategy = cast(OpStrategy, input_strategy)
     softmax_dim = cast(int, softmax_dim)
     softmax_dim = normalize_dim(softmax_dim, input_strategy.ndim)

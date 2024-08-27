@@ -37,8 +37,9 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
+from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
-from ..runtime.runtime_utils import do_bench_gpu, get_max_y_grid, next_power_of_2
+from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -71,7 +72,12 @@ from .simd import (
     SIMDKernel,
     SIMDScheduling,
 )
-from .triton_utils import config_of, signature_of, signature_to_meta
+from .triton_utils import (
+    config_of,
+    should_unwrap_unspec_arg,
+    signature_of,
+    signature_to_meta,
+)
 
 
 if TYPE_CHECKING:
@@ -430,6 +436,13 @@ class TritonPrinter(PythonPrinter):
 
     def _helper_sqrt(self, expr):
         return f"libdevice.sqrt({self._print(expr)}.to(tl.float32))"
+
+    def _print_FloatPow(self, expr):
+        return (
+            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
+        )
+
+    _print_PowByNatural = _print_FloatPow
 
     def _print_Where(self, expr):
         c = self.doprint(expr.args[0])
@@ -1056,7 +1069,7 @@ class TritonKernelOverrides(TritonOverrides):
         need_where = False
         for node in nodes:
             for arg in node.args:
-                if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
+                if arg.target != "load" or should_unwrap_unspec_arg(arg.args[0]):
                     need_where = True
 
         value = None if need_where else other
@@ -1668,7 +1681,7 @@ class TritonKernel(SIMDKernel):
 
         index_str = indexing.index_str
         mask_str = indexing.mask_str if indexing.has_mask() else None
-        size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
+        size_str = texpr(self.rename_indexing(size)) if upper else None
 
         # expr is already wrapped
         line = self.indirect_assert(
@@ -1747,7 +1760,7 @@ class TritonKernel(SIMDKernel):
 
         advance_block_ptr = None
         append_broadcast = None
-        if V.graph.is_unspec_arg(name):
+        if should_unwrap_unspec_arg(name):
             line = var
         else:
             if isinstance(indexing, BlockPtrOptions):
@@ -2243,24 +2256,16 @@ class TritonKernel(SIMDKernel):
         )
 
         if not self.persistent_reduction:
-
-            def sum_fn(a, b):
-                return [ops.add(ai, bi) for ai, bi in zip(a, b)]
-
-            sum_helper_fn = self._lift_helper(sum_fn, len(values))
-            pre_reduce_vars = ", ".join(
-                f"{scan_var} * (rbase == (RBLOCK - 1))"
-                for scan_var in partial_scan_vars
-            )
             # tl.reduce doesn't work for non-commutative operators, so instead
             # of repeating the scan op as a reduction, we use sum to select the
             # last scan value
-            partial_reduce_vars = cse_multiple(
-                f"tl.reduce(({pre_reduce_vars}), -1, {sum_helper_fn}, keep_dims=True)",
-                len(values),
-                masks,
-            )
-            accs_next = combine_fn(tuple(accumulators), partial_reduce_vars)
+            partial_reduce_vars = [
+                cse_compute(
+                    f"triton_helpers.select_one(({partial_scan_var}), rbase == (RBLOCK - 1), dim=-1, keep_dims=True)"
+                )
+                for partial_scan_var in partial_scan_vars
+            ]
+            accs_next = combine_fn(tuple(accumulators), tuple(partial_reduce_vars))
             full_scan_vars = combine_fn(tuple(accumulators), partial_scan_vars)
             result_vars = [
                 cse_compute(f"tl.where(roffset > 0, {full_scan}, {partial_scan})")
@@ -2472,12 +2477,14 @@ class TritonKernel(SIMDKernel):
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
-            result.writeline("from triton.testing import do_bench")
+            result.writeline(
+                "from torch._inductor.runtime.benchmarking import benchmarker"
+            )
             result.writeline("")
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -2532,6 +2539,9 @@ class TritonKernel(SIMDKernel):
             inductor_meta["profile_bandwidth"] = config.profile_bandwidth
             inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
             inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
+            inductor_meta[
+                "profile_bandwidth_with_do_bench_using_profiling"
+            ] = config.profile_bandwidth_with_do_bench_using_profiling
         if config.coordinate_descent_tuning:
             inductor_meta[
                 "coordinate_descent_tuning"
@@ -2804,9 +2814,9 @@ class TritonKernel(SIMDKernel):
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        _, call_args, arg_types, _ = self.args.python_argdefs()
-        for arg, arg_type in zip(call_args, arg_types):
-            if isinstance(arg_type, TensorArg):
+        _, call_args, arg_signatures, _ = self.args.python_argdefs()
+        for arg, arg_signature in zip(call_args, arg_signatures):
+            if isinstance(arg_signature, TensorArg):
                 if V.graph.cpp_wrapper:
                     if config.abi_compatible:
                         wrapper.writeline(
@@ -3080,7 +3090,7 @@ class TritonScheduling(SIMDScheduling):
             else:
                 # We have to clone the inplace updated arguments to avoid earlier calls
                 # generating out of range indices for later calls.
-                ms = do_bench_gpu(
+                ms = benchmarker.benchmark_gpu(
                     lambda: call(wrapped_jit_function.clone_args(*args)[0])
                 )
 
@@ -3088,7 +3098,9 @@ class TritonScheduling(SIMDScheduling):
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
                 # the input values between benchmarking
-                ms = ms - do_bench_gpu(lambda: wrapped_jit_function.clone_args(*args))
+                ms = ms - benchmarker.benchmark_gpu(
+                    lambda: wrapped_jit_function.clone_args(*args)
+                )
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run",
@@ -3097,3 +3109,91 @@ class TritonScheduling(SIMDScheduling):
             )
             store_cache()
             return ms, mod.__file__
+
+    def benchmark_combo_kernel(self, node_list):
+        def cache_file_path():
+            assert mod.__file__ is not None
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+
+        def load_cache():
+            path = cache_file_path()
+            if os.path.exists(path):
+                with open(path) as fd:
+                    return tuple(float(e) for e in fd.read().split())
+            return (None, None)
+
+        def store_cache():
+            path = cache_file_path()
+            with open(path, "w") as fd:
+                fd.write(str(ms) + " " + str(ms_clone))
+
+        total_ms, file_list = 0, []
+        total_clone_ms = 0
+        removed_buffers_orig = V.graph.removed_buffers
+        V.graph.removed_buffers = OrderedSet(removed_buffers_orig)
+        inplaced_to_remove_orig = V.graph.inplaced_to_remove
+        V.graph.inplaced_to_remove = OrderedSet(inplaced_to_remove_orig)
+        enable_autotune = config.combo_kernels_autotune > 0
+        mixed_sizes = config.combo_kernel_allow_mixed_sizes > 0
+        kernel_code_list = self.generate_combo_kernel_code(
+            subkernel_nodes=node_list,
+            custom_part_algorithm=True,
+            enable_autotune=enable_autotune,
+            mixed_sizes=mixed_sizes,
+            only_gen_src_code=True,
+        )
+
+        for src_code, _, node_group in kernel_code_list:
+            fused_node_lists = [node.get_nodes() for node in node_group]
+            names = [n.get_name() for nodes in fused_node_lists for n in nodes]
+
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
+            mod = PyCodeCache.load(src_code)
+
+            log.debug(
+                "kernel src code for %s written to: %s",
+                names,
+                mod.__file__,
+            )
+            ms, ms_clone = load_cache()
+            if ms is not None:
+                total_ms += ms
+                total_clone_ms += ms_clone
+                file_list.append(mod.__file__)
+                continue
+
+            args = mod.get_args()
+            call = mod.call
+            wrapped_jit_function = mod.triton_
+
+            # call once to trigger the compilation
+            call(wrapped_jit_function.clone_args(*args)[0])
+
+            launchers = wrapped_jit_function.launchers
+            assert len(launchers) == 1
+            if launchers[0].n_spills > 0:
+                # skip benchmarking the kernel if there are register spills
+                ms = ms_clone = float("inf")
+            else:
+                # We have to clone the inplace updated arguments to avoid earlier calls
+                # generating out of range indices for later calls.
+                ms = benchmarker.benchmark_gpu(
+                    lambda: call(wrapped_jit_function.clone_args(*args)[0])
+                )
+                ms_clone = benchmarker.benchmark_gpu(
+                    lambda: wrapped_jit_function.clone_args(*args)[0]
+                )
+
+            log.debug(
+                "The fused kernel for %s took %.3f ms to run, %.3f ms to clone inputs",
+                {n.get_name() for n in node_group},
+                ms,
+                ms_clone,
+            )
+            store_cache()
+            total_ms += ms
+            total_clone_ms += ms_clone
+            file_list.append(mod.__file__)
+        V.graph.removed_buffers = removed_buffers_orig
+        V.graph.inplaced_to_remove = inplaced_to_remove_orig
+        return total_ms, total_clone_ms, file_list
