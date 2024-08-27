@@ -5036,6 +5036,7 @@ class TestMemPool(TestCase):
             is_python_module=False,
             keep_intermediates=False,
             verbose=True,
+            with_cuda=True,
         )
         allocator = torch.cuda.memory.CUDAPluggableAllocator(
             dummy_allocator,
