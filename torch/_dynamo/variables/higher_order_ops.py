@@ -1124,8 +1124,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         def arg_extractor(combine_fn, input, dim, reverse):
             return combine_fn, input, dim, reverse
-        # def arg_extractor(combine_fn, input, dim):
-        #     return combine_fn, input, dim
 
         combine_fn, input, dim, reverse = arg_extractor(*args, **kwargs)
 
@@ -1151,7 +1149,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         else BuiltinVariable(getattr)
                         .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
                         .items,
-                        # else tuple([s if n != dim.as_proxy() else 1 for n, s in enumerate(BuiltinVariable(getattr).call_function(tx, [leaf, ConstantVariable.create("shape")], {}).items)]),
+                        # else tuple([s if n != dim.as_proxy() else 1
+                        # for n, s in enumerate(BuiltinVariable(getattr)
+                        # .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
+                        # .items)]),
                     ),
                 ),
                 kwargs={

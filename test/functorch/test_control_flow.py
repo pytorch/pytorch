@@ -1323,13 +1323,25 @@ def forward(self, L_x_ : torch.Tensor):
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
     @decorateIf(
         unittest.skip,
         lambda params: (
             params["scan_op"] == associative_scan
-            and params["device"] == torch.device("cpu")
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "eager"
+            )
+        ),
+    )
+    # Skipping the scan tests, as scan currently does not support inductor
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["scan_op"] == scan and params["compile_mode"] != "eager"
         ),
     )
     def test_pointwise_scan_compile(self, scan_op, reverse, compile_mode, device):
@@ -1343,8 +1355,10 @@ def forward(self, L_x_ : torch.Tensor):
         torch.compiler.reset()
         if compile_mode == "compile":
             scan_fct = torch.compile(scan_op, fullgraph=True, dynamic=False)
-        else:
+        elif compile_mode == "compile_dynamic_shape":
             scan_fct = torch.compile(scan_op, fullgraph=True, dynamic=True)
+        else:
+            scan_fct = torch.compile(scan_op, fullgraph=True, backend="eager")
 
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
             result = scan_fct(op, x, 0, reverse=reverse)
