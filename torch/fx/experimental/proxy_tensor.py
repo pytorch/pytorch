@@ -1071,38 +1071,43 @@ class PythonKeyTracer(Tracer):
             return e
 
 
-@contextmanager
-def _temp_remove_pre_dispatch_torch_function_mode() -> Generator[None, None, None]:
-    from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
+def _make_temp_remove_mode_context_manager(
+    mode_ty,
+) -> Callable[[], Generator[None, None, None]]:
+    @contextmanager
+    def context_manager_fn() -> Generator[None, None, None]:
+        from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
 
-    temp_elements = []
-    pre_dispatch_mode = None
+        temp_elements = []
+        removed_mode = None
 
-    while _len_torch_function_stack() > 0:
-        mode = _pop_mode()
-        if isinstance(mode, PreDispatchTorchFunctionMode):
-            pre_dispatch_mode = mode
-            break
-        else:
-            temp_elements.append(mode)
+        while _len_torch_function_stack() > 0:
+            mode = _pop_mode()
+            if isinstance(mode, mode_ty):
+                removed_mode = mode
+                break
+            else:
+                temp_elements.append(mode)
 
-    for mode in reversed(temp_elements):
-        _push_mode(mode)
+        for mode in reversed(temp_elements):
+            _push_mode(mode)
 
-    try:
-        yield
+        try:
+            yield
 
-    finally:
-        if pre_dispatch_mode is not None:
-            count = len(temp_elements)
-            while count > 0:
-                mode = _pop_mode()
-                count -= 1
+        finally:
+            if removed_mode is not None:
+                count = len(temp_elements)
+                while count > 0:
+                    mode = _pop_mode()
+                    count -= 1
 
-            temp_elements.append(pre_dispatch_mode)
+                temp_elements.append(removed_mode)
 
-            for mode in reversed(temp_elements):
-                _push_mode(mode)
+                for mode in reversed(temp_elements):
+                    _push_mode(mode)
+
+    return context_manager_fn
 
 
 @torch._disable_dynamo
@@ -1217,6 +1222,11 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
         return func(*args, **kwargs)
 
 
+_temp_remove_metadata_torch_function_mode = _make_temp_remove_mode_context_manager(
+    TorchFunctionMetadataMode
+)
+
+
 # This mode is **only** used for pre_dispatch tracing.
 # In particular, we need to make sure that autograd/autocast API's
 # that do not desugar into dispatcher operators stay in the graph.
@@ -1243,6 +1253,11 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # Don't actually run the function! We just want to trace the calls
             # into a graph. We don't actualy want to change global autograd state.
         return func(*args, **kwargs)
+
+
+_temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
+    PreDispatchTorchFunctionMode
+)
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
