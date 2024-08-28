@@ -423,6 +423,7 @@ class DefaultsSource(ChainedSource):
 class GetItemSource(ChainedSource):
     index: Any
     index_is_slice: bool = False
+    is_tuple: bool = False
 
     def __post_init__(self):
         assert self.base is not None
@@ -746,3 +747,7 @@ def is_from_defaults(source: Source):
 
 def is_cell_contents(source: Source):
     return isinstance(source, AttrSource) and source.member == "cell_contents"
+
+
+def is_tuple_getitem(source: Source) -> bool:
+    return isinstance(source, GetItemSource) and source.is_tuple
