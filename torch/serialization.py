@@ -294,6 +294,8 @@ class skip_data:
         >>>     with torch.serialization.skip_data():
         >>>         torch.save(t, f.name)
         >>>     torch.load(f.name, weights_only=True)
+        # tensor([[0., 0., 0.],
+        #         [0., 0., 0.]])
     """
 
     def __init__(self, materialize_fake_tensors: bool = False):
