@@ -1580,9 +1580,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None
     ):
         orig_stride = stride
-        # This is a fix for test_duplicated_params_abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface
-        # The https://github.com/pytorch/pytorch/pull/130956 may convert a symint stride to int,
-        # which generates a const int arg rather than a static constexpr int arg.
         device_str = self.codegen_device(device)
         dtype_code = self.codegen_dtype(dtype)
         size = self.codegen_shape_tuple(shape)
