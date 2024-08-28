@@ -367,6 +367,7 @@ class TestAutograd(TestCase):
         x = torch.ones(1, requires_grad=True)
         torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_set_materialize_non_diff_grads(self):
         class Func(torch.autograd.Function):
             @staticmethod
