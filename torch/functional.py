@@ -151,6 +151,7 @@ def broadcast_shapes(*shapes):
             tensors = broadcast_tensors(*tensors)
             return tensors[0].shape
 
+
 def split(
     tensor: Tensor,
     split_size_or_sections: Union[int, List[int]],
@@ -208,7 +209,6 @@ def split(
     # split_size_or_sections. The branching code is in _tensor.py, which we
     # call here.
     return tensor.split(split_size_or_sections, dim)
-
 
 
 def einsum(*args: Any) -> Tensor:
