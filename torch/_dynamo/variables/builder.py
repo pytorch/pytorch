@@ -323,13 +323,14 @@ class FrameStateSizeEntry:
 
 
 # All class-based iterators in itertools
-ITERTOOLS_TYPES: FrozenSet[type] = frozenset(
-    member
+# NOTE: use id() because some objects are not hashable, it will raise error during lookup
+ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
+    id(member)
     for name, member in vars(itertools).items()
     if not name.startswith("_") and inspect.isclass(member)
 )
-# Will be updated later in torch/_dynamo/polyfills/itertools.py
-ITERTOOLS_POLYFILLED_TYPES: Set[type] = set()
+# Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
+ITERTOOLS_POLYFILLED_TYPE_IDS: Set[int] = set()
 
 
 class VariableBuilder:
@@ -887,7 +888,7 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif value in ITERTOOLS_TYPES and value not in ITERTOOLS_POLYFILLED_TYPES:
+        elif id(value) in ITERTOOLS_TYPE_IDS and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
