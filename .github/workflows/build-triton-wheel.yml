@@ -42,9 +42,12 @@ jobs:
             rocm_version: "6.2"
           - device: "cuda"
             rocm_version: ""
+          - device: "arm"
+            rocm_version: ""
+            runs-on: [self-hosted, linux.arm64.2xlarge]
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || matrix.device == 'arm' && 'pytorch/manylinuxaarch64-builder:cpu-aarch64' || 'pytorch/manylinux-builder:cpu' }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
