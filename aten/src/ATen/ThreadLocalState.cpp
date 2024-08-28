@@ -4,6 +4,7 @@
 #include <ATen/core/grad_mode.h>
 #endif
 
+#include <ATen/autocast_mode.h>
 #include <ATen/record_function.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/FunctionalTensorWrapper.h>

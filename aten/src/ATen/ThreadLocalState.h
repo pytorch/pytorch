@@ -79,7 +79,8 @@ class TORCH_API ThreadLocalState {
   at::impl::ThreadLocalPythonObjects saved_objects_;
 
   // TLS for autocast dtypes
-  std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES> autocast_dtypes_;
+  std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+      autocast_dtypes_;
 
   friend class ThreadLocalStateGuard;
 };
