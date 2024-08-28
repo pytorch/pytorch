@@ -1806,6 +1806,40 @@ class TestBlockMask(InductorTestCase):
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
 
     @supported_platform
+    def test_getitem(self):
+        offset = torch.zeros(8, device="cuda")
+
+        def causal_mask(b, h, q, kv):
+            return (q + (offset[b] * 128)) >= kv
+
+        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048)
+
+        q_index = torch.tensor([0])
+        new_block_mask = block_mask[:, :, q_index]
+
+        self.assertEqual(new_block_mask.kv_num_blocks.ndim, 3)
+        self.assertEqual(new_block_mask.kv_indices.ndim, 4)
+        torch.testing.assert_close(
+            new_block_mask.kv_num_blocks,
+            block_mask.kv_num_blocks[:, :, q_index],
+        )
+        torch.testing.assert_close(
+            new_block_mask.kv_indices, block_mask.kv_indices[:, :, q_index, :]
+        )
+
+        if block_mask.full_kv_num_blocks is not None:
+            assert new_block_mask.full_kv_num_blocks is not None
+            assert new_block_mask.full_kv_indices is not None
+            torch.testing.assert_close(
+                new_block_mask.full_kv_num_blocks,
+                block_mask.full_kv_num_blocks[:, :, q_index],
+            )
+            torch.testing.assert_close(
+                new_block_mask.full_kv_indices,
+                block_mask.full_kv_indices[:, :, q_index, :],
+            )
+
+    @supported_platform
     def test_block_mask_device_change(self):
         offset = torch.zeros(8, device="cuda")
 

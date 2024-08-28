@@ -392,12 +392,12 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
-        new_kv_num_blocks = self.kv_num_blocks[:, :, index]
-        new_kv_indices = self.kv_indices[:, :, index, :]
+        new_kv_num_blocks = self.kv_num_blocks[index]
+        new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:
             assert self.full_kv_indices is not None
-            new_full_kv_num_blocks = self.full_kv_num_blocks[:, :, index]
-            new_full_kv_indices = self.full_kv_indices[:, :, index, :]
+            new_full_kv_num_blocks = self.full_kv_num_blocks[index]
+            new_full_kv_indices = self.full_kv_indices[index]
         else:
             new_full_kv_num_blocks = None
             new_full_kv_indices = None
