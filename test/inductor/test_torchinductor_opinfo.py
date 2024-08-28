@@ -302,10 +302,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "linalg.eigvals": {f32, f64},
     # Double and complex datatype matmul is not supported in oneDNN
     "__rmatmul__": {f64},
-    "addbmm": {f64},
     ("addmm", "decomposed"): {f64},
-    "addmm": {f64},
-    "addmv": {f64},
     "addr": {f64},
     "baddbmm": {f64},
     "bmm": {f64},
@@ -330,6 +327,14 @@ inductor_expected_failures_single_sample["xpu"] = {
     "pca_lowrank": {f64},
     "svd_lowrank": {f64},
     "tensordot": {f64},
+    # could not create a primitive
+    "addbmm": {f16, f32, f64},
+    "addmm": {f16, f32, f64},
+    "addmv": {f32, f64},
+    # could not create a primitive descriptor for
+    # a deconvolution forward propagation primitive
+    "nn.functional.conv_transpose2d": {f32, f64},
+    "nn.functional.conv_transpose3d": {f32, f64},
 }
 
 
