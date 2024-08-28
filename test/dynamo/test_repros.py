@@ -5751,8 +5751,13 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.sin(x)
 
         fn(torch.randn(4))
-        
+
     @requires_cuda
+    # This test will fail as flip in combination with particular input lenghts
+    # produces weird results.
+    # This is under investigations in
+    # https://github.com/pytorch/pytorch/issues/131805
+    @unittest.expectedFailure
     def test_flip_bad_accuracy(self):
         import torch
         import torch._dynamo.config
@@ -5840,14 +5845,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 return (rev_1,)
 
         mod = Repro()
-        # def load_args(reader):
-        #     buf0 = reader.storage('daea2d1a60a0939fea1275603b97befe81962b03', 72, device=device(type='cuda', index=0), dtype_hint=torch.int64)
-        #     reader.tensor(buf0, (9,), dtype=torch.int64, is_leaf=True)  # arg0_1
-        # run_repro(mod, load_args, command='run', accuracy='--strict-accuracy', save_dir=os.path.dirname(os.path.realpath(__file__)), tracing_mode='real', check_str=None)
-
         x = torch.arange(9, device=torch.device("cuda"))
 
-        # out = mod(x)
         @torch.compile
         def f(x):
             return mod(x)
