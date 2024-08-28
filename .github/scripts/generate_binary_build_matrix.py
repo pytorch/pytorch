@@ -325,7 +325,7 @@ def generate_wheels_matrix(
     os: str,
     arches: Optional[List[str]] = None,
     python_versions: Optional[List[str]] = None,
-    use_split_build: Optional[bool] = False,
+    use_split_build: bool = False,
 ) -> List[Dict[str, str]]:
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
@@ -372,12 +372,21 @@ def generate_wheels_matrix(
             ) and python_version == "3.13":
                 continue
 
+            if use_split_build and (
+                arch_version not in ["12.4", "12.1", "11.8", "cpu"] or os != "linux"
+            ):
+                raise RuntimeError(
+                    "Split build is only supported on linux with cuda 12.4, 12.1, 11.8, and cpu.\n"
+                    f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
+                    "Please modify the matrix generation to exclude this combination."
+                )
+
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                use_split_build
-                and arch_version in ["12.4", "12.1", "11.8"]
+                arch_version in ["12.4", "12.1", "11.8"]
                 and os == "linux"
+                or arch_version == "cuda-aarch64"
             ):
                 ret.append(
                     {
@@ -387,7 +396,7 @@ def generate_wheels_matrix(
                         "desired_cuda": translate_desired_cuda(
                             gpu_arch_type, gpu_arch_version
                         ),
-                        "use_split_build": "True",
+                        "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
                             "cxx11-abi" if arch_version == "cuda-aarch64" else ""
                         ),
@@ -403,7 +412,27 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
-            elif use_split_build and arch_version in ["cpu"] and os == "linux":
+                # Special build building to use on Colab. PyThon 3.10 for 12.1 CUDA
+                if python_version == "3.10" and arch_version == "12.1":
+                    ret.append(
+                        {
+                            "python_version": python_version,
+                            "gpu_arch_type": gpu_arch_type,
+                            "gpu_arch_version": gpu_arch_version,
+                            "desired_cuda": translate_desired_cuda(
+                                gpu_arch_type, gpu_arch_version
+                            ),
+                            "use_split_build": "True" if use_split_build else "False",
+                            "devtoolset": "",
+                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                            "package_type": package_type,
+                            "pytorch_extra_install_requirements": "",
+                            "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
+                                ".", "_"
+                            ),
+                        }
+                    )
+            else:
                 ret.append(
                     {
                         "python_version": python_version,
@@ -412,7 +441,7 @@ def generate_wheels_matrix(
                         "desired_cuda": translate_desired_cuda(
                             gpu_arch_type, gpu_arch_version
                         ),
-                        "use_split_build": "True",
+                        "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
                             "cxx11-abi" if arch_version == "cpu-cxx11-abi" else ""
                         ),
@@ -428,85 +457,7 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
-            elif use_split_build:
-                raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12.4, 12.1, 11.8, and cpu.\n"
-                    f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
-                    "Please modify the matrix generation to exclude this combination."
-                )
 
-            else:
-                if (
-                    arch_version in ["12.4", "12.1", "11.8"]
-                    and os == "linux"
-                    or arch_version == "cuda-aarch64"
-                ):
-                    ret.append(
-                        {
-                            "python_version": python_version,
-                            "gpu_arch_type": gpu_arch_type,
-                            "gpu_arch_version": gpu_arch_version,
-                            "desired_cuda": translate_desired_cuda(
-                                gpu_arch_type, gpu_arch_version
-                            ),
-                            "devtoolset": (
-                                "cxx11-abi" if arch_version == "cuda-aarch64" else ""
-                            ),
-                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                            "package_type": package_type,
-                            "pytorch_extra_install_requirements": (
-                                PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
-                                if os != "linux-aarch64"
-                                else ""
-                            ),
-                            "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(  # noqa: B950
-                                ".", "_"
-                            ),
-                        }
-                    )
-                    # Special build building to use on Colab. PyThon 3.10 for 12.1 CUDA
-                    if python_version == "3.10" and arch_version == "12.1":
-                        ret.append(
-                            {
-                                "python_version": python_version,
-                                "gpu_arch_type": gpu_arch_type,
-                                "gpu_arch_version": gpu_arch_version,
-                                "desired_cuda": translate_desired_cuda(
-                                    gpu_arch_type, gpu_arch_version
-                                ),
-                                "devtoolset": "",
-                                "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                                "package_type": package_type,
-                                "pytorch_extra_install_requirements": "",
-                                "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
-                                    ".", "_"
-                                ),
-                            }
-                        )
-                else:
-                    ret.append(
-                        {
-                            "python_version": python_version,
-                            "gpu_arch_type": gpu_arch_type,
-                            "gpu_arch_version": gpu_arch_version,
-                            "desired_cuda": translate_desired_cuda(
-                                gpu_arch_type, gpu_arch_version
-                            ),
-                            "devtoolset": (
-                                "cxx11-abi" if arch_version == "cpu-cxx11-abi" else ""
-                            ),
-                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                            "package_type": package_type,
-                            "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                                ".", "_"
-                            ),
-                            "pytorch_extra_install_requirements": (
-                                PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
-                                if os != "linux"
-                                else ""
-                            ),
-                        }
-                    )
     return ret
 
 
