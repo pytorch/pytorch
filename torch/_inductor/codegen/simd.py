@@ -1110,6 +1110,18 @@ class SIMDScheduling(BaseScheduling):
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
             else:
+                # flush out any other runnable nodes to reduce number of loops
+                not_ready_yet_nodes.add(node.get_name())
+                for other_node in nodes[index + 1 :]:
+                    if (
+                        other_node not in done
+                        and fits_in_main_body(other_node)
+                        and not (not_ready_yet_nodes & other_node.ancestors)
+                        and expect_improved_memory_usage(other_node)
+                    ):
+                        schedule_node_in_loop(other_node)
+                    else:
+                        not_ready_yet_nodes.add(other_node.get_name())
                 node_schedule.append(DisableReduction)
             if maybe_split_index:
                 node_schedule.insert(maybe_split_index, DisableReduction)
