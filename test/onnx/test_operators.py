@@ -6,6 +6,7 @@ Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --produce-onnx-test-data: generate onnx test data
           --accept: accept onnx updates and overwrite models
 """
+
 import glob
 import inspect
 import io
@@ -879,7 +880,8 @@ class TestOperators(common_utils.TestCase):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
+                    x_in[list(x_in.keys())[0]],  # noqa: RUF015
+                    list(x_in.keys())[0],  # noqa: RUF015
                 )
                 return x_out
 

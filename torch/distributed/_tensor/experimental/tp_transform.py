@@ -31,6 +31,8 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
 
+__all__ = ["tensor_parallel_transformation"]
+
 aten = torch.ops.aten
 
 
@@ -54,7 +56,7 @@ def tensor_parallel_transformation(
     state_dict = copy.copy(exported_program.state_dict)
 
     with gm._set_replace_hook(sig.get_replace_hook()):
-        res = TensorParallelTransformPass(
+        res = _TensorParallelTransformPass(
             rank,
             world_size,
             device_type,
@@ -68,7 +70,7 @@ def tensor_parallel_transformation(
     return exported_program._update(gm, sig, state_dict=state_dict)
 
 
-class TensorParallelTransformPass(PassBase):
+class _TensorParallelTransformPass(PassBase):
     """
     This pass is responsible for transforming a single-device graph into a tensor parallel
     graph. It will mark the placement strategy of each node in the graph,
@@ -472,7 +474,7 @@ def _insert_reshard_gm(
                 input_node: input_arg,
             },
         )
-    node.replace_input_with(input_arg, output_node)
+    node.replace_input_with(input_arg, output_node)  # type: ignore[arg-type]
 
 
 def _clean_up_graph_metadata(gm: torch.fx.GraphModule) -> None:

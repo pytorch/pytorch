@@ -313,17 +313,47 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("in_features", (16,))
     @parametrize("image_size", (18,))
     @parametrize("out_features", (32,))
-    @parametrize("bias", (True,))
+    @parametrize(
+        "bias",
+        (
+            False,
+            True,
+        ),
+    )
+    @parametrize(
+        "has_non_epilogue_users",
+        (
+            True,
+            False,
+        ),
+    )
     @dtypes(torch.bfloat16)
     def test_linear_with_permute(
-        self, batch_size, in_features, image_size, out_features, bias, dtype
+        self,
+        batch_size,
+        in_features,
+        image_size,
+        out_features,
+        bias,
+        has_non_epilogue_users,
+        dtype,
     ):
         # Reproducer from the convnext model in timm
         class M(torch.nn.Module):
-            def __init__(self, bias):
+            def __init__(self, bias, has_non_epilogue_users):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
                 self._frozen_param398 = torch.randn(batch_size, out_features, 1, 1)
+                self.conv = torch.nn.Conv2d(
+                    out_features,
+                    out_features,
+                    kernel_size=7,
+                    padding=3,
+                    groups=out_features,
+                )
+                self.linear2 = torch.nn.Linear(out_features, out_features, bias)
+                self._frozen_param400 = torch.randn(batch_size, out_features, 1, 1)
+                self.has_non_epilogue_users = has_non_epilogue_users
 
             def forward(self, mul_272, _convolution_pointwise_default_31):
                 out1 = torch.ops.prims.convert_element_type.default(
@@ -332,10 +362,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 mul_272 = None
 
                 _linear_pointwise_default_131 = self.linear(out1)
-
                 permute_188 = torch.ops.aten.permute.default(
                     _linear_pointwise_default_131, [0, 3, 1, 2]
                 )
+
                 mul_273 = torch.ops.aten.mul.Tensor(permute_188, self._frozen_param398)
                 add_187 = torch.ops.aten.add.Tensor(
                     mul_273, _convolution_pointwise_default_31
@@ -343,15 +373,28 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 convert_element_type_847 = torch.ops.prims.convert_element_type.default(
                     add_187, torch.bfloat16
                 )
-
-                return convert_element_type_847
+                _convolution_pointwise_default_29 = self.conv(convert_element_type_847)
+                permute_189 = torch.ops.aten.permute.default(
+                    _convolution_pointwise_default_29, [0, 2, 3, 1]
+                )
+                permute_189 = self.linear2(permute_189)
+                permute_189 = torch.ops.aten.permute.default(permute_189, [0, 3, 1, 2])
+                permute_189 = torch.ops.aten.mul.Tensor(
+                    permute_189, self._frozen_param400
+                )
+                # If template_buffer will be used by nodes other than the epilogue nodes,
+                # we can't alias the template_buffer with the Y buffer.
+                if self.has_non_epilogue_users:
+                    add_191 = torch.ops.aten.add.Tensor(permute_189, add_187)
+                    return add_191
+                return permute_189
 
         view_12 = torch.randn(batch_size, image_size, image_size, in_features)
         _convolution_pointwise_default_31 = torch.randn(
             batch_size, out_features, image_size, image_size
         ).to(memory_format=torch.channels_last)
 
-        mod = M(bias=bias).eval()
+        mod = M(bias=bias, has_non_epilogue_users=has_non_epilogue_users).eval()
         with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast():
             self.common(
                 mod,
@@ -362,8 +405,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=atol,
                 rtol=rtol,
             )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -808,6 +851,35 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("bias", (True, False))
     @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_linear_cache_blocking(
+        self, batch_size, in_features, out_features, bias, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.gemm_thread_factors": "4,2,7"})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(56)
+    @parametrize("batch_size", (1024,))
+    @parametrize("in_features", (1024,))
+    @parametrize("out_features", (1024,))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_thread_factors(
         self, batch_size, in_features, out_features, bias, dtype
     ):
         class M(torch.nn.Module):
