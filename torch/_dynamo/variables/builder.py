@@ -15,6 +15,7 @@ import random
 import re
 import sys
 import types
+import warnings
 import weakref
 from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
 
@@ -218,6 +219,12 @@ static_inputs_log = torch._logging.getArtifactLogger(
 
 
 DimList = List
+
+
+def safe_has_grad(t):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+        return hasattr(t, "grad")
 
 
 class _missing:
@@ -1511,7 +1518,11 @@ class VariableBuilder:
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
             unimplemented("torch.compile does not support sparse Tensors")
 
-        if safe_grad(value) is not None and value.dtype != safe_grad(value).dtype:
+        if (
+            safe_has_grad(value)
+            and safe_grad(value) is not None
+            and value.dtype != safe_grad(value).dtype
+        ):
             unimplemented(
                 "Inconsistent dtype between tensor and its gradient. "
                 "This can happen in FSDP and crashes meta tensor creation. "
