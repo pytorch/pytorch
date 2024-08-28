@@ -1743,6 +1743,7 @@ def _new_process_group_helper(
                     backend_class.rank(),
                     backend_class.size(),
                 )
+                pg._set_default_backend(backend_type)
         elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
