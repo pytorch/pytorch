@@ -12,6 +12,7 @@ from ..exc import (
     unimplemented,
 )
 from .base import MutableLocal, VariableTracker
+from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
@@ -165,6 +166,12 @@ class ItertoolsVariable(VariableTracker):
                     from_exc=e,
                 )
             return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
+        elif self.value is itertools.islice:
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(tx, polyfills.islice), args, kwargs
+            )
         elif self.value is itertools.repeat:
             if len(args) < 2:
                 return variables.RepeatIteratorVariable(
@@ -176,6 +183,8 @@ class ItertoolsVariable(VariableTracker):
             return tx.inline_user_function_return(
                 SourcelessBuilder.create(tx, polyfills.repeat), args, kwargs
             )
+        elif self.value is itertools.count:
+            return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.cycle:
             return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.dropwhile:
@@ -205,6 +214,24 @@ class RepeatIteratorVariable(IteratorVariable):
 
     # Repeat needs no mutation, clone self
     def next_variable(self, tx):
+        return self.item
+
+
+class CountIteratorVariable(IteratorVariable):
+    def __init__(self, item: int = 0, step: int = 1, **kwargs) -> None:
+        super().__init__(**kwargs)
+        if not isinstance(item, VariableTracker):
+            item = ConstantVariable.create(item)
+        if not isinstance(step, VariableTracker):
+            step = ConstantVariable.create(step)
+        self.item = item
+        self.step = step
+
+    def next_variable(self, tx):
+        assert self.mutable_local
+        tx.output.side_effects.mutation(self)
+        next_item = self.item.call_method(tx, "__add__", [self.step], {})
+        self.item = next_item
         return self.item
 
 
