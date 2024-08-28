@@ -942,7 +942,7 @@ class CppVecOverrides(CppOverrides):
     def __new__(cls, *args, **kargs):
         self = super().__new__(cls)
 
-        def vectorize_by_scalar_func_with_for_loop(scalar_func, *args, **kwargs):
+        def scalarize(scalar_func, *args, **kwargs):
             assert not kwargs
             kernel = V.kernel
             assert isinstance(kernel, CppVecKernel)
@@ -990,7 +990,7 @@ class CppVecOverrides(CppOverrides):
             code.writeline("()")
             return code
 
-        def wrap(vec_func, scalar_func):
+        def vectorize_by_scalar_func_with_for_loop(vec_func, scalar_func):
             # `CppVecKernel` generates both scalar ops and vector ops according to
             # whether the inputs are scalars or vectors while all ops in `CppVecOverrides`
             # (except for some ops explained below) assume the inputs are vectors. We wrap the ops in
@@ -1069,9 +1069,7 @@ class CppVecOverrides(CppOverrides):
                     if vec_func:
                         return vec_func(*new_args, **kwargs)
                     else:
-                        return vectorize_by_scalar_func_with_for_loop(
-                            scalar_func, *new_args, **kwargs
-                        )
+                        return scalarize(scalar_func, *new_args, **kwargs)
                 else:
                     return scalar_func(*args, **kwargs)
 
@@ -1082,13 +1080,21 @@ class CppVecOverrides(CppOverrides):
                 "masked",
                 "index_expr",
             ]:
-                setattr(self, name, wrap(method.__func__, None))
+                setattr(
+                    self,
+                    name,
+                    vectorize_by_scalar_func_with_for_loop(method.__func__, None),
+                )
 
         for name, method in vars(CppOverrides).items():
             if getattr(method, "__class__", None) == staticmethod and name not in vars(
                 CppVecOverrides
             ):
-                setattr(self, name, wrap(None, method.__func__))
+                setattr(
+                    self,
+                    name,
+                    vectorize_by_scalar_func_with_for_loop(None, method.__func__),
+                )
 
         return self
 
