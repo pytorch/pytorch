@@ -140,6 +140,22 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         event_command_status::complete;
   }
 
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override {
+    TORCH_CHECK(
+        event1 && event2,
+        "Both events must be recorded before calculating elapsed time.");
+    auto* xpu_event1 = reinterpret_cast<sycl::event*>(event1);
+    auto* xpu_event2 = reinterpret_cast<sycl::event*>(event2);
+
+    using namepsace sycl::info::event_profiling;
+    // Block until both of the recorded events are completed.
+    uint64_t end_time_ns = xpu_event2->get_profiling_info<command_end>();
+    uint64_t start_time_ns = xpu_event1->get_profiling_info<command_end>();
+    // Return the eplased time in milliseconds.
+    return static_cast<double>(end_time_ns - start_time_ns) * 1e-6;
+  }
+
   // Stream-related functions
   bool queryStream(const Stream& stream) const override {
     const XPUStream xpu_stream{stream};
@@ -167,12 +183,6 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const override {
     const XPUStream xpu_stream{stream};
     XPUCachingAllocator::recordStream(data_ptr, xpu_stream);
-  }
-
-  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
-      const override {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "elapsedTime is not supported by XPU backend.");
   }
 };
 

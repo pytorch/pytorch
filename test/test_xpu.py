@@ -4,6 +4,7 @@ import collections
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import torch
@@ -229,6 +230,13 @@ print(torch.xpu.device_count())
         stream.record_event(event)
         event.synchronize()
         self.assertTrue(event.query())
+        start_event = torch.xpu.Event(enable_timing=True)
+        end_event = torch.xpu.Event(enable_timing=True)
+        stream.record_event(start_event)
+        time.sleep(0.1)
+        stream.record_event(end_event)
+        torch.xpu.synchronize()
+        self.assertGreater(start_event.elapsed_time(end_event), 0)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
@@ -241,8 +249,8 @@ print(torch.xpu.device_count())
         self.assertEqual(stream.stream_id, xpu_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
 
-        event1 = torch.Event("xpu")
-        event2 = torch.Event("xpu")
+        event1 = torch.Event("xpu", enable_timing=True)
+        event2 = torch.Event("xpu", enable_timing=True)
         self.assertEqual(event1.event_id, 0)
         a = torch.randn(1000)
         b = torch.randn(1000)
@@ -259,10 +267,7 @@ print(torch.xpu.device_count())
         self.assertTrue(event2.query())
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
-        with self.assertRaisesRegex(
-            NotImplementedError, "elapsedTime is not supported by XPU backend."
-        ):
-            event1.elapsed_time(event2)
+        self.assertTrue(event1.elapsed_time(event2) > 0)
 
     def test_generator(self):
         torch.manual_seed(2024)
