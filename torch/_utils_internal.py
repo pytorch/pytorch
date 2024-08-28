@@ -124,7 +124,7 @@ def set_pytorch_distributed_envs_from_justknobs():
     pass
 
 
-def log_export_usage(**kwargs):
+async def log_export_usage(**kwargs):
     pass
 
 

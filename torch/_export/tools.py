@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import asyncio
 import logging
 import warnings
 from typing import Any, Dict, Iterable, Optional, Tuple
@@ -83,8 +84,7 @@ def report_exportability(
             'submod_2': None
         }
     """
-
-    log_export_usage(event="export.report_exportability")
+    asyncio.run(log_export_usage(event="export.report_exportability"))
 
     kwargs = kwargs or {}
 

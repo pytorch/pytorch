@@ -132,7 +132,8 @@ def capture_pre_autograd_graph(
         print_export_warning()
         module = torch.export._trace._export_for_training(f, args, kwargs, dynamic_shapes=dynamic_shapes, strict=True).module()
     else:
-        log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
+        import asyncio
+        asyncio.run(log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"}))
 
         # Do not decompose dropout for exported models, because in eval mode the dropout
         # op disappears from the graph, which makes it difficult to switch to train mode.

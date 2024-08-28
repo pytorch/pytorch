@@ -10,6 +10,7 @@ in torch._dynamo.convert_frame.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import functools
 import inspect
@@ -1295,7 +1296,7 @@ def export(
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
     if _log_export_usage:
-        log_export_usage(event="export.private_api", flags={"_dynamo"})
+        asyncio.run(log_export_usage(event="export.private_api", flags={"_dynamo"}))
 
     # Deal with "local variable referenced before assignment"
     _f = f

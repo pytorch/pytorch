@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import asyncio
 
 
 def exportdb_error_message(case_name: str):
@@ -12,10 +13,10 @@ def exportdb_error_message(case_name: str):
         return f"See {case_name} in exportdb for unsupported case. \
                 https://pytorch.org/docs/main/generated/exportdb/index.html#{url_case_name}"
     else:
-        log_export_usage(
+        asyncio.run(log_export_usage(
             event="export.error.casenotregistered",
             message=case_name,
-        )
+        ))
         return f"{case_name} is unsupported."
 
 

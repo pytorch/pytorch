@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import asyncio
 import dataclasses
 import functools
 import inspect
@@ -532,7 +533,9 @@ def _export_to_torch_ir(
     """
 
     if _log_export_usage:
-        log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
+        asyncio.run(
+            log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
+        )
 
     if not isinstance(args, tuple):
         raise UserError(
@@ -985,11 +988,13 @@ def _log_export_wrapper(fn):
             start = time.time()
             ep = fn(*args, **kwargs)
             end = time.time()
-            log_export_usage(
-                event="export.time",
-                metrics=end - start,
-                flags=_EXPORT_FLAGS,
-                **get_ep_stats(ep),
+            asyncio.run(
+                log_export_usage(
+                    event="export.time",
+                    metrics=end - start,
+                    flags=_EXPORT_FLAGS,
+                    **get_ep_stats(ep),
+                )
             )
         except Exception as e:
             t = type(e)
@@ -997,18 +1002,22 @@ def _log_export_wrapper(fn):
             case_name = get_class_if_classified_error(e)
             if case_name is not None:
                 log.error(exportdb_error_message(case_name))
-                log_export_usage(
-                    event="export.error.classified",
-                    type=error_type,
-                    message=str(e),
-                    flags=_EXPORT_FLAGS,
+                asyncio.run(
+                    log_export_usage(
+                        event="export.error.classified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
                 )
             else:
-                log_export_usage(
-                    event="export.error.unclassified",
-                    type=error_type,
-                    message=str(e),
-                    flags=_EXPORT_FLAGS,
+                asyncio.run(
+                    log_export_usage(
+                        event="export.error.unclassified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
                 )
             raise e
         finally:
@@ -1905,7 +1914,7 @@ def _export(
     flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
     _EXPORT_FLAGS = flags
 
-    log_export_usage(event="export.enter", flags=_EXPORT_FLAGS)
+    asyncio.run(log_export_usage(event="export.enter", flags=_EXPORT_FLAGS))
 
     (
         args,
