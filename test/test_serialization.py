@@ -4247,6 +4247,19 @@ class TestSerialization(TestCase, SerializationMixin):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)
 
+    def test_skip_data_serialization_preserves_views(self):
+        t = torch.randn(2, 3)
+        t_view = t.view(-1)
+        t_slice = t[1]
+        sd = {'t': t, 't_view': t_view, 't_slice': t_slice}
+        with BytesIOContext() as f:
+            with skip_data():
+                torch.save(sd, f)
+            f.seek(0)
+            sd_loaded = torch.load(f, weights_only=True)
+            self.assertTrue(id(sd_loaded['t_view'].untyped_storage()) == id(sd_loaded['t'].untyped_storage()))
+            self.assertTrue(id(sd_loaded['t_slice'].untyped_storage()) == id(sd_loaded['t'].untyped_storage()))
+
     def test_skip_data_serialization_error_cases(self):
         def _save_load(t):
             with BytesIOContext() as f:
