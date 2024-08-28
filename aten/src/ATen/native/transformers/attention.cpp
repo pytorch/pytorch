@@ -870,7 +870,6 @@ _scaled_dot_product_flash_attention_cpu(
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(2);
   int64_t num_head = query.size(1);
-  int64_t headSize = query.size(3);
 
   TORCH_CHECK(c10::isFloatingType(dtype),
     "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, FP16, but got ", dtype, " instead.");
