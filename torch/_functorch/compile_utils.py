@@ -50,6 +50,14 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     )
 
     compute_mutation_region_ids(fx_g)  # type: ignore[arg-type]
+
+    # Make a list of nodes that are directly returned from the output.  This prevents us
+    # from deduplicating returned tensors which have experienced identical operations,
+    # but are separate data structures in eager mode.
+    output_node: fx.Node = list(fx_g.nodes)[-1]
+    assert output_node.op == "output"
+    inputs_to_output_node = output_node.all_input_nodes
+
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
@@ -58,6 +66,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             or n.op == "output"
             or n.op == "get_attr"
             or get_aten_target(n) in rand_ops
+            or n in inputs_to_output_node
         ):
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
