@@ -278,7 +278,6 @@ static bool xnnpack_use_convolution2d(
 }
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 // This struct is templated so that we can run backend selection in a dynamic
 // shapes context; all of the real kernel selection in eager mode runs with
 // int64_t
@@ -297,7 +296,7 @@ struct ConvParams {
 
   bool is_strided() const {
     bool is_strided = false;
-    for (auto s : stride) {
+    for (const auto& s : stride) {
       is_strided |= (s != 1);
     }
     return is_strided;
@@ -1665,7 +1664,7 @@ at::Tensor _convolution(
                "Input type (", input.toString(), ") and bias type (", bias.toString(),
                ") should be the same");
 
-      output = at::_mps_convolution(input.contiguous(), weight, bias.defined() ? bias.contiguous() : bias,
+      output = at::_mps_convolution(input, weight, bias.defined() ? bias.contiguous() : bias,
                                      params.padding, params.stride, params.dilation,
                                      params.groups);
 #else
@@ -1757,7 +1756,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   // See: https://github.com/pytorch/pytorch/pull/36355
   if (!params.transposed && input.dim() > 4) {
     // Avoid undefined behavior when num channels == 0; params are unused for that case.
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     params.groups = (weight.size(1) > 0) ? input.size(1) / weight.size(1) : -1;
   } else {
     params.groups = groups_;

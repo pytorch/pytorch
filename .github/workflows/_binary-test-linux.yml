@@ -59,6 +59,11 @@ on:
         required: false
         type: string
         description: Desired python version
+      runner_prefix:
+        required: false
+        default: ""
+        type: string
+        description: prefix for runner label
       runs_on:
         required: true
         type: string
@@ -77,7 +82,7 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runs_on }}
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}

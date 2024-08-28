@@ -28,7 +28,12 @@ def strict_mode(callable, operands):
             )
 
 
-strict_mode_op = HigherOrderOperator("strict_mode")
+class StrictMode(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("strict_mode")
+
+
+strict_mode_op = StrictMode()
 
 
 @strict_mode_op.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -45,10 +50,7 @@ strict_mode_op.py_impl(DispatchKey.Autograd)(
 
 @strict_mode_op.py_impl(ProxyTorchDispatchMode)
 def inner(mode, callable, operands):
-    if mode.enable_tracing:
-        return trace_strict_mode(mode, strict_mode_op, callable, operands)
-    else:
-        return strict_mode_op(callable, operands)
+    return trace_strict_mode(mode, strict_mode_op, callable, operands)
 
 
 def trace_strict_mode(mode, strict_mode_op, callable, operands):

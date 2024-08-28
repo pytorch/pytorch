@@ -13,7 +13,6 @@
 #include <vector>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
@@ -1045,8 +1044,25 @@ This class does not support ``__members__`` property.)");
       .def_static(
           "get_symmetric_memory",
           &::c10d::symmetric_memory::get_symmetric_memory)
+      .def_static(
+          "has_multicast_support",
+          &::c10d::symmetric_memory::has_multicast_support)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
+      .def_property_readonly(
+          "buffer_ptrs_dev",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            return reinterpret_cast<uintptr_t>(symm_mem->get_buffer_ptrs_dev());
+          })
+      .def_property_readonly(
+          "signal_pad_ptrs_dev",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            return reinterpret_cast<uintptr_t>(
+                symm_mem->get_signal_pad_ptrs_dev());
+          })
+      .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
+      .def_property_readonly(
+          "signal_pad_size", &SymmetricMemory::get_signal_pad_size)
       .def(
           "get_buffer",
           &SymmetricMemory::get_buffer,
@@ -2242,22 +2258,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
           .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
 
-#ifndef _WIN32
-  module.def(
-      "_round_robin_process_groups",
-      [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
-          -> c10::intrusive_ptr<::c10d::ProcessGroup> {
-        if (processGroups.empty()) {
-          throw std::invalid_argument("Specify at least 1 process group");
-        }
-        const auto& first = processGroups.front();
-        return c10::make_intrusive<::c10d::ProcessGroupRoundRobin>(
-            first->getRank(), first->getSize(), std::move(processGroups));
-      },
-      py::arg("process_groups"),
-      py::call_guard<py::gil_scoped_release>());
-#endif
-
   // TODO: The collection definitions handles direct instantiation of
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
   // and should be removed once all tests are transitioned
@@ -2711,6 +2711,22 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               },
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_add_ephemeral_timeout",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 const std::chrono::milliseconds& timeout) {
+                self->addEphemeralTimeout(timeout);
+              },
+              py::arg("timeout"))
+          .def(
+              "_verify_work_timeout",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 const c10::intrusive_ptr<::c10d::Work> work,
+                 const std::chrono::milliseconds& timeout) {
+                return self->verifyWorkTimeoutForTest(work, timeout);
+              },
+              py::arg("work"),
+              py::arg("timeout"))
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly("uid", &::c10d::ProcessGroupNCCL::getUid)
@@ -2928,13 +2944,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           [](::c10d::Work& work) -> std::vector<at::Tensor> {
             // Deprecation reason:
             // Work.result() returns a vector of tensors. This signature is
-            // problematic as some collectives may just return one tensor (e.g
-            // all-reduce), while some others may return multiple tensors (e.g.
-            // all-gather).
-            // Deprecating work.result() would also allow us to remove the
-            // `outputs_` field in the Work class, avoiding an "artificial"
-            // reference to the tensors, which could potentially hold up the
-            // tensors' memory.
+            // problematic as some collectives may just return one tensor
+            // (e.g all-reduce), while some others may return multiple
+            // tensors (e.g. all-gather).
+            // Deprecating work.result() would
+            // also allow us to remove the `outputs_` field in the Work
+            // class, avoiding an "artificial" reference to the tensors,
+            // which could potentially hold up the tensors' memory.
             TORCH_WARN_ONCE(fmt::format(kDeprecationWarning, "Work::result"));
             return work.result();
           })

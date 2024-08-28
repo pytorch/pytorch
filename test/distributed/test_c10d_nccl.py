@@ -350,6 +350,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @parametrize("type", [torch.float16, torch.float32, torch.float64, torch.bfloat16])
     @skip_if_rocm
     def test_nan_assert(self, type):
+        # Expecting a device-side error when NaN is detected
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
@@ -363,6 +364,46 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         with self.assertRaises(RuntimeError):
             pg.allreduce(nan_tensor)
         dist.destroy_process_group()
+        # reset env
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nan_p2p(self):
+        # Putting NaN at recv buffer, program should not fail as NaN checker
+        # should not check on receive buffer
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
+        if self.rank == 0:
+            c10d.send(t, 1)
+        elif self.rank == 1:
+            # Putting NaN at recv buffer
+            t[1, 1] = float("nan")
+            c10d.recv(t, 0)
+        c10d.destroy_process_group()
+        # reset env
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nan_check(self):
+        # Not expecting an error, NaN check should not make legit code fail
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        x = torch.ones((10,), dtype=torch.bfloat16, device=device) * self.rank
+        t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
+        c10d.broadcast(x, src=0)
+        c10d.all_reduce(t)
+        c10d.destroy_process_group()
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
@@ -578,6 +619,55 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=252), pg)
         self._check_nccl_timeout(timedelta(seconds=252))
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("backend", [None, "nccl"])
+    def test_extend_nccl_pg_timeout(self, backend):
+        torch.cuda.set_device(self.rank)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        opts = dict(
+            backend=backend,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=123),
+        )
+        dist.init_process_group(**opts)
+        pg = dist.distributed_c10d._get_default_group()
+        bankend = pg._get_backend(torch.device(f"cuda:{self.rank}"))
+        w = pg.allreduce(torch.rand(10).cuda(self.rank))
+        self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=123)))
+        w.wait()
+        bankend._set_default_timeout(timedelta(seconds=3))
+        if self.rank == 0:
+            # Ideally we want to sleep for a very long time, but this is not
+            # feasible in unit test. So this is only a very tiny case.
+            time.sleep(5)
+            pg.allreduce(torch.rand(10).cuda(self.rank))
+            time.sleep(5)
+            pg.allreduce(torch.rand(5).cuda(self.rank))
+            w = pg.allreduce(torch.rand(10).cuda(self.rank))
+            self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=3)))
+            w.wait()
+        else:
+            dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+                timedelta(seconds=10)
+            )
+            w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
+            w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
+            self.assertTrue(bankend._verify_work_timeout(w1, timedelta(seconds=13)))
+            self.assertTrue(bankend._verify_work_timeout(w2, timedelta(seconds=13)))
+            w1.wait()
+            dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+                timedelta(seconds=5)
+            )
+            # Since we are not block wait so use a sync here to leave enough time
+            # for watchdog to reset first timeout extension.
+            torch.cuda.synchronize(torch.device(f"cuda:{self.rank}"))
+            w = pg.allreduce(torch.rand(10).cuda(self.rank))
+            self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=8)))
+            w.wait()
+
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_optimization(self):
@@ -768,6 +858,8 @@ class DistributedDataParallelTest(
         # otherwise process will be taken down and we can't check for errors.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
+        # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
         store = c10d.FileStore(self.file_name, self.world_size)
         # provide sufficient timeout to initialize NCCL comm.
         pg = c10d.ProcessGroupNCCL(
@@ -4088,6 +4180,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
             return None
 
 
+@skip_but_pass_in_sandcastle
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -4139,6 +4232,7 @@ instantiate_parametrized_tests(NCCLTraceTestDumpOnTimeout)
 instantiate_parametrized_tests(NCCLTraceTest)
 
 
+@skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
@@ -4192,6 +4286,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 time.sleep(600)
 
 
+@skip_but_pass_in_sandcastle
 class NcclErrorDumpTest(NCCLTraceTestBase):
     def _wait_process(self, rank, timeout):
         try:

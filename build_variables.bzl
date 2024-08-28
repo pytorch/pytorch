@@ -473,6 +473,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/mkldnn_tensor.cpp",
     "torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
+    "torch/csrc/jit/serialization/pickle.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -495,6 +496,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
     "torch/csrc/distributed/c10d/GroupRegistry.cpp",
+    "torch/csrc/distributed/c10d/LockGuard.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
@@ -542,7 +544,6 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.cpp",
     "torch/csrc/distributed/c10d/HashStore.cpp",
-    "torch/csrc/distributed/c10d/ProcessGroupRoundRobin.cpp",
     "torch/csrc/distributed/rpc/agent_utils.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/profiler/remote_profiler_manager.cpp",
@@ -689,7 +690,8 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
-    "torch/csrc/distributed/c10d/Utils.cu",
+    "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
+    "torch/csrc/distributed/c10d/NCCLUtils.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
@@ -774,11 +776,13 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",
+    "torch/csrc/cuda/GdsFile.cpp",
 ]
 
 libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
     "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/shared/cudnn.cpp",
+    "torch/csrc/cuda/shared/cusparselt.cpp",
     "torch/csrc/cuda/Tensor.cpp",
 ]
 
@@ -914,6 +918,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/disable_torch_function.cpp",
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",
+    "torch/csrc/instruction_counter/Module.cpp",
 ] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [
@@ -1440,6 +1445,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/cuda/CUDABlas.cpp",
     "aten/src/ATen/cuda/CUDASparseBlas.cpp",
     "aten/src/ATen/cuda/CublasHandlePool.cpp",
+    "aten/src/ATen/native/cuda/linalg/CudssHandlePool.cpp",
     "aten/src/ATen/cuda/tunable/StreamTimer.cpp",
     "aten/src/ATen/cuda/tunable/Tunable.cpp",
     "aten/src/ATen/native/cuda/Activation.cpp",

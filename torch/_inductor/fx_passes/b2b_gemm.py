@@ -1,12 +1,22 @@
 # mypy: allow-untyped-defs
 import functools
+from collections import deque
 from typing import Dict, List, Set, Tuple
 
 import torch
+from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
-from ..ir import FixedLayout, Subgraph
-from ..kernel.flex_attention import build_subgraph_buffer, create_placeholder
+from ..ir import (
+    ComputedBuffer,
+    FixedLayout,
+    FlexibleLayout,
+    InputBuffer,
+    StorageBox,
+    Subgraph,
+    TensorBox,
+)
+from ..lowering import lowerings
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -245,23 +255,105 @@ def load_ratio_right(
 
 
 # the block sizes are limited by hardware (the shared memory)
-# in theory all numbers are independent; e.g. BLOCK_SIZE_M is not necessarily equal to BLOCK_SIZE_O
+# intuitively, the optimization works when the intermediate matrix is large
+# and we assign large block sizes to large dimensions
 b2b_gemm_configs = [
     {
-        "BLOCK_SIZE_M": m,
-        "BLOCK_SIZE_N": n,
-        "BLOCK_SIZE_O": m,
-        "BLOCK_SIZE_P": n,
-        "num_stages": s,
-        "num_warps": 2 * s,
-    }
-    for (m, n, s) in {  # deduplicate
-        (m, n, s)
-        for m in [16, 32, 64, 128]
-        for n in [16, 32, 64, 128]
-        for s in ([2] if (m == 128 or n == 128) else [2, 4])  # don't be too large
-        if not (m == n == 128)  # don't be too large
-    }
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 16,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_O": 64,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 128,
+        "BLOCK_SIZE_P": 16,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 128,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_O": 128,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 16,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_O": 64,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 16,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_O": 64,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
 ]
 
 
@@ -337,6 +429,9 @@ def unoptimized_b2b_gemm(
     *,
     out: torch.Tensor,
 ) -> torch.Tensor:
+    """
+    The unoptimized version is used as a fallback when the b2b_gemm kernel is not beneficial.
+    """
     if is_left_assoc:
         torch.mm(subgraph.graph_module(torch.mm(A, B)), C, out=out)
     else:
@@ -345,6 +440,74 @@ def unoptimized_b2b_gemm(
 
 
 unoptimized_choice = ExternKernelChoice(unoptimized_b2b_gemm)
+
+
+def build_subgraph_buffer(
+    args: List[TensorBox],
+    subgraph: Subgraph,
+):
+    """
+    This function is adapted from ../kernel/flex_attention.py.
+    The goal is to take in the required args and produce the subgraph buffer
+    The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
+
+    Args:
+        args: The args that are passed into the subgraph
+        subgraph: The Subgraph ir for which to produce the output node
+    """
+    cnt = 0
+    env = {}
+    for node in subgraph.graph_module.graph.nodes:
+        if node.op == "placeholder":
+            env[node] = args[cnt]
+            cnt += 1
+        elif node.op == "call_function":
+            # For call_function we use the default lowerings and pass in the
+            # already created TensorBoxes as args
+            args, kwargs = tree_map(
+                lambda x: env[x] if x in env else x, (node.args, node.kwargs)
+            )
+            env[node] = lowerings[node.target](*args, **kwargs)
+        elif node.op == "output":
+
+            def convert_output_node_to_buffer(output):
+                if output is None:
+                    return None
+                output_node = output
+                output_buffer = env[output_node]
+                assert isinstance(output_buffer, TensorBox), (
+                    "The output node for B2B-GEMM's subgraph must be a TensorBox, but got: ",
+                    type(output_buffer),
+                )
+                assert isinstance(output_buffer.data, StorageBox), (
+                    "The output node for B2B-GEMM's subgraph must be a StorageBox, but got: ",
+                    type(output_buffer),
+                )
+                subgraph_buffer = ComputedBuffer(
+                    name=None,
+                    layout=FlexibleLayout(
+                        device=output_buffer.data.get_device(),
+                        dtype=output_buffer.data.get_dtype(),
+                        size=output_buffer.data.get_size(),
+                    ),
+                    data=output_buffer.data.data,  # type: ignore[arg-type]
+                )
+                return subgraph_buffer
+
+            # node.args[0] should be a single element representing the output of the subgraph
+            return tree_map(convert_output_node_to_buffer, node.args[0])
+
+    raise ValueError("B2B-GEMM was passed a subgraph with no output node!")
+
+
+def create_placeholder(
+    name: str, dtype: torch.dtype, device: torch.device
+) -> TensorBox:
+    """
+    Creates a placeholder input buffers for producing subgraph_output
+    """
+    input_buffer = InputBuffer(name, FixedLayout(device, dtype, [], []))
+    return TensorBox.create(input_buffer)
 
 
 def tuned_b2b_gemm(
@@ -446,39 +609,35 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         with no other input nodes for the intermediates and dst;
         return
         (1) the Boolean value
-        (2) the subgraph node set (which only makes sense when the Boolean value is True)
+        (2) the subgraph node set including src and dst (which only makes sense when the Boolean value is True)
         """
-        if src == dst:  # trivial subgraph
-            return (True, {src})
-
-        reachable: Dict[torch.fx.Node, bool] = {}
+        visited: Set[torch.fx.Node] = set()
         input_counter: Dict[torch.fx.Node, int] = {}
 
-        def reach(node: torch.fx.Node) -> bool:
-            if node in reachable:
-                return reachable[node]
-            if node is dst:
-                reachable[node] = True
-                return True
-            # for nodes other than dst, bookkeep their users' input counts
-            for user in node.users.keys():
-                if user not in input_counter:
-                    input_counter[user] = len(user.all_input_nodes)
-                input_counter[user] -= 1
-            # continue checking reachability
-            if (node is src) or is_pointwise_node(node):
-                ret = True
-                for user in node.users.keys():
-                    if not reach(user):
-                        ret = False
-                        break
-            else:
-                ret = False
-            reachable[node] = ret
-            return ret
+        all_reachable = True
+        queue = deque([src])
+        while queue:
+            node = queue.popleft()
+            if node not in visited:
+                if node is dst:
+                    visited.add(node)
+                elif (node is src) or is_pointwise_node(node):
+                    for user in node.users.keys():
+                        # for nodes other than dst, bookkeep their users' input counts
+                        if user not in input_counter:
+                            input_counter[user] = len(user.all_input_nodes)
+                        input_counter[user] -= 1
+                        # continue BFS
+                        queue.append(user)
+                    visited.add(node)
+                else:
+                    all_reachable = False
+                    break
 
-        ok = reach(src) and all(count == 0 for count in input_counter.values())
-        return (ok, set(reachable.keys()))
+        return (
+            all_reachable and all(count == 0 for count in input_counter.values()),
+            visited,
+        )
 
     # check inner_mm reaches f_node on every user path via pointwise nodes with no outside input_nodes
     ok, subgraph_node_set = all_reach_via_pointwise_with_no_other_inputs(

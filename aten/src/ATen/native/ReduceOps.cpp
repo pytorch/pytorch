@@ -892,8 +892,11 @@ static inline void diff_check_compatible_shape(const Tensor& self, const std::op
         "diff expects prepend or append to be the same dimension as input");
 
     for (const auto i : c10::irange(other.value().dim())) {
-      TORCH_CHECK(
-          other.value().sym_size(i) == self.sym_size(i) || i == wrapped_dim,
+      if (i == wrapped_dim) {
+        continue;
+      }
+      TORCH_SYM_CHECK(
+          other.value().sym_size(i).sym_eq(self.sym_size(i)),
           "diff expects the shape of tensor to prepend or append to match that of"
           " input except along the differencing dimension;"
           " input.size(", i, ") = ", self.sym_size(i), ", but got"
@@ -1411,6 +1414,15 @@ Tensor& mean_out(const Tensor& self, DimnameList dim,
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
+Tensor& mean_dtype_out(const Tensor &self, std::optional<ScalarType> dtype, Tensor& result) {
+  TORCH_CHECK(
+    canCast(self.scalar_type(), result.scalar_type()),
+      "mean.dtype_out(): input types can't be cast to the desired output type ",
+      result.scalar_type());
+  // at::mean_out should make sure dtype and result.scalar_type() are the same
+  return at::mean_out(result, self, IntArrayRef{}, false, dtype);
+}
+
 // TODO(@heitorschueroff) implement custom kernels for nanmean
 Tensor& nanmean_out(
     const Tensor& self,
@@ -1814,8 +1826,8 @@ static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
-  TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda(),
-              "std and var only supports tensors on a CPU or CUDA device, but got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda() || self.device().is_xpu(),
+              "std and var supports tensors on a CPU, CUDA, or XPU device only, but got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
@@ -1887,8 +1899,8 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              fname, " only supports tensors on a CPU or CUDA device, got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu(),
+              fname, " supports tensors on a CPU, CUDA, or XPU device only, got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());

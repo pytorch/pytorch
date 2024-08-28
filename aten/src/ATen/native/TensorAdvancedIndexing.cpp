@@ -811,7 +811,7 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<std::optional<Tensor>
       at::assert_no_overlap(self, *index);
     }
   }
-  if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
+  if ((self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU) && (accumulate || globalContext().deterministicAlgorithms())) {
       TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
       value_.device(), " for value tensor");
       index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
@@ -2284,12 +2284,20 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
 }
 
 Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
-  return (self != 0).sum(dims);
+  auto reduce = self;
+  if (reduce.scalar_type() != kBool) {
+    reduce = reduce != 0;
+  }
+  return reduce.sum(dims);
 }
 
 Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
   if (!dims.empty()) {
-    return (self != 0).sum(dims);
+    auto reduce = self;
+    if (reduce.scalar_type() != kBool) {
+      reduce = reduce != 0;
+    }
+    return reduce.sum(dims);
   }
 
   // Optimized all-reduce
