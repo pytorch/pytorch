@@ -22,6 +22,7 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/StringUtil.h>
+#include <cstdio>
 
 namespace at::cuda::tunable {
 
