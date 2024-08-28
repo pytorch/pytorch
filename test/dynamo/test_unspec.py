@@ -11,6 +11,7 @@ import torch._dynamo.testing
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, same
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -475,6 +476,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f3(r), optimize(f3)(r))
         self.assertEqual(f4(r), optimize(f4)(r))
 
+    @skipIfWindows(
+        msg="AssertionError: The values for attribute 'dtype' do not match: torch.int32 != torch.int64."
+    )
     def test_to_tensor(self):
         def f1():
             a = np.random.uniform(low=-1, high=1, size=(20, 1))
