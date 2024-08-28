@@ -20,6 +20,7 @@ from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.test_case import TestCase
+from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
     get_buffer,
@@ -28,6 +29,7 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
+from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import Dim, export, unflatten
@@ -2489,6 +2491,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             with self.assertRaises(RuntimeError):
                 gm(torch.randn(33, 4), torch.randn(32, 4))
                 gm(torch.randn(128, 4), torch.randn(128, 4))
+
+    def test_dont_duck_size_for_auto_dynamic(self):
+        # for this use case, mark_dynamic() and AUTO should have same effect.
+        # check that same symbol gets allocated to both dims without raising constraint violation.
+        from torch.export.dynamic_shapes import DIM
+
+        AUTO, STATIC = DIM.AUTO, DIM.STATIC
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                # x: [s0, s1], y: [s0 + 1, 4]
+                assert y.shape[1] == 4
+                assert x.shape[0] == y.shape[0] - 1
+                return x * 2, y * 2
+
+        # duck sizing would make all static based on these sample inputs
+        inputs = (torch.randn(4, 4), torch.randn(5, 4))
+        shapes = {
+            "x": (AUTO, AUTO),
+            "y": (AUTO, AUTO),
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
     @testing.expectedFailureRetraceability  # T183144629
     def test_map(self):
@@ -7026,6 +7051,69 @@ def forward(self, x, y):
             failing_shapes=[
                 ((22,), (5,)),
             ],
+        )
+
+    @testing.expectedFailureNonStrict
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
+    @testing.expectedFailureSerDer  # T195866111
+    def test_hints_wrapper(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                x = x + y
+
+                def inner_body_fn(x, y):
+                    x = torch.relu(x)
+                    x = x + y
+                    return x
+
+                def outer_body_fn(x, y):
+                    x = hints_wrapper(
+                        inner_body_fn, (x, y), {}, hints={"inner_body": True}
+                    )
+                    x = torch.abs(x)
+                    return x
+
+                res = hints_wrapper(
+                    outer_body_fn, (x, y), {}, hints={"outer_body": True}
+                )
+                return res
+
+        x = torch.randn(2, 4)
+        y = torch.ones(4)
+
+        ep = export(M(), (x, y))
+        export_res = ep.module()(x, y)
+        ref_res = M()(x, y)
+        self.assertEqual(export_res, ref_res)
+        self.assertExpectedInline(
+            normalize_gm(ep.graph_module.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x: "f32[2, 4]", y: "f32[4]"):
+        add: "f32[2, 4]" = torch.ops.aten.add.Tensor(x, y);  x = None
+
+        hints_wrapper_body_graph_0 = self.hints_wrapper_body_graph_0
+        hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_graph_0, (add, y), {}, hints = {'outer_body': True});  hints_wrapper_body_graph_0 = add = y = None
+        getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+        return (getitem,)
+
+    class hints_wrapper_body_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2, 4]", arg1_1: "f32[4]"):
+            hints_wrapper_body_graph_0 = self.hints_wrapper_body_graph_0
+            hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_graph_0, (arg0_1, arg1_1), {}, hints = {'inner_body': True});  hints_wrapper_body_graph_0 = arg0_1 = arg1_1 = None
+            getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+            abs_1: "f32[2, 4]" = torch.ops.aten.abs.default(getitem);  getitem = None
+            return (abs_1,)
+
+        class hints_wrapper_body_graph_0(torch.nn.Module):
+            def forward(self, arg0_1: "f32[2, 4]", arg1_1: "f32[4]"):
+                relu: "f32[2, 4]" = torch.ops.aten.relu.default(arg0_1);  arg0_1 = None
+                add: "f32[2, 4]" = torch.ops.aten.add.Tensor(relu, arg1_1);  relu = arg1_1 = None
+                return (add,)
+""",
         )
 
 

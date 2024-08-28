@@ -367,6 +367,7 @@ class TestAutograd(TestCase):
         x = torch.ones(1, requires_grad=True)
         torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_set_materialize_non_diff_grads(self):
         class Func(torch.autograd.Function):
             @staticmethod
@@ -3307,6 +3308,7 @@ class TestAutograd(TestCase):
         y = x.masked_fill(mask, 0)
         y.sum().backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_mark_non_differentiable_mixed(self):
         class MyFunction(Function):
             @staticmethod
@@ -4097,6 +4099,7 @@ class TestAutograd(TestCase):
             assert_strict_equal(xc, x)
             assert_strict_equal(yc, y)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_dep_nograd(self):
         class F1(Function):
             @staticmethod
@@ -8785,6 +8788,7 @@ for shape in [(1,), ()]:
 
         gradcheck(Func.apply, (a,), check_forward_ad=True)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_custom_function_forward_mode_non_differentiable(self):
         # returns differentiable type, marked non-differentiable
         class Func(torch.autograd.Function):

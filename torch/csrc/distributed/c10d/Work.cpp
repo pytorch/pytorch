@@ -1,7 +1,7 @@
 #include <ATen/ThreadLocalState.h>
 
+#include <torch/csrc/distributed/c10d/LockGuard.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
-#include <torch/csrc/distributed/c10d/logging.h>
 #include <utility>
 
 namespace c10d {

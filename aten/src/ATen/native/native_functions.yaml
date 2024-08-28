@@ -3920,11 +3920,10 @@
   tags: core
 
 # For normal naming convention this should be `mean.out`. However since we already have `mean.out` we have to rename this.
-# FIXME: fix CI jobs and re-enable this
-#- func: mean.dtype_out(Tensor self, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-#  device_check: NoCheck   # TensorIterator
-#  dispatch:
-#    CompositeExplicitAutograd: mean_dtype_out
+- func: mean.dtype_out(Tensor self, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CompositeExplicitAutograd: mean_dtype_out
 
 - func: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: mean.out
@@ -14764,7 +14763,7 @@
     CPU: _scaled_dot_product_flash_attention_cpu
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias=None, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable
   tags: nondeterministic_seeded
