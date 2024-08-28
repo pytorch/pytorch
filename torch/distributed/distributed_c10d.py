@@ -1712,8 +1712,10 @@ def _new_process_group_helper(
         group_rank,
         group_size,
     )
-    assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
-    pg._set_default_backend(Backend.backend_type_map[backend])
+    # Set the default backend when only single backend is passed in.
+    if "," not in str(backend) and ":" not in str(backend):
+        assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
+        pg._set_default_backend(Backend.backend_type_map[backend])
     if device_id:
         pg.bound_device_id = device_id
     backend_config = BackendConfig(backend)
