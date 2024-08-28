@@ -182,14 +182,19 @@ class BuiltinVariable(VariableTracker):
     def can_constant_fold_through(self):
         return self.fn in self._constant_fold_functions()
 
-    def is_unfoldable_op(self):
-        unfoldable_ops = {
+    @staticmethod
+    @functools.lru_cache(None)
+    def _unfoldable_ops():
+        unfs = {
             operator.delitem,
             operator.setitem,
         }
         if sys.version_info >= (3, 11):
-            unfoldable_ops.add(operator.call)
-        return self.fn in unfoldable_ops
+            unfs.add(operator.call)
+        return unfs
+
+    def is_unfoldable_op(self):
+        return self.fn in self._unfoldable_ops()
 
     @staticmethod
     @functools.lru_cache(None)
