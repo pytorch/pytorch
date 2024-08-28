@@ -25,15 +25,16 @@ struct VecMaskLoad<
       const VecMask<mask_t, mask_n>& vec_mask) {
     at::vec::Vectorized<T> zero_vec(0);
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
-    VecMask<mask_t, 2> tmp_mask;
+    VectorizedN<mask_t, 2> tmp_vec;
     VectorizedN<T, dst_n> result;
 #ifndef _MSC_VER
 #pragma unroll
 #endif
     for (int i = 0; i < dst_n; i++) {
-      tmp_mask[0] = vec_mask[2 * i];
-      tmp_mask[1] = vec_mask[2 * i + 1];
-      auto int_mask = tmp_mask.template cast<int, 1>()[0];
+      tmp_vec[0] = vec_mask[2 * i];
+      tmp_vec[1] = vec_mask[2 * i + 1];
+      auto int64_mask = VecMask<mask_t, 2>(tmp_vec).template cast<int64_t, 2>();
+      auto int_mask = int64_mask.template cast<int, 1>()[0];
       auto mmask = _mm512_cmp_epi32_mask(int_mask, all_ones, _MM_CMPINT_EQ);
       if constexpr (std::is_same_v<T, float>) {
         result[i] = Vectorized<T>(_mm512_mask_loadu_ps(
@@ -47,29 +48,27 @@ struct VecMaskLoad<
   }
 };
 
-template <typename T, int dst_n, typename mask_t, int mask_n>
+template <typename T, int dst_n, typename mask_t>
 struct VecMaskLoad<
     T,
     dst_n,
     mask_t,
-    mask_n,
+    dst_n,
     typename std::enable_if_t<
-        (mask_n == dst_n && dst_n >= 1) &&
-            (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
-             std::is_same_v<T, uint32_t>),
+        std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
+            std::is_same_v<T, uint32_t>,
         void>> {
   static inline VectorizedN<T, dst_n> apply(
       const T* ptr,
-      const VecMask<mask_t, mask_n>& vec_mask) {
+      const VecMask<mask_t, dst_n>& vec_mask) {
     at::vec::Vectorized<T> zero_vec(0);
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
-    VecMask<mask_t, 1> tmp_mask;
     VectorizedN<T, dst_n> result;
 #ifndef _MSC_VER
 #pragma unroll
 #endif
     for (int i = 0; i < dst_n; i++) {
-      tmp_mask[0] = vec_mask[i];
+      auto tmp_mask = VecMask<mask_t, 1>(vec_mask[i]);
       auto int_mask = tmp_mask.template cast<int, 1>()[0];
       auto mmask = _mm512_cmp_epi32_mask(int_mask, all_ones, _MM_CMPINT_EQ);
       if constexpr (std::is_same_v<T, float>) {
