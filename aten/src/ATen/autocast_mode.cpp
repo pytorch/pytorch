@@ -54,7 +54,7 @@ thread_local int nesting = 0;
 static_assert(
     at::COMPILE_TIME_MAX_DEVICE_TYPES == 21,
     "The definition of the default autocast data type per device backend doesn't match with the definition of the device type.");
-std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     autocast_dtype = {
         at::kBFloat16, // CPU
         at::kHalf, // CUDA.
@@ -102,7 +102,6 @@ at::ScalarType get_autocast_dtype(at::DeviceType device_type) {
 }
 
 void set_autocast_dtype(at::DeviceType device_type, at::ScalarType dtype) {
-  const std::lock_guard<std::mutex> lock(cached_casts_mutex);
   autocast_dtype[static_cast<int>(device_type)] = dtype;
 }
 
