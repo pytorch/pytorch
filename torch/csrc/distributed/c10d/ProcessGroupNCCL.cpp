@@ -4063,8 +4063,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   auto barDevice = at::Device(at::DeviceType::CUDA, barDevIdx);
 
   // Create a dummy tensor on the device
+  // Note: we use zeros() instead of empty() to prevent barrier from triggering
+  // alarm when NaN checker is enabled.
   at::Tensor barrierTensor =
-      at::empty({1}, at::TensorOptions().device(barDevice).dtype(at::kFloat));
+      at::zeros({1}, at::TensorOptions().device(barDevice).dtype(at::kFloat));
 
   // All reduce to achieve the barrier
   auto work = allreduce_impl(barrierTensor);
