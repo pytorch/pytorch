@@ -1437,7 +1437,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 x_linear = self.linear(x_conv)
                 return x_linear.cos() + y_conv_1d.sum()
 
-        ep = torch.export._trace._export_for_training(
+        ep = torch.export.export_for_training(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
         ep_has_linear_convd = ep.run_decompositions(
@@ -1570,7 +1570,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 return self.linear(x)
 
         eager_model = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model, (torch.ones(2, 2),)
         )
         self.assertExpectedInline(
@@ -1609,7 +1609,7 @@ def forward(self, x):
 
         eager_model_for_export = Foo()
         eager_model_for_testing = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model_for_export, (torch.ones(4, 4),)
         )
         self.assertExpectedInline(
@@ -1654,7 +1654,7 @@ def forward(self, x):
         eager_model_for_export_training = Foo()
         eager_model_for_export_inference = Foo()
         eager_model_for_testing = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model_for_export_training,
             (torch.ones(4, 4),),
             dynamic_shapes=({0: Dim("x")},),
@@ -1691,7 +1691,7 @@ def forward(self, x):
                 return x + y + self.buffer.sum()
 
         eager_model = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model,
             ([torch.ones(4, 4), torch.ones(4, 4)],),
         )
@@ -1717,7 +1717,7 @@ def forward(self, x):
                 return self.linear(x) + self.buffer.sum()
 
         eager_model = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model,
             (torch.ones(2, 2),),
         )
