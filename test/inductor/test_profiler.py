@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import json
 import unittest
+from typing import Callable, Optional
 
 import torch
 import torch._inductor.test_case
@@ -47,7 +48,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             any(("name" in event and kernel_name == event["name"]) for event in events)
         )
 
-    def _test_profiling_kernel_names(self, fn, args, kernel_name_str: str):
+    def _test_profiling_kernel_names(
+        self, fn, args, kernel_name_str: str, check_fn: Optional[Callable] = None
+    ):
         """
         We expect a record_function event to be added on the CPU side, surrounding
         the launch of each triton kernel.
@@ -56,6 +59,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
         for _ in range(2):
             fn_opt(*args)
+
+        if check_fn is not None:
+            check_fn()
 
         with torch.profiler.profile(
             activities=[ProfilerActivity.CPU], record_shapes=True
@@ -107,7 +113,21 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
             args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
 
-            events = self._test_profiling_kernel_names(fn, args, "mm")
+            def check_fn():
+                # test_profiling_kernel_names will check this before asserting mm is in the trace.
+                # reason: sometimes testing runs on machines with not enough SMs, and autotuning is skipped.
+                if (
+                    torch._dynamo.utils.counters["inductor"][
+                        "select_algorithm_autotune"
+                    ]
+                    == 0
+                ):
+                    raise unittest.SkipTest(
+                        "select_algorithm didn't run, we probably won't get profiling data. GPU might not have enough SMs."
+                    )
+
+            events = self._test_profiling_kernel_names(fn, args, "mm", check_fn)
+
             event_found = False
             for event in events:
                 if event.name == "triton_tem_fused_mm_0":

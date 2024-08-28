@@ -12,6 +12,7 @@ import functools
 import gc
 import inspect
 import itertools
+import os
 import random
 import unittest
 import warnings
@@ -43,6 +44,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.two_tensor import TwoTensor
@@ -963,7 +965,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         # (dynamic shapes, static shapes)
         self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (94, 106, 121))
+        self.assertIn(cnt.op_count, (92, 106, 119))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -1924,6 +1926,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(b(y), y.sin().cos()))
 
+    @skipIfWindows(
+        msg="torch._dynamo.exc.TorchRuntimeError: Failed running call_function <class 'torch.LongTensor'>(*(FakeTensor(..., size=(10,), dtype=torch.int32),), **{}):"  # noqa: B950
+    )
     def test_longtensor_list(self):
         for partition in [0, 5, 10]:
 
@@ -4917,6 +4922,55 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    def test_super_staticmethod(self):
+        class Parent:
+            @staticmethod
+            def greet():
+                return 5
+
+        class Child(Parent):
+            @staticmethod
+            def greet(x):
+                return x * super(Child, Child).greet()
+
+        child = Child()
+
+        def fn(x):
+            return child.greet(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_super_diamond(self):
+        class A:
+            def __init__(self):
+                super().__init__()
+                self.a = 5
+
+        class Nothing:
+            pass
+
+        class B(Nothing, A):
+            def __init__(self):
+                super().__init__()
+                self.b = 10
+
+            def run(self, x):
+                return self.a * self.b * x
+
+        def fn(x):
+            b = B()
+            return b.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_vc_bumped_in_inference_graph(self):
         @torch.compile
         def f(x):
@@ -5016,6 +5070,28 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(v.foo, 200)
         self.assertEqual(v.data.shape, (10, 20))
         self.assertEqual(type(v), Matrix)
+
+    def test_classmethod_with_slots(self):
+        class Mock:
+            __slots__ = ("_a",)
+
+            def __init__(self):
+                self._a = 2
+
+            @classmethod
+            def _m(cls):
+                return 3
+
+            def run(self, x):
+                return torch.sin(x) * self._a * self._m()
+
+        def fn(x):
+            mock = Mock()
+            return mock.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_nn_parametrize(self):
         class Module(nn.Module):
@@ -5467,6 +5543,65 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
 
+    # https://github.com/pytorch/pytorch/issues/132200
+    def test_partitioner_cse_respects_mutation_boundaries(self):
+        set_available = hasattr(torch.ops, "fsdp") and hasattr(torch.ops.fsdp, "set_")
+        if not set_available:
+            return
+
+        @torch.compile(backend="aot_eager_decomp_partition")
+        def f(x, l):
+            # z0 and z1 can be CSEd
+            z0 = x.sin()
+            z1 = x.sin()
+            y = x + 1
+            torch.ops.fsdp.set_.default(x, y)
+            # z3 and z3 can be CSEd with each other,
+            # but *not* with z0/z1 (they cross a mutation boundary)
+            z2 = x.sin()
+            z3 = x.sin()
+            return z0, z1, z2, z3, l**2
+
+        x = torch.randn(3)
+        x_clone = x.clone()
+        l = torch.randn(3, requires_grad=True)
+        z0, z1, z2, z3, _ = f(x, l)
+
+        # the partitioner runs CSE. We expect that of the 4 sin() ops above:
+        # - the first 2 are CSE'd
+        # - the last 2 are CSE'd
+        # - the set_() op in the middle is a mutation barrier, preventing CSE
+        self.assertEqual(z0, (x_clone).sin())
+        self.assertEqual(z1, (x_clone).sin())
+        self.assertEqual(z2, (x_clone + 1).sin())
+        self.assertEqual(z3, (x_clone + 1).sin())
+
+    # https://github.com/pytorch/pytorch/issues/132197
+    def test_fsdp_set_input_mutation_applied_when_input_gets_no_gradients(self):
+        set_available = hasattr(torch.ops, "fsdp") and hasattr(torch.ops.fsdp, "set_")
+        if not set_available:
+            return
+
+        @torch.compile(backend="aot_eager_decomp_partition")
+        def f(x, l):
+            z = x.sin()
+            y = x + 1
+            # graph input has its storage mutated
+            torch.ops.fsdp.set_.default(x, y)
+            z2 = x.sin()
+            return z2, l**2
+
+        x = torch.randn(3)
+        x_test = x.clone()
+        l = torch.randn(3, requires_grad=True)
+        result, _ = f(x, l)
+        result_test, _ = torch.compile(f, backend="aot_eager_decomp_partition")(
+            x_test, l
+        )
+
+        self.assertEqual(result, result_test)
+        self.assertEqual(x, x_test)
+
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -5489,6 +5624,64 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertTrue(cnt.frame_count <= 2)
 
+    @torch._dynamo.config.patch(guard_nn_modules=False)
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_inlining_cornercase(self):
+        """
+        nn.Modules can be mapped to either NNModuleVariable or UnspecializedNNModuleVariable. For NNModuleVariable, the
+        tensor attributes become part of the Dynamo graph. For unspecialized, they are lifted as inputs.
+
+        But there is a cornercase. Suppose you have NNModuleVariable with a submodule that is
+        UnspecializedNNModuleVariable. Today, Dynamo will still consider the submodule as specialized (courtesy of
+        guard.source().is_nn_module()). In retrospect, this is a mistake but there are dependencies of export and also
+        cudagraphs which make it harder to fix the corner case right away. The long term solution is
+        inline_inbuilt_nn_modules anyways, so we might have to live with this cornercase in the short term.
+
+        We are starting to annotate the source of each nn module more precisely - NNModuleVariable attribute is marked
+        as NNModuleSource, UnspecilaizedNNModuleVariable attribute is marked as UnspecializedNNModuleSource. But this
+        changes the behavior for the cornercase. And fails some tests which have unfortunately relied on this behavior.
+
+
+        To solve this, we tag the source only when inline_inbuilt_nn_module flag is turned on.
+
+        In this test, we purposely turn the flag off, testing that the tagging is disabled.
+        """
+
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+                self.a = torch.randn(1, 1)
+                self.counter = 0
+                self.multipliers = [2.2, 3.3]
+
+            def forward(self, x):
+                self.counter += 1
+                return (
+                    self.linear(x) * self.a * self.multipliers[0] * self.multipliers[1]
+                )
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubMod()
+
+            def forward(self, x):
+                return self.submod(x)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager")
+
+        x = torch.randn(1, 1)
+        ref = mod(x)
+        res = opt_mod(x)
+
+        mod.submod.multipliers = [3.3, 4.4]
+        # Since guard_nn_modules is False, this will not recompile
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            ref = mod(x)
+            res = opt_mod(x)
+
     def test_optimized_module_training(self):
         mod = torch.nn.Linear(3, 3)
         mod.eval()
@@ -5502,6 +5695,62 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         mod.eval()
         self.assertFalse(opt_mod.training)
+
+    @requires_cuda
+    def test_memleak_when_graph_input_has_tensor_attr(self):
+        @torch.compile(backend="eager")
+        def f(x):
+            x.add_(1)
+
+        mem_before = torch.cuda.memory_allocated()
+
+        x = torch.ones(2, device="cuda")
+        x.foo = torch.zeros(2, device="cuda")
+        f(x)
+        del x.foo
+        del x
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+        # check when non-tensor data structure attribute contains a tensor
+        @torch.compile(backend="eager")
+        def f(x):
+            x.add_(1)
+
+        mem_before = torch.cuda.memory_allocated()
+        x = torch.ones(2, device="cuda")
+        x.foo = [torch.zeros(2, device="cuda") for _ in range(5)]
+        f(x)
+        del x.foo
+        del x
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+        # check with tensor refcycle
+        @torch.compile(backend="eager")
+        def g(x, y):
+            return x + y
+
+        mem_before = torch.cuda.memory_allocated()
+        x = torch.ones(2, device="cuda")
+        y = torch.zeros(2, device="cuda")
+        x.foo = [y]
+        y.foo = [x]
+        g(x, y)
+        del x.foo
+        del y.foo
+        del x
+        del y
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+    def test_os_fspath(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            os.fspath(".")
+            return torch.sin(x)
+
+        fn(torch.randn(4))
 
 
 instantiate_parametrized_tests(ReproTests)

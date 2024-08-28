@@ -911,6 +911,9 @@ inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
           DispatchKeySet(
               {DispatchKey::Functionalize,
                DispatchKey::PythonTLSSnapshot,
+               DispatchKey::FuncTorchGradWrapper,
+               DispatchKey::FuncTorchVmapMode,
+               DispatchKey::FuncTorchBatched,
                DispatchKey::Python}))
       .highestPriorityTypeId();
 }

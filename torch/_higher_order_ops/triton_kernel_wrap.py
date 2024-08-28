@@ -590,24 +590,16 @@ def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
 def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     mode, *, kernel_idx, constant_args_idx, grid, kwargs
 ):
-    if mode.enable_tracing:
-        trace_triton_kernel_wrapper(
-            mode,
-            triton_kernel_wrapper_mutation,
-            {
-                "kernel_idx": kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": grid,
-                "kwargs": kwargs,
-            },
-        )
-    else:
-        triton_kernel_wrapper_mutation(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            kwargs=kwargs,
-        )
+    trace_triton_kernel_wrapper(
+        mode,
+        triton_kernel_wrapper_mutation,
+        {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "kwargs": kwargs,
+        },
+    )
 
     return None
 
@@ -691,25 +683,17 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
 def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     mode, *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
 ):
-    if mode.enable_tracing:
-        return trace_triton_kernel_wrapper(
-            mode,
-            triton_kernel_wrapper_functional,
-            {
-                "kernel_idx": kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": grid,
-                "kwargs": kwargs,
-                "tensors_to_clone": tensors_to_clone,
-            },
-        )
-    else:
-        return triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx,
-            grid=grid,
-            kwargs=kwargs,
-            tensors_to_clone=tensors_to_clone,
-        )
+    return trace_triton_kernel_wrapper(
+        mode,
+        triton_kernel_wrapper_functional,
+        {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "kwargs": kwargs,
+            "tensors_to_clone": tensors_to_clone,
+        },
+    )
 
 
 @triton_kernel_wrapper_functional.py_functionalize_impl
@@ -1020,9 +1004,21 @@ class TraceableTritonKernelWrapper:
         return tracing_triton_hopifier_singleton.call_getitem(self, args)
 
     def run(self, *args, **kwargs):
-        return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
+        from torch._library.triton import is_capture_triton_enabled
+
+        if is_capture_triton_enabled():
+            return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
+        else:
+            assert self.kernel is not None
+            return self.kernel.run(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        return tracing_triton_hopifier_singleton.call_triton_kernel(
-            self, args, kwargs, None
-        )
+        from torch._library.triton import is_capture_triton_enabled
+
+        if is_capture_triton_enabled():
+            return tracing_triton_hopifier_singleton.call_triton_kernel(
+                self, args, kwargs, None
+            )
+        else:
+            assert self.kernel is not None
+            return self.kernel[self.grid](*args, **kwargs)
