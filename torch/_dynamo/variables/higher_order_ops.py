@@ -1122,10 +1122,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, input, dim, reverse):
-            return combine_fn, input, dim, reverse
+        def arg_extractor(combine_fn, input, dim):
+            return combine_fn, input, dim
 
-        combine_fn, input, dim, reverse = arg_extractor(*args, **kwargs)
+        combine_fn, input, dim = arg_extractor(*args, **kwargs)
 
         if input.python_type() != list:
             unimplemented(
@@ -1217,7 +1217,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             make_attr(tx, combine_fn_name),
             input_proxy,
             dim.as_proxy(),
-            reverse.as_proxy(),
         )
 
         with tx.fake_mode:
