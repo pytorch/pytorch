@@ -949,6 +949,7 @@ class CppVecOverrides(CppOverrides):
             code = BracesBuffer()
             code.writeline("[&]()")
             vec_dtype = args[0].dtype
+            n_vec = kernel._get_num_vectors(vec_dtype)
             tiling_factor = kernel.tiling_factor
             scalar_args = []
             cdtype = DTYPE_TO_CPP[vec_dtype]
@@ -980,13 +981,12 @@ class CppVecOverrides(CppOverrides):
                 with code.indent():
                     code.writeline(f"tmpbuf_out[i] = {res};")
                 if output_mask:
-                    n_vec = kernel._get_num_vectors(vec_dtype)
                     code.writeline(
                         f"return at::vec::VecMask<{cdtype},{n_vec}>::from(tmpbuf_out.data());"
                     )
                 else:
                     code.writeline(
-                        f"return at::vec::Vectorized<{cdtype}>::loadu(tmpbuf_out.data(), {tiling_factor});"
+                        f"return at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu(tmpbuf_out.data(), {tiling_factor});"
                     )
             code.writeline("()")
             return code
@@ -1618,6 +1618,52 @@ class CppVecOverrides(CppOverrides):
             )
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
+
+    @staticmethod
+    def frexp(x):
+        cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
+        if all(cache_key in V.kernel.cse.cache for cache_key in cache_keys):
+            return tuple(V.kernel.cse.cache[cache_key] for cache_key in cache_keys)
+
+        cdtype = DTYPE_TO_CPP[x.dtype]
+        tiling_factor = V.kernel.tiling_factor
+        code = BracesBuffer()
+        exponent = V.kernel.cse.newvar()
+        mantissa = V.kernel.cse.newvar()
+        exponent.update_on_args("frexp", (x,), kwargs={})
+        mantissa.update_on_args("frexp", (x,), kwargs={})
+        n_vec = V.kernel._get_num_vectors(x.dtype)
+        code.writeline(f"at::vec::Vectorized<int32_t> {exponent};")
+        code.writeline(f"at::vec::VectorizedN<{cdtype}, {n_vec}> {mantissa};")
+        code.writeline("[&]()")
+        with code.indent():
+            code.writeline(
+                f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf;"
+            )
+            code.writeline(f"{x}.store(tmpbuf.data(), {tiling_factor});")
+            code.writeline(
+                f"__at_align__ std::array<int32_t, {tiling_factor}> tmpbuf_exponent;"
+            )
+            code.writeline(
+                f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf_mantissa;"
+            )
+            code.writeline(f"for (int i = 0; i < {tiling_factor}; i++)")
+            with code.indent():
+                code.writeline(
+                    "tmpbuf_mantissa[i] = std::frexp(tmpbuf[i], &tmpbuf_exponent[i]);"
+                )
+            code.writeline(
+                f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {tiling_factor});"
+            )
+            code.writeline(
+                f"{mantissa} = at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu(tmpbuf_mantissa.data(), {tiling_factor});"
+            )
+        code.writeline("();")
+        V.kernel.compute.splice(code)
+        cse_vars = (mantissa, exponent)
+        for cache_key, cse_var in zip(cache_keys, cse_vars):
+            V.kernel.cse.cache[cache_key] = cse_var
+        return mantissa, exponent
 
 
 CppVecOverrides._initialize_pointwise_overrides("cppvec")
