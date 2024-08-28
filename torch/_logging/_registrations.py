@@ -47,6 +47,12 @@ register_log(
         "torch._export.non_strict_utils",
     ],
 )
+register_log(
+    "subclasses",
+    [
+        "torch._dynamo.backends.debugging",
+    ],
+)
 
 register_artifact(
     "guards",
@@ -148,6 +154,11 @@ register_artifact(
 register_artifact(
     "schedule",
     "Inductor scheduler information. Useful if working on Inductor fusion algo",
+    off_by_default=True,
+)
+register_artifact(
+    "subclasses",
+    "TBD",
     off_by_default=True,
 )
 register_artifact("perf_hints", "", off_by_default=True)

@@ -1478,6 +1478,10 @@ TEST_WITH_AOT_EAGER: bool = TestEnvironment.def_flag(
     "TEST_WITH_AOT_EAGER",
     env_var="PYTORCH_TEST_WITH_AOT_EAGER",
 )
+TEST_WITH_SUBCLASSES: bool = TestEnvironment.def_flag(
+    "TEST_WITH_SUBCLASSES",
+    env_var="PYTORCH_TEST_WITH_SUBCLASSES",
+)
 TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
     "TEST_WITH_TORCHDYNAMO",
     env_var="PYTORCH_TEST_WITH_DYNAMO",
@@ -2972,7 +2976,7 @@ class TestCase(expecttest.TestCase):
         test_cls = super_run.__self__
 
         # Are we compiling?
-        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR
+        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR or TEST_WITH_SUBCLASSES
         # Is the class strict and compiling?
         strict_default = False
         should_reset_dynamo = False
@@ -3024,6 +3028,8 @@ class TestCase(expecttest.TestCase):
                 super_run = torch._dynamo.optimize("inductor")(super_run)
             elif TEST_WITH_AOT_EAGER:
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
+            elif TEST_WITH_SUBCLASSES:
+                super_run = torch._dynamo.optimize("test_subclasses")(super_run)
             elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
                 # Assume eager-generated GraphModules will not error out.

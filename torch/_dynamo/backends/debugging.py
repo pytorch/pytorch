@@ -4,13 +4,17 @@ import dataclasses
 import functools
 import logging
 from importlib import import_module
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional, Type
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
-from torch import _guards
+from torch import _guards, Tensor
+from torch._dynamo.source import LocalSource
+from torch._dynamo.variables.builder import GraphArg
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.weak import TensorWeakRef
 
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
@@ -148,6 +152,140 @@ register_backend(
 # by using the relevant fuser with torch.jit.fuser(...)
 aot_ts = aot_autograd(fw_compiler=ts_compile)
 register_backend(name="aot_ts", compiler_fn=aot_ts)
+
+
+def _try_lift_tensor_arguments(gm, inputs):
+    placeholders = {}
+    i = 0
+    added_inputs = []
+    for n in gm.graph.nodes:
+        if n.op == "placeholder":
+            placeholders[n] = inputs[i]
+            i += 1
+        elif n.op == "call_function":
+            if len(n.kwargs) != 0:
+                continue
+            node_args = [a for a in n.args if isinstance(a, torch.fx.Node)]
+            other_args = [a for a in n.args if not isinstance(a, torch.fx.Node)]
+
+            is_output_tensor = isinstance(n.meta["example_value"], Tensor)
+
+            if (
+                is_output_tensor
+                and all(
+                    (a in placeholders and isinstance(a, (bool, int, float)))
+                    for a in node_args
+                )
+                and all(isinstance(a, (bool, int, float)) for a in other_args)
+            ):
+                real_args = [placeholders.get(a, a) for a in n.args]
+                new_real_arg = n.target(*real_args)
+
+                with gm.graph.inserting_before(n):
+                    name = f"lifted_arg_{len(added_inputs)}"
+                    new_input_node = gm.graph.placeholder(name, type_expr=Tensor)
+                    added_inputs.append(new_real_arg)
+                    new_input_node.meta["grapharg"] = GraphArg(
+                        source=LocalSource(name),
+                        _example=TensorWeakRef(new_real_arg),
+                        pass_arg_as_tensor=False,
+                        fake_tensor=None,
+                        is_tensor=True,
+                        example_strong_ref=new_real_arg,
+                    )
+                    n.replace_all_uses_with(new_input_node)
+
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+
+    new_inputs = [*inputs, *added_inputs]
+
+    log.debug(
+        "test_subclasses _try_lift_tensor_arguments graph after lifting: inputs:%s result:%s",
+        new_inputs,
+        gm.print_readable(False),
+    )
+    return gm, new_inputs
+
+
+@register_backend
+def test_subclasses(gm, inputs, **kwargs):
+    if kwargs:
+        log.warning("test_subclasses backend ignoring extra kwargs %s", kwargs)
+
+    log.debug(
+        "test_subclasses backend call inputs:%s gm:%s", inputs, gm.print_readable(False)
+    )
+
+    import copy
+
+    test_gm = copy.deepcopy(gm)
+    test_inputs = copy.deepcopy(inputs)
+
+    compiler_fn = aot_eager
+
+    # Verify original inputs
+    compiler_fn(test_gm, test_inputs)
+
+    MAX_NUM_TEST_INPUTS: int = 3
+
+    from torch.testing._internal.two_tensor import TwoTensor
+
+    TRANSFORMATIONS: List[Callable[[Tensor], Type]] = [
+        (lambda t: TwoTensor(t, t), True),
+        (lambda t: t, False),
+    ]
+
+    def _is_tensor(t):
+        return isinstance(t, Tensor)
+
+    def _is_tensor_subclass(t):
+        return is_traceable_wrapper_subclass(t)
+
+    if not any(_is_tensor(t) for t in inputs):
+        # Try to find tensor creations with inputs and lift as arguments
+        test_gm, test_inputs = _try_lift_tensor_arguments(test_gm, test_inputs)
+
+        if not any(_is_tensor(t) for t in inputs):
+            log.debug("No tensor inputs")
+            return gm
+
+    def apply_transformation(inps, transform_tensor_subclasses: bool = False):
+        import random
+
+        random.seed(42)
+        for j in range(len(inps)):
+            inp = inps[j]
+            if _is_tensor(inp) and (
+                not transform_tensor_subclasses or not _is_tensor_subclass(inp)
+            ):
+                tt = TRANSFORMATIONS[random.randrange(0, len(TRANSFORMATIONS))]
+
+                test_inputs[j] = tt[0](inp)
+                if tt[1]:
+                    return True
+
+        return False
+
+    for i in range(MAX_NUM_TEST_INPUTS):
+        if not apply_transformation(test_inputs) and not apply_transformation(
+            test_inputs, True
+        ):
+            break
+
+        log.info(
+            "test_subclasses backend testing %d transformed inputs:%s gm:%s",
+            i,
+            test_inputs,
+            test_gm.print_readable(False),
+        )
+
+        aot_eager(test_gm, test_inputs)
+
+        log.info("test_subclasses backend testing %d OK", i)
+
+    return gm
+
 
 # These buggy backends are used for inducing bugs so that we can test
 # our repro extraction / minifier scripts
