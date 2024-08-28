@@ -832,9 +832,6 @@ def mps_ops_modifier(ops):
         # Unsupported dtypes
         # bmm is not supported for integral types
         'nn.functional.bilinear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # Cannot convert a MPS Tensor to float64 dtype. The tensors
-        # input data is created with double in common_methods_invocations.py
-        'nn.functional.batch_norm': [torch.float32],
         'ones_like': None,
         'zeros_like': None,
 
@@ -2540,6 +2537,19 @@ class TestMPS(TestCaseMPS):
         outputs = y(x(inputs))
         # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
         outputs.sum().backward()
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/133520
+    def test_batch_norm_slices(self):
+        bn_cpu = nn.BatchNorm2d(100, affine=False, device='cpu')
+        bn_mps = nn.BatchNorm2d(100, affine=False, device='mps')
+
+        x_cpu = torch.randn(100, 100, 35, 45).to('cpu')
+        x_mps = x_cpu.to('mps')
+
+        res_cpu = bn_cpu(x_cpu[5:])
+        res_mps = bn_mps(x_mps[5:])
+
+        self.assertEqual(res_cpu, res_mps)
 
     def test_layer_norm_backward(self):
         inputs = torch.rand(4, 4, device="mps", requires_grad=True)

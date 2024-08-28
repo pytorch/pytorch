@@ -944,7 +944,7 @@ def CppExtension(name, sources, *args, **kwargs):
         ...             name='extension',
         ...             sources=['extension.cpp'],
         ...             extra_compile_args=['-g'],
-        ...             extra_link_flags=['-Wl,--no-as-needed', '-lm'])
+        ...             extra_link_args=['-Wl,--no-as-needed', '-lm'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension
@@ -998,7 +998,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
         ...                 sources=['extension.cpp', 'extension_kernel.cu'],
         ...                 extra_compile_args={'cxx': ['-g'],
         ...                                     'nvcc': ['-O2']},
-        ...                 extra_link_flags=['-Wl,--no-as-needed', '-lcuda'])
+        ...                 extra_link_args=['-Wl,--no-as-needed', '-lcuda'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension

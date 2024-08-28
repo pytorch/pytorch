@@ -587,6 +587,20 @@ class SideEffects:
                         create_instruction("POP_TOP"),
                     ]
                 )
+            elif isinstance(
+                var, variables.torch_function.TorchFunctionModeStackVariable
+            ):
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "set_torch_function_mode_stack"
+                    )
+                )
+                cg.foreach(var.symbolic_stack)
+                cg.append_output(
+                    create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))
+                )
+                cg.call_function(1, False)
+                cg.append_output(create_instruction("POP_TOP"))
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
@@ -649,6 +663,21 @@ class SideEffects:
                     cg(var.mutable_local.source)  # type: ignore[attr-defined]
                     cg.call_function(1, False)
                     cg.pop_top()
+            elif isinstance(var, variables.RandomVariable):
+                # set correct random seed state
+                def gen_fn():
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_attr("setstate")
+
+                cg.add_push_null(gen_fn)
+                cg(var.wrap_state(var.random.getstate()))
+
+                suffixes.append(
+                    [
+                        *create_call_function(1, False),  # setstate
+                        create_instruction("POP_TOP"),
+                    ]
+                )
             else:
                 raise AssertionError(type(var))
 

@@ -29,7 +29,7 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FUSED_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
     _get_torch_rocm_version,
 )
@@ -10134,14 +10134,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "test_meta_inplace",
                 dtypes=integral_types_and(torch.bool),
             ),
-            # FIXME: fails check
-            # https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/TensorIterator.cpp#L508-L510
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestForeach",
-                "test_parity",
-                dtypes=(torch.bool,),
-            ),
         ),
     ),
     ForeachFuncInfo(
@@ -10186,14 +10178,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "TestMeta",
                 "test_meta_outplace",
                 dtypes=complex_types_and(torch.bool),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10250,14 +10234,6 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -10306,14 +10282,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "TestMeta",
                 "test_meta_outplace",
                 dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10398,14 +10366,6 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -10485,14 +10445,6 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -10541,14 +10493,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "TestMeta",
                 "test_meta_outplace",
                 dtypes=integral_types_and(torch.bool) + complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10604,71 +10548,14 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestMeta",
-                "test_dispatch_meta_inplace",
-                device_type="cuda",
-                dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta_outplace",
-                device_type="cuda",
-                dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
                 "test_dispatch_symbolic_meta_inplace",
                 dtypes=integral_types_and(torch.bool),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestMeta",
-                "test_dispatch_symbolic_meta_inplace",
-                device_type="cuda",
-                dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta_outplace",
-                device_type="cuda",
-                dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
                 "test_meta_inplace",
                 dtypes=integral_types_and(torch.bool),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta_inplace",
-                device_type="cuda",
-                dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta_outplace",
-                device_type="cuda",
-                dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_autodiff",
-                device_type="cuda",
-                dtypes=(torch.complex128,),
             ),
         ),
     ),
@@ -10714,14 +10601,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "TestMeta",
                 "test_meta_outplace",
                 dtypes=complex_types_and(torch.bool),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10851,14 +10730,6 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -10887,22 +10758,8 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestMeta",
-                "test_dispatch_meta_inplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
                 "test_dispatch_meta_outplace",
                 dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta_outplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10913,22 +10770,8 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestMeta",
-                "test_dispatch_symbolic_meta_inplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
                 "test_dispatch_symbolic_meta_outplace",
                 dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta_outplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10939,30 +10782,8 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestMeta",
-                "test_meta_inplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
                 "test_meta_outplace",
                 dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta_outplace",
-                device_type="cuda",
-                dtypes=(torch.bfloat16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types() + (torch.bfloat16,),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -11077,14 +10898,6 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -11112,14 +10925,6 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
@@ -11154,14 +10959,6 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -11190,14 +10987,6 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
@@ -15927,8 +15716,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
@@ -15952,8 +15740,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool2d',
            aten_name='max_unpool2d',
@@ -15962,8 +15749,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
@@ -15989,8 +15775,7 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool3d',
            aten_name='max_unpool3d',
@@ -16000,8 +15785,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
@@ -16024,8 +15808,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.linear',
            aten_name='linear',
@@ -16248,9 +16031,6 @@ op_db: List[OpInfo] = [
         decorators=[],
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
         ),
     ),
     OpInfo(
@@ -16301,12 +16081,6 @@ op_db: List[OpInfo] = [
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
             # FIXME
             DecorateInfo(unittest.skip('test_cow_input does not work with efficient attention on ROCM'),
                          'TestCompositeCompliance', 'test_cow_input',
@@ -16320,24 +16094,17 @@ op_db: List[OpInfo] = [
                          'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
                          device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
-            # registered in fake_impls.py instead of _meta_registrations.py, so meta kernels will fail.
-            # However, for implementations that fall back to the constituent ops, the meta kernels may not
-            # fail. Fused kernels will fail, whereas unfused kernels will not fail.
-            # All fused kernels support bf16 and fp16 - so if fused attention is supported, the test will fail.
-            # mem_eff_attention also supports fp32 - so if it is supported the test will fail.
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
-                         dtypes=(torch.bfloat16, torch.float16), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
-            # TODO: float32 support in ROCM efficient attention
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
-                         dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                         dtypes=(torch.bfloat16, torch.float16), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                         dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+            # for element 1, was torch.Size([4, 4, 0]) but real shape was torch.Size([16, 3, 0])
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16, torch.float32],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16, torch.float32],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                         dtypes=(torch.bfloat16, torch.float16,), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                         dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),),
+                         device_type="cuda", dtypes=[torch.float32],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),),
     ),
     OpInfo(
         'torch.ops.aten._flash_attention_forward',
@@ -16353,14 +16120,14 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
         skips=(
-            # Device mismatch due to philox seed and offset
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
-            # meta implementation is in fake_impls.py instead of being a meta registration
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            # Checking the scalar value of the philox seed and offset
             # Checking the scalar value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
@@ -16388,14 +16155,14 @@ op_db: List[OpInfo] = [
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
             skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2")],
         skips=(
-            # Device mismatch due to philox seed and offset
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
-            # meta implementation is in fake_impls.py instead of being a meta registration
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16, torch.float32],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
+                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
@@ -20977,7 +20744,7 @@ op_db: List[OpInfo] = [
         # FIXME: mean needs 'dim' parameter when using the 'out' overload.
         # Adding it with 'generate_args_kwargs' does not work, since these also get passed
         # onto the reference implementations.
-        supports_out=False,
+        supports_out=True,
         assert_autodiffed=True,
         assert_jit_shape_analysis=True,
         promotes_int_to_float=True,
@@ -20985,6 +20752,9 @@ op_db: List[OpInfo] = [
         ref=reference_reduction_numpy(np.mean),
         error_inputs_func=error_inputs_mean,
         skips=(
+            # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
+            # of dtype torch.float32 into an out= with dtype torch.long
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='cuda', dtypes=[torch.float32]),
             # FIXME: mean does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: mean reduces all dimensions when dim=[]
