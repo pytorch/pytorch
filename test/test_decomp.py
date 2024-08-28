@@ -530,9 +530,6 @@ comprehensive_failures = {
         "nn.functional.interpolate", "bilinear", dtypes=(torch.uint8,)
     ),  # off by one error
     xfail(
-        "nn.functional.interpolate", "bicubic", dtypes=(torch.uint8,)
-    ),  # off by one error
-    xfail(
         "nn.functional.upsample_bilinear", "", dtypes=(torch.uint8,)
     ),  # off by one error
 }
