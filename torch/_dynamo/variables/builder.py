@@ -15,6 +15,7 @@ import random
 import re
 import sys
 import types
+import warnings
 import weakref
 from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
 
@@ -25,7 +26,7 @@ from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
-from torch._subclasses.meta_utils import is_sparse_any
+from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -218,6 +219,12 @@ static_inputs_log = torch._logging.getArtifactLogger(
 
 
 DimList = List
+
+
+def safe_has_grad(t):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+        return hasattr(t, "grad")
 
 
 class _missing:
@@ -1408,7 +1415,8 @@ class VariableBuilder:
                 or (source and source.guard_source().is_unspecialized_nn_module())
             )
         ):
-            self.mark_static_input(value, guard=False)
+            self.mark_static_input(value, guard=is_parameter_freezing())
+            is_static_input = True
 
         make_graph_attribute = is_static_input and (
             not config.inline_inbuilt_nn_modules or is_parameter_freezing()
@@ -1510,6 +1518,18 @@ class VariableBuilder:
             # export + sparsity is being added but we need to create
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
             unimplemented("torch.compile does not support sparse Tensors")
+
+        if (
+            safe_has_grad(value)
+            and safe_grad(value) is not None
+            and value.dtype != safe_grad(value).dtype
+        ):
+            unimplemented(
+                "Inconsistent dtype between tensor and its gradient. "
+                "This can happen in FSDP and crashes meta tensor creation. "
+                "This is potentially a workaround. Fixing it correctly "
+                "requires some design around FSDP + torch.compile."
+            )
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,

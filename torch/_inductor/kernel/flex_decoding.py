@@ -18,6 +18,7 @@ from .flex_attention import (
     compute_next_offset_func,
     create_indices_fake,
     create_num_blocks_fake_generator,
+    maybe_realize,
 )
 
 
@@ -160,7 +161,7 @@ flex_decoding_template = TritonTemplate(
     # first kv block we're loading
 
     # last valid block according to sparse mask
-    block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+    block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
     K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
@@ -206,7 +207,7 @@ flex_decoding_template = TritonTemplate(
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
 
         # last valid block according to sparse mask
-        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
         K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
@@ -364,7 +365,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             empty(0, device=query.get_device()) for _ in range(2)
         )
 
-    for buf in [
+    (
         query,
         key,
         value,
@@ -372,8 +373,17 @@ def create_flex_decoding_kernel(*args, **kwargs):
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-    ]:
-        buf.realize()
+    ) = maybe_realize(
+        [
+            query,
+            key,
+            value,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ]
+    )
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []

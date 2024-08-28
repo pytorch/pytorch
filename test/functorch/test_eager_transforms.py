@@ -4989,7 +4989,14 @@ def forward(self, x_1):
 
 
 def construct_sum_pyop():
-    mysum = HigherOrderOperator("mysum")
+    class MySum(HigherOrderOperator):
+        def __init__(self):
+            super().__init__("mysum")
+
+        def __call__(self, *args, **kwargs):
+            return super().__call__(*args, **kwargs)
+
+    mysum = MySum()
 
     @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
     def mysum_batch_rule(interpreter, x, dim):
