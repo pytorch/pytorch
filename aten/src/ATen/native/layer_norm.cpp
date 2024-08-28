@@ -295,13 +295,12 @@ Tensor rms_norm(
       eps_val = eps.value();
     }
 
-    at::Tensor result;
+    // upcast is needed for all dtypes
+    Tensor upcasted_input = input.to(ScalarType::Float);
+    upcasted_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
 
-    if constexpr (std::is_same_v<scalar_t, c10::Half>) {
-      result = input.mul(at::rsqrt(at::pow(input.to(at::ScalarType::Float), 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val)).to(at::ScalarType::Half));
-    } else {
-      result = input.mul(at::rsqrt(at::pow(input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val)));
-    }
+    Tensor result = input.mul(upcasted_input);
+    result = result.type_as(input);
 
     if (weight_opt.has_value()) {
       result = result.mul(weight_opt.value());
