@@ -184,6 +184,20 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             all(node.target is not torch.sigmoid for node in gm1.graph.nodes)
         )
 
+    def test_disable_no_recompile(self):
+        def gn(x):
+            return torch.cos(x)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = torch.sin(x)
+            x = torch._dynamo.disable(gn, recursive=True)(x)
+            return torch.sin(x)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(5):
+                fn(torch.randn(4))
+
     def test_allow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
