@@ -90,6 +90,7 @@ from .symbolic_convert import (
 from .trace_rules import is_numpy
 from .utils import (
     CleanupManager,
+    clear_torch_function_mode_stack,
     CompilationMetrics,
     counters,
     dynamo_timed,
@@ -104,6 +105,7 @@ from .utils import (
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
+    set_torch_function_mode_stack,
     setup_compile_debug,
     troubleshooting_url,
     write_record_to_file,
