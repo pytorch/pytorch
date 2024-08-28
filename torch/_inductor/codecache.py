@@ -1706,9 +1706,20 @@ class AotCodeCompiler:
             # Currently, this only support serializing extern nodes in fbcode
             # Eventually, we should also have a serializer for OSS.
             if serialized_extern_kernel_nodes:
-                output_json = os.path.splitext(input_path)[0] + ".json"
-                with open(output_json, "w") as f:
+                extern_kernel_nodes_json = os.path.splitext(input_path)[0] + ".json"
+                with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
+
+            # Save user provided metadata
+            if len(config.aot_inductor.metadata) > 0:
+                meta_json = os.path.splitext(input_path)[0] + "_metadata.json"
+                for k, v in config.aot_inductor.metadata.items():
+                    assert isinstance(k, str) and isinstance(
+                        v, (str)
+                    ), "Metadata must only contain strings"
+
+                with open(meta_json, "w") as f:
+                    f.write(json.dumps(config.aot_inductor.metadata))
 
             output_so = (
                 config.aot_inductor.output_path

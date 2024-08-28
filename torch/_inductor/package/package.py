@@ -129,7 +129,7 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
 
     linker_options = BuildOptionsBase(**linker_flags)
     so_builder = CppBuilder(
-        name=os.path.split(so_path)[-1],
+        name=file_name,
         sources=[output_o, consts_o],
         BuildOption=linker_options,
         output_dir=so_path,

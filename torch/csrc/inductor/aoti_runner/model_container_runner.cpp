@@ -5,6 +5,10 @@
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
+#include <nlohmann/json.hpp>
+#include <fstream>
+#include <iostream>
+
 // TODO: Investigate why this is necessary, but fixes build problems in FRL
 #if __has_include("filesystem")
 #include <filesystem>
@@ -71,13 +75,29 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
       model_so_->sym("AOTInductorModelContainerGetCallSpec"));
 
-  // Hack to find the json file name from the model so file
+  // Get serialized metadata file
   size_t lastindex = model_so_path.find_last_of('.');
-  std::string json_filename = model_so_path.substr(0, lastindex) + ".json";
+  std::string metadata_json_path =
+      model_so_path.substr(0, lastindex) + "_metadata.json";
 
-  if (file_exists(json_filename)) {
+  if (file_exists(metadata_json_path)) {
+    std::ifstream metadata_json_file(metadata_json_path);
+    TORCH_CHECK(metadata_json_file.is_open());
+    // Parse file into a map
+    nlohmann::json metadata_json_obj;
+    metadata_json_file >> metadata_json_obj;
+    for (auto& item : metadata_json_obj.items()) {
+      metadata_[item.key()] = item.value().get<std::string>();
+    }
+  }
+
+  // Get serialized extern node json file
+  std::string extern_node_json_file =
+      model_so_path.substr(0, lastindex) + ".json";
+
+  if (file_exists(extern_node_json_file)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-        json_filename, device_str == "cpu");
+        extern_node_json_file, device_str == "cpu");
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
   }
@@ -194,6 +214,11 @@ std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       get_call_spec_func_(container_handle_, &in_spec, &out_spec));
   return {in_spec, out_spec};
+}
+
+std::unordered_map<std::string, std::string> AOTIModelContainerRunner::
+    get_metadata() {
+  return metadata_;
 }
 
 std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&

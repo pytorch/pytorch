@@ -1,7 +1,10 @@
 # Owner(s): ["module: inductor"]
 import copy
+import os
 import sys
 import unittest
+from dataclasses import dataclass
+from typing import Callable
 
 import torch
 from torch._inductor import config
@@ -23,7 +26,13 @@ except (unittest.SkipTest, ImportError) as e:
     raise
 
 
-def compile(model, example_inputs, dynamic_shapes, options, device):
+@dataclass
+class CompiledResult:
+    package_path: str
+    compiled_model: Callable
+
+
+def compile(model, example_inputs, dynamic_shapes, options, device) -> CompiledResult:
     ep = torch.export.export(
         model,
         example_inputs,
@@ -33,7 +42,7 @@ def compile(model, example_inputs, dynamic_shapes, options, device):
     gm = ep.module()
     package_path = torch._inductor.aot_compile(gm, example_inputs, options=options)  # type: ignore[arg-type]
     compiled_model = load_package(package_path, device)
-    return compiled_model
+    return CompiledResult(package_path, compiled_model)
 
 
 def check_model(
@@ -45,7 +54,7 @@ def check_model(
     disable_constraint_solver=False,
     atol=None,
     rtol=None,
-):
+) -> CompiledResult:
     with torch.no_grad(), config.patch(
         {
             "aot_inductor.package": True,
@@ -59,7 +68,7 @@ def check_model(
         expected = ref_model(*ref_inputs)
 
         torch.manual_seed(0)
-        compiled_model = compile(
+        compiled_result = compile(
             model,
             example_inputs,
             dynamic_shapes,
@@ -67,9 +76,10 @@ def check_model(
             self.device,
         )
 
-        actual = compiled_model(*example_inputs)
+        actual = compiled_result.compiled_model(*example_inputs)
 
     self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+    return compiled_result
 
 
 class AOTInductorTestsTemplate:
@@ -98,6 +108,40 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_metadata(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        metadata = {"device": str(self.device)}
+        compiled_result = self.check_model(
+            Model(), example_inputs, options={"aot_inductor.metadata": metadata}
+        )
+
+        so_path = next(
+            os.path.join(root, file)
+            for root, dirs, files in os.walk(compiled_result.package_path)
+            for file in files
+            if file.endswith("so")
+        )
+
+        if metadata["device"] == "cpu":
+            runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
+        elif metadata["device"] == "cuda" or metadata["device"].startswith("cuda:"):
+            runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, metadata["device"])  # type: ignore[assignment, call-arg]
+
+        loaded_metadata = runner.get_metadata()
+        self.assertEqual(len(loaded_metadata), 1)
+        self.assertEqual(loaded_metadata.get("device"), str(self.device))
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)

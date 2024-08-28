@@ -42,6 +42,7 @@ class TORCH_API AOTIModelContainerRunner {
   void swap_constant_buffer();
 
   std::vector<std::string> get_call_spec();
+  std::unordered_map<std::string, std::string> get_metadata();
 
  protected:
   AOTIModelContainerRunner(
@@ -80,6 +81,7 @@ class TORCH_API AOTIModelContainerRunner {
 
  private:
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
+  std::unordered_map<std::string, std::string> metadata_;
 };
 
 using CreateAOTIModelRunnerFunc = std::shared_ptr<AOTIModelContainerRunner> (*)(
