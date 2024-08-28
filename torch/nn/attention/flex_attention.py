@@ -51,7 +51,6 @@ class _ModificationType(Enum):
     UNKNOWN = 3
 
 
-@torch._dynamo.assume_constant_result
 def _get_mod_type(fn: Callable) -> _ModificationType:
     """Get the type of modification function.
     This function inspects the number of positional arguments of the function to determine
