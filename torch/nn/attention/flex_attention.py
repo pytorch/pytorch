@@ -392,12 +392,23 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
-        mapped_attributes = tree_map_only(
-            torch.Tensor,
-            lambda x: x[index],
-            self.as_tuple(flatten=False),
+        new_kv_num_blocks = self.kv_num_blocks[:, :, index]
+        new_kv_indices = self.kv_indices[:, :, index, :]
+        if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
+            new_full_kv_num_blocks = self.full_kv_num_blocks[:, :, index]
+            new_full_kv_indices = self.full_kv_indices[:, :, index, :]
+        else:
+            new_full_kv_num_blocks = None
+            new_full_kv_indices = None
+        return BlockMask.from_kv_blocks(
+            new_kv_num_blocks,
+            new_kv_indices,
+            new_full_kv_num_blocks,
+            new_full_kv_indices,
+            BLOCK_SIZE=self.BLOCK_SIZE,
+            mask_mod=self.mask_mod,
         )
-        return BlockMask(*mapped_attributes)
 
     def __repr__(self):
         def shape_or_none(x: Optional[torch.Tensor]):
@@ -547,31 +558,6 @@ class BlockMask:
             self.as_tuple(flatten=False),
         )
         return BlockMask(*mapped_attributes)
-
-    def get_mask(
-        self, index: torch.Tensor, mask_mod: _mask_mod_signature
-    ) -> "BlockMask":
-        """
-        Returns a new BlockMask instance with the specified mask_mod applied to the given row index.
-        """
-        block_index = index // self.BLOCK_SIZE[0]
-        new_kv_num_blocks = self.kv_num_blocks[:, :, block_index]
-        new_kv_indices = self.kv_indices[:, :, block_index, :]
-        if self.full_kv_num_blocks is not None:
-            assert self.full_kv_indices is not None
-            new_full_kv_num_blocks = self.full_kv_num_blocks[:, :, block_index]
-            new_full_kv_indices = self.full_kv_indices[:, :, block_index, :]
-        else:
-            new_full_kv_num_blocks = None
-            new_full_kv_indices = None
-        return BlockMask.from_kv_blocks(
-            new_kv_num_blocks,
-            new_kv_indices,
-            new_full_kv_num_blocks,
-            new_full_kv_indices,
-            BLOCK_SIZE=self.BLOCK_SIZE,
-            mask_mod=mask_mod,
-        )
 
 
 def _broadcast_to_dim(x, dim):
