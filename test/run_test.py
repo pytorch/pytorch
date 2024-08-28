@@ -183,6 +183,7 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/_tensor/test_attention",
+    "test_transformers",
 ]
 
 XPU_BLOCKLIST = [
@@ -1417,7 +1418,7 @@ def get_selected_tests(options) -> List[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
-        selected_tests = ["test_mps", "test_metal", "test_modules"]
+        selected_tests = ["test_mps", "test_metal", "test_modules", "test_nn"]
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])

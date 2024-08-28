@@ -1376,7 +1376,7 @@ def bwd_dkdv_inner(
     do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
-    hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(Q_LEN // BLOCK_M1, 1))
+    hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(tl.cdiv(Q_LEN, BLOCK_M1), 1))
 
     if not IS_DIVISIBLE:
         if hi >= 1:
@@ -1605,9 +1605,6 @@ def flex_attention_backward(*args, **kwargs):
             full_q_indices,
         ]
     )
-
-    if _use_flex_decoding(query, kernel_options):
-        raise NotImplementedError("Flex decoding backward pass is not implemented. ")
 
     device = query.get_device()
     dtype = query.get_dtype()
