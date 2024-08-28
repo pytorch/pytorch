@@ -7092,6 +7092,36 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         expected_grad.unbind()[1].add_(1.0)
         torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
+    @dtypes(torch.float32)
+    def test_composite_op_in_inference_mode(self, device, dtype):
+        # expect view
+        nt = random_nt_from_dims(
+            [4, None, 48],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        with torch.inference_mode():
+            output = nt.reshape([4, -1, 3, 16])
+            self.assertEqual(output.shape, (4, nt.shape[1], 3, 16))
+            self.assertTrue(output._is_view())
+
+        # expect copy
+        nt = random_nt_from_dims(
+            [4, None, 3, 16],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        ).transpose(-1, -2)
+
+        with torch.inference_mode():
+            output = nt.reshape([4, -1, 48])
+            self.assertEqual(output.shape, (4, nt.shape[1], 48))
+            self.assertFalse(output._is_view())
+
 
 FORWARD_FAILURES = {
     # === BEGIN NotImplementedError SECTION ===

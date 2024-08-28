@@ -1204,7 +1204,10 @@ def view_default(func, *args, **kwargs):
 
     inner_size = [get_inner_size(i) for i in range(len(size) - 1)]
 
-    return NestedTensor(func(inp._values, inner_size), **extract_kwargs(inp))
+    # Preserve inference-mode-ness of input.
+    # TODO: Do this for all other views!
+    with torch.inference_mode(inp.is_inference()):
+        return NestedTensor(func(inp._values, inner_size), **extract_kwargs(inp))
 
 
 @register_jagged_func(
