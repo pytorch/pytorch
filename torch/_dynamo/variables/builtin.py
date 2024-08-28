@@ -184,13 +184,11 @@ class BuiltinVariable(VariableTracker):
 
     def is_unfoldable_op(self):
         unfoldable_ops = {
-           operator.delitem,
-           operator.setitem,
-        } if sys.version_info < (3, 11) else {
             operator.delitem,
             operator.setitem,
-            operator.call,
         }
+        if sys.version_info >= (3, 11):
+            unfoldable_ops.add(operator.call)
         return self.fn in unfoldable_ops
 
     @staticmethod
@@ -858,6 +856,7 @@ class BuiltinVariable(VariableTracker):
 
         elif obj.is_unfoldable_op():
             builder = SourcelessBuilder.create
+
             def unfoldable_handler(tx: "InstructionTranslator", args, kwargs):
                 try:
                     res = fn(
