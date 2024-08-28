@@ -1,4 +1,4 @@
-import random
+import gc
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -17,13 +17,17 @@ class Benchmark(BenchmarkBase):
 
     def _prepare_once(self):
         torch._dynamo.config.capture_scalar_outputs = True
-        random.seed(42)
+        torch.manual_seed(0)
+
         self.splits = torch.randint(10, (self.N,))
+        print(self.splits)
         sz = self.splits.sum().item()
         self.input = torch.randn(sz)
 
     def _prepare(self):
         torch._dynamo.reset()
+        gc.collect()
+        gc.disable()
 
     def _work(self):
         @torch.compile(fullgraph=True)
