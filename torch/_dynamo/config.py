@@ -9,6 +9,7 @@ from os.path import abspath, dirname
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
 import torch
+from torch._utils_internal import JustKnobsConfig
 
 
 def is_fbcode():
@@ -98,7 +99,9 @@ force_nn_module_property_static_shapes = True
 allow_ignore_mark_dynamic = False
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
-guard_nn_modules = False if is_fbcode() else True
+guard_nn_modules = JustKnobsConfig(
+    name="pytorch/compiler:guard_nn_modules", default=True
+)
 
 # Uses CPython internal dictionary tags to detect mutation. There is some
 # overlap between guard_nn_modules_using_dict_tags and guard_nn_modules flag.

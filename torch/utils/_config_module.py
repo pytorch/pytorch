@@ -12,9 +12,22 @@ from typing import Any, Callable, Dict, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
 
+from torch._utils_internal import JustKnobsConfig
+
 
 # Types saved/loaded in configs
-CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+CONFIG_TYPES = (
+    int,
+    float,
+    bool,
+    type(None),
+    str,
+    list,
+    set,
+    tuple,
+    dict,
+    JustKnobsConfig,
+)
 
 
 def install_config_module(module: ModuleType) -> None:
@@ -47,6 +60,9 @@ def install_config_module(module: ModuleType) -> None:
                 default[name] = value
                 if dest is module:
                     delattr(module, key)
+            elif value is JustKnobsConfig:
+                # JustKnobsConfig is a singleton, so we can't copy it
+                continue
             elif isinstance(value, type):
                 assert value.__module__ == module.__name__
                 # a subconfig with `class Blah:` syntax
