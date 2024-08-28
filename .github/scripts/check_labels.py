@@ -54,7 +54,6 @@ def main() -> None:
     except Exception as e:
         if args.exit_non_zero:
             sys.exit(1)
-        pass
 
     sys.exit(0)
 
