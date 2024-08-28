@@ -5103,10 +5103,19 @@ class UserDefinedTritonKernel(ExternKernel):
         raw_args = [
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         ]
+
+        # NOTE: raw_args doesn't include autotuned args.
+        # But, kernel.constexprs includes indices of autotuned args.
+        # So, let's recalculate constexpr indices wrt to raw_args.
+        constexpr_indices = []
+        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+            if kernel.arg_names.index(kwarg) in kernel.constexprs:
+                constexpr_indices.append(idx)
+
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
+            new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -5914,17 +5923,9 @@ class FallbackKernel(ExternKernelAlloc):
             if V.graph.cpp_wrapper:
                 from torchgen.aoti.fallback_ops import inductor_fallback_ops
 
-                if (
-                    config.is_fbcode()
-                    and kernel not in has_c_shim
+                if config.abi_compatible and str(kernel) not in inductor_fallback_ops:
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
-                    # If you do hit a missed op, please update gen_aoti_c_shim.py.
-                    and config.c_shim_version == "1"
-                ) or (
-                    config.abi_compatible
-                    and config.c_shim_version == "2"
-                    and str(kernel) not in inductor_fallback_ops
-                ):
+                    # If you do hit a missed op, please update fallback_ops.py.
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
                         kernel,
@@ -6668,7 +6669,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
-        self.fetch_attr = submodules.__getitem__
+        self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
