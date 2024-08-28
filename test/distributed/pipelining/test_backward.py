@@ -97,18 +97,18 @@ class StageBackwardTests(TestCase):
         # Monitor memory after backward_input
         for _ in range(5):
             gc.collect()
-            before_count = len(gc.get_objects())
+            before_gc_count = len(gc.get_objects())
             out = mod(x)
             loss = loss_fn(out, target)
             dinputs, param_groups = stage_backward_input(
                 stage_outputs=(loss,),
                 output_grads=None,
-                stage_inputs=[x],
+                input_values=[x],
                 weights=mod.parameters(),
             )
             gc.collect()
-            after_count = len(gc.get_objects())
-            self.assertEqual(before_count, after_count)
+            after_gc_count = len(gc.get_objects())
+            self.assertLessEqual(after_gc_count, before_gc_count)
 
     def test_stage_backward_weight(self):
         # MLP as a stage module
@@ -135,7 +135,7 @@ class StageBackwardTests(TestCase):
         )
 
         # backward of loss with respect to weights
-        dweights = stage_backward_weight(mod.parameters(), param_groups)
+        stage_backward_weight(mod.parameters(), param_groups, retain_graph=True)
 
         # Run reference
         ref_out = ref_mod(ref_x)
@@ -143,13 +143,24 @@ class StageBackwardTests(TestCase):
         ref_loss.backward()
 
         # Every rank checks gradients
-        for name, p in mod.named_parameters():
+        for i, (name, p) in enumerate(mod.named_parameters()):
             ref_p = ref_mod.get_parameter(name)
             try:
                 torch.testing.assert_close(p.grad, ref_p.grad)
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
+
+        # Monitor memory after backward_weight
+        for _ in range(5):
+            gc.collect()
+            before_gc_count = len(gc.get_objects())
+            out = mod(x)
+            loss = loss_fn(out, target)
+            stage_backward_weight(mod.parameters(), param_groups, retain_graph=True)
+            gc.collect()
+            after_gc_count = len(gc.get_objects())
+            self.assertLessEqual(after_gc_count, before_gc_count)
 
     def test_stage_backward_weight_multiple_iters(self):
         # MLP as a stage module

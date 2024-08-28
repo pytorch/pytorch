@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import collections
 import logging
-from typing import Any, cast, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import torch
 from torch.autograd.graph import GradientEdge, Node
@@ -55,11 +55,8 @@ def reverse_closure(
             q.append(node)
     while q:
         node = q.popleft()
-        metadata = cast(Dict[str, List], node.metadata)
         reverse_edges = reverse_edges_dict[node]
         for fn in reverse_edges:
-            if fn is None:
-                raise RuntimeError("Something went wrong")
             if fn in closure or fn is None:
                 continue
             if fn in target_nodes:
@@ -80,9 +77,11 @@ def construct_reverse_graph(roots: List[Node]) -> Dict[Node, List[Node]]:
             root_seen.add(node)
     while q:
         node = q.popleft()
-        for fn, idx in node.next_functions:
+        for fn, _ in node.next_functions:
             if fn is not None:
-                reverse_edges_dict[fn].append(fn)
+                if len(reverse_edges_dict[fn]) == 0:
+                    q.append(fn)
+                reverse_edges_dict[fn].append(node)
     return reverse_edges_dict
 
 
@@ -208,7 +207,7 @@ def stage_backward_input(
 
 
 def stage_backward_weight(
-    weights: Iterator[Parameter], param_groups: List[Dict[str, Any]]
+    weights: Iterator[Parameter], param_groups: List[Dict[str, Any]], retain_graph=False
 ):
     # map weights to param_group_weights
     grad_acc_to_weight = {}
@@ -233,6 +232,7 @@ def stage_backward_weight(
             intermediate_edges,
             weights_edges,
             grad_outputs=sum(param_group["grads"], tuple()),
+            retain_graph=retain_graph,
         )
         for grad_acc, dw in zip(param_group["params"], dweights):
             weight, index = grad_acc_to_weight[grad_acc]
