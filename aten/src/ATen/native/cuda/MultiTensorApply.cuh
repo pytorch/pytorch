@@ -8,49 +8,50 @@
 
 namespace at::native {
 
-namespace {
-
-static constexpr int64_t kILP = 4;
-static constexpr int64_t kChunkSize = 65536;
-static constexpr int64_t kBlockSize = 512;
-
 // NOTE: [32KB kernel argument size support]
-// 32KB kernel argument size support is available only when CUDART_VERSION >=
-// 12010 and the driver version is >= 530. Only the former condition can be
-// checked at compile time. This implies:
+// 32KB kernel argument size support has three requirements:
+// - CUDART_VERSION >= 12010
+// - Driver version >= 530
+// - GPU arch >= VOLTA
 //
-// - If CUDART_VERSION < 12010, kernels for the 32KB kernel argument size will
-// not be built.
+// Due to minor version compatibility, it possible for binaries built with
+// CUDART_VERSION >= 12010 to run with driver version < 530. Since driver
+// version can only be checked at runtime, if CUDART_VERSION >= 12010, we have
+// to build both 4KB and 32KB kernels and determine the appropriate kernel to
+// dispatch at runtime.
 //
-// - If CUDART_VERSION >= 12010, kernels for both 4KB and 32KB kernel argument
-// sizes will be built. However, due to CUDA's minor version compatibility,
-// even when CUDART_VERSION >= 12010, the driver may not support 32KB.
-// Therefore, a runtime check is necessary to determine the appropriate kernel
-// to dispatch.
+// - If CUDART_VERSION < 12010, only 4KB kernels will be instantiated.
+//
+// - If CUDART_VERSION >= 12010:
+//   - Host code:
+//     - We always instantiate the launching stub for both 4KB and 32KB kernels.
+//   - Device code:
+//     - If __CUDA_ARCH__ >= 700, we always instantiate both 4KB and 32KB
+//     kernels.
+//     - If __CUDA_ARCH__ < 700, it's not possible to even compile an empty
+//     32KB kernel (formal parameter space overflowed). Thus, we only
+//     instantiate a declaration for 32KB kernels. This is valid as long as the
+//     declaration-only kernel is not launched.
+//
+// - At runtime, we dispatch to the 32KB kernel if driver version >= 530 and
+// GPU arch >= VOLTA.
 //
 // - TODO(yifu): once there's a CUDART version that is not compatible with any
 // driver version below 530, we can determine at compile time to not compile
 // the kernels for 4KB kernel argument size.
 //
 // https://developer.nvidia.com/blog/cuda-12-1-supports-large-kernel-parameters/
-bool supports_large_kernel_arg() {
-#if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
-  static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
-  if (!supports_large_kernel_arg_.has_value()) {
-    int driver_ver = 0;
-    cudaDriverGetVersion(&driver_ver);
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    *supports_large_kernel_arg_ = (driver_ver >= 12010) && prop->major >= 7;
-  }
-  return *supports_large_kernel_arg_;
-#else
-  return false;
-#endif
-}
+bool supports_large_kernel_arg();
+
+namespace {
+
+static constexpr int64_t kILP = 4;
+static constexpr int64_t kChunkSize = 65536;
+static constexpr int64_t kBlockSize = 512;
 
 #if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
 #define DISPATCH_MULTI_TENSOR_APPLY(...)                \
-  if (supports_large_kernel_arg()) {                    \
+  if (at::native::supports_large_kernel_arg()) {        \
     constexpr bool large_kernel_arg C10_UNUSED = true;  \
     __VA_ARGS__();                                      \
   } else {                                              \
@@ -80,10 +81,6 @@ struct DepthToMaxConfig<false> {
   using TensorIdxType = unsigned char;
 };
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 700
-template <>
-struct DepthToMaxConfig<true> : DepthToMaxConfig<false> {};
-#else
 template <>
 struct DepthToMaxConfig<true> {
   // TODO(yifu): These values are not yet optimally tuned. I simply multiplied
@@ -100,7 +97,6 @@ struct DepthToMaxConfig<true> {
       420};
   using TensorIdxType = uint16_t;
 };
-#endif
 
 template <typename T>
 __device__ __forceinline__ bool is_aligned(T* p) {
@@ -185,23 +181,31 @@ struct FusedOptimizerTensorListMetadata {
   int start_tensor_this_launch;
 };
 
+#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 700
 template <typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
-__global__ void multi_tensor_apply_kernel(
-    T tensorListMeta,
-    U callable,
-    ArgTypes... args) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 700
-  if constexpr (U::use_large_kernel_arg) {
-    CUDA_KERNEL_ASSERT(
-        false &&
-        "multi_tensor_apply with 32KB argument size is not supported "
-        "on devices with sm<70. This kernel should not be reachable.");
-    return;
-  }
-#endif
+__global__ typename std::enable_if<U::use_large_kernel_arg, void>::type
+    multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args) {
   // Hand the chunk information to the user-supplied functor to process however
   // it likes.
+  callable(kChunkSize, tensorListMeta, args...);
+}
+#else
+// When compiling device code with __CUDA_ARCH__ < 700, we only instantiate a
+// declaration for the 32KB kernels.
+// For details see: [32KB kernel argument size support]
+#pragma nv_diag_suppress 114 // Function was referenced but not defined
+template <typename T, typename U, typename... ArgTypes>
+C10_LAUNCH_BOUNDS_1(kBlockSize)
+__global__ typename std::enable_if<U::use_large_kernel_arg, void>::type
+    multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args);
+#pragma nv_diag_default 114 // Function was referenced but not defined
+#endif
+
+template <typename T, typename U, typename... ArgTypes>
+C10_LAUNCH_BOUNDS_1(kBlockSize)
+__global__ typename std::enable_if<!U::use_large_kernel_arg, void>::type
+    multi_tensor_apply_kernel(T tensorListMeta, U callable, ArgTypes... args) {
   callable(kChunkSize, tensorListMeta, args...);
 }
 
