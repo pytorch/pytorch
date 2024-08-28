@@ -1526,7 +1526,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 return x_linear.cos() + y_conv_1d.sum()
 
         ep = torch.export._trace._export(
-            Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50)), preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
+            Foo(),
+            (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50)),
+            preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
         )
 
         self.assertExpectedInline(

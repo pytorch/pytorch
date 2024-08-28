@@ -15,10 +15,7 @@ import torch._dynamo
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._dynamo.exc import UserError, UserErrorType
-from torch._ops import OpOverload
-from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._export.db.logging import (
     exportdb_error_message,
     get_class_if_classified_error,
@@ -60,8 +57,11 @@ from torch._functorch._aot_autograd.traced_function_transforms import (
 from torch._functorch._aot_autograd.utils import create_tree_flattened_fn
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
+from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._utils_internal import log_export_usage
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -757,7 +757,9 @@ def _export_to_aten_ir(
         finally:
             torch.compiler._is_compiling_flag = old_value
 
-    override_cia_ops = _override_composite_implicit_decomp(preserve_ops, decomp_table if decomp_table else {})
+    override_cia_ops = _override_composite_implicit_decomp(
+        preserve_ops, decomp_table if decomp_table else {}
+    )
 
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
@@ -1356,7 +1358,9 @@ def _strict_export(
     allow_complex_guards_as_runtime_asserts: bool,
     _is_torch_jit_trace: bool,
 ) -> ExportArtifact:
-    lower_to_aten = functools.partial(_export_to_aten_ir, pre_dispatch=pre_dispatch, preserve_ops=preserve_ops)
+    lower_to_aten = functools.partial(
+        _export_to_aten_ir, pre_dispatch=pre_dispatch, preserve_ops=preserve_ops
+    )
     return _strict_export_lower_to_aten_ir(
         mod=mod,
         args=args,
@@ -2007,8 +2011,8 @@ def _export(
 
     if pre_dispatch and len(preserve_ops) > 0:
         raise RuntimeError(
-            f"We don't support preserving CompositeImplicitAutograd ops in "
-            f"predispatch mode because they are preserved implicitly"
+            "We don't support preserving CompositeImplicitAutograd ops in "
+            "predispatch mode because they are preserved implicitly"
         )
 
     (

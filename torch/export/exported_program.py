@@ -8,7 +8,6 @@ import operator
 import types
 import warnings
 from collections import namedtuple
-from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
@@ -54,7 +53,6 @@ from torch._export.utils import (
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export._remove_unneccessary_copy_op_pass import (
     _remove_unneccessary_copy_op_pass,
 )
@@ -141,7 +139,10 @@ def _fx_collection_equivalence_fn(
 
 def _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index):
     from torch._functorch.aot_autograd import aot_export_module
-    from torch.export._trace import _ignore_backend_decomps, _override_composite_implicit_decomp
+    from torch.export._trace import (
+        _ignore_backend_decomps,
+        _override_composite_implicit_decomp,
+    )
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
