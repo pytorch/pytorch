@@ -30,15 +30,15 @@ enum class BlasOp {
   T = 1
 };
 
-inline std::string BlasOpToString(BlasOp op) {
+inline char BlasOpToString(BlasOp op) {
   switch (op) {
     case BlasOp::N:
-      return "N";
+      return 'N';
     case BlasOp::T:
-      return "T";
+      return 'T';
   }
   TORCH_CHECK(false, "unrecognized BlasOp");
-  return "N";
+  return 'N';
 }
 
 namespace detail {
