@@ -17,6 +17,7 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
     identity,
+    is_function,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -981,6 +982,27 @@ class PolyfilledFunctionVariable(VariableTracker):
                     tx,
                     handler,
                 ).call_function(tx, args, kwargs)
+
+        return super().call_function(tx, args, kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__call__":
+            return self.call_function(tx, args, kwargs)
+
+        method = getattr(self.fn, name, None)
+        assert method is not None, f"Member {name} not found in {self.fn}"
+        assert is_function(method), f"Member {name} is not callable in {self.fn}"
+        options = {}
+        if self.source:
+            options["source"] = AttrSource(self.source, name)
+        member_variable = PolyfilledFunctionVariable(method, **options)
+        return member_variable.call_function(tx, args, kwargs)
 
     def as_python_constant(self):
         return self.fn
