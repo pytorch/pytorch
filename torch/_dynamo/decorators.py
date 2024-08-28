@@ -235,6 +235,16 @@ def substitute_in_graph(
         raise TypeError(
             f"substitute_in_graph expects a function but got {type(original_fn)!r}"
         )
+    if is_embedded_type:
+        if not inspect.isclass(original_fn):
+            raise TypeError(
+                f"substitute_in_graph expects a class but got {type(original_fn)!r}"
+            )
+
+        from .variables.builder import ITERTOOLS_POLYFILLED_TYPES, ITERTOOLS_TYPES
+
+        if original_fn in ITERTOOLS_TYPES:
+            ITERTOOLS_POLYFILLED_TYPES.add(original_fn)
 
     def wrapper(traceable_fn: _F) -> _F:
         if not is_function(traceable_fn):
