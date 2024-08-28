@@ -978,13 +978,15 @@ class CppVecOverrides(CppOverrides):
                     code.writeline(f"tmpbuf_out[i] = {res};")
                 if output_mask:
                     assert not kernel.tail_size
-                    code.writeline(
-                        f"return at::vec::VecMask<{cdtype},{n_vec}>::from(tmpbuf_out.data());"
-                    )
+                    load_args = "tmpbuf_out.data()"
+                    load_fn = f"at::vec::VecMask<{cdtype},{n_vec}>::from"
                 else:
-                    code.writeline(
-                        f"return at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu(tmpbuf_out.data(), {size});"
-                    )
+                    load_args = f"tmpbuf_out.data(), {size}"
+                    if n_vec == 1:
+                        load_fn = f"at::vec::Vectorized<{cdtype}>::loadu"
+                    else:
+                        load_fn = f" at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu"
+                code.writeline(f"return {load_fn}({load_args});")
             code.writeline("()")
             return code
 
@@ -2909,7 +2911,10 @@ class CppVecKernel(CppKernel):
         elif src_dtype == torch.bool and dtype != torch.bool:
             expr = f"{src}.to<{dst_cpp_type},{dst_num_vectors}>()"
         elif src_dtype != dtype:
-            expr = f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+            if src_num_vectors == dst_num_vectors == 1:
+                expr = f"at::vec::convert<{dst_cpp_type}>({src})"
+            else:
+                expr = f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
         return expr
 
 
