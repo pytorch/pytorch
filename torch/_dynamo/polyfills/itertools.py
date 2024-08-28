@@ -14,7 +14,6 @@ from ..variables.builder import ITERTOOLS_POLYFILLED_TYPES
 __all__ = [
     "chain",
     "chain_from_iterable",
-    "count",
     "islice",
     "tee",
 ]
@@ -39,18 +38,6 @@ chain.from_iterable = chain_from_iterable  # type: ignore[method-assign]
 
 
 ITERTOOLS_POLYFILLED_TYPES.add(itertools.chain)
-
-
-# Reference: https://docs.python.org/3/library/itertools.html#itertools.count
-@substitute_in_graph(itertools.count, is_embedded_type=True)  # type: ignore[arg-type]
-def count(start: _T = 0, step: _T = 1) -> Iterator[_T]:  # type: ignore[assignment]
-    n = start
-    while True:
-        yield n
-        n += step  # type: ignore[operator]
-
-
-ITERTOOLS_POLYFILLED_TYPES.add(itertools.count)
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.islice

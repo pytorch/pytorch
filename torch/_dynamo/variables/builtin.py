@@ -1442,22 +1442,6 @@ class BuiltinVariable(VariableTracker):
             items = [variables.TupleVariable(list(item)) for item in zip(*unpacked)]
             return variables.TupleVariable(items)
 
-    def call_enumerate(self, tx: "InstructionTranslator", *args):
-        if len(args) == 1:
-            start = 0
-        else:
-            assert len(args) == 2
-            assert isinstance(args[1], variables.ConstantVariable)
-            start = args[1].as_python_constant()
-        if args[0].has_unpack_var_sequence(tx):
-            items = [
-                variables.TupleVariable(
-                    [variables.ConstantVariable.create(idx), var],
-                )
-                for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
-            ]
-            return variables.TupleVariable(items)
-
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
 
