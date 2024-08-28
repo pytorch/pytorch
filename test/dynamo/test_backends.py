@@ -328,7 +328,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             registry._register_entrypoint_backends.cache_clear()
 
             backends = list_backends()
-            assert name in backends, backends
+            assert name in backends, (name, backends)
 
 
 if __name__ == "__main__":
