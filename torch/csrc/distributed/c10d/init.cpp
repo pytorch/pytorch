@@ -2130,6 +2130,14 @@ communication mechanism.
               },
               py::arg("device"),
               py::call_guard<py::gil_scoped_release>())
+           .def(
+              "_set_default_backend",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const ::c10d::ProcessGroup::BackendType& backendType) {
+                return self->setDefaultBackend(backendType);
+              },
+              py::arg("backend_type"),
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_register_on_completion_hook",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,

@@ -65,8 +65,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       case BackendType::MPI:
         return "mpi";
       case BackendType::UNDEFINED:
-      default:
         return "undefined";
+      default:
+        return "custom";
     }
   };
 
@@ -646,6 +647,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backendTypeToBackend_.at(backendType_);
   }
 
+  void setDefaultBackend(const BackendType& backendType) {
+    backendType_ = backendType;
+  }
+
   c10::intrusive_ptr<Backend> getBackend(c10::DeviceType deviceType);
 
   c10::intrusive_ptr<Backend> getBackend(BackendType backendType) const {
@@ -718,7 +723,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int size_;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const BackendType backendType_;
+  BackendType backendType_;
   std::string pg_desc_;
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and

@@ -145,7 +145,6 @@ def _export_c_types() -> None:
         AllToAllOptions,
         BarrierOptions,
         BroadcastOptions,
-        C10dBackend,
         GatherOptions,
         PrefixStore,
         ProcessGroup,
@@ -269,6 +268,7 @@ class Backend(str):
         GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
         UCC: ProcessGroup.BackendType.UCC,
+        MPI: ProcessGroup.BackendType.MPI,
     }
 
     def __new__(cls, name: str):
@@ -1714,6 +1714,8 @@ def _new_process_group_helper(
         group_rank,
         group_size,
     )
+    assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
+    pg._set_default_backend(Backend.backend_type_map[backend])
     if device_id:
         pg.bound_device_id = device_id
     backend_config = BackendConfig(backend)
@@ -4451,7 +4453,9 @@ def split_group(
         group_rank,
         len(my_group),
     )
+    backend_type = ProcessGroup.BackendType.NCCL
     pg.bound_device_id = device_id
+    pg._set_default_backend(backend_type)
 
     pg_options._timeout = timeout
     pg_options.split_from = parent_backend
@@ -4461,7 +4465,6 @@ def split_group(
     backend_class = ProcessGroupNCCL(
         prefix_store, group_rank, len(my_group), pg_options
     )
-    backend_type = ProcessGroup.BackendType.NCCL
     backend_class._set_sequence_number_for_group()
 
     pg._register_backend(torch.device("cuda"), backend_type, backend_class)
@@ -4608,6 +4611,7 @@ def _new_group_with_tag(
     if not backend:
         backend = default_backend
     backend = Backend(backend)
+    print(backend)
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)
