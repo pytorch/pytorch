@@ -233,9 +233,10 @@ class ComptimeContext:
 
         NB: Stack grows downwards in our print
         """
+        # TODO: improve printing
         tx = self.__get_tx(stacklevel)
         for s in tx.stack:
-            print(f"- {s.debug_repr()}", file=file)
+            print(f"- {s}", file=file)
 
     def print_locals(self, *, file=None, stacklevel=0):
         """
@@ -243,9 +244,10 @@ class ComptimeContext:
         By default this view is very limited; you can get more information
         about any individual local using get_local().
         """
+        # TODO: improve by improving the VariableTracker printing
         tx = self.__get_tx(stacklevel)
         for k, v in tx.symbolic_locals.items():
-            print(f"{k} = {v.debug_repr()}", file=file)
+            print(f"{k} = {v}", file=file)
 
     def print_bt(self, *, file=None, stacklevel=0):
         """
