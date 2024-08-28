@@ -906,6 +906,26 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel_train(f, x), """9""")
 
     @requires_cuda
+    def test_inplace_custom_op_training_two_mutated_inputs(self):
+        @torch.library.custom_op(
+            "_reinplacing::sin_cos", mutates_args={"out_sin", "out_cos"}
+        )
+        def sin_cos(
+            x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor
+        ) -> None:
+            out_sin.copy_(x.sin())
+            out_cos.copy_(x.cos())
+
+        def f(x):
+            out0 = torch.empty_like(x)
+            out1 = torch.empty_like(x)
+            sin_cos(x, out0, out1)
+            return x.clone(), out0, out1
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel(f, x), """21""")
+
+    @requires_cuda
     def test_inplace_custom_op_training(self):
         @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
         def sin(x: torch.Tensor, result: torch.Tensor) -> None:
