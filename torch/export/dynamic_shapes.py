@@ -15,7 +15,9 @@ from torch.utils._pytree import (
     MappingKey,
     SequenceKey,
     SUPPORTED_NODES,
+    TreeSpec,
     tree_flatten,
+    tree_map,
     tree_map_with_path,
 )
 
@@ -1179,3 +1181,201 @@ def refine_dynamic_shapes_from_suggested_fixes(
         return dim  # unchanged dim
 
     return _tree_map_with_path(apply_fixes, dynamic_shapes, dynamic_shapes)
+
+
+def _extract_spec(ep: ExportedProgram):
+    import sympy
+    from torch.export.graph_signature import InputKind
+    from torch.utils._sympy.numbers import int_oo
+
+    # extract placeholder shapes from ep in order
+    user_inputs = set(
+        spec.arg.name
+        for spec in ep.graph_signature.input_specs
+        if spec.kind == InputKind.USER_INPUT
+    )
+    placeholders = [
+        node
+        for node in ep.graph.nodes
+        if node.op == "placeholder"
+        and node.name in user_inputs
+    ]
+    flat_shapes = [
+        list(val.shape) if isinstance(val := node.meta.get("val"), torch.Tensor) else None
+        for node in placeholders
+    ]
+
+    def _replace_call_spec(call_spec):
+        if isinstance(call_spec, LeafSpec):
+            return call_spec
+        if call_spec.type in BUILTIN_TYPES:
+            return TreeSpec(
+                type=call_spec.type,
+                context=call_spec.context,
+                children_specs=[_replace_call_spec(arg) for arg in call_spec.children_specs],
+            )
+        else:
+            return TreeSpec(
+                type=list,
+                context=None,
+                children_specs=[_replace_call_spec(arg) for arg in call_spec.children_specs],
+            )
+
+    in_spec = _replace_call_spec(ep.call_spec.in_spec)
+    shape_args, shape_kwargs = in_spec.unflatten(flat_shapes)
+    tree_shapes = shape_args + tuple(shape_kwargs.values())  # this won't work for out-of-order kwargs
+
+    dims = {}
+    def track_dim(val):
+        if val is None:
+            return val
+        if isinstance(val, int):
+            return val
+        if isinstance(val, torch.SymInt) and val.node.expr.is_number:
+            return int(val.node.expr)
+
+        assert isinstance(val, torch.SymInt)
+        expr = val.node.expr
+
+        # track root symbol
+        root = next(iter(expr.free_symbols))
+        if root.name not in dims:
+            dims[root.name] = {
+                "min": ep.range_constraints[root].lower,
+                "max": ep.range_constraints[root].upper,
+                "derived": set(),
+            }
+
+        # track derived dims
+        if not isinstance(expr, sympy.Symbol):
+            dims[root.name]["derived"].add(str(expr))
+
+        return str(val)
+
+    # tree map then do some sorting on dims
+    tree_shapes = tree_map(track_dim, tree_shapes)
+    dims = {
+        k: {
+            "min": v["min"],
+            "max": None if v["max"] is int_oo else v["max"],
+            "derived": sorted(v["derived"]),
+        }
+        for k, v in sorted(dims.items())
+    }
+    return {
+        "dynamic_shapes": tree_shapes,
+        "dims": dims,
+    }
+
+
+def _serialize_spec(dynamic_shapes, args, kwargs={}):
+    from torch.utils._sympy.numbers import int_oo
+
+    if dynamic_shapes is None:
+        return {"dynamic_shapes": None, "dims": {}}
+
+    if isinstance(dynamic_shapes, dict):
+        dynamic_shapes = dynamic_shapes.values()
+    dynamic_shapes = tuple(dynamic_shapes)
+    combined_args = tuple(args) + tuple(kwargs.values())
+
+    dims = {}
+
+    def track_dim(shape, val):
+        if val is None:
+            return shape
+        if isinstance(val, int):
+            return val
+        if isinstance(val, DIM):
+            return val.__class__.__name__ + '.' + val.name
+
+        assert isinstance(val, _Dim)
+
+        # track root dim
+        root = val.root if isinstance(val, _DerivedDim) else val
+        if root.__name__ not in dims:
+            dims[root.__name__] = {
+                "min": root.min,
+                "max": root.max,
+                "derived": set(),
+            }
+
+        # track derived dims
+        if isinstance(val, _DerivedDim):
+            dims[root.__name__]["derived"].add(val.__name__)
+
+        return val.__name__
+
+    def serialize_shapes(path, tensor, shape):
+        out = []
+        if isinstance(shape, dict):
+            for i, s in enumerate(tensor.shape):
+                out.append(track_dim(s, shape.get(i, None)))
+        elif isinstance(shape, (tuple, list)):
+            for i, s in enumerate(tensor.shape):
+                out.append(track_dim(s, shape[i]))
+        else:
+            assert shape is None
+            if isinstance(tensor, torch.Tensor):
+                for i, s in enumerate(tensor.shape):
+                    out.append(track_dim(s, None))
+            else:
+                out = None
+        return out
+
+    # tree map then do some sorting on dims
+    serialized_shapes = _tree_map_with_path(
+        serialize_shapes,
+        combined_args,
+        dynamic_shapes,
+        tree_name="inputs",
+    )
+    dims = {
+        k: {
+            "min": v["min"],
+            "max": None if v["max"] is int_oo else v["max"],
+            "derived": sorted(v["derived"]),
+        }
+        for k, v in sorted(dims.items())
+    }
+    return {
+        "dynamic_shapes": serialized_shapes,
+        "dims": dims,
+    }
+
+
+def _deserialize_spec(spec):
+    import sympy
+
+    dynamic_shapes = spec["dynamic_shapes"]
+    dims = spec["dims"]
+    if dynamic_shapes is None:
+        return None
+
+    dim_cache = {}
+    for name, info in dims.items():
+        if name not in dim_cache:
+            dim_cache[name] = Dim(name, min=info["min"], max=info["max"])
+        symbol = sympy.sympify(name)
+        for _expr in info["derived"]:
+            expr = sympy.sympify(_expr)
+            modulus, remainder = sympy.polys.polytools.div(expr, symbol)
+            ddim = dim_cache[name]
+            if modulus != 1:
+                ddim = int(modulus) * ddim
+            if remainder != 0:
+                ddim = ddim + int(remainder)
+            dim_cache[_expr] = ddim
+
+    def deserialize_shape(val):
+        if val is None or isinstance(val, int):
+            return val
+        elif val == "DIM.AUTO":
+            return DIM.AUTO
+        elif val == "DIM.STATIC":
+            return DIM.STATIC
+        assert isinstance(val, str)
+        assert val in dim_cache
+        return dim_cache[val]
+
+    return tree_map(deserialize_shape, dynamic_shapes)

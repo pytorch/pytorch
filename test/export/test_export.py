@@ -306,6 +306,46 @@ class TestExport(TestCase):
                 test_inputs = (torch.randn(*shape) for shape in shapes)
                 with self.assertRaises(RuntimeError):
                     ep.module()(*test_inputs)
+            self._serdes_shapes(model, inputs, _specs)
+
+    def _serdes_shapes(self, model, inputs, dynamic_shapes, kwargs={}):
+        from torch.export.dynamic_shapes import _deserialize_spec, _extract_spec, _serialize_spec
+
+        ep = export(model, inputs, kwargs, dynamic_shapes=dynamic_shapes)
+        ep_spec = _extract_spec(ep)
+        ser_spec = _serialize_spec(dynamic_shapes, inputs, kwargs=kwargs)
+        # assert ep_spec == ser_spec
+        des_ep_spec = _deserialize_spec(ep_spec)
+        des_ser_spec = _deserialize_spec(ser_spec)
+        # assert des_ep_spec == dynamic_shapes
+        # assert des_ser_spec == dynamic_shapes
+        des_ep_ep = export(model, inputs, kwargs, dynamic_shapes=des_ep_spec)
+        des_ser_ep = export(model, inputs, kwargs, dynamic_shapes=des_ser_spec)
+        des_ep_ep_spec = _extract_spec(des_ep_ep)
+        des_ser_ep_spec = _extract_spec(des_ser_ep)
+        assert des_ep_ep_spec == des_ser_ep_spec
+
+    def test_extract_spec(self):
+        from torch.export.dynamic_shapes import DIM, _extract_spec
+        auto = DIM.AUTO
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                w = x + y[1:]
+                w = w @ torch.randn(4, 6)
+                return w.reshape([-1]) + z
+
+        inputs = (
+            torch.randn(6, 4),
+            torch.randn(7, 4),
+            torch.randn(36),
+        )
+        shapes = (
+            (auto, auto),
+            (auto, auto),
+            (auto,),
+        )
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        self._serdes_shapes(Foo(), inputs, shapes)
 
     def test_basic(self):
         class Module(torch.nn.Module):
@@ -489,6 +529,8 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+        self._serdes_shapes(m, example_args, dynamic_shapes)
+
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -572,6 +614,7 @@ graph():
         ep_ns = torch.export.export(
             foo, inp, dynamic_shapes=dynamic_shapes, strict=False
         )
+        self._serdes_shapes(foo, inp, dynamic_shapes)
 
         bad_runtime_inp1 = (
             torch.ones(6),
@@ -1186,6 +1229,8 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         self.assertEqual(
             ep.module()(torch.randn(6), torch.randn(7), torch.randn(8)).size()[0], 6
         )
+
+        self._serdes_shapes(foo, (u, v, w), ({0: dimx}, {0: dimy}, {0: dimz}))
 
     def test_derived_dim_out_of_order_repeat_derived(self):
         dimy = torch.export.Dim("dimy", min=5, max=7)
@@ -1835,6 +1880,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
+        self._serdes_shapes(foo, inputs, ((dx, None), (dy, 4), (dz, 3)))
+
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -2462,6 +2509,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
+        auto = torch.export.dynamic_shapes.DIM.AUTO
+        auto_shapes = ((auto, auto),)
+        self._serdes_shapes(m, (a,), auto_shapes)
+
     def test_mark_and_auto_dynamic(self):
         # for this use case, mark_dynamic() and AUTO should have same effect.
         # check that same symbol gets allocated to both dims without raising constraint violation.
@@ -2691,6 +2742,16 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+    def test_list_input(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x["data"][0] + x["data"][1]
+
+        inputs = ({
+            "data": [torch.randn(4), torch.randn(4)]
+        },)
+        ep = export(Foo(), inputs)
 
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
@@ -2928,6 +2989,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ],
             ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
         )
+        self._serdes_shapes(foo, inputs, {"inputs": [{0: batch}, {0: batch}]})
 
         # pass dynamic shapes of inputs [pytree-registered classes]
         if HAS_TORCHREC:
@@ -4642,6 +4704,12 @@ def forward(self, b_a_buffer, x):
             # We are specifying dynamism on the first kwarg even though user passed in
             # different order
             dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
+        )
+        self._serdes_shapes(
+            foo,
+            (torch.randn(4, 4), torch.randn(4, 4)),
+            dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
+            kwargs={"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
         )
 
         test_inp = (torch.randn(4, 4), torch.randn(7, 4))
