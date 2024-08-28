@@ -2199,9 +2199,9 @@ class CheckFunctionManager:
         self.output_graph = output_graph
         w_builder = None
 
-        self.torch_function_mode_stack = (
-            torch.overrides._get_current_function_mode_stack()
-        )
+        # NB: Until we trace device contexts, we need to use the stack recorded at the beginning of tracing
+        # in case a set default device call was made in the graph.
+        self.torch_function_mode_stack = output_graph.torch_function_mode_stack if output_graph else None
 
         def source_ref(source):
             guard_source = source.guard_source()
