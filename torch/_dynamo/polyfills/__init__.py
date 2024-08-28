@@ -1,26 +1,16 @@
-# mypy: allow-untyped-defs
-
 """
 Python polyfills for common builtins.
 """
+
+# NOTE: 1. Please do not import any submodule in the directory here to avoid circular imports.
+#       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
+
+# mypy: allow-untyped-defs
+
 import math
 from typing import Any, Callable, Sequence
 
 import torch
-
-
-def all(iterator):
-    for elem in iterator:
-        if not elem:
-            return False
-    return True
-
-
-def any(iterator):
-    for elem in iterator:
-        if elem:
-            return True
-    return False
 
 
 def index(iterator, item, start=0, end=None):
@@ -164,15 +154,3 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     if isinstance(obj, cls):
         obj.__init__(*args, **kwargs)
     return obj
-
-
-def fspath(path):
-    # Python equivalent of os.fspath
-    if isinstance(path, (str, bytes)):
-        return path
-    elif hasattr(path, "__fspath__"):
-        return path.__fspath__()
-    else:
-        raise TypeError(
-            f"expected str, bytes or os.PathLike object, not {type(path).__name__}"
-        )

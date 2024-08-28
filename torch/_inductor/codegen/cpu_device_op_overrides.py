@@ -8,9 +8,9 @@ class CpuDeviceOpOverrides(DeviceOpOverrides):
     def import_get_raw_stream_as(self, name):
         return dedent(
             """
-                      def get_raw_stream(_):
-                          return 0
-                      """
+            def get_raw_stream(_):
+                return 0
+            """
         )
 
     def set_device(self, device_idx):
