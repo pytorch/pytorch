@@ -368,9 +368,9 @@ at::Tensor _cslt_sparse_mm(
         out_dtype_opt,
         transpose_result,
         (int) alg_id,
-	CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
+        CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
         false,
-	false);
+        false);
     return std::get<1>(result);
 }
 
@@ -394,7 +394,7 @@ int64_t _cslt_sparse_mm_search(
         alg_id_int,
         CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
         true,
-	false);
+        false);
     return (int64_t) std::get<0>(result);
 }
 
@@ -436,9 +436,9 @@ int64_t _cslt_sparse_mm_get_attr(
         out_dtype_opt,
         transpose_result,
         alg_id_int,
-	attr_enum,
+        attr_enum,
         true,
-	true);
+        true);
     return (int64_t) std::get<2>(result);
 }
 
