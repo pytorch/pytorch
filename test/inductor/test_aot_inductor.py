@@ -3194,7 +3194,6 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     def test_bool_input(self):
-        # Specialize on whichever branch the example input for b is
         class Model(torch.nn.Module):
             def forward(self, x, b):
                 if b:
@@ -3377,6 +3376,21 @@ class AOTInductorTestsTemplate:
             for kernel_name, _ in kernel_calls_not_to_print:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
+
+    def test_size_from_multi_output(self):
+        # Specialize on whichever branch the example input for b is
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                _x, _i = torch.unique(x, sorted=True, return_inverse=True)
+                _x = _x.clone().detach()
+                return self.relu(_x), _i
+
+        example_inputs = (torch.randn(8, device=self.device),)
+        self.check_model(Model(), example_inputs)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
@@ -3566,6 +3580,7 @@ CPU_TEST_FAILURES = {
     "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(
         is_skip=True
     ),
+    "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
