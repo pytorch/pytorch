@@ -623,7 +623,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             "scalars",
             "algorithm",
         ]
-        if self.has_bias:
+        if not self.has_bias:
             const_arg_names.insert(2, "bias")
         const_args = list(self.codegen_const_args(const_arg_names))
 
@@ -825,6 +825,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             "unary_scalars",
             "unary_algorithm",
         ]
+        if not self.has_bias:
+            const_arg_names.insert(4, "bias")
         const_args = list(self.codegen_const_args(const_arg_names))
 
         x = args[0]
