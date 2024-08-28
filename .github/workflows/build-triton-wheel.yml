@@ -39,12 +39,8 @@ jobs:
         device: ["cuda", "rocm", "xpu", "arm"]
         include:
           - device: "rocm"
-<<<<<<< HEAD
-            rocm_version: "6.2"
-=======
-            rocm_version: "6.1"
+            rocm_version: "6.2"ß
             runs_on: [self-hosted, linux.2xlarge]
->>>>>>> 4e186f828a (add device=arm option)
           - device: "cuda"
             rocm_version: ""
             runs_on: [self-hosted, linux.2xlarge]
@@ -120,7 +116,7 @@ jobs:
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 ninja
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
           # Triton xpu build use GCC11
           if [[ "${BUILD_DEVICE}" == xpu ]]; then
             docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
