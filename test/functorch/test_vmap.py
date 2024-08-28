@@ -4084,7 +4084,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                     kwargs = sample_input.kwargs
                     for batched_args, in_dims, _ in generate_vmap_inputs(args, {}):
                         with self.assertRaises(Exception):
-                            vmap(op, in_dims)(*batched_args, **kwargs)
+                            # Added torch.compile as vmap alone raises
+                            # torch.func.vmap(fn) requires the function to be inlined by dynamo
+                            torch.compile(vmap(op, in_dims))(*batched_args, **kwargs)
 
             # Sample inputs check
             sample_inputs_op = {

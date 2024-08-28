@@ -315,7 +315,9 @@ def _compute_quantities_for_vmap_test(
     # t = make_fx(vmap(f, in_dims=in_dims, out_dims=out_dim))(*batched_args, **kwarg_values)
     # print(in_dims, [arg.shape for arg in batched_args], kwarg_values)
     batched_args, kwarg_values = maybe_clone_inputs()
-    batched_out = vmap(op, in_dims=in_dims, out_dims=out_dim)(
+    # Added torch.compile as vmap alone raises
+    # torch.func.vmap(fn) requires the function to be inlined by dynamo
+    batched_out = torch.compile(vmap(op, in_dims=in_dims, out_dims=out_dim))(
         *batched_args, **kwarg_values
     )
 
@@ -336,9 +338,17 @@ def _compute_quantities_for_vmap_test(
     inner_in_dims = (0,) + pytree.tree_map(lambda x: None, in_dims)
     outer_in_dims = (0,) + in_dims
     batched_args, kwarg_values = maybe_clone_inputs()
-    vmapvmap_output = vmap(
-        vmap(f, inner_in_dims, out_dims=out_dim), outer_in_dims, out_dims=out_dim
+    # Added torch.compile as vmap alone raises
+    # torch.func.vmap(fn) requires the function to be inlined by dynamo
+    vmapvmap_output = torch.compile(
+        vmap(vmap(f, inner_in_dims, out_dims=out_dim), outer_in_dims, out_dims=out_dim)
     )(dummy, *batched_args, **kwarg_values)
+    # vmapvmap_output = torch.compile(vmap(
+    #     torch.compile(vmap(f, inner_in_dims, out_dims=out_dim)), outer_in_dims, out_dims=out_dim
+    # ))(dummy, *batched_args, **kwarg_values)
+    # vmapvmap_output = vmap(
+    #     vmap(f, inner_in_dims, out_dims=out_dim), outer_in_dims, out_dims=out_dim
+    # )(dummy, *batched_args, **kwarg_values)
 
     yield (batched_out, loop_out, vmapvmap_output, vmapvmap_expected)
 

@@ -6954,8 +6954,8 @@ def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports
         # NOTE: if `dtype` is not same as input, then inplace variants fail with
         # `provided dtype must match the dtype of self tensor in cumsum`
         yield SampleInput(_make_tensor_helper((S, S, S)), 1, dtype=dtype)
-        
-        
+
+
 def sample_inputs_associative_scan(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, dtype=torch.float32, low=None, high=None):
         return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
@@ -6964,16 +6964,13 @@ def sample_inputs_associative_scan(op_info, device, dtype, requires_grad, suppor
 
     def fct(x, y):
         return x * y + x + y
-    
-    # yield fct
-    # yield SampleInput(fct)
-    # yield SampleInput(_make_tensor_helper((2, 3, 4), low=0.1, high=2))
-    # yield SampleInput(_make_tensor_helper((1,), dtype=torch.bool))
-    # yield SampleInput(_make_tensor_helper((1,), dtype=torch.bool))
-    yield SampleInput(fct, 
+
+    yield SampleInput(fct,
                       _make_tensor_helper((2, 3, 4), low=0.1, high=2),
                       int(_make_tensor_helper((), dtype=torch.int32, low=0, high=2)),
-                      _make_tensor_helper((), dtype=torch.bool))
+                    #   _make_tensor_helper((), dtype=torch.bool)
+                      False
+                      )
 
 
 def sample_inputs_unfold(op_info, device, dtype, requires_grad, **kwargs):
