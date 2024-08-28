@@ -1617,6 +1617,22 @@ utils_device.CURRENT_DEVICE == None""".split(
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_arange_length_with_float32_dtype(self):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check_is_size(y)
+            r = torch.arange(y, dtype=torch.float32)
+
+            if r.size(0) == y:
+                return r + 1
+
+            return r
+
+        x = torch.tensor([300])
+        r = f(x)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -10037,6 +10053,22 @@ def ___make_guard_fn():
             return [(k, list(g)) for k, g in itertools.groupby(l, key=operator.neg)]
 
         l = [1, 2, -2, 3, 4, 4, -4, 0, -2]
+        eager = fn(l)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(l)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_tee(self):
+        counters.clear()
+
+        def fn(l):
+            a, b = itertools.tee(l)
+            return list(a), list(b)
+
+        l = [1, 2, 2, 3, 4, 4, 4, 1, 2]
         eager = fn(l)
 
         compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
