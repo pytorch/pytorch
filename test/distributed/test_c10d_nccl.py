@@ -350,7 +350,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @parametrize("type", [torch.float16, torch.float32, torch.float64, torch.bfloat16])
     @skip_if_rocm
     def test_nan_assert(self, type):
-        # Expecting a device-side error when NaN is detected
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
