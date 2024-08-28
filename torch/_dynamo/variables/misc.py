@@ -362,6 +362,7 @@ class InspectSignatureVariable(VariableTracker):
 
     _nonvar_fields = {
         "signature",
+        "parameters",
         *VariableTracker._nonvar_fields,
     }
 
@@ -377,24 +378,27 @@ class InspectSignatureVariable(VariableTracker):
         super().__init__(**kwargs)
         self.inspected = inspected
 
-        if isinstance(self.inspected, UserFunctionVariable):
+        if isinstance(self.inspected, UserMethodVariable):
             self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())[1:]
+        elif isinstance(self.inspected, UserFunctionVariable):
+            self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
         else:
             self.fn = self.inspected.as_python_constant()
-        self.signature = inspect.signature(self.fn)
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "parameters":
-            if isinstance(self.inspected, UserMethodVariable):
-                parameters = list(self.signature.parameters.items())[1:]
-            else:
-                parameters = list(self.signature.parameters.items())
             return variables.ConstDictVariable(
                 {
                     variables.ConstantVariable.create(
                         param[0]
                     ): InspectParameterVariable(param[1])
-                    for param in parameters
+                    for param in self.parameters
                 },
                 user_cls=dict,
             )
@@ -459,12 +463,15 @@ class InspectParameterVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         from .builder import SourcelessBuilder, VariableBuilder
 
-        attr_value = getattr(self.value, name)
-        if self.source:
-            attr_source = AttrSource(self.source, name)
-            return VariableBuilder(tx, attr_source)(attr_value)
-        else:
-            return SourcelessBuilder.create(tx, attr_value)
+        try:
+            attr_value = getattr(self.value, name)
+            if self.source:
+                attr_source = AttrSource(self.source, name)
+                return VariableBuilder(tx, attr_source)(attr_value)
+            else:
+                return SourcelessBuilder.create(tx, attr_value)
+        except AttributeError:
+            unimplemented(f"getattr({self.value}, {name})")
 
 
 class InspectBoundArgumentsVariable(VariableTracker):
