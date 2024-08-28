@@ -935,17 +935,63 @@ class CppOverrides(OpOverrides):
 
 CppOverrides._initialize_pointwise_overrides("cpp")
 
-FALLBACKOPS = []
-
 
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""
 
     def __new__(cls, *args, **kargs):
-        global FALLBACKOPS
         self = super().__new__(cls)
 
-        def wrap(func):
+        def vectorize_by_scalar_func_with_for_loop(scalar_func, *args, **kwargs):
+            assert not kwargs
+            kernel = V.kernel
+            assert isinstance(kernel, CppVecKernel)
+            code = BracesBuffer()
+            code.writeline("[&]()")
+            vec_dtype = args[0].dtype
+            tiling_factor = kernel.tiling_factor
+            scalar_args = []
+            cdtype = DTYPE_TO_CPP[vec_dtype]
+            output_mask = scalar_func.__name__ in (
+                "isinf",
+                "isnan",
+                "signbit",
+            )
+            octype = "bool" if output_mask else cdtype
+            with code.indent():
+                for argidx, arg in enumerate(args):
+                    if isinstance(arg, CppCSEVariable):
+                        assert arg.is_vec
+                        assert arg.dtype == vec_dtype
+                        code.writeline(
+                            f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf{argidx};"
+                        )
+                        code.writeline(
+                            f"{arg}.store(tmpbuf{argidx}.data(), {tiling_factor});"
+                        )
+                        scalar_args.append(f"tmpbuf{argidx}[i]")
+                    else:
+                        scalar_args.append(arg)
+                code.writeline(
+                    f"__at_align__ std::array<{octype}, {tiling_factor}> tmpbuf_out;"
+                )
+                res = scalar_func(*scalar_args)
+                code.writeline(f"for (int i = 0; i < {tiling_factor}; i++)")
+                with code.indent():
+                    code.writeline(f"tmpbuf_out[i] = {res};")
+                if output_mask:
+                    n_vec = kernel._get_num_vectors(vec_dtype)
+                    code.writeline(
+                        f"return at::vec::VecMask<{cdtype},{n_vec}>::from(tmpbuf_out.data());"
+                    )
+                else:
+                    code.writeline(
+                        f"return at::vec::Vectorized<{cdtype}>::loadu(tmpbuf_out.data(), {tiling_factor});"
+                    )
+            code.writeline("()")
+            return code
+
+        def wrap(vec_func, scalar_func):
             # `CppVecKernel` generates both scalar ops and vector ops according to
             # whether the inputs are scalars or vectors while all ops in `CppVecOverrides`
             # (except for some ops explained below) assume the inputs are vectors. We wrap the ops in
@@ -958,6 +1004,13 @@ class CppVecOverrides(CppOverrides):
             # `ops.index_expr`:
             #     needs to further analyze the dependency of the index expression on
             #     the tiling itervar.
+            scalar_ops = super(CppVecOverrides, self)
+            if not scalar_func:
+                scalar_func = getattr(
+                    scalar_ops, vec_func.__name__, getattr(V.ops, vec_func.__name__)  # type: ignore[attr-defined]
+                )
+            assert scalar_func is not None
+
             def wrapper(*args, **kwargs):
                 scalars = [
                     arg
@@ -991,7 +1044,7 @@ class CppVecOverrides(CppOverrides):
                     # 3. int32 and fp32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
                     if len(new_args) == 2:
                         new_args = promote_args(new_args)
-                    elif func == CppVecOverrides.where:
+                    elif vec_func == CppVecOverrides.where:
                         new_args[1:] = promote_args(new_args[1:])
 
                 # Broadcast scalar args to vector
@@ -1002,7 +1055,7 @@ class CppVecOverrides(CppOverrides):
                         if (
                             isinstance(new_arg, CppCSEVariable)
                             and not new_arg.is_vec
-                            and func
+                            and vec_func
                             not in [
                                 CppVecOverrides.rand,
                                 CppVecOverrides.randn,
@@ -1014,14 +1067,13 @@ class CppVecOverrides(CppOverrides):
                     ]
 
                 if vectors:
-                    return func(*new_args, **kwargs)
+                    if vec_func:
+                        return vec_func(*new_args, **kwargs)
+                    else:
+                        return vectorize_by_scalar_func_with_for_loop(
+                            scalar_func, *new_args, **kwargs
+                        )
                 else:
-                    # fallback to scalar ops
-                    scalar_ops = super(CppVecOverrides, self)
-                    scalar_func = getattr(
-                        scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__)  # type: ignore[attr-defined]
-                    )
-                    assert scalar_func is not None
                     return scalar_func(*args, **kwargs)
 
             return wrapper
@@ -1031,72 +1083,15 @@ class CppVecOverrides(CppOverrides):
                 "masked",
                 "index_expr",
             ]:
-                setattr(self, name, wrap(method.__func__))
+                setattr(self, name, wrap(method.__func__, None))
 
         for name, method in vars(CppOverrides).items():
             if getattr(method, "__class__", None) == staticmethod and name not in vars(
                 CppVecOverrides
             ):
-                if name == "constant":
-                    continue
-                FALLBACKOPS.append(name)
-                setattr(self, name, CppVecOverrides.fallback(method.__func__))
+                setattr(self, name, wrap(None, method.__func__))
 
         return self
-
-    @classmethod
-    def fallback(cls, scalar_func):
-        def wrapper(*args, **kwargs):
-            assert not kwargs
-            kernel = V.kernel
-            assert isinstance(kernel, CppVecKernel)
-            code = BracesBuffer()
-            code.writeline("[&]()")
-            vec_dtype = args[0].dtype
-            tiling_factor = kernel.tiling_factor
-            scalar_args = []
-            cdtype = DTYPE_TO_CPP[vec_dtype]
-            output_bool_dtype = scalar_func.__name__ in (
-                "isinf",
-                "isnan",
-                "signbit",
-            )
-            octype = "bool" if output_bool_dtype else cdtype
-            with code.indent():
-                for argidx, arg in enumerate(args):
-                    if isinstance(arg, CppCSEVariable):
-                        if not arg.is_vec:
-                            arg = kernel.broadcast(arg)
-                        assert arg.dtype == vec_dtype
-                        code.writeline(
-                            f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf{argidx};"
-                        )
-                        code.writeline(
-                            f"{arg}.store(tmpbuf{argidx}.data(), {tiling_factor});"
-                        )
-                        scalar_args.append(f"tmpbuf{argidx}[i]")
-                    else:
-                        scalar_args.append(arg)
-                code.writeline(
-                    f"__at_align__ std::array<{octype}, {tiling_factor}> tmpbuf_out;"
-                )
-                res = scalar_func(*scalar_args)
-                code.writeline(f"for (int i = 0; i < {tiling_factor}; i++)")
-                with code.indent():
-                    code.writeline(f"tmpbuf_out[i] = {res};")
-                if output_bool_dtype:
-                    n_vec = kernel._get_num_vectors(vec_dtype)
-                    code.writeline(
-                        f"return at::vec::VecMask<{cdtype},{n_vec}>::from(tmpbuf_out.data());"
-                    )
-                else:
-                    code.writeline(
-                        f"return at::vec::Vectorized<{cdtype}>::loadu(tmpbuf_out.data(), {tiling_factor});"
-                    )
-            code.writeline("()")
-            return code
-
-        return wrapper
 
     @staticmethod
     def add(a, b):

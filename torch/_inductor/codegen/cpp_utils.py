@@ -183,8 +183,6 @@ class CppCSEVariable(CSEVariable):
         )
 
     def update_on_args(self, name, args, kwargs):
-        from .cpp import FALLBACKOPS
-
         if name == "load":
             # args[2] is index
             self._set_dependent_itervars(args[2])
@@ -200,8 +198,6 @@ class CppCSEVariable(CSEVariable):
             if name == "index_expr":
                 self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
-                self.is_vec = True
-            if name in FALLBACKOPS:
                 self.is_vec = True
         # NOTE [Deduce dtype of CppCSEVariable at runtime]
         self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
