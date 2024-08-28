@@ -16,9 +16,9 @@ from ..decorators import substitute_in_graph
 __all__ = [
     "all",
     "any",
-    "enumerate___new__",
+    "enumerate",
     "sum",
-    "zip___new__",
+    "zip",
 ]
 
 
@@ -41,14 +41,8 @@ def any(iterable: Iterable[object], /) -> bool:
     return False
 
 
-@substitute_in_graph(builtins.enumerate.__new__)  # type: ignore[arg-type]
-def enumerate___new__(
-    cls: type[builtins.enumerate[_T]],
-    iterable: Iterable[_T],
-    start: int = 0,
-) -> Iterable[tuple[int, _T]]:
-    assert cls is builtins.enumerate
-
+@substitute_in_graph(builtins.enumerate, is_embedded_type=True)  # type: ignore[arg-type]
+def enumerate(iterable: Iterable[_T], start: int = 0) -> Iterable[tuple[int, _T]]:
     if not isinstance(start, int):
         raise TypeError(
             f"{type(start).__name__!r} object cannot be interpreted as an integer"
@@ -66,14 +60,8 @@ def sum(iterable: Iterable[_T], /, start: _T = 0) -> _T:  # type: ignore[assignm
 
 if sys.version_info >= (3, 10):
 
-    @substitute_in_graph(builtins.zip.__new__)  # type: ignore[arg-type]
-    def zip___new__(
-        cls: type[builtins.zip[tuple[_T, ...]]],
-        *iterables: Iterable[_T],
-        strict: bool = False,
-    ) -> Iterable[tuple[_T, ...]]:
-        assert cls is builtins.zip
-
+    @substitute_in_graph(builtins.zip, is_embedded_type=True)  # type: ignore[arg-type]
+    def zip(*iterables: Iterable[_T], strict: bool = False) -> Iterable[tuple[_T, ...]]:
         if not iterables:
             return
         if len(iterables) == 1:
@@ -111,13 +99,8 @@ if sys.version_info >= (3, 10):
 
 else:
 
-    @substitute_in_graph(builtins.zip.__new__)  # type: ignore[arg-type]
-    def zip___new__(
-        cls: type[builtins.zip[tuple[_T, ...]]],
-        *iterables: Iterable[_T],
-    ) -> Iterable[tuple[_T, ...]]:
-        assert cls is builtins.zip
-
+    @substitute_in_graph(builtins.zip, is_embedded_type=True)  # type: ignore[arg-type]
+    def zip(*iterables: Iterable[_T]) -> Iterable[tuple[_T, ...]]:
         if not iterables:
             return
         if len(iterables) == 1:
