@@ -888,7 +888,7 @@ _scaled_dot_product_flash_attention_cpu(
           (attn_mask.value().dim() == 2 || attn_mask.value().dim() == 4),
     "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}");
 
-  at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
+  at::Tensor output = at::empty_like(query, query.options()).transpose(1, 2);
   const auto accumulate_dtype = toOpMathType(dtype);
   at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
       query.options().dtype(accumulate_dtype));
