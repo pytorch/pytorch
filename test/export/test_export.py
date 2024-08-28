@@ -2578,6 +2578,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 gm(torch.randn(33, 4), torch.randn(32, 4))
                 gm(torch.randn(128, 4), torch.randn(128, 4))
 
+    def test_dont_duck_size_for_auto_dynamic(self):
+        # for this use case, mark_dynamic() and AUTO should have same effect.
+        # check that same symbol gets allocated to both dims without raising constraint violation.
+        from torch.export.dynamic_shapes import DIM
+
+        AUTO, STATIC = DIM.AUTO, DIM.STATIC
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                # x: [s0, s1], y: [s0 + 1, 4]
+                assert y.shape[1] == 4
+                assert x.shape[0] == y.shape[0] - 1
+                return x * 2, y * 2
+
+        # duck sizing would make all static based on these sample inputs
+        inputs = (torch.randn(4, 4), torch.randn(5, 4))
+        shapes = {
+            "x": (AUTO, AUTO),
+            "y": (AUTO, AUTO),
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        ep.module()(torch.randn(6, 3), torch.randn(7, 4))
+
     @testing.expectedFailureRetraceability  # T183144629
     def test_map(self):
         class Module(torch.nn.Module):
