@@ -34,11 +34,11 @@ if not is_available():
 
 
 else:
+    from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
-        C10dBackend,
         get_backend,
         get_process_group_ranks,
         get_rank,
