@@ -39,7 +39,7 @@ jobs:
         device: ["cuda", "rocm", "xpu", "arm"]
         include:
           - device: "rocm"
-            rocm_version: "6.2"ß
+            rocm_version: "6.2"
             runs_on: [self-hosted, linux.2xlarge]
           - device: "cuda"
             rocm_version: ""
