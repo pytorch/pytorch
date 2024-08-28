@@ -4214,8 +4214,7 @@ class TestSerialization(TestCase, SerializationMixin):
             st = torch.sparse_coo_tensor(i, v, (2, 4))
         tt = TwoTensor(torch.randn(2, device=t_device), torch.randn(2, device=t_device))
 
-        mode = FakeTensorMode()
-        converter = FakeTensorConverter()
+        mode, converter = FakeTensorMode(), FakeTensorConverter()
 
         def fn(t):
             return converter.from_real_tensor(mode, t) if materialize_fake else t
@@ -4258,7 +4257,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
         nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
         t = torch.randn(2, 3, device="meta")
-        with self.assertRaisesRegex(RuntimeError, "Cannot serialize NST under skip_data context manager"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot serialize nested tensor under skip_data context manager"):
             _save_load(nt)
 
         with self.assertWarnsRegex(UserWarning, "meta device under skip_data context manager is a no-op"):

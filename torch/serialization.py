@@ -268,11 +268,12 @@ class safe_globals(_weights_only_unpickler._safe_globals):
 
 class skip_data:
     """
-    Context-manager that skips writing storages for ``torch.save`` calls.
+    Context-manager that skips writing storage bytes for ``torch.save`` calls.
 
-    Space will still be reserved for storages by ``torch.save``, but storage bytes will not be written.
+    Storages will still be saved, but the space that their bytes would usually be written to
+    will be empty space. The storage bytes can then be populated in a separate pass.
 
-    ..warning::
+    .. warning::
         The ``skip_data`` context manager is an early prototype and is subject to change.
 
     Args:
@@ -288,27 +289,19 @@ class skip_data:
     """
 
     def __init__(self, materialize_fake_tensors: bool = False):
+        self.materialize_fake_tensors = materialize_fake_tensors
+
+    def __enter__(self):
         self._old_skip_data = getattr(_serialization_tls, "skip_data", False)
         self._old_materialize_fake_tensors = getattr(
             _serialization_tls, "materialize_fake_tensors", False
         )
-        self.materialize_fake_tensors = materialize_fake_tensors
-
-    def __enter__(self):
         _serialization_tls.skip_data = True
         _serialization_tls.materialize_fake_tensors = self.materialize_fake_tensors
-        torch._C._stash_obj_in_tls("skip_data", _serialization_tls.skip_data)
-        torch._C._stash_obj_in_tls(
-            "materialize_fake_tensors", _serialization_tls.materialize_fake_tensors
-        )
 
     def __exit__(self, type, value, tb):
         _serialization_tls.skip_data = self._old_skip_data
         _serialization_tls.materialize_fake_tensors = self._old_materialize_fake_tensors
-        torch._C._stash_obj_in_tls("skip_data", _serialization_tls.skip_data)
-        torch._C._stash_obj_in_tls(
-            "materialize_fake_tensors", _serialization_tls.materialize_fake_tensors
-        )
 
 
 def _is_zipfile(f) -> bool:

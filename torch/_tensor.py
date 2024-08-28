@@ -399,7 +399,7 @@ class Tensor(torch._C.TensorBase):
         elif self.is_nested:
             if skip_data:
                 raise RuntimeError(
-                    "Cannot serialize NST under skip_data context manager, file an issue if you need this feature"
+                    "Cannot serialize nested tensor under skip_data context manager, file an issue if you need this feature"
                 )
             args_nested = (
                 # NB: values() currently returns the storage as a buffer in an unsafe way.
@@ -415,25 +415,30 @@ class Tensor(torch._C.TensorBase):
             type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
             and (
-                (
-                    isinstance(
-                        self, torch._subclasses.functional_tensor.FunctionalTensor
-                    )
-                    or (
-                        isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
-                        and not (skip_data and materialize_fake_tensors)
-                    )
-                )
+                isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
                 or (
-                    not isinstance(
-                        self,
-                        (
-                            torch._subclasses.functional_tensor.FunctionalTensor,
-                            torch._subclasses.fake_tensor.FakeTensor,
-                        ),
-                    )
+                    not isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
                     and self.data_ptr() == 0
                 )
+            )
+        ):
+            arg_wrapper_subclass = (
+                type(self),
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.storage_offset(),
+                self.layout,
+                self.device,
+                self.requires_grad,
+            )
+            return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
+        elif (
+            type(self) is not torch.Tensor
+            and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+            and (
+                isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and not (skip_data and materialize_fake_tensors)
             )
         ):
             arg_wrapper_subclass = (
