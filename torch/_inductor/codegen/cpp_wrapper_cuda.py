@@ -70,7 +70,7 @@ class CppWrapperCuda(CppWrapperCpu):
         self.device = "cuda"
         super().__init__()
         self.grid_id = count()
-        self.cuda = True
+        self.device_type = "cuda"
 
     def write_header(self):
         if V.graph.is_const_graph:
