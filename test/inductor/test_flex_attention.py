@@ -1507,7 +1507,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         out, lse = flex(query, key, value, block_mask=block_mask, return_lse=True)
         self.assertEqual(out[:, :, M:, :].sum(), 0)
-        self.assertTrue((lse[:, :, M:] == 0.0).all())
+        self.assertTrue((lse[:, :, M:] == -float("inf")).all())
 
         loss = out.sum() + lse.sum()
         loss.backward()
@@ -1654,11 +1654,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             kernel_options = {}
             flex_call = flex_attention
 
-        N_CTX = 128
+        N_CTX = 96
         SLIDING_WINDOW = 64
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 96, 64),
+            (2, 2, N_CTX, 64),
             device="cuda",
             dtype=torch.float32,
             requires_grad=False,
