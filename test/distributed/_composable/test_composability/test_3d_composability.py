@@ -124,10 +124,10 @@ class Test3DComposability(FSDPTest):
                     1,
                 ],
                 "tp_degree": [
-                    2,
+                    1,
                 ],
                 "pp_degree": [
-                    2,
+                    4,
                 ],
             },
             self._test_3d_composability,
@@ -201,8 +201,8 @@ class Test3DComposability(FSDPTest):
                 model,
                 world_mesh["tp"],
                 loss_parallel=parallel_dims.loss_parallel_enabled,
-                enable_float8=False,
-                enable_async_tp=False,  # add config here
+                enable_float8=True,
+                enable_async_tp=True,  # not works for all pp_schedule
             )
 
         self._apply_compile(model)
@@ -304,17 +304,18 @@ class Test3DComposability(FSDPTest):
                 "feed_forward.w3": colwise_parallel(),
             }
 
-        if enable_async_tp:
-            from torch.distributed._symmetric_memory import enable_symm_mem_for_group
-
-            torch._inductor.config._micro_pipeline_tp = True
-            enable_symm_mem_for_group(tp_mesh.get_group().group_name)
-            torch.distributed.breakpoint()
             parallelize_module(
                 module=transformer_block,
                 device_mesh=tp_mesh,
                 parallelize_plan=layer_plan,
             )
+
+        if enable_async_tp:
+            from torch.distributed._symmetric_memory import enable_symm_mem_for_group
+
+            torch._inductor.config._micro_pipeline_tp = True
+            enable_symm_mem_for_group(tp_mesh.get_group().group_name)
+
         self.logger.info(
             f"Applied {'Float8 ' if enable_float8 else ''}{'Async ' if enable_async_tp else ''}"  # noqa: G004
             "Tensor Parallelism to the model"
@@ -394,7 +395,7 @@ class Test3DComposability(FSDPTest):
         model_config: ModelArgs,
         loss_fn: Callable[..., torch.Tensor],
     ):
-        split_mode = "tracer"
+        split_mode = "manual"
         valid_split_modes = ("manual", "tracer")
         if split_mode == "manual":
             stages, models = self._pipeline_llama_manual(
@@ -414,7 +415,7 @@ class Test3DComposability(FSDPTest):
             "flexible_interleaved_1f1b",
         ]
         pp_schedule = self._build_pipeline_schedule(
-            parallel_dims.pp, schedule_class[3], stages, loss_fn
+            parallel_dims.pp, schedule_class[0], stages, loss_fn
         )
 
         return pp_schedule, models
