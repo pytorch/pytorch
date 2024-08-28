@@ -35,7 +35,12 @@ from ..utils import (
     set_example_value,
 )
 from .base import VariableTracker
-from .functions import NestedUserFunctionVariable, UserFunctionVariable, wrap_bound_arg
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+    wrap_bound_arg,
+)
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -366,6 +371,7 @@ class InspectSignatureVariable(VariableTracker):
 
     _nonvar_fields = {
         "signature",
+        "parameters",
         *VariableTracker._nonvar_fields,
     }
 
@@ -381,18 +387,27 @@ class InspectSignatureVariable(VariableTracker):
         super().__init__(**kwargs)
         self.inspected = inspected
 
-        if isinstance(self.inspected, UserFunctionVariable):
+        if isinstance(self.inspected, UserMethodVariable):
             self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())[1:]
+        elif isinstance(self.inspected, UserFunctionVariable):
+            self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
         else:
             self.fn = self.inspected.as_python_constant()
-        self.signature = inspect.signature(self.fn)
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    variables.ConstantVariable.create(name): InspectParameterVariable()
-                    for name in self.inspected.inspect_parameter_names()
+                    variables.ConstantVariable.create(
+                        param[0]
+                    ): InspectParameterVariable(param[1])
+                    for param in self.parameters
                 },
                 user_cls=dict,
             )
@@ -448,7 +463,24 @@ class InspectSignatureVariable(VariableTracker):
 
 
 class InspectParameterVariable(VariableTracker):
-    """This is not implemented, if used will graph break."""
+    """represents inspect.Parameter(...)"""
+
+    def __init__(self, value, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        try:
+            attr_value = getattr(self.value, name)
+            if self.source:
+                attr_source = AttrSource(self.source, name)
+                return VariableBuilder(tx, attr_source)(attr_value)
+            else:
+                return SourcelessBuilder.create(tx, attr_value)
+        except AttributeError:
+            unimplemented(f"getattr({self.value}, {name})")
 
 
 class InspectBoundArgumentsVariable(VariableTracker):
