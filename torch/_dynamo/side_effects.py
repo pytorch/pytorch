@@ -3,10 +3,9 @@
 import builtins
 import functools
 import inspect
-import itertools
 import warnings
 from collections.abc import MutableMapping
-from typing import Any, Dict, Final, FrozenSet, List, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
 import torch.nn
 
@@ -26,22 +25,6 @@ from .variables.base import (
     MutableLocalBase,
     MutableLocalSource,
     VariableTracker,
-)
-
-
-# Defined in CPython's Include/object.h
-TPFLAGS_IMMUTABLETYPE: Final[int] = 1 << 8
-
-# Classes that embedded in the Python interpreter and should not be mutated
-# See also: sys.builtin_module_names
-IMMUTABLE_EMBEDDED_TYPES: Final[FrozenSet[type]] = frozenset(
-    {
-        builtins.enumerate,
-        builtins.zip,
-        itertools.chain,
-        itertools.count,
-        itertools.islice,
-    }
 )
 
 
@@ -209,14 +192,9 @@ class SideEffects:
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
-        assert inspect.isclass(cls)
         return (
-            (
-                inspect.getattr_static(cls, "__getattribute__", None)
-                is object.__getattribute__
-            )
-            or cls in IMMUTABLE_EMBEDDED_TYPES
-            or bool(cls.__flags__ & TPFLAGS_IMMUTABLETYPE)
+            inspect.getattr_static(cls, "__getattribute__", None)
+            is object.__getattribute__
         )
 
     def is_attribute_mutation(self, item):
