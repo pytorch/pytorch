@@ -1445,7 +1445,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        # Not used?
+        # FIXME(rec): This doesn't seem to be used
         def debug_str(example_inputs, out):
             def tensor_repr(x):
                 return (
@@ -1479,7 +1479,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark_in_current_process(choices):
             inputs = get_inputs()
-            _, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
                 try:

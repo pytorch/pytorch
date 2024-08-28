@@ -212,8 +212,8 @@ def is_valid_mm_plus_mm(match: Match):
     if k1 != k2:
         return False
 
-    *b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
-    *b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    *_, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
+    *_, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
     if k3 != k4:
         return False
 

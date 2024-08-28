@@ -474,7 +474,7 @@ class PackageImporter(Importer):
             parent_module = self.modules[parent]
 
             try:
-                path = parent_module.__path__  # type: ignore[attr-defined]
+                parent_module.__path__  # type: ignore[attr-defined]
 
             except AttributeError:
                 # when we attempt to import a package only containing pybinded files,

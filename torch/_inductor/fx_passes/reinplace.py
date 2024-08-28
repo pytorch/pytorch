@@ -126,7 +126,6 @@ def _decompose_scatter_functional(
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
     assert node.target is _generalized_scatter
-    _, src, view_ops = node.args
     return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
 
 
@@ -181,7 +180,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, _, view_ops = node.args
+    inp, _, _ = node.args
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):

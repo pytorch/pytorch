@@ -189,7 +189,7 @@ class ComboKernel(Kernel):
         )
 
         for node in subkernel_nodes:
-            _, tiled_groups, numel, rnumel = node_info_map[node]
+            _, tiled_groups, _, _ = node_info_map[node]
             node_info = node
 
             read_writes = node.read_writes

@@ -429,7 +429,6 @@ def write(
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
     basename, _, path = get_path(key, extension, specified_dir)
-    encode_utf_8: bool = hash_type == "code"
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path

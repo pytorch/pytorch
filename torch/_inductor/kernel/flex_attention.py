@@ -1611,7 +1611,6 @@ def flex_attention_backward(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     assert Bq == Bkv, "Batch dimension must match"
-    B = Bq
 
     kernel_options = dict(kernel_options)
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
