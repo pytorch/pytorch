@@ -113,20 +113,6 @@ class MultiKernelState:
             # the second pass of cpp-wrapper.
             return multi_kernel_name
 
-        # add subkernel src code hashes to the multi-kernel source code so changing a
-        # subkernel implementation will result in a different py file for
-        # multi-kernel. This makes cache implementation straightforward since
-        # we can decide cache file name based on multi-kernel py file name
-        # directly.
-        #
-        # Without the hash added for subkernels, the cache file may be shared by
-        # different subkernels which is incorrect.
-        subkernel_hashes = "\n".join(
-            f"# subkernel{i} code hash: {kernel.code_hash}"
-            for i, kernel in enumerate(kernels)
-        )
-        kernel_name_list = ",\n    ".join(kernel_names)
-
         buf = IndentedBuffer()
         buf.writeline(
             f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
