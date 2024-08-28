@@ -4055,7 +4055,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @parametrize('path_type', (str, Path))
     @parametrize('weights_only', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_mmap_loading(self, weights_only, path_type):
+    def test_serialization_mmap_loading_options(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -4104,7 +4104,7 @@ class TestSerialization(TestCase, SerializationMixin):
             for v in result.values():
                 self.assertTrue(v.is_cuda)
 
-    def test_serialization_mmap_loading_options(self):
+    def test_serialization_mmap_loading(self):
         if IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "Changing the default mmap options is currently not supported"):
                 torch.serialization.set_default_mmap_options(2)
@@ -4114,21 +4114,35 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(sd, f)
             # with MmapVisibility.MAP_PRIVATE, should not be able to modify file
-            sd_loaded = torch.load(f.name, mmap=True)
+            sd_loaded = torch.load(f.name, mmap=True, weights_only=True)
             sd_loaded['weight'][0][0] = 0
-            sd_loaded2 = torch.load(f.name, mmap=True)
+            sd_loaded2 = torch.load(f.name, mmap=True, weights_only=True)
             self.assertEqual(sd_loaded2['weight'], sd['weight'])
             # with MmapVisibility.MAP_SHARED, should be able to modify file
             torch.serialization.set_default_mmap_options(MAP_SHARED)
             try:
-                sd_loaded = torch.load(f.name, mmap=True)
+                sd_loaded = torch.load(f.name, mmap=True, weights_only=True)
                 sd_loaded['weight'][0][0] = 0
-                sd_loaded2 = torch.load(f.name, mmap=True)
+                sd_loaded2 = torch.load(f.name, mmap=True, weights_only=True)
                 self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
                 self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
                 self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
             finally:
                 torch.serialization.set_default_mmap_options(MAP_PRIVATE)
+
+    @unittest.skipIf(IS_WINDOWS, "mmap ctx doesn't work on Windows")
+    def test_serialization_mmap_loading_ctx(self):
+        sd = torch.nn.Linear(3, 5).state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            with torch.serialization.set_default_mmap_options(MAP_SHARED):
+                sd_loaded = torch.load(f.name, mmap=True, weights_only=True)
+                sd_loaded['weight'][0][0] = 0
+                sd_loaded2 = torch.load(f.name, mmap=True, weights_only=True)
+                self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
+                self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
+                self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+            self.assertTrue(torch.serialization.get_default_mmap_options() == MAP_PRIVATE)
 
     @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
     @parametrize('weights_only', (True, False))
