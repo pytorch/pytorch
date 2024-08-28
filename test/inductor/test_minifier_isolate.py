@@ -7,6 +7,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
     skipIfRocm,
+    skipIfWindows,
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -33,6 +34,9 @@ inner(torch.randn(2, 2).to("{device}"))
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "runtime_error")
+    @skipIfWindows(
+        msg="Build Failed: fatal error C1083: Cannot open include file: 'Python.h': No such file or directory"
+    )
     def test_after_aot_cpu_runtime_error(self):
         self._test_after_aot_runtime_error("cpu", "")
 
