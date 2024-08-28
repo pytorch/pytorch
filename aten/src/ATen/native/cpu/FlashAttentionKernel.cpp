@@ -376,8 +376,9 @@ void cpu_flash_attention(
   const auto accumulate_dtype = toOpMathType(dtype);
 
   // Whether pack is needed
-  bool need_pack = with_pack && at::native::cpublas::need_pack(dtype);
+  bool need_pack = false;
   // Block size of packing B matrix
+  int64_t packb_size = 64;
   // Use packb_size due to the limitation:
   // oneDNN pack only supports output leading dimention being one of (16, 32, 48, 64)
   // For instance,
@@ -385,7 +386,30 @@ void cpu_flash_attention(
   // we need to split kvSplitSize with packb_size for packing k.T,
   // for (q @ k.T) @ v [qSplitSize, kvSplitSize] x [kvSplitSize, headSize] -> [qSplitSize, headSize],
   // we need to split headSize with packb_size for packing v
-  int64_t packb_size = 64;
+  if (with_pack) {
+    if (dtype == at::ScalarType::BFloat16) {
+      need_pack =
+          ((kvSize < 448 && kvSize % packb_size == 0) || kvSize >= 448) &&
+          (headSize % packb_size == 0 && headSize < 320);
+    } else {
+      need_pack =
+          ((kvSize < 448 && kvSize % packb_size == 0) || kvSize >= 448) &&
+          (headSize % packb_size == 0 && headSize < 512);
+    }
+    if (need_pack) {
+      float pack_size_per_thread =
+          (batchSize * num_head * kvSlice + num_thread - 1) / num_thread * kvSplitSize * headSize;
+      float gemm_size_per_thread =
+          (batchSize * num_head * qSlice + num_thread - 1) / num_thread * qSplitSize * kvSize * headSize;
+      // cpu_flash_attention with pack has better performance when qSize, kvSize and headSize are long enough,
+      need_pack = pack_size_per_thread >= 65535 && qSize >= 320;
+      // When the number of gemm is much greater than the number of pack,
+      // the pack overhead can be overlaped.
+      need_pack = need_pack &&
+          (gemm_size_per_thread / pack_size_per_thread >= (dtype == at::ScalarType::BFloat16 ? 6144 : 448));
+    }
+  }
+
   int64_t rHeadSize = need_pack ? (headSize + packb_size - 1) / packb_size * packb_size : headSize;
   int64_t rkvSplitSize = need_pack ? (kvSplitSize + packb_size - 1) / packb_size * packb_size : kvSplitSize;
   int64_t rkvTail = need_pack ? (kvTail + packb_size - 1) / packb_size * packb_size : kvTail;
@@ -492,7 +516,7 @@ void cpu_flash_attention(
                   packb_size);
             }
             // Pack
-            at::native::cpublas::pack(
+            cpublas::pack(
                 /* K */ eheadSize,
                 /* N */ packb_size,
                 /* ld_in */ packb_size,
@@ -518,7 +542,7 @@ void cpu_flash_attention(
                 ekvBlockSize,
                 packb_size,
                 vStrideN);
-            at::native::cpublas::pack(
+            cpublas::pack(
                 ekvBlockSize,
                 packb_size,
                 packb_size,
@@ -581,7 +605,7 @@ void cpu_flash_attention(
         // Calculate scale * q @ k.T
         if (need_pack) {
           for (int64_t b = 0; b < kvBlockSize; b += packb_size) {
-            at::native::cpublas::brgemm(
+            cpublas::brgemm(
                 qBlockSize,
                 packb_size,
                 eheadSize,
@@ -714,7 +738,7 @@ void cpu_flash_attention(
         if (need_pack) {
           int64_t psize = n / kvSplitSize * ekvSplitSize;
           for (int64_t b = 0; b < headSize; b += packb_size) {
-            at::native::cpublas::brgemm(
+            cpublas::brgemm(
                 qBlockSize,
                 packb_size,
                 ekvBlockSize,
@@ -774,7 +798,9 @@ void cpu_flash_attention(
       data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
   });
-
+  if (need_pack) {
+    cpublas::brgemm_release();
+  }
 }
 
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
@@ -1140,46 +1166,40 @@ void flash_attention_kernel_impl(
     std::optional<Tensor> attn_mask,
     std::optional<double> scale) {
   auto q_seq_len = query.size(2);
-  auto k_seq_len = key.size(2);
-  auto headSize = query.size(3);
-  auto nhead = query.size(1);
 
   // When q_seq_len and k_seq_len are long enough,
   // cpu_flash_attention with pack has better performance.
-    bool use_pack =
-      (query.scalar_type() == kBFloat16 &&
-       at::native::cpublas::need_pack(kBFloat16) && q_seq_len >= 320 &&
-       k_seq_len >= 320 && nhead >= 4 && headSize >= 128) ||
-      (query.scalar_type() == kHalf && at::native::cpublas::need_pack(kHalf) &&
-       q_seq_len >= 64 && k_seq_len >= 64 && headSize >= 64);
+  bool could_pack =
+      (query.scalar_type() == kBFloat16 && cpublas::need_pack(kBFloat16)) ||
+      (query.scalar_type() == kHalf && cpublas::need_pack(kHalf));
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
     if (!attn_mask.has_value()) {
       if (q_seq_len >= 768) {
-        FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_pack, scalar_t, scalar_t, 256, 512,
+        FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, scalar_t, 256, 512,
           output, logsumexp, query, key, value,
           dropout_p, is_causal, attn_mask, scale);
       } else if (q_seq_len >= 192) {
-        FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_pack, scalar_t, scalar_t, 64, 512,
+        FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, scalar_t, 64, 512,
           output, logsumexp, query, key, value,
           dropout_p, is_causal, attn_mask, scale);
       } else {
-        FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_pack, scalar_t, scalar_t, 32, 512,
+        FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, scalar_t, 32, 512,
           output, logsumexp, query, key, value,
           dropout_p, is_causal, attn_mask, scale);
       }
     } else {
       AT_DISPATCH_MASK_TYPES(attn_mask.value().scalar_type(), "flash_attention_mask", [&]() {
         if (q_seq_len >= 768) {
-          FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_pack, scalar_t, mask_t, 256, 512,
+          FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, mask_t, 256, 512,
             output, logsumexp, query, key, value,
             dropout_p, is_causal, attn_mask, scale);
         } else if (q_seq_len >= 192) {
-          FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_pack, scalar_t, mask_t, 64, 512,
+          FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, mask_t, 64, 512,
             output, logsumexp, query, key, value,
             dropout_p, is_causal, attn_mask, scale);
         } else {
-          FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_pack, scalar_t, mask_t, 32, 512,
+          FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, mask_t, 32, 512,
             output, logsumexp, query, key, value,
             dropout_p, is_causal, attn_mask, scale);
         }

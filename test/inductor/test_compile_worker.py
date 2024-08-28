@@ -8,10 +8,12 @@ from torch._inductor.compile_worker.subproc_pool import (
     SubprocPool,
 )
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 class TestCompileWorker(TestCase):
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_basic_jobs(self):
         pool = SubprocPool(2)
         try:
@@ -22,6 +24,7 @@ class TestCompileWorker(TestCase):
         finally:
             pool.shutdown()
 
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_exception(self):
         pool = SubprocPool(2)
         try:
@@ -34,6 +37,7 @@ class TestCompileWorker(TestCase):
         finally:
             pool.shutdown()
 
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_crash(self):
         pool = SubprocPool(2)
         try:

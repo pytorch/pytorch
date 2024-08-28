@@ -17,6 +17,7 @@ import linecache
 import logging
 import multiprocessing
 import operator
+import os
 import posixpath
 import random
 import re
@@ -32,6 +33,7 @@ import typing
 import unittest
 import weakref
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
 import torch
@@ -2980,6 +2982,7 @@ def _disallowed_callable_ids() -> Dict[int, str]:
 
 @FunctionIdSet
 def _builtin_function_ids() -> Dict[int, str]:
+    # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
         id(v): f"builtins.{k}"
         for k, v in builtins.__dict__.items()
@@ -3072,6 +3075,7 @@ def is_forbidden(obj) -> bool:
 
 
 def is_builtin_callable(obj) -> bool:
+    # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     return id(obj) in _builtin_function_ids
 
 
@@ -3154,13 +3158,20 @@ THIRDPARTY_SKIPLIST = (
 )
 
 
+def _as_posix_path(path):
+    posix_path = Path(os.path.normpath(path)).as_posix()
+    # os.path.normpath and pathlib.Path remove trailing slash, so we need to add it back
+    if path.endswith((os.path.sep, "/")):
+        posix_path += "/"
+    return posix_path
+
+
 def _strip_init_py(s):
     # TODO: Once we require py3.9 use removesuffix instead.
     suffix = "__init__.py"
     if s.endswith(suffix):
-        return s[: -len(suffix)]
-    else:
-        return s
+        s = s[: -len(suffix)]
+    return _as_posix_path(s)
 
 
 def _module_dir(m: types.ModuleType):
@@ -3203,26 +3214,29 @@ if torch.distributed.is_available():
         # we have to add replicate to LEGACY_MOD_INLINELIST to ensure
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
-        "torch.distributed._composable.fsdp",
     }
 
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
 # Please keep this sorted alphabetically.
-MOD_INLINELIST = {
-    "torch.utils._python_dispatch",
-    "torch._refs",
-    "torch._prims",
+MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
-    "torch._dynamo.polyfill",
-    "torch._functorch.vmap",
+    "torch._dynamo.polyfills",
     "torch._functorch.autograd_function",
-    "torch._library.custom_ops",
     "torch._functorch.eager_transforms",
+    "torch._functorch.functional_call",
+    "torch._functorch.vmap",
+    "torch._higher_order_ops.associative_scan",
+    "torch._higher_order_ops.strict_mode",
+    "torch._higher_order_ops.while_loop",
     "torch._inductor.test_operators",
+    "torch._library.custom_ops",
+    "torch._prims",
+    "torch._refs",
+    "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
     "torch.autograd.function",
@@ -3237,31 +3251,25 @@ MOD_INLINELIST = {
     "torch.random",
     "torch.sparse",
     "torch.testing",
-    "torch.testing._internal.hypothesis_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
+    "torch.utils._python_dispatch",
     "torch.utils._pytree",
     "torch.utils.hooks",
-    "torch._tensor",
-    "torch._higher_order_ops.strict_mode",
-    "torch._higher_order_ops.while_loop",
-    "torch._higher_order_ops.associative_scan",
-    "torch._functorch.functional_call",
-}
+]
+assert sorted(set(MOD_INLINELIST)) == MOD_INLINELIST
+MOD_INLINELIST = set(MOD_INLINELIST)
 
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
-    MOD_INLINELIST.add("torch.distributed._functional_collectives")
-    MOD_INLINELIST.add("torch.distributed._composable.replicate")
-    MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
     inlinelist = {
-        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
         for m in LEGACY_MOD_INLINELIST
     }
     return inlinelist
@@ -3270,7 +3278,7 @@ def get_legacy_mod_inlinelist():
 @functools.lru_cache(None)
 def get_mod_inlinelist():
     inlinelist = {
-        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
         for m in MOD_INLINELIST
     }
     return inlinelist
@@ -3281,10 +3289,10 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<frozen abc",
     "<__array_function__ internals>",
-    _config_module.__file__,
+    _as_posix_path(_config_module.__file__),
     "triton/backends",
 ]
-SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
+SKIP_DIRS.extend(map(_as_posix_path, filter(None, map(_module_dir, BUILTIN_SKIPLIST))))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
@@ -3303,7 +3311,7 @@ FBCODE_SKIP_TORCHREC_DIRS = {
 }
 
 FBCODE_SKIP_TORCHREC_DIRS_RE = re.compile(
-    f".*({'|'.join(map(re.escape, FBCODE_SKIP_TORCHREC_DIRS))})"
+    f".*({'|'.join(re.escape(_as_posix_path(d)) for d in FBCODE_SKIP_TORCHREC_DIRS)})"
 )
 
 # TODO(yanboliang, anijain2305) - There are a few concerns that we should
@@ -3317,7 +3325,7 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS = {
     "torchrec/distributed/types.py",
 }
 FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
-    f".*({'|'.join(map(re.escape, FBCODE_INLINE_FILES_IN_SKIPPED_DIRS))})"
+    f".*({'|'.join(re.escape(_as_posix_path(d)) for d in FBCODE_INLINE_FILES_IN_SKIPPED_DIRS)})"
 )
 
 # torch.optim is a special case,
@@ -3330,7 +3338,9 @@ FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 
 def _recompile_re():
     global SKIP_DIRS_RE
-    SKIP_DIRS_RE = re.compile(rf"^[^\s<]*({'|'.join(map(re.escape, SKIP_DIRS))})")
+    SKIP_DIRS_RE = re.compile(
+        rf"^[^\s<]*({'|'.join(re.escape(_as_posix_path(d)) for d in SKIP_DIRS)})"
+    )
 
 
 def add(import_name: str):
@@ -3359,6 +3369,7 @@ def check_file(filename, is_inlined_call=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
+    filename = _as_posix_path(filename)
     if filename in FORCE_SKIP_FILES:
         return SkipResult(True, "FORCE_SKIP_FILES")
     if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
