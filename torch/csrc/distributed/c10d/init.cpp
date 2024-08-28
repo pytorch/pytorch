@@ -2542,6 +2542,8 @@ Arguments:
               py::call_guard<py::gil_scoped_release>());
 
   // base Backend::Options binding
+  // TODO: Maybe we can consider how to merge this with
+  // `DistributedBackendOptions`.
   auto backendOptions =
       intrusive_ptr_class_<::c10d::Backend::Options>(
           backend,
