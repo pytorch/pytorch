@@ -48,6 +48,7 @@ from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
+    AttrProxySource,
     AttrSource,
     CallMethodItemSource,
     ConstantSource,
@@ -1316,6 +1317,13 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
+
+            # Note [Tracing a torch.compiled function]
+            # when make_fx tracing a compiled function, we need
+            if isinstance(value, torch.fx.experimental.proxy_tensor._AttrProxy):
+                value = value.get_base()
+                self.source = AttrProxySource(self.source)
+
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()

@@ -3245,6 +3245,8 @@ MOD_INLINELIST = [
     "torch.distributions",
     "torch.export._tree_utils",
     "torch.fx._pytree",
+    "torch.fx._symbolic_trace",
+    "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.overrides",

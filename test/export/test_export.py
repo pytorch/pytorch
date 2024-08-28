@@ -5572,7 +5572,6 @@ graph():
             )
         )
 
-    # Guard validation upsets the guard
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
