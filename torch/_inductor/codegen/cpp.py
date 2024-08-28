@@ -2594,12 +2594,10 @@ class CppVecKernel(CppKernel):
     def arange(self, index: CppCSEVariable, stride: sympy.Symbol) -> CppCSEVariable:
         assert not index.is_vec
         assert index.dtype is not None
-        vec_type = self._get_vec_type(index.dtype)
-        if self.tail_size:
-            line = f"{vec_type}::set({vec_type}(0), {vec_type}::arange({index}, {stride}), {cexpr_index(self.tail_size)})"
-        else:
-            line = f"{vec_type}::arange({index}, {stride})"
-        csevar = self.cse.generate(self.compute, line)
+        csevar = self.cse.generate(
+            self.compute,
+            f"{self._get_vec_type(index.dtype)}::arange({index}, {stride})",
+        )
         assert isinstance(csevar, CppCSEVariable)
         csevar.dtype = index.dtype
         csevar.is_vec = True
