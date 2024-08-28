@@ -5,7 +5,9 @@ on:
     # - cron: 0 7 * * 1-6
     # - cron: 0 7 * * 0
     # Does not perform max_autotune on CPU, so skip the weekly run setup
-    - cron: 0 7 * * *
+    # Run 6 times everyday to see if perf instablity can be reproduced
+    # Will change this back
+    - cron: 0 */4 * * *
   # NB: GitHub has an upper limit of 10 inputs here
   workflow_dispatch:
     inputs:
@@ -103,10 +105,12 @@ jobs:
     name: linux-jammy-aarch64-py3.10-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-aarch64-py3_10-inductor-build
-    if: github.event.schedule == '0 7 * * *'
+    if: github.event.schedule == '0 */4 * * *'
     with:
       build-environment: linux-jammy-aarch64-py3.10
-      dashboard-tag: training-false-inference-true-default-true-dynamic-true-aotinductor-true
+      # Turn off dynamic-shapes and aotinductor tests for now, to have faster iteration for debugging perf instability.
+      # Will change this back
+      dashboard-tag: training-false-inference-true-default-true-dynamic-false-aotinductor-false
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
