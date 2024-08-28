@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+import contextlib
 import cProfile
 import dis
 import functools
@@ -27,6 +28,7 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
+from torch._dynamo.utils import CompileTimeInstructionCounter
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
@@ -95,6 +97,7 @@ from .utils import (
     format_bytecode,
     frame_phase_timing,
     gen_record_file_name,
+    get_chromium_event_logger,
     increment_frame,
     is_namedtuple,
     istype,
@@ -159,6 +162,7 @@ class Tracker:
 
 input_codes = Tracker()
 output_codes = Tracker()
+disabled_codes: Dict[int, Callable[..., Any]] = {}
 
 initial_global_state: Optional[GlobalStateGuard] = None
 
@@ -204,10 +208,16 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
+
+            exit_stack = contextlib.ExitStack()
+            exit_stack.enter_context(
+                torch.fx._symbolic_trace._maybe_revert_all_patches()
+            )
             try:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
+                exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
                 torch.use_deterministic_algorithms(
@@ -650,7 +660,8 @@ def _compile(
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         with dynamo_timed("_compile.compile_inner", phase_name="entire_frame_compile"):
-            return _compile_inner(code, one_graph, hooks, transform)
+            with CompileTimeInstructionCounter.record():
+                return _compile_inner(code, one_graph, hooks, transform)
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
@@ -869,6 +880,9 @@ def _compile(
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
         convert_frame_intern = structured.intern_string(__file__)
+        # Initialize the ChromiumEventLogger on start
+        chromium_event_log = get_chromium_event_logger()
+        chromium_event_log.reset()
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {

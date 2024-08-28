@@ -53,7 +53,7 @@ from typing_extensions import TypeAlias
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.utils import ChromiumEventLogger, counters, dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed, get_chromium_event_logger
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -67,6 +67,8 @@ T = TypeVar("T")
 
 if TYPE_CHECKING:
     from collections.abc import KeysView
+
+    from .remote_cache import RemoteCacheBackend
 
 
 """
@@ -427,6 +429,7 @@ def write(
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
+    encode_utf_8: bool = hash_type == "code"
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path
@@ -440,7 +443,10 @@ def write_text(text: str) -> str:
 
 
 def write_atomic(
-    path: str, content: Union[str, bytes], make_dirs: bool = False
+    path: str,
+    content: Union[str, bytes],
+    make_dirs: bool = False,
+    encode_utf_8: bool = False,
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
@@ -452,7 +458,7 @@ def write_atomic(
         path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     write_mode = "w" if isinstance(content, str) else "wb"
-    with tmp_path.open(write_mode) as f:
+    with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
         f.write(content)
     tmp_path.rename(path)
 
@@ -899,6 +905,34 @@ def maybe_realign_inputs(
             compiled_graph.current_callable = new_callable
 
 
+def add_ephemeral_timeout_increase_for_distributed(time_saved_ns: int) -> int:
+    """
+    Ephemerally increases the NCCL timeout when compiling for a distributed job
+    Returns amount of seconds increased
+    """
+    if not torch.distributed.is_available() or not torch.distributed.is_initialized():
+        return 0
+
+    increased_timeout_sec = int(time_saved_ns // 1e9)  # convert to seconds
+
+    if config.is_fbcode():
+        fudge_factor = torch._utils_internal.justknobs_getval_int(
+            "pytorch/remote_cache:ephemeral_timeout_fudge_factor_percentage"
+        )
+        log.info(
+            "Ephemeral NCCL timeout increase fudge factor %d and original increase value %d",
+            fudge_factor,
+            increased_timeout_sec,
+        )
+        increased_timeout_sec += int(increased_timeout_sec * fudge_factor / 100)
+
+    log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
+    dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+        timedelta(seconds=increased_timeout_sec)
+    )
+    return increased_timeout_sec
+
+
 class FxGraphCache:
     """
     Supports caching and reusing compiled Fx graphs.
@@ -1145,7 +1179,7 @@ class FxGraphCache:
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
         local: bool,
-        remote_cache: None,
+        remote_cache: Optional[RemoteCacheBackend],
     ) -> None:
         """
         Store a serialized CompiledFxGraph on disk.
@@ -1192,17 +1226,16 @@ class FxGraphCache:
                 write_atomic(path, content, make_dirs=True)
 
             if remote_cache:
+                time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
                 cache_data = (
                     {
                         "data": content,
-                        "time_taken_ms": int(
-                            disk_compiled_graph._time_taken_ns // 1e6
-                        ),  # Convert from NS to MS
+                        "time_taken_ms": time_taken_ms,
                     }
                     if config.is_fbcode()
                     else content
                 )
-                remote_cache.put(key, cache_data)
+                remote_cache.put(key, cache_data)  # type: ignore[arg-type]
         except Exception:
             log.warning("fx graph unable to write to cache", exc_info=True)
             counters["inductor"]["fxgraph_cache_write_error"] += 1
@@ -1254,15 +1287,16 @@ class FxGraphCache:
         compiled_graph = None
         cache_state = None
         cache_event_time = None
-        key = None
-        debug_lines = None
+        cache_info: Dict[str, Any] = {}
         try:
             FxGraphCache._check_can_cache(gm)
             key, debug_lines = compiled_fx_graph_hash(
                 gm, example_inputs, fx_kwargs, inputs_to_check
             )
+            cache_info["key"] = key
+            cache_info["components"] = debug_lines
 
-            remote_cache = None
+            remote_cache: Optional[RemoteCacheBackend] = None
             if remote:
                 cache_id = "fx-graph-v1"
                 try:
@@ -1294,6 +1328,7 @@ class FxGraphCache:
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
                 compiled_graph._time_taken_ns = time_ns() - start_time
+                cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
                 FxGraphCache._save_graph(
                     key,
                     compiled_graph,
@@ -1306,31 +1341,30 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time_ns()
-                if (
-                    torch.distributed.is_available()
-                    and torch.distributed.is_initialized()
-                    and (time_taken_ns := compiled_graph._time_taken_ns) is not None
-                ):
-                    increased_timeout_sec = int(
-                        time_taken_ns // 1e9
-                    )  # convert to seconds
-                    log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
-                    dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
-                        timedelta(seconds=increased_timeout_sec)
-                    )
+                if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
+                    cache_info["time_saved_ns"] = time_saved_ns
+                    if (
+                        ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
+                            time_saved_ns
+                        )
+                    ) != 0:
+                        cache_info["ephemeral_timeout_increase"] = ephemeral_increase
             compiled_graph._fx_graph_cache_key = key
-        except BypassFxGraphCache:
+        except BypassFxGraphCache as e:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
+            log.info("Bypassing FX Graph Cache because '%s'", e)
+            cache_info["cache_bypass_reason"] = str(e)
             cache_event_time = time_ns()
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
         assert compiled_graph is not None
-        cache_args = {"key": key, "cache_state": cache_state, "components": debug_lines}
-        ChromiumEventLogger.log_instant_event(
-            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_args
+        cache_info["cache_state"] = cache_state
+        chromium_log = get_chromium_event_logger()
+        chromium_log.log_instant_event(
+            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
         torch._logging.trace_structured(
             "artifact",
@@ -1338,7 +1372,7 @@ class FxGraphCache:
                 "name": "fx_graph_cache_hash",
                 "encoding": "json",
             },
-            payload_fn=lambda: json.dumps(cache_args),
+            payload_fn=lambda: json.dumps(cache_info),
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
@@ -1870,10 +1904,15 @@ class AotCodeCompiler:
                     run_command_and_check(link_cmd)
 
                 if use_mmap_weights:
+                    import resource
+
+                    page_size_ = resource.getpagesize()
+                    page_size = max(16384, page_size_)
+
                     with open(output_so, "a+b") as f_so:
                         so_size = f_so.tell()
                         # Page align the weights
-                        f_so.write(b" " * (16384 - so_size % 16384))
+                        f_so.write(b" " * (page_size - so_size % page_size))
                         f_so.write(serialized_weights)
                         f_so.write(struct.pack("q", magic_number))
 
@@ -2198,7 +2237,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
-        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
+        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == -1 && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
