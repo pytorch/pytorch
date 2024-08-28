@@ -31,20 +31,27 @@ concurrency:
 jobs:
   build-wheel:
     name: "Build Triton Wheel"
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
-        device: ["cuda", "rocm", "xpu"]
+        py_vers: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+        device: ["cuda", "rocm", "xpu", "arm"]
         include:
           - device: "rocm"
+<<<<<<< HEAD
             rocm_version: "6.2"
+=======
+            rocm_version: "6.1"
+            runs_on: [self-hosted, linux.2xlarge]
+>>>>>>> 4e186f828a (add device=arm option)
           - device: "cuda"
             rocm_version: ""
+            runs_on: [self-hosted, linux.2xlarge]
+          - device: "xpu"
+            runs_on: [self-hosted, linux.2xlarge]
           - device: "arm"
-            rocm_version: ""
-            runs-on: [self-hosted, linux.arm64.2xlarge]
+            runs_on: [self-hosted, linux.arm64.2xlarge]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || matrix.device == 'arm' && 'pytorch/manylinuxaarch64-builder:cpu-aarch64' || 'pytorch/manylinux-builder:cpu' }}
