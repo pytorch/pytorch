@@ -147,6 +147,17 @@ class VecMask {
     return result;
   }
 
+  static VecMask<T, N> set(
+      const VecMask<T, N>& a,
+      const VecMask<T, N>& b,
+      int64_t count = size()) {
+    VectorizedN<T, N> result = VectorizedN<T, N>::set(
+      VectorizedN<T, N>(a),
+      VectorizedN<T, N>(b),
+      count);
+    return result;
+  }
+
   void store(bool* b, int count = size()) {
     constexpr int L = (VectorizedN<T, N>::size() + Vectorized<bool>::size() - 1)/ Vectorized<bool>::size();
     auto res = this->to<bool, L>();
