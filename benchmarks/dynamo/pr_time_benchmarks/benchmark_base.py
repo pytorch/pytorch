@@ -109,6 +109,10 @@ class BenchmarkBase(ABC):
             CompileTimeInstructionCounter.clear()
             self._work()
             count = CompileTimeInstructionCounter.value()
+            if count == 0:
+                raise RuntimeError(
+                    "compile time instruction count is 0, please check your benchmarks"
+                )
             print(f"compile time instruction count for iteration {i} is {count}")
             results.append(count)
 
