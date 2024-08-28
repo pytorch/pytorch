@@ -175,7 +175,6 @@ def scaled_dot_product_flash_attention_strategy(
     q_input_strategy = op_schema.args_schema[0]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.shape
 
     single_mesh_dim_strategies = []
 
@@ -254,7 +253,6 @@ def scaled_dot_product_flash_attention_backward_strategy(
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.shape
 
     tensor_input_indices = [
         i
@@ -348,7 +346,7 @@ def scaled_dot_product_efficient_attention_strategy(
     q_input_strategy = op_schema.args_schema[0]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.shape
+
     has_attn_bias = op_schema.args_schema[3] is not None
     compute_log_sumexp = op_schema.args_schema[4]
 
@@ -422,14 +420,7 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.shape
     has_attn_bias = op_schema.args_schema[4] is not None
-
-    tensor_input_indices = [
-        i
-        for i, arg_spec in enumerate(op_schema.args_schema)
-        if isinstance(arg_spec, OpStrategy)
-    ]
 
     single_mesh_dim_strategies = []
 

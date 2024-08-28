@@ -239,7 +239,7 @@ torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
         self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))
         self.assertIsNotNone(repro_dir)
         print("running minifier", file=sys.stderr)
-        minifier_proc, minifier_code = self._run_minifier_launcher(
+        _, minifier_code = self._run_minifier_launcher(
             repro_dir, isolate=isolate, minifier_args=minifier_args
         )
         print("running repro", file=sys.stderr)

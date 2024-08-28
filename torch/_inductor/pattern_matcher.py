@@ -1033,7 +1033,6 @@ class ReplacementPatternEntry(PatternEntry):
         args: Sequence[torch.fx.Node],
     ) -> None:
         output_nodes = match.output_nodes()
-        first_node = output_nodes[0]
 
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]

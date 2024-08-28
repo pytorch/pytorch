@@ -526,7 +526,7 @@ def split_module(
             for node in original_order:
                 if node in already_constructed_attr_nodes:
                     continue  # already added this attr to the base graph
-                base_mod_env, based_mod_attrs = construct_graph(
+                base_mod_env, _ = construct_graph(
                     node, base_mod_env, base_mod_attrs
                 )
                 already_constructed_attr_nodes.add(node)

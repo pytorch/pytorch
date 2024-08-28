@@ -58,7 +58,6 @@ def get_size_of_all_nodes(
         # Mark shape and dtype for each node (node.shape and node.dtype)
         ShapeProp(fx_module).propagate(*args)
     # Calculate the total size of the whole fx graph
-    total_size_of_graph = 0.0
     for node in fx_module.graph.nodes:
         if node.op == "output":
             break
@@ -92,7 +91,7 @@ def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
         submodule = submodule_dict[node.target]
         parameters = submodule.named_parameters()
         # Parameters are named tuples
-        for name, p in parameters:
+        for _, p in parameters:
             total_num_of_elems += p.numel()
     # Don't forget the output size
     # node.shape is the shape of this node's output

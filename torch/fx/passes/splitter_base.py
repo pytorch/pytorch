@@ -80,7 +80,7 @@ class _SplitterSettingBase:
             "we might not care about non-tensor data flow and we can set this option "
             "to true to disable the functionality that prevent non-tensor data flow.",
         )
-        args, unknown = parser.parse_known_args()
+        args, _ = parser.parse_known_args()
 
         self.min_acc_module_size: int = args.min_acc_module_size if args.min_acc_module_size else min_acc_module_size
         self.skip_fusion: bool = args.skip_fusion if args.skip_fusion else skip_fusion
@@ -882,7 +882,7 @@ class _SplitterBase:
     def generate_split_results(self) -> SplitResult:
         split_module = self()
         submodule_names = []
-        for name, mod in split_module.named_children():
+        for name, _ in split_module.named_children():
             submodule_names.append(name)
         if (
             self.settings.max_acc_splits > 0

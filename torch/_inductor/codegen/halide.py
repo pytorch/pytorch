@@ -1382,7 +1382,7 @@ class HalideKernel(SIMDKernel):
         """
 
         def arg_order(arg_tuple):
-            call_str, arg = arg_tuple
+            _, arg = arg_tuple
             if isinstance(arg, SizeArg):
                 return 1  # this would normally be at the end, move it to middle
             elif "out_ptr" in arg.name:

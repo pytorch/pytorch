@@ -860,7 +860,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             for kernel_file in kernel_files:
                 if kernel_file is None:
                     continue
-                path, name = os.path.split(kernel_file)
+                name = os.path.basename(kernel_file)
                 dst = os.path.join(resource_dir, name)
                 shutil.copyfile(kernel_file, dst)
 

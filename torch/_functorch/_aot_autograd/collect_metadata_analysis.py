@@ -200,10 +200,8 @@ def run_functionalized_fw_and_collect_metadata(
                     "tensor subclasses"
                 )
 
-            if not isinstance(arg, Tensor):
-                new_arg = arg
-            else:
-                new_arg = from_fun(f_arg)
+            if isinstance(arg, Tensor):
+                from_fun(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
@@ -670,7 +668,7 @@ from a multi-output view call"
             coerce_tangent,
             traced_tangents,
         )
-        user_outs = pytree.tree_map(from_fun, f_output_tangents)
+        pytree.tree_map(from_fun, f_output_tangents)
 
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []

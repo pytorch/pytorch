@@ -45,7 +45,7 @@ def islice(iterator, start=0, end=None, step=1):
 
 
 def repeat(item, count):
-    for i in range(count):
+    for _ in range(count):
         yield item
 
 

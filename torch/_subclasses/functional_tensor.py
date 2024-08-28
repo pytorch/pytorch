@@ -399,9 +399,6 @@ class FunctionalTensorMode(TorchDispatchMode):
                 if r is not NotImplemented:
                     return r
 
-        def assert_is_functional(x):
-            assert torch._is_functional_tensor(x)
-
         def wrap(x):
             # Only wrap our outputs in subclasses if the inner functionalization call
             # also wrapped outputs into FunctionalTensorWrappers.
