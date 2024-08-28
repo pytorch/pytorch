@@ -12,9 +12,9 @@ from ..variables.builder import ITERTOOLS_POLYFILLED_TYPES
 
 
 __all__ = [
-    "chain___new__",
+    "chain",
     "chain_from_iterable",
-    "count___new__",
+    "count",
     "tee",
 ]
 
@@ -23,13 +23,8 @@ _T = TypeVar("_T")
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
-@substitute_in_graph(itertools.chain.__new__)  # type: ignore[arg-type]
-def chain___new__(
-    cls: type[itertools.chain[_T]],
-    *iterables: Iterable[_T],
-) -> Iterator[_T]:
-    assert cls is itertools.chain
-
+@substitute_in_graph(itertools.chain, is_embedded_type=True)  # type: ignore[arg-type]
+def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
     for iterable in iterables:
         yield from iterable
 
@@ -39,18 +34,15 @@ def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
     return itertools.chain(*iterable)
 
 
+chain.from_iterable = chain_from_iterable  # type: ignore[method-assign]
+
+
 ITERTOOLS_POLYFILLED_TYPES.add(itertools.chain)
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.count
-@substitute_in_graph(itertools.count.__new__)  # type: ignore[arg-type]
-def count___new__(
-    cls: type[itertools.count[_T]],  # type: ignore[type-var]
-    start: _T = 0,  # type: ignore[assignment]
-    step: _T = 1,  # type: ignore[assignment]
-) -> Iterator[_T]:
-    assert cls is itertools.count
-
+@substitute_in_graph(itertools.count, is_embedded_type=True)  # type: ignore[arg-type]
+def count(start: _T = 0, step: _T = 1) -> Iterator[_T]:  # type: ignore[assignment]
     n = start
     while True:
         yield n

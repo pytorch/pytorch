@@ -182,6 +182,8 @@ def substitute_in_graph(
     original_fn: _F,
     *,
     skip_signature_check: bool = False,
+    # type that is embedded in the Python interpreter
+    is_embedded_type: bool = False,  # internal use only
 ) -> Callable[[_F], _F]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
@@ -227,7 +229,9 @@ def substitute_in_graph(
         >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
         2
     """
-    if not is_function(original_fn):
+    if not is_function(original_fn) and not (
+        is_embedded_type and inspect.isclass(original_fn)
+    ):
         raise TypeError(
             f"substitute_in_graph expects a function but got {type(original_fn)!r}"
         )
