@@ -510,8 +510,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 }
 
 
-#if !defined(__MAC_15_0) && \
-    (!defined(MAC_OS_X_VERSION_15_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_15_0))
+#if defined(__MAC_15_0)
 static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   using namespace mps;
 
@@ -662,8 +661,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   if (resultSize > pow(2, 32)) {
 
 
-#if !defined(__MAC_15_0) && \
-    (!defined(MAC_OS_X_VERSION_15_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_15_0))
+#if defined(__MAC_15_0)
     result = tiled_bmm_out_mps_impl(batch1, batch2, result);
     return result;
 #else
