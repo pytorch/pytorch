@@ -1,3 +1,4 @@
+# Owner(s): ["module: dynamo"]
 import typing
 import unittest
 
@@ -40,3 +41,9 @@ class TestReturnValueDuplication(unittest.TestCase):
         self.assertTrue(actual[0].requires_grad)
         self.assertTrue(actual[1].requires_grad)
         self.assertIsNot(actual[0], actual[1])
+
+
+if __name__ == "__main__":
+    import torch._dynamo.test_case
+
+    torch._dynamo.test_case.run_tests()
