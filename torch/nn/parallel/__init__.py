@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 from typing_extensions import deprecated
 
-from .data_parallel import data_parallel, DataParallel
-from .distributed import DistributedDataParallel
-from .parallel_apply import parallel_apply
-from .replicate import replicate
-from .scatter_gather import gather, scatter
+from torch.nn.parallel.data_parallel import data_parallel, DataParallel
+from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.nn.parallel.parallel_apply import parallel_apply
+from torch.nn.parallel.replicate import replicate
+from torch.nn.parallel.scatter_gather import gather, scatter
 
 
 __all__ = [

@@ -977,3 +977,47 @@ class CallbackRegistry(Generic[P]):
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
+
+
+# IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py
+# for use in the weights_only Unpickler.
+
+IMPORT_MAPPING = {
+    "__builtin__": "builtins",
+    "copy_reg": "copyreg",
+    "Queue": "queue",
+    "repr": "reprlib",
+    "_abcoll": "collections.abc",
+    # Non-mutual mappings.
+    "UserDict": "collections",
+    "UserList": "collections",
+    "UserString": "collections",
+    "whichdb": "dbm",
+    "StringIO": "io",
+    "cStringIO": "io",
+}
+
+
+# This contains rename rules that are easy to handle.  We ignore the more
+# complex stuff (e.g. mapping the names in the urllib and types modules).
+# These rules should be run before import names are fixed.
+NAME_MAPPING = {
+    ("__builtin__", "xrange"): ("builtins", "range"),
+    ("__builtin__", "reduce"): ("functools", "reduce"),
+    ("__builtin__", "intern"): ("sys", "intern"),
+    ("__builtin__", "unichr"): ("builtins", "chr"),
+    ("__builtin__", "unicode"): ("builtins", "str"),
+    ("__builtin__", "long"): ("builtins", "int"),
+    ("itertools", "izip"): ("builtins", "zip"),
+    ("itertools", "imap"): ("builtins", "map"),
+    ("itertools", "ifilter"): ("builtins", "filter"),
+    ("itertools", "ifilterfalse"): ("itertools", "filterfalse"),
+    ("itertools", "izip_longest"): ("itertools", "zip_longest"),
+    ("UserDict", "IterableUserDict"): ("collections", "UserDict"),
+    ("UserList", "UserList"): ("collections", "UserList"),
+    ("UserString", "UserString"): ("collections", "UserString"),
+    # Non-mutual mappings.
+    ("__builtin__", "basestring"): ("builtins", "str"),
+    ("exceptions", "StandardError"): ("builtins", "Exception"),
+    ("UserDict", "UserDict"): ("collections", "UserDict"),
+}

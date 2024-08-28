@@ -80,7 +80,7 @@ struct FastSymbolizer {
     }
     return it->second.get();
   }
-  optional<std::pair<std::string, int64_t>> findLine(
+  std::optional<std::pair<std::string, int64_t>> findLine(
       Sections* s,
       uint64_t offset) {
     if (auto idx = s->findDebugInfoOffset(offset)) {

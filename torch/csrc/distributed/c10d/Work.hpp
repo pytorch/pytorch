@@ -51,7 +51,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
       OpType opType = OpType::UNKNOWN,
       const char* profilingTitle = nullptr,
       const std::optional<std::vector<at::Tensor>>& inputTensors =
-          c10::nullopt);
+          std::nullopt);
 
   ~Work() override;
 
@@ -126,8 +126,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // provided by the user.
   void finishAndThrow(std::exception_ptr exception);
 
-  mutable std::mutex mutex_;
-  std::condition_variable cv_;
+  mutable std::timed_mutex mutex_;
+  std::condition_variable_any cv_;
   bool completed_ = false;
   std::exception_ptr exception_;
 

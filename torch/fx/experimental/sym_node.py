@@ -32,10 +32,6 @@ from torch import (  # noqa: F401
     SymInt,
 )
 
-from torch.fx.experimental._sym_dispatch_mode import (
-    handle_sym_dispatch,
-    sym_function_mode,
-)
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -47,7 +43,7 @@ sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 __all__ = ["SymNode", "method_to_operator", "magic_methods"]
 
 
-SymTypes = (SymInt, SymFloat, SymBool)
+from torch.types import py_sym_types as SymTypes
 
 
 def _to_symtype(t):
@@ -81,6 +77,7 @@ class SymNode:
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
+
         # What's the difference between hint and constant?
         #
         # - A constant is known to be invariant across invocations of the model;
@@ -107,51 +104,78 @@ class SymNode:
         # unbacked symint that a hint was now possible, but as we added more
         # potential refinements to unbacked symints this got harder to keep
         # in sync, so we've deleted it for now.)
+
+        def compute_hint():
+            from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+            # This occasionally gets exercised by, e.g.,
+            # convert_shape_to_symint.  It's just a nicety so you don't HAVE
+            # to have a correct hint on hand when making a SymNode.
+            # Don't attempt to compute for unbacked, this can be quite
+            # expensive.
+            if free_unbacked_symbols(self.expr):
+                return None
+            hint = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
+            if hint is not None:
+                hint = self.pytype(hint) if not isinstance(hint, SymTypes) else hint
+            return hint
+
         if hint is not None:
             assert type(hint) is pytype or type(hint) is _to_symtype(pytype), (
                 "Cannot create SymNode of type "
                 f"{pytype} with incompatible hint of type {type(hint)}"
             )
+            if self.shape_env and self.shape_env._translation_validation_enabled:
+                # This is technically not TV, but this assert is expensive so
+                # let's only do it when we're already doing expensive things
+                computed_hint = compute_hint()
+                assert (
+                    hint == computed_hint
+                ), f"{hint} != {computed_hint} (for {self.expr})"
+        else:
+            hint = compute_hint()
         self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
 
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self.fx_node = (
-            fx_node if self.shape_env._translation_validation_enabled else None
+        tx_validation_en = (
+            self.shape_env and self.shape_env._translation_validation_enabled
         )
+        self.fx_node = tx_validation_en and fx_node
 
     def with_shape_env(self, shape_env: "ShapeEnv") -> "SymNode":
         return SymNode(
             self._expr, shape_env, self.pytype, self._hint, self.constant, self.fx_node
         )
 
+    def _value_eq(self, other: "SymNode") -> bool:
+        # Purposely don't include the shape_env in the eq.
+        return (
+            self._expr == other._expr
+            and self.pytype == other.pytype
+            and self._hint == other._hint
+            and self.constant == other.constant
+            and self.fx_node == other.fx_node
+        )
+
+    def _value_hash(self) -> int:
+        # Purposely don't include the shape_env in the hash.
+        return hash((self._expr, self.pytype, self._hint, self.constant, self.fx_node))
+
     @property
     def expr(self):
         return self.shape_env.replace(self._expr)
 
-    # Recompute the hint and see if we've got it now
-    # Precondition: self._hint is None
-    def _update_hint(self):
-        r = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
-        if r is not None:
-            self._hint = self.pytype(r) if not isinstance(r, SymTypes) else r
-
     @property
     def hint(self):
-        if self._hint is None:
-            self._update_hint()
         return self._hint
 
     def has_hint(self):
-        if self._hint is None:
-            self._update_hint()
         return self._hint is not None
 
     def require_hint(self, fallback=None):
-        if self._hint is None:
-            self._update_hint()
         if self._hint is None:
             if fallback is not None:
                 return fallback
@@ -240,6 +264,19 @@ class SymNode:
         return self.str()
 
     def __repr__(self):
+        rep = [
+            f"SymNode({self._expr}, shape_env={self.shape_env}, pytype={self.pytype}",
+        ]
+        if self._hint is not None:
+            rep.append(f"hint={self._hint}")
+        if self.constant is not None:
+            rep.append(f"constant={self.constant}")
+        if self.fx_node is not None:
+            rep.append(f"fx_node={self.fx_node}")
+        return ", ".join(rep) + ")"
+
+    def _graph_repr(self) -> builtins.str:
+        # Representation used by GraphModule to create a pythonic version of a graph
         return self.str()
 
     # These methods call the metaprogrammed methods, they're hand written
@@ -766,15 +803,15 @@ def _sympy_ge(a, b):
 
 
 def _sympy_min(a, b):
-    import sympy
+    from torch.utils._sympy.functions import Min
 
-    return sympy.Min(a, b)
+    return Min(a, b)
 
 
 def _sympy_max(a, b):
-    import sympy
+    from torch.utils._sympy.functions import Max
 
-    return sympy.Max(a, b)
+    return Max(a, b)
 
 
 def _sympy_ite(a, t, f):
@@ -906,6 +943,8 @@ def sympy_is_channels_last_contiguous_3d(sizes, strides):
 def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
     import sympy
 
+    from torch.utils._sympy.functions import Max
+
     dim = len(sizes)
 
     if dim != len(dim_order):
@@ -936,7 +975,7 @@ def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
         #     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
         #     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as
         #     channels_last
-        m = strides[d] * sympy.Max(sizes[d], 1)
+        m = strides[d] * Max(sizes[d], 1)
 
     return r
 
@@ -1014,6 +1053,10 @@ def _make_node_magic(method, func):
         method_attr = method
 
     def binary_magic_impl(self, other):
+        from torch.fx.experimental.proxy_tensor import (
+            get_proxy_mode,
+            handle_sym_dispatch,
+        )
         from torch.fx.experimental.symbolic_shapes import safe_expand
 
         op = method_to_operator(method)
@@ -1026,7 +1069,7 @@ def _make_node_magic(method, func):
         if alternate_impl and out_hint is not None:
             return to_node(self, alternate_impl(wrap_node(self), wrap_node(other)))
 
-        if sym_function_mode():
+        if get_proxy_mode():
             return to_node(
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
@@ -1055,7 +1098,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
-        sym_node_log.debug("%s %s %s -> %s", func, self.expr, other.expr, out)
+        sym_node_log.debug("%s %s %s -> %s", method, self.expr, other.expr, out)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
@@ -1088,10 +1131,14 @@ def _make_node_magic(method, func):
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     def unary_magic_impl(self):
+        from torch.fx.experimental.proxy_tensor import (
+            get_proxy_mode,
+            handle_sym_dispatch,
+        )
         from torch.fx.experimental.symbolic_shapes import safe_expand
 
         op = method_to_operator(method)
-        if sym_function_mode():
+        if get_proxy_mode():
             return to_node(self, handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.expr
@@ -1126,10 +1173,14 @@ def _make_node_magic(method, func):
     elif method == "sym_ite":
 
         def sym_ite_impl(pred_node, then_node, else_node):
+            from torch.fx.experimental.proxy_tensor import (
+                get_proxy_mode,
+                handle_sym_dispatch,
+            )
             from torch.fx.experimental.symbolic_shapes import safe_expand
 
             out_hint = then_node.hint if pred_node.hint else else_node.hint
-            if sym_function_mode():
+            if get_proxy_mode():
                 return to_node(
                     pred_node,
                     handle_sym_dispatch(
@@ -1167,10 +1218,14 @@ def _make_node_magic(method, func):
     elif method == "round":
 
         def round_impl(self, ndigits=None):
+            from torch.fx.experimental.proxy_tensor import (
+                get_proxy_mode,
+                handle_sym_dispatch,
+            )
             from torch.fx.experimental.symbolic_shapes import safe_expand
 
             op = builtins.round
-            if sym_function_mode():
+            if get_proxy_mode():
                 return to_node(
                     self, handle_sym_dispatch(op, (wrap_node(self), ndigits), {})
                 )
@@ -1215,8 +1270,13 @@ def _make_node_sizes_strides(method, func):
     # NB: don't LRU cache, lots of arguments
 
     def sizes_strides_impl(self, sizes, strides):
+        from torch.fx.experimental.proxy_tensor import (
+            get_proxy_mode,
+            handle_sym_dispatch,
+        )
+
         op = getattr(sys.modules[__name__], method)
-        if sym_function_mode():
+        if get_proxy_mode():
             return to_node(
                 self,
                 handle_sym_dispatch(

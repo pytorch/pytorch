@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import contextlib
-
-from typing import Callable, Optional
+from typing import Callable
 
 import torch
 import torch._ops
@@ -11,7 +10,6 @@ import torch.func
 import torch.fx
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
 from torch.utils import _pytree as pytree
@@ -62,13 +60,12 @@ class Functionalize(_pass.Transform):
     which are not needed for ONNX inference.
     """
 
-    @_beartype.beartype
     def __init__(
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
         enable_dynamic_axes: bool,
-        allow_fake_constant: Optional[bool] = False,
+        allow_fake_constant: bool | None = False,
     ):
         super().__init__(diagnostic_context, module)
         self.enable_dynamic_axes = enable_dynamic_axes
@@ -99,7 +96,6 @@ class Functionalize(_pass.Transform):
 
         return wrapped
 
-    @_beartype.beartype
     def _run(self, *args) -> torch.fx.GraphModule:
         # To preserve stack trace info after `make_fx`.
         module = _utils.wrap_graph_module_for_node_meta_preservation(self.module)
@@ -108,7 +104,7 @@ class Functionalize(_pass.Transform):
 
         # Mimic `torch._dynamo.export(aten_graph=True)` behavior in invoking `make_fx`.
         # TODO: May need revisit for user fake mode export + dynamic shape scenario.
-        fake_mode: Optional[fake_tensor.FakeTensorMode] = self.fake_mode
+        fake_mode: fake_tensor.FakeTensorMode | None = self.fake_mode
         maybe_fake_args = self._maybe_fakefy_args(fake_mode, *args)
         if fake_mode is not None:
             # Using existing fake mode as context, signal `make_fx` that it does not need
@@ -120,13 +116,13 @@ class Functionalize(_pass.Transform):
             tracing_mode = "symbolic" if self.enable_dynamic_axes else "fake"
 
         assert fake_mode is not None  # for mypy
-        with proxy_tensor.maybe_disable_fake_tensor_mode(), fake_mode:
+        with fake_tensor.unset_fake_temporarily(), fake_mode:
             graph_module = proxy_tensor.make_fx(
                 functionalized_callable,
                 decomposition_table={},
                 tracing_mode=tracing_mode,
                 _allow_non_fake_inputs=True,
-                _allow_fake_constant=self.allow_fake_constant,
+                _allow_fake_constant=bool(self.allow_fake_constant),
             )(*maybe_fake_args)
 
         # Rename placeholder targets to match the original module's signature since
@@ -145,7 +141,6 @@ class RemoveInputMutation(_pass.Transform):
     for inference. They could be useful for training.
     """
 
-    @_beartype.beartype
     def _run(self, *args) -> torch.fx.GraphModule:
         for node in reversed(self.module.graph.nodes):
             if (

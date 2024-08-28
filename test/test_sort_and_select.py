@@ -7,7 +7,6 @@ import numpy as np
 
 import torch
 from torch import nan
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -419,12 +418,8 @@ class TestSortAndSelect(TestCase):
 
         shapes = (
             [],
-            [
-                0,
-            ],
-            [
-                20,
-            ],
+            [0],
+            [20],
             [1, 20],
             [30, 30],
             [10, 20, 30],

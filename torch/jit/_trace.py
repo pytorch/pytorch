@@ -10,7 +10,6 @@ functionalities in `torch.jit`.
 """
 
 import contextlib
-
 import copy
 import functools
 import inspect
@@ -23,18 +22,17 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch._jit_internal import (
+    _get_model_id,
     _qualified_name,
     get_callable_argument_names,
     is_scripting,
 )
-
 from torch.autograd import function
 from torch.jit._script import _CachedForward, script, ScriptModule
-
 from torch.jit._state import _enabled, _python_cu
 from torch.nn import Module
-
 from torch.testing._comparison import default_tolerances
+
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -965,7 +963,7 @@ def trace(
         import torch.nn as nn
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
@@ -1001,7 +999,6 @@ def trace(
         log_torchscript_usage,
     )
 
-    log_torchscript_usage("trace")
     traced_func = _trace_impl(
         func,
         example_inputs,
@@ -1016,6 +1013,7 @@ def trace(
         example_kwarg_inputs,
         _store_inputs,
     )
+    log_torchscript_usage("trace", model_id=_get_model_id(traced_func))
 
     if check_if_torch_exportable():
         from torch._export.converter import TS2EPConverter
@@ -1045,6 +1043,15 @@ def trace(
 
         def _log_exportability(func_to_export, export_func, export_args, export_type):
             try:
+                traced_result = func_to_export(*export_args)
+            except Exception as e:
+                _ = e
+                log_torch_jit_trace_exportability(
+                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
+                )
+                return
+
+            try:
                 ep_module = export_func(func_to_export, export_args)
             except Exception as e:
                 log_torch_jit_trace_exportability(
@@ -1060,15 +1067,6 @@ def trace(
             except Exception as e:
                 log_torch_jit_trace_exportability(
                     "trace", str(export_type), str(_ExportOutcome.FAILED_TO_RUN), str(e)
-                )
-                return
-
-            try:
-                traced_result = func_to_export(*export_args)
-            except Exception as e:
-                _ = e
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
                 )
                 return
 
@@ -1181,7 +1179,7 @@ def trace_module(
         import torch.nn as nn
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 

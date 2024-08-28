@@ -26,7 +26,7 @@ static std::optional<size_t> getDimensions(Value* v) {
   if (v->type()->isSubtypeOf(TensorType::get())) {
     return v->type()->cast<TensorType>()->sizes().size();
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 

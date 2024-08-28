@@ -149,16 +149,22 @@ inline convert_to_int_of_same_size<float>(const Vectorized<float> &src) {
   return _mm256_cvttps_epi32(src);
 }
 
-// Only works for inputs in the range: [-2^51, 2^51]
 // From: https://stackoverflow.com/a/41148578
 template<>
 Vectorized<double>
 inline convert_to_fp_of_same_size<double>(const Vectorized<int64_t> &src) {
-  auto x = _mm256_add_epi64(src, _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000)));
-  return _mm256_sub_pd(
-    _mm256_castsi256_pd(x),
-    _mm256_set1_pd(0x0018000000000000)
-  );
+  __m256i magic_i_lo   = _mm256_set1_epi64x(0x4330000000000000); /* 2^52 */
+  __m256i magic_i_hi32 = _mm256_set1_epi64x(0x4530000080000000); /* 2^84 + 2^63 */
+  __m256i magic_i_all  = _mm256_set1_epi64x(0x4530000080100000); /* 2^84 + 2^63 + 2^52 */
+  __m256d magic_d_all  = _mm256_castsi256_pd(magic_i_all);
+
+  __m256i v_lo         = _mm256_blend_epi32(magic_i_lo, src, 0b01010101); /* v_low = low32 + 2^52 */
+  __m256i v_hi         = _mm256_srli_epi64(src, 32);
+          v_hi         = _mm256_xor_si256(v_hi, magic_i_hi32); /* v_hi = high32*2^32 + 2^84 + 2^63 */
+  /* int64 = low32 + high32*2^32 = v_hi + v_lo - 2^52 - 2^63 - 2^84 */
+  __m256d v_hi_dbl     = _mm256_sub_pd(_mm256_castsi256_pd(v_hi), magic_d_all);
+  __m256d result       = _mm256_add_pd(v_hi_dbl, _mm256_castsi256_pd(v_lo));
+  return result;
 }
 
 template<>
@@ -306,6 +312,17 @@ inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
 template<>
 inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
   return flip8(v);
+}
+
+inline Vectorized<bool> operator&&(
+    const Vectorized<bool>& self,
+    const Vectorized<bool>& other) {
+  const __m256i* self_ = reinterpret_cast<const __m256i*>(self.as_bytes());
+  const __m256i* other_ = reinterpret_cast<const __m256i*>(other.as_bytes());
+  __m256i out = _mm256_and_si256(*self_, *other_);
+  Vectorized<bool> ret;
+  std::memcpy(ret, &out, ret.size() * sizeof(bool));
+  return ret;
 }
 
 #endif // (defined(CPU_CAPABILITY_AVX2)

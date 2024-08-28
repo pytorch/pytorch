@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MyModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.lin1 = nn.Linear(3, 3, bias=False)

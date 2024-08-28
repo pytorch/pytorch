@@ -93,6 +93,8 @@ done
 
 # Copy Include Files
 cp -r $ROCM_HOME/include/hip $TRITON_ROCM_DIR/include
+cp -r $ROCM_HOME/include/roctracer $TRITON_ROCM_DIR/include
+cp -r $ROCM_HOME/include/hsa $TRITON_ROCM_DIR/include
 
 # Copy linker
 mkdir -p $TRITON_ROCM_DIR/llvm/bin

@@ -403,14 +403,14 @@ static std::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t
     auto tuple1 = t1->castRaw<TupleType>();
     auto tuple2 = t2->castRaw<TupleType>();
     if (tuple1->elements().size() != tuple2->elements().size()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     std::vector<TypePtr> elements;
     for (size_t i = 0; i < tuple1->elements().size(); i++) {
       if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i), default_to_union)) {
         elements.push_back(*std::move(elem));
       } else {
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
     return static_cast<TypePtr>(TupleType::create(std::move(elements)));
@@ -443,7 +443,7 @@ static std::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t
     return type_hint;
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, const TypePtr& type_hint) {
@@ -463,7 +463,7 @@ std::optional<TypePtr> unifyTypeList(
     const TypePtr& type_hint) {
   if (elements.empty()) {
     why_not << "Cannot get unified type from empty list";
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   TypePtr ret_type = elements.at(0);
@@ -474,7 +474,7 @@ std::optional<TypePtr> unifyTypeList(
               << elements.at(i)->repr_str()
               << " did not match the types before it ("
               << ret_type->repr_str() << ")";
-      return c10::nullopt;
+      return std::nullopt;
     }
     ret_type = *maybe_unified;
   }

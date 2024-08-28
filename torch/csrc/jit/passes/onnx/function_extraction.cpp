@@ -225,16 +225,16 @@ std::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(
   auto v_it =
       scope_ctxs_[scope_key_]->env_to_subgraph_.find(ref_n->outputs().at(0));
   if (v_it == scope_ctxs_[scope_key_]->env_to_subgraph_.end()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto* n_in_def = v_it->second->node();
   auto n_attr_it = node_attr_to_name_.find(n_in_def);
   if (n_attr_it == node_attr_to_name_.end()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto name_it = n_attr_it->second.find(attr.toUnqualString());
   if (name_it == n_attr_it->second.end()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return name_it->second;
 }
@@ -301,7 +301,7 @@ std::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
     ScopePtr a,
     ScopePtr b) {
   if (!IsValidScope(a) || !IsValidScope(b)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   auto diff =
@@ -327,20 +327,20 @@ std::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
     }
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
     const scope_list& scopes) {
   if (scopes.empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   std::optional<ScopePtr> common_ancestor = scopes.at(0);
   for (const auto& scope : scopes) {
     common_ancestor = FindCommonAncestor(common_ancestor.value(), scope);
     if (!common_ancestor.has_value()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
@@ -410,7 +410,7 @@ std::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
     }
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::shared_ptr<Graph> FunctionExtractor::ConstructFuncGraph(

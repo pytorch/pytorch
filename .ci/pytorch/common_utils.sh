@@ -179,7 +179,7 @@ function install_torchvision() {
 }
 
 function install_tlparse() {
-  pip_install --user "tlparse==0.3.7"
+  pip_install --user "tlparse==0.3.25"
   PATH="$(python -m site --user-base)/bin:$PATH"
 }
 
@@ -222,6 +222,8 @@ function checkout_install_torchbench() {
     # to install and test other models
     python install.py --continue_on_fail
   fi
+  echo "Print all dependencies after TorchBench is installed"
+  python -mpip freeze
   popd
 }
 

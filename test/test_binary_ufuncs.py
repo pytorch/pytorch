@@ -12,7 +12,6 @@ from numbers import Number
 import numpy as np
 
 import torch
-
 import torch.autograd.forward_ad as fwAD
 from torch import inf, nan
 from torch.testing import make_tensor
@@ -67,6 +66,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict,
     xfailIfTorchDynamo,
 )
+
 
 if TEST_SCIPY:
     import scipy.integrate
@@ -156,7 +156,6 @@ class TestBinaryUfuncs(TestCase):
             numpy_sample = sample.numpy()
             l_numpy = numpy_sample.input
             r_numpy = numpy_sample.args[0]
-
             actual = op(l, r)
             expected = op.ref(l_numpy, r_numpy)
 
@@ -969,12 +968,32 @@ class TestBinaryUfuncs(TestCase):
         d_ref = d_true.float() if rounding_unsupported else d_true
         self.assertEqual(d_trunc, d_ref.trunc().to(dtype))
 
+    @dtypes(*floating_types_and(torch.bfloat16, torch.float16))
+    def test_floor_div_extremal(self, device, dtype):
+        for num, denom, shape in itertools.product(
+            [torch.finfo(dtype).max * 0.7],
+            [0.5, -0.5, 0.0],
+            [(), (32,)],  # Scalar and vectorized
+        ):
+            a = torch.full(shape, num, dtype=dtype, device=device)
+            b = torch.full(shape, denom, dtype=dtype, device=device)
+
+            ref = np.floor_divide(num, denom).item()
+            if ref > torch.finfo(dtype).max:
+                ref = np.inf
+            elif ref < torch.finfo(dtype).min:
+                ref = -np.inf
+            expect = torch.full(shape, ref, dtype=dtype, device=device)
+            actual = torch.div(a, b, rounding_mode="floor")
+            self.assertEqual(expect, actual)
+
     @dtypes(torch.bfloat16, torch.half, torch.float32, torch.float64)
     def test_div_rounding_nonfinite(self, device, dtype):
         # Compare division of special floating point values against NumPy
         num = torch.tensor(
             [1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
             dtype=dtype,
+            device=device,
         )
         # Divide by zero is tested separately
         denom = num[num != 0]
@@ -3387,29 +3406,41 @@ class TestBinaryUfuncs(TestCase):
         assert m.dim() == 0, "m is intentionally a scalar"
         self.assertEqual(torch.pow(2, m), 2**m)
 
-    @onlyCPU
     def test_ldexp(self, device):
         # random values
         mantissas = torch.randn(64, device=device)
         exponents = torch.randint(-31, 31, (64,), device=device, dtype=torch.int32)
 
         # basic test
-        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        np_outcome = np.ldexp(mantissas.cpu().numpy(), exponents.cpu().numpy())
         pt_outcome_1 = torch.ldexp(mantissas, exponents)
         pt_outcome_2 = mantissas.ldexp(exponents)
-        self.assertEqual(np_outcome, pt_outcome_1)
-        self.assertEqual(np_outcome, pt_outcome_2)
+        self.assertEqual(np_outcome, pt_outcome_1.cpu())
+        self.assertEqual(np_outcome, pt_outcome_2.cpu())
         mantissas.ldexp_(exponents)
-        self.assertEqual(np_outcome, mantissas)
+        self.assertEqual(np_outcome, mantissas.cpu())
 
         # test bounds
         mantissas = torch.tensor(
             [float("inf"), float("-inf"), float("inf"), float("nan")], device=device
         )
         exponents = torch.randint(0, 31, (4,), device=device, dtype=torch.int32)
-        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        np_outcome = np.ldexp(mantissas.cpu().numpy(), exponents.cpu().numpy())
         pt_outcome = torch.ldexp(mantissas, exponents)
-        self.assertEqual(np_outcome, pt_outcome)
+        self.assertEqual(np_outcome, pt_outcome.cpu())
+
+        # test half dtype behavior
+        mantissas = torch.randn(64, device=device, dtype=torch.half)
+        exponents = torch.randint(-5, 5, (64,), device=device)
+        self.assertEqual(torch.ldexp(mantissas, exponents).dtype, torch.half)
+
+        # test float64 computation
+        mantissas = torch.tensor([1], dtype=torch.float64, device=device)
+        exponents = torch.tensor([128], dtype=torch.int64, device=device)
+        expected = torch.pow(
+            torch.full((1,), 2, device=device, dtype=torch.float64), 128
+        )
+        self.assertEqual(torch.ldexp(mantissas, exponents), expected)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_lerp(self, device, dtype):
@@ -3887,14 +3918,14 @@ class TestBinaryUfuncs(TestCase):
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, dx=dx, dim=dim)
-            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)
+            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual, exact_dtype=False)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
-            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)
+            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual.cpu(), exact_dtype=False)
 
@@ -4403,9 +4434,7 @@ class TestBinaryUfuncs(TestCase):
             test_helper(x, q)
 
     @onlyCUDA
-    @dtypes(
-        torch.chalf,
-    )
+    @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.
         # Ideally, this should be covered by `test_complex_half_reference_testing`

@@ -598,15 +598,18 @@ This is mostly useful for debugging purposes.
 0, 1 are always specialized
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Regardless of whether we mark a dimension as dynamic, or we have traced
-an integer as dynamic, if we pass an input where that dimension is 0 or
-1, Dynamo will trace it as non-dynamic and it will generate a specific
-graph for it. This is the reason why in the example above we find guards
-of the form ``2 <= L['a'].size()[0]``.
+Regardless of whether we mark a dimension as dynamic, if we pass an input
+where that dimension is 0 or 1, Dynamo will trace it as non-dynamic and it
+will generate a specific graph for it. This is the reason why in the example
+above we find guards of the form ``2 <= L['a'].size()[0]``.
 
 There are several reasons for this choice. There are two particularly
 important - A tensor is empty if and only if any of its dimensions is
 zero - A tensor can only be contiguous if one of the strides is one
+
+This policy decision does NOT apply to plain Python ints; if we think a Python
+int should be compiled dynamically, we won't specialize them by default;
+instead, whether or not it gets specialized depends on its usage.
 
 Duck shaping
 ^^^^^^^^^^^^

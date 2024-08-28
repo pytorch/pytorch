@@ -86,7 +86,7 @@ class LazyModuleMixin:
 
     >>> # xdoctest: +SKIP
     >>> class LazyMLP(torch.nn.Module):
-    ...    def __init__(self):
+    ...    def __init__(self) -> None:
     ...        super().__init__()
     ...        self.fc1 = torch.nn.LazyLinear(10)
     ...        self.relu1 = torch.nn.ReLU()
@@ -258,6 +258,8 @@ class LazyModuleMixin:
                 return True
         return False
 
+    # torchrec tests the code consistency with the following code
+    # fmt: off
     def _infer_parameters(self: _LazyProtocol, module, args, kwargs=None):
         r"""Infers the size and initializes the parameters according to the provided input batch.
 
@@ -271,15 +273,14 @@ class LazyModuleMixin:
         kwargs = kwargs if kwargs else {}
         module.initialize_parameters(*args, **kwargs)
         if module.has_uninitialized_params():
-            raise RuntimeError(
-                f"module {self._get_name()} has not been fully initialized"
-            )
+            raise RuntimeError(f'module {self._get_name()} has not been fully initialized')
         module._initialize_hook.remove()
         module._load_hook.remove()
-        delattr(module, "_initialize_hook")
-        delattr(module, "_load_hook")
+        delattr(module, '_initialize_hook')
+        delattr(module, '_load_hook')
         if module.cls_to_become is not None:
             module.__class__ = module.cls_to_become
+    # fmt: on
 
     def _replicate_for_data_parallel(self: _LazyProtocol):
         raise RuntimeError(

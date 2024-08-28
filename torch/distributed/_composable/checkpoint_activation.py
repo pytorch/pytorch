@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from contextlib import contextmanager, nullcontext
 from typing import Any, ContextManager, Dict, Optional, Tuple
@@ -48,7 +49,7 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
         >>> import torch.nn as nn
         >>>
         >>> class MyModel(nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>         super().__init__()
         >>>         self.l1 = nn.Linear(10, 10)
         >>>         self.l2 = nn.Linear(10, 10)

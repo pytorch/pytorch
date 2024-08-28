@@ -147,7 +147,7 @@ Tensor _upsample_nearest2d_quantized_cpu(
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
 
     // special case: just copy
     if (input_height == output_height && input_width == output_width) {

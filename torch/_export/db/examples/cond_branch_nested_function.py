@@ -1,17 +1,8 @@
 # mypy: allow-untyped-defs
 import torch
 
-from torch._export.db.case import export_case
 from functorch.experimental.control_flow import cond
 
-
-@export_case(
-    example_inputs=(torch.randn(3),),
-    tags={
-        "torch.cond",
-        "torch.dynamic-shape",
-    },
-)
 class CondBranchNestedFunction(torch.nn.Module):
     """
     The branch functions (`true_fn` and `false_fn`) passed to cond() must follow these rules:
@@ -26,8 +17,6 @@ class CondBranchNestedFunction(torch.nn.Module):
 
     NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
     """
-    def __init__(self):
-        super().__init__()
 
     def forward(self, x):
         def true_fn(x):
@@ -43,3 +32,10 @@ class CondBranchNestedFunction(torch.nn.Module):
             return inner_false_fn(x)
 
         return cond(x.shape[0] < 10, true_fn, false_fn, [x])
+
+example_args = (torch.randn(3),)
+tags = {
+    "torch.cond",
+    "torch.dynamic-shape",
+}
+model = CondBranchNestedFunction()

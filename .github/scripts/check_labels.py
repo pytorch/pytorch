@@ -5,7 +5,6 @@ import sys
 from typing import Any
 
 from github_utils import gh_delete_comment, gh_post_pr_comment
-
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from label_utils import has_required_labels, is_label_err_comment, LABEL_ERR_MSG
 from trymerge import GitHubPR

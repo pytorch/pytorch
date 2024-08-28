@@ -26,7 +26,7 @@ struct AnyModulePlaceholder : public AnyValue::Placeholder {
 
   /// Returns a `AnyModulePlaceholder` with a deep copy of this `AnyModule`.
   virtual std::unique_ptr<AnyModulePlaceholder> clone_module(
-      optional<Device> device) const = 0;
+      std::optional<Device> device) const = 0;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModuleHolder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -120,7 +120,7 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   }
 
   std::unique_ptr<AnyModulePlaceholder> clone_module(
-      optional<Device> device) const override {
+      std::optional<Device> device) const override {
     return std::make_unique<AnyModuleHolder>(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }

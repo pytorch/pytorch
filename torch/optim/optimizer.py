@@ -1,6 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+"""Base optimizer."""
 import functools
-import math
 import warnings
 from collections import defaultdict, OrderedDict
 from copy import deepcopy
@@ -31,13 +32,14 @@ from torch.utils._foreach_utils import (
     _get_fused_kernels_supported_devices,
     _group_tensors_by_device_and_dtype,
     Indices,
+    TensorListList,
 )
 from torch.utils.hooks import RemovableHandle
+
 
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
-TensorListList: TypeAlias = List[List[torch.Tensor]]
 DeviceDict = Dict[Optional[torch.device], torch.Tensor]
 
 
@@ -109,15 +111,6 @@ def _stack_if_compiling(x):
         return torch.stack(x)
     else:
         return x
-
-
-def _dispatch_sqrt(
-    x: float,
-):  # float annotation is needed because of torchscript type inference
-    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
-        return x.sqrt()
-    else:
-        return math.sqrt(x)
 
 
 def _disable_dynamo_if_unsupported(single_tensor_fn=None):
@@ -199,6 +192,19 @@ def _default_to_fused_or_foreach(
     return fused, foreach
 
 
+def _device_dtype_check_for_fused(
+    p: torch.Tensor, cuda_unsupported: bool = False
+) -> None:
+    fused_supported_devices = _get_fused_kernels_supported_devices()
+    if cuda_unsupported:
+        fused_supported_devices.remove("cuda")
+    if not (p.device.type in fused_supported_devices and torch.is_floating_point(p)):
+        raise RuntimeError(
+            "`fused=True` requires all the params to be floating point Tensors of "
+            f"supported devices: {fused_supported_devices} but {p.dtype} and {p.device.type}"
+        )
+
+
 def _view_as_real(params, *state_and_grads):
     for i, p in enumerate(params):
         if torch.is_complex(p):
@@ -217,7 +223,7 @@ def _get_scalar_dtype(is_fused=None):
 
 def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
     r"""Return the device type list that supports capturable optimizer."""
-    capturable_supported_devices = ["cuda"]
+    capturable_supported_devices = ["cuda", "xpu", "hpu"]
     if not torch.jit.is_scripting():
         capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
     if supports_xla:
@@ -267,8 +273,9 @@ _maximize_doc = r"""maximize (bool, optional): maximize the objective with respe
 
 
 def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:
-    r"""Register a pre hook common to all optimizers. The hook should have the following
-    signature::
+    r"""Register a pre hook common to all optimizers.
+
+    The hook should have the following signature::
 
         hook(optimizer, args, kwargs) -> None or modified args and kwargs
 
@@ -286,8 +293,9 @@ def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableH
 
 
 def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> RemovableHandle:
-    r"""Register a post hook common to all optimizers. The hook should have the following
-    signature::
+    r"""Register a post hook common to all optimizers.
+
+    The hook should have the following signature::
 
         hook(optimizer, args, kwargs) -> None
 
@@ -336,7 +344,7 @@ class Optimizer:
     _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
-    def __init__(self, params: ParamsT, defaults: Dict[str, Any]) -> None:
+    def __init__(self, params: ParamsT, defaults: Dict[str, Any]) -> None:  # noqa: D107
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
         self._optimizer_step_pre_hooks = OrderedDict()
@@ -371,14 +379,14 @@ class Optimizer:
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> Dict[str, Any]:  # noqa: D105
         return {
             "defaults": self.defaults,
             "state": self.state,
             "param_groups": self.param_groups,
         }
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
+    def __setstate__(self, state: Dict[str, Any]) -> None:  # noqa: D105
         self.__dict__.update(state)
         if "_optimizer_step_pre_hooks" not in self.__dict__:
             self._optimizer_step_pre_hooks = OrderedDict()
@@ -395,7 +403,7 @@ class Optimizer:
         self._patch_step_function()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault("differentiable", False)
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> str:  # noqa: D105
         format_string = self.__class__.__name__ + " ("
         for i, group in enumerate(self.param_groups):
             format_string += "\n"
@@ -457,10 +465,9 @@ class Optimizer:
         This is a workaround due to lack of a proper step hook on the optimizer,
         and will be removed if it exists.
         """
-        pass
 
     @staticmethod
-    def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:
+    def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:  # noqa: D102
         @functools.wraps(func)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> R:
             self, *_ = args
@@ -503,7 +510,8 @@ class Optimizer:
         Dict[Tuple[None, None], Tuple[TensorListList, Indices]],
         Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]],
     ]:
-        """Groups a list of lists of tensors by device and dtype.
+        """Group a list of lists of tensors by device and dtype.
+
         Skips this step if we are compiling since this will occur during inductor lowering.
         """
         if is_compiling():
@@ -521,8 +529,9 @@ class Optimizer:
             self.__class__.step.hooked = True  # type: ignore[attr-defined]
 
     def register_step_pre_hook(self, hook: OptimizerPreHook) -> RemovableHandle:
-        r"""Register an optimizer step pre hook which will be called before
-        optimizer step. It should have the following signature::
+        r"""Register an optimizer step pre hook which will be called before optimizer step.
+
+        It should have the following signature::
 
             hook(optimizer, args, kwargs) -> None or modified args and kwargs
 
@@ -544,6 +553,7 @@ class Optimizer:
 
     def register_step_post_hook(self, hook: OptimizerPostHook) -> RemovableHandle:
         r"""Register an optimizer step post hook which will be called after optimizer step.
+
         It should have the following signature::
 
             hook(optimizer, args, kwargs) -> None
@@ -564,10 +574,10 @@ class Optimizer:
 
     def register_state_dict_pre_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
-    ) -> RemovableHandle:
-        r"""Register a state dict pre-hook which will be called before
-        :meth:`~torch.optim.Optimizer.state_dict` is called. It should have the
-        following signature::
+    ) -> RemovableHandle:  # noqa: D101
+        r"""Register a state dict pre-hook which will be called before :meth:`~torch.optim.Optimizer.state_dict` is called.
+
+        It should have the following signature::
 
             hook(optimizer) -> None
 
@@ -599,9 +609,9 @@ class Optimizer:
         hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
         prepend: bool = False,
     ) -> RemovableHandle:
-        r"""Register a state dict post-hook which will be called after
-        :meth:`~torch.optim.Optimizer.state_dict` is called. It should have the
-        following signature::
+        r"""Register a state dict post-hook which will be called after :meth:`~torch.optim.Optimizer.state_dict` is called.
+
+        It should have the following signature::
 
             hook(optimizer, state_dict) -> state_dict or None
 
@@ -630,7 +640,7 @@ class Optimizer:
 
     @torch._disable_dynamo
     def state_dict(self) -> StateDict:
-        r"""Returns the state of the optimizer as a :class:`dict`.
+        r"""Return the state of the optimizer as a :class:`dict`.
 
         It contains two entries:
 
@@ -678,7 +688,6 @@ class Optimizer:
             }
 
         """
-
         for pre_hook in self._optimizer_state_dict_pre_hooks.values():
             pre_hook(self)
 
@@ -753,7 +762,7 @@ class Optimizer:
         self,
         hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
         prepend: bool = False,
-    ) -> RemovableHandle:
+    ) -> RemovableHandle:  # noqa: D205 D400
         r"""Register a load_state_dict pre-hook which will be called before
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
         following signature::
@@ -790,7 +799,7 @@ class Optimizer:
 
     def register_load_state_dict_post_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
-    ) -> RemovableHandle:
+    ) -> RemovableHandle:  # noqa: D205 D400
         r"""Register a load_state_dict post-hook which will be called after
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
         following signature::
@@ -824,7 +833,7 @@ class Optimizer:
 
     @torch._disable_dynamo
     def load_state_dict(self, state_dict: StateDict) -> None:
-        r"""Loads the optimizer state.
+        r"""Load the optimizer state.
 
         Args:
             state_dict (dict): optimizer state. Should be an object returned
@@ -910,7 +919,7 @@ class Optimizer:
 
     @torch._disable_dynamo
     def zero_grad(self, set_to_none: bool = True) -> None:
-        r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
+        r"""Reset the gradients of all optimized :class:`torch.Tensor` s.
 
         Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
@@ -972,7 +981,7 @@ class Optimizer:
         ...
 
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
-        r"""Performs a single optimization step (parameter update).
+        r"""Perform a single optimization step to update parameter.
 
         Args:
             closure (Callable): A closure that reevaluates the model and

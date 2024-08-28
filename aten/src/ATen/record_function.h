@@ -3,8 +3,8 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
-#include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
+#include <optional>
 
 #include <array>
 #include <functional>
@@ -319,7 +319,7 @@ struct TORCH_API RecordFunction {
     if (!isActive()) {
       return;
     }
-    kwinputs_ = *kwargs;
+    kwinputs_ = std::unordered_map<std::string, IValue>(*kwargs);
     before(std::move(fn), args, current_sequence_nr);
   }
 

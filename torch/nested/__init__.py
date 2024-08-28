@@ -14,6 +14,7 @@ __all__ = [
     "nested_tensor",
     "nested_tensor_from_jagged",
     "narrow",
+    "masked_select",
 ]
 
 # Nested Tensor constructor functions
@@ -106,6 +107,9 @@ def as_nested_tensor(
             return torch._nested_tensor_from_tensor_list(ts, dtype, None, device, None)
     elif layout == torch.jagged:
         if isinstance(ts, Tensor):
+            if device is None:
+                device = ts.device
+
             # contiguous() might be necessary to get flattened view.
             # we could probably be more precise about when to do this as an optimization
             values = ts.contiguous().flatten(0, 1).to(device=device, dtype=dtype)
@@ -116,7 +120,9 @@ def as_nested_tensor(
 
             from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
 
-            return nested_view_from_values_offsets(values, offsets)
+            return nested_view_from_values_offsets(
+                values, offsets, min_seqlen=seq_len, max_seqlen=seq_len
+            )
         else:
             from torch.nested._internal.nested_tensor import jagged_from_list
 
@@ -312,6 +318,8 @@ def nested_tensor_from_jagged(
     offsets: Optional[Tensor] = None,
     lengths: Optional[Tensor] = None,
     jagged_dim: Optional[int] = None,
+    min_seqlen: Optional[int] = None,
+    max_seqlen: Optional[int] = None,
 ) -> Tensor:
     r"""
 Constructs a jagged layout nested tensor from the given jagged components. The jagged layout
@@ -343,6 +351,12 @@ Args:
     jagged_dim (optional int): Indicates which dimension in values is the packed jagged
         dimension. If None, this is set to dim=1 (i.e. the dimension immediately following
         the batch dimension). Default: None
+    min_seqlen (optional int): If set, uses the specified value as the cached minimum sequence
+        length for the returned nested tensor. This can be a useful alternative to computing
+        this value on-demand, possibly avoiding a GPU -> CPU sync. Default: None
+    max_seqlen (optional int): If set, uses the specified value as the cached maximum sequence
+        length for the returned nested tensor. This can be a useful alternative to computing
+        this value on-demand, possibly avoiding a GPU -> CPU sync. Default: None
 
 Example::
 
@@ -372,6 +386,13 @@ Example::
     >>> torch.equal(c, values[3:5, :])
     True
     """
+    from torch.fx._symbolic_trace import is_fx_tracing
+    if is_fx_tracing():
+        raise RuntimeError(
+            "torch.nested.nested_tensor_from_jagged does not support tracing with fx.symbolic_trace. "
+            "Use fx.wrap to wrap the function that calls nested_tensor_from_jagged."
+        )
+
     if offsets is None:
         if lengths is None:
             raise RuntimeError(
@@ -388,4 +409,57 @@ Example::
 
     from torch.nested._internal.nested_tensor import nested_view_from_values_offsets_lengths
 
-    return nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=jagged_dim)
+    return nested_view_from_values_offsets_lengths(
+        values, offsets, lengths, ragged_idx=jagged_dim, min_seqlen=min_seqlen, max_seqlen=max_seqlen)
+
+def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
+    r"""
+    Constructs a nested tensor given a strided tensor input and a strided mask, the resulting jagged layout nested tensor
+    will have values retain values where the mask is equal to True. The dimensionality of the mask is preserved and is
+    represented with the offsets, this is unlike :func:`masked_select` where the output is collapsed to a 1D tensor.
+
+    Args:
+    tensor (:class:`torch.Tensor`): a strided tensor from which the jagged layout nested tensor is constructed from.
+    mask (:class:`torch.Tensor`): a strided mask tensor which is applied to the tensor input
+
+    Example::
+
+    >>> tensor = torch.randn(3, 3)
+    >>> mask = torch.tensor([[False, False, True], [True, False, True], [False, False, True]])
+    >>> nt = torch.nested.masked_select(tensor, mask)
+    >>> nt.shape
+    torch.Size([3, j4])
+    >>> # Length of each item in the batch:
+    >>> nt.offsets().diff()
+    tensor([1, 2, 1])
+
+    >>> tensor = torch.randn(6, 5)
+    >>> mask = torch.tensor([False])
+    >>> nt = torch.nested.masked_select(tensor, mask)
+    >>> nt.shape
+    torch.Size([6, j5])
+    >>> # Length of each item in the batch:
+    >>> nt.offsets().diff()
+    tensor([0, 0, 0, 0, 0, 0])
+    """
+    if tensor.layout != torch.strided:
+        raise RuntimeError(
+            f"torch.nested.masked_select requires a strided tensor, given {tensor.layout}"
+        )
+
+    if mask.layout != torch.strided:
+        raise RuntimeError(
+            f"torch.nested.masked_select requires a strided mask, given: {mask.layout}"
+        )
+    res_values = tensor.masked_select(mask)
+    expanded_mask = mask.expand(tensor.shape)
+    res_lengths = expanded_mask.sum(dim=tensor.ndim - 1).view(-1)
+
+    from torch.nested._internal.nested_tensor import (
+        nested_view_from_values_offsets,
+    )
+
+    return nested_view_from_values_offsets(
+        values=res_values,
+        offsets=F.pad(res_lengths.cumsum(dim=0), (1, 0)),
+    )

@@ -20,8 +20,9 @@ from torch.onnx import (
     _OrtBackendOptions as OrtBackendOptions,
     ExportOptions,
 )
-
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNNModuleInlined
+
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import onnx_test_common
@@ -108,15 +109,6 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                     export_options=ExportOptions(
                         dynamic_shapes=True,
                     )
-                ),
-            ),
-            (
-                OrtBackendOptions(
-                    use_aot_autograd=False,
-                    export_options=ExportOptions(
-                        op_level_debug=True,
-                        dynamic_shapes=True,
-                    ),
                 ),
             ),
         ]
@@ -352,7 +344,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         class MLP(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 4, bias=True)
                 self.fc2 = nn.Linear(4, 2, bias=True)
@@ -397,6 +389,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             (True, False),
         ]
     )
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     def test_llama_attention_with_local_backend(
         self, test_local_backend: bool, test_backward: bool
     ):
@@ -471,11 +464,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                # with inlining and dynamic=True, we have more graph captures
-                number_of_captured_graphs = 3 if test_backward else 2
-            else:
-                number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 2 if test_backward else 1
 
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
@@ -496,6 +485,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             (True, True),
         ]
     )
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     def test_llama_decoder_with_local_backend(
         self, test_local_backend: bool, test_backward: bool
     ):
@@ -569,11 +559,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                # with inlining and dynamic=True, we have more graph captures
-                number_of_captured_graphs = 3 if test_backward else 2
-            else:
-                number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 2 if test_backward else 1
 
             execution_count = len(example_args_collection) * number_of_captured_graphs
 
@@ -592,6 +578,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             (True, True),
         ]
     )
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/129456")
     def test_llama_with_local_backend(
         self, test_local_backend: bool, test_backward: bool
     ):
@@ -660,11 +647,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                # with inlining and dynamic=True, we have more graph captures
-                number_of_captured_graphs = 3 if test_backward else 2
-            else:
-                number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 2 if test_backward else 1
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
@@ -698,7 +681,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         class MLP(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 4, bias=True)
                 self.fc2 = nn.Linear(4, 2, bias=True)

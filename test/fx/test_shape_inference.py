@@ -86,7 +86,7 @@ class TestShapeInference(unittest.TestCase):
 
     def test_infer_shape(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w_1 = torch.empty([256, 328])
                 self.b_1 = torch.empty([256])

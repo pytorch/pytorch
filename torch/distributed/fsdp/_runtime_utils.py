@@ -637,7 +637,6 @@ def _pre_backward_hook(
         and hasattr(handle, "_ran_pre_backward_hook")
         and handle._ran_pre_backward_hook
     ):
-        logger.debug("%s %s", id(state), "Not Running pre backward! Already Ran!")
         return grad
 
     with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):

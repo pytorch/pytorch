@@ -220,8 +220,7 @@ double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
   double big_endian = read<double>();
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double little_endian;
+  double little_endian = 0;
 
   // Pickle floats are big endian, so reverse the bytes
   auto big_endian_ptr = reinterpret_cast<const char*>(&big_endian);
@@ -277,6 +276,7 @@ inline void append(std::vector<T>& a, T&& e) {
   a.emplace_back(std::forward<T>(e));
 }
 template <>
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 inline void append<bool>(std::vector<bool>& a, bool&& e) {
   a.push_back(e);
 }
@@ -395,7 +395,7 @@ PickleOpCode Unpickler::readInstruction() {
           break;
         default: {
           elements.reserve(stack_.size() - start);
-          auto start_it = stack_.begin() + start;
+          auto start_it = stack_.begin() + static_cast<std::ptrdiff_t>(start);
           for (auto it = start_it; it != stack_.end(); ++it) {
             elements.emplace_back(std::move(*it));
           }
@@ -484,7 +484,8 @@ PickleOpCode Unpickler::readInstruction() {
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }
-      stack_.erase(stack_.begin() + start, stack_.end());
+      stack_.erase(
+          stack_.begin() + static_cast<std::ptrdiff_t>(start), stack_.end());
       stack_.emplace_back(std::move(dict));
     } break;
     case PickleOpCode::SETITEMS: {
@@ -505,7 +506,8 @@ PickleOpCode Unpickler::readInstruction() {
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }
-      stack_.erase(stack_.begin() + start, stack_.end());
+      stack_.erase(
+          stack_.begin() + static_cast<std::ptrdiff_t>(start), stack_.end());
     } break;
     case PickleOpCode::BINGET: {
       auto pos = read<uint8_t>();
@@ -654,11 +656,13 @@ PickleOpCode Unpickler::readInstruction() {
 
       auto dict = stack_.at(dict_pos).toGenericDict();
       dict.insert_or_assign(stack_.at(key_pos), stack_.at(val_pos));
-      stack_.erase(stack_.begin() + (key_pos), stack_.end());
+      stack_.erase(
+          stack_.begin() + static_cast<std::ptrdiff_t>(key_pos), stack_.end());
     } break;
     default: {
       AT_ERROR(
           "Unknown opcode for unpickling at ",
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
           reinterpret_cast<void*>(opcode),
           ": ",
           int(static_cast<uint8_t>(opcode)));
@@ -1168,7 +1172,8 @@ void Unpickler::readListElements(IValue list_ivalue, size_t start) {
   } else {
     AT_ERROR("Unknown IValue list kind: ", list_ivalue.tagKind());
   }
-  stack_.erase(stack_.begin() + start, stack_.end());
+  stack_.erase(
+      stack_.begin() + static_cast<std::ptrdiff_t>(start), stack_.end());
 }
 
 // Pop all the list items off of the stack and append them to the list at

@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <string>
 #include <utility>
 
 #include <c10/core/Device.h>

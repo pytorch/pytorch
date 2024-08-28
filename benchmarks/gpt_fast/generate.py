@@ -14,6 +14,7 @@ from quantize import WeightOnlyInt8QuantHandler as LLaMAWeightOnlyInt8QuantHandl
 import torch
 import torch._inductor.config
 
+
 torch._inductor.config.coordinate_descent_tuning = True
 torch._inductor.config.triton.unique_kernel_names = True
 torch._inductor.config.fx_graph_cache = True  # Experimental feature to reduce compilation times, will be on by default in future
@@ -161,10 +162,8 @@ def _get_model_size(model):
     for name, child in model.named_children():
         if not isinstance(child, torch.nn.Embedding):
             model_size += sum(
-                [
-                    p.numel() * p.dtype.itemsize
-                    for p in itertools.chain(child.parameters(), child.buffers())
-                ]
+                p.numel() * p.dtype.itemsize
+                for p in itertools.chain(child.parameters(), child.buffers())
             )
 
     # Remove the inactivated experts from the model size if this is mixture of experts
@@ -177,12 +176,10 @@ def _get_model_size(model):
             ):
                 model_size -= (
                     sum(
-                        [
-                            p.numel() * p.dtype.itemsize
-                            for p in itertools.chain(
-                                submodule.parameters(), child.buffers()
-                            )
-                        ]
+                        p.numel() * p.dtype.itemsize
+                        for p in itertools.chain(
+                            submodule.parameters(), child.buffers()
+                        )
                     )
                     * (config.num_experts - config.num_activated_experts)
                     / config.num_experts
@@ -269,6 +266,7 @@ def run_llama2_7b_bf16(device: str = "cuda"):
             f"{token_per_sec:.02f}",
             model.mode,
             device,
+            True,
         ),
         Experiment(
             model.name,
@@ -277,6 +275,7 @@ def run_llama2_7b_bf16(device: str = "cuda"):
             f"{memory_bandwidth:.02f}",
             model.mode,
             device,
+            True,
         ),
         Experiment(
             model.name,
@@ -285,6 +284,7 @@ def run_llama2_7b_bf16(device: str = "cuda"):
             f"{compilation_time:.02f}",
             model.mode,
             device,
+            True,
         ),
     ]
 
@@ -311,6 +311,7 @@ def run_llama2_7b_int8(device: str = "cuda"):
             f"{token_per_sec:.02f}",
             model.mode,
             device,
+            True,
         ),
         Experiment(
             model.name,
@@ -319,6 +320,7 @@ def run_llama2_7b_int8(device: str = "cuda"):
             f"{memory_bandwidth:.02f}",
             model.mode,
             device,
+            True,
         ),
         Experiment(
             model.name,
@@ -327,6 +329,7 @@ def run_llama2_7b_int8(device: str = "cuda"):
             f"{compilation_time:.02f}",
             model.mode,
             device,
+            True,
         ),
     ]
 
@@ -342,7 +345,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
         175,
-        1280,
+        1130,
         162,
     )
     token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
@@ -354,6 +357,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
             f"{token_per_sec:.02f}",
             model.mode,
             device,
+            True,
         ),
         Experiment(
             model.name,
@@ -362,6 +366,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
             f"{memory_bandwidth:.02f}",
             model.mode,
             device,
+            True,
         ),
         Experiment(
             model.name,
@@ -370,5 +375,6 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
             f"{compilation_time:.02f}",
             model.mode,
             device,
+            True,
         ),
     ]
