@@ -1445,6 +1445,11 @@ def init_process_group(
 
     """
 
+    if (os.environ.get("TORCH_FAKE_PROCESS_GROUP") == "1"):
+        backend = "fake"
+        store = torch.testing._internal.distributed.fake_pg.FakeStore()
+        init_method = None
+
     global _world
 
     global _backend
