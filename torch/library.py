@@ -1229,7 +1229,7 @@ def opcheck(
 
     Concretely, we test the following:
 
-    - test_schema: We test that the schema matches the implementation of
+    - test_schema: If the schema matches the implementation of
       the operator. For example: if the schema specifies a Tensor is mutated,
       then we check the implementation mutates the Tensor. If the schema
       specifies that we return a new Tensor, then we check that the
