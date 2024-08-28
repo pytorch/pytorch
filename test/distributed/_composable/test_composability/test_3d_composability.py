@@ -5,7 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Callable, Tuple, Union
+from typing import Callable, List, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -48,6 +48,9 @@ class ParallelDims:
     world_size: int
     enable_loss_parallel: bool
     dp_type: str
+    float8: bool
+    async_tp: bool
+    schedule_class: str
 
     def __post_init__(self):
         self.dp_type = self.dp_type.lower()
@@ -74,7 +77,6 @@ class ParallelDims:
             if d > 1:
                 dims.append(d)
                 names.append(name)
-        # logger.info(f"Building {len(dims)}-D device mesh with {names}, {dims}")
         names = tuple(names)
         return init_device_mesh(device_type, dims, mesh_dim_names=names)
 
@@ -97,6 +99,116 @@ class ParallelDims:
     @cached_property
     def model_parallel_size(self):
         return self.tp * self.pp
+
+
+class Float8Handler:
+    def __init__(self, parallel_dims: ParallelDims, scale_for_fsdp: bool):
+        self.enabled = False
+
+        if not (torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9)):
+            # Float8 is only supported on SM89 or later (H100+ GPUs)
+            return
+        try:
+            from torchao.float8 import CastConfig, Float8LinearConfig, ScalingType
+        except ImportError as e:
+            raise ImportError(
+                "torchao is not installed. Please install it to use float8 linear layers."
+            ) from e
+
+        # Mutates the model inplace replacing instances of torch.nn.Linear with Float8Linear
+        enable_fsdp_float8_all_gather = (
+            parallel_dims.dp_enabled
+            and parallel_dims.dp_type == "fsdp"
+            and scale_for_fsdp
+        )
+        scaling_type_input = ScalingType("dynamic") #["dynamic", "delayed"]
+        scaling_type_weight = ScalingType("dynamic") #["dynamic", "delayed"]
+        scaling_type_grad_output = ScalingType("dynamic") #["dynamic", "delayed"]
+        self.config = Float8LinearConfig(
+            enable_fsdp_float8_all_gather=enable_fsdp_float8_all_gather,
+            cast_config_input=CastConfig(scaling_type=scaling_type_input),
+            cast_config_weight=CastConfig(scaling_type=scaling_type_weight),
+            cast_config_grad_output=CastConfig(scaling_type=scaling_type_grad_output),
+            enable_pre_and_post_forward=False,
+        )
+
+        self.enabled = True
+
+        # for precompute_float8_dynamic_scale_for_fsdp
+        self.precompute_scale = (
+            enable_fsdp_float8_all_gather
+            and scale_for_fsdp
+        )
+
+        # for sync_float8_amax_and_scale_history
+        self.delayed_scaling = (
+            scaling_type_input == "delayed"
+            or scaling_type_weight == "delayed"
+            or scaling_type_grad_output == "delayed"
+        )
+        self._sync_float8_amax_and_scale_history = None
+        #self.compile = job_config.training.compile
+
+    def convert_to_float8_training(self, model: nn.Module):
+        """
+        This function converts the linear layers of `model` to `Float8Linear`.
+        Note that today, only dynamic tensor scaling (the default) is supported.
+        This will mutate the model inplace.
+        """
+        if not self.enabled:
+            return
+
+        from torchao.float8 import convert_to_float8_training
+
+        # Mutates the model inplace replacing instances of nn.Linear with Float8Linear
+        convert_to_float8_training(
+            model,
+            config=self.config,
+            module_filter_fn=lambda mod, fqn: fqn != "output",
+        )
+
+    def precompute_float8_dynamic_scale_for_fsdp(
+        self, model: Union[nn.Module, List[nn.Module]]
+    ):
+        if not self.enabled:
+            return
+
+        if not self.precompute_scale:
+            return
+
+        from torchao.float8 import precompute_float8_dynamic_scale_for_fsdp
+
+        models = [model] if isinstance(model, nn.Module) else model
+        for m in models:
+            precompute_float8_dynamic_scale_for_fsdp(m)
+
+    def sync_float8_amax_and_scale_history(
+        self, model: Union[nn.Module, List[nn.Module]]
+    ):
+        if not self.enabled:
+            return
+
+        if not self.delayed_scaling:
+            return
+
+        from torchao.float8 import sync_float8_amax_and_scale_history
+
+        # TODO(vkuzo): see if precalculating the modules to sync over is going to
+        # meaningfully help performance
+
+        if self._sync_float8_amax_and_scale_history is None:
+            if self.compile:
+                self._sync_float8_amax_and_scale_history = torch.compile(
+                    sync_float8_amax_and_scale_history
+                )
+            else:
+                self._sync_float8_amax_and_scale_history = (
+                    sync_float8_amax_and_scale_history
+                )
+
+        models = [model] if isinstance(model, nn.Module) else model
+        for m in models:
+            self._sync_float8_amax_and_scale_history(m)
 
 
 class Test3DComposability(FSDPTest):
@@ -124,17 +236,20 @@ class Test3DComposability(FSDPTest):
                     1,
                 ],
                 "tp_degree": [
-                    1,
+                    2,
                 ],
                 "pp_degree": [
-                    4,
+                    2,
                 ],
+                "float8": [True],
+                "async_tp": [True],
+                "schedule_class": ["1f1b"], #["1f1b","gpipe","interleaved_1f1b","flexible_interleaved_1f1b",]
             },
             self._test_3d_composability,
         )
         self.logger.info("Finished job: 3D composability test")
 
-    def _test_3d_composability(self, dp_degree, tp_degree, pp_degree):
+    def _test_3d_composability(self, dp_degree, tp_degree, pp_degree, float8, async_tp, schedule_class):
         TRACE_BUFFER_SIZE = "TORCH_NCCL_TRACE_BUFFER_SIZE"
         TRACE_FILE = "TORCH_NCCL_DEBUG_INFO_TEMP_FILE"
         DUMP_ON_TIMEOUT = "TORCH_NCCL_DUMP_ON_TIMEOUT"
@@ -149,6 +264,9 @@ class Test3DComposability(FSDPTest):
             world_size=world_size,
             enable_loss_parallel=False,
             dp_type="fsdp",
+            float8=float8,
+            async_tp=async_tp,
+            schedule_class=schedule_class,
         )
         device = torch.device("cuda", index=dist.get_rank())
         torch.cuda.set_device(device)
@@ -165,8 +283,16 @@ class Test3DComposability(FSDPTest):
         torch.manual_seed(0)
         model_args = ModelArgs(dropout_p=0.0)
         model = Transformer(model_args)
-
         world_mesh = parallel_dims.build_mesh(device_type="cuda")
+
+        if parallel_dims.float8:
+            scale_for_fsdp = False
+            if parallel_dims.dp_enabled and parallel_dims.dp_type == "fsdp":
+                scale_for_fsdp = True
+            # a no-op hander if float8 is not enabled
+            float8_handler = Float8Handler(parallel_dims, scale_for_fsdp)
+            # swap to Float8Linear based on float8 configs
+            float8_handler.convert_to_float8_training(model)
 
         if parallel_dims.dp_enabled:
             dp_mesh = world_mesh["dp"]
@@ -187,8 +313,11 @@ class Test3DComposability(FSDPTest):
             for m in model_parts:
                 self._parallelize_llama(m, world_mesh, parallel_dims)
                 m.to_empty(device="cuda")
+                m.train()
         else:
             self._parallelize_llama(model, world_mesh, parallel_dims)
+            model.train()
+            model_parts = [model]
 
     def _parallelize_llama(
         self,
@@ -201,8 +330,8 @@ class Test3DComposability(FSDPTest):
                 model,
                 world_mesh["tp"],
                 loss_parallel=parallel_dims.loss_parallel_enabled,
-                enable_float8=True,
-                enable_async_tp=True,  # not works for all pp_schedule
+                enable_float8=parallel_dims.float8,
+                enable_async_tp=parallel_dims.async_tp,
             )
 
         self._apply_compile(model)
@@ -303,13 +432,13 @@ class Test3DComposability(FSDPTest):
                 "feed_forward.w2": rowwise_parallel(output_layouts=Shard(1)),
                 "feed_forward.w3": colwise_parallel(),
             }
-
+            '''
             parallelize_module(
                 module=transformer_block,
                 device_mesh=tp_mesh,
                 parallelize_plan=layer_plan,
             )
-
+            '''
         if enable_async_tp:
             from torch.distributed._symmetric_memory import enable_symm_mem_for_group
 
@@ -408,14 +537,8 @@ class Test3DComposability(FSDPTest):
             )
         """
 
-        schedule_class = [
-            "1f1b",
-            "gpipe",
-            "interleaved_1f1b",
-            "flexible_interleaved_1f1b",
-        ]
         pp_schedule = self._build_pipeline_schedule(
-            parallel_dims.pp, schedule_class[0], stages, loss_fn
+            parallel_dims.pp, parallel_dims.schedule_class, stages, loss_fn
         )
 
         return pp_schedule, models
@@ -477,15 +600,15 @@ class Test3DComposability(FSDPTest):
             else:
                 mp_dtype = torch.bfloat16
             batch_size = 8
-            local_seq_len = int(2048 // parallel_dims.tp)
+            local_seq_len = int(128 // parallel_dims.tp)
             layers_io_shape = (batch_size, local_seq_len, model_config.dim)
             output_layer_shape = (
                 batch_size,
-                2048,
+                128,
                 model_config.vocab_size,
             )
             if is_first:
-                tokens_shape = (8, 2048)
+                tokens_shape = (8, 128)
                 input = torch.randint(
                     model_config.vocab_size,
                     tokens_shape,
@@ -572,7 +695,7 @@ class Test3DComposability(FSDPTest):
         pp_rank = pp_mesh.get_local_rank()
         pp_size = pp_mesh.size()
         microbatches = parallel_dims.pp
-        tokens_shape = (8, 2048)
+        tokens_shape = (8, 128)
         input = torch.randint(
             model_config.vocab_size,
             tokens_shape,
