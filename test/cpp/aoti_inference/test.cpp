@@ -247,6 +247,7 @@ void test_aoti_double_buffering(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
+#if defined(USE_CUDA) || defined(USE_ROCM)
 void test_aoti_double_buffering_with_tensor_constants() {
   torch::NoGradGuard no_grad;
 
@@ -285,6 +286,7 @@ void test_aoti_double_buffering_with_tensor_constants() {
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
+#endif
 
 } // namespace
 
