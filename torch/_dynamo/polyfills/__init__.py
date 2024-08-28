@@ -154,15 +154,3 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     if isinstance(obj, cls):
         obj.__init__(*args, **kwargs)
     return obj
-
-
-def fspath(path):
-    # Python equivalent of os.fspath
-    if isinstance(path, (str, bytes)):
-        return path
-    elif hasattr(path, "__fspath__"):
-        return path.__fspath__()
-    else:
-        raise TypeError(
-            f"expected str, bytes or os.PathLike object, not {type(path).__name__}"
-        )
