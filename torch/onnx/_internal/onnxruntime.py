@@ -34,16 +34,11 @@ from torch.utils import _pytree
 
 if TYPE_CHECKING:
     import onnx
+    import onnxruntime
+
+    from onnxruntime.capi import _pybind_state as ORTC
 
 try:
-    # Use try-except to initialize package-dependent global variables.
-    import onnxruntime  # type: ignore[import]
-    from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
-
-    # This is not use directly in DORT but needed by underlying exporter,
-    # so we still need to check if it exists.
-    importlib.import_module("onnxscript")
-
     import torch.onnx
     import torch.onnx._internal
     import torch.onnx._internal._exporter_legacy
@@ -57,7 +52,7 @@ try:
         from_python_type_to_onnx_tensor_element_type,
     )
 
-    _SUPPORT_ONNXRT = True
+    _SUPPORT_ONNXRT = None
 except ImportError:
     _SUPPORT_ONNXRT = False
 
@@ -87,6 +82,24 @@ def is_onnxrt_backend_supported() -> bool:
         ...     print("pip install onnx onnxscript onnxruntime")
         ...
     """
+    global _SUPPORT_ONNXRT
+
+    if _SUPPORT_ONNXRT is None:
+        # `onnxruntime` might import a lot of other runtime packages,
+        # e.g. apex, deepspeed, transformers.
+        # So lazy-importing onnxruntime to avoid possible circular import.
+        try:
+            importlib.import_module("onnxruntime")
+            importlib.import_module("onnxruntime.capi._pybind_state")
+
+            # This is not use directly in DORT but needed by underlying exporter,
+            # so we still need to check if it exists.
+            importlib.import_module("onnxscript")
+
+            _SUPPORT_ONNXRT = True
+        except ImportError:
+            _SUPPORT_ONNXRT = False
+
     return _SUPPORT_ONNXRT
 
 
@@ -143,6 +156,8 @@ def _nvtx_range_pop():
 
 
 def _get_ort_device_type(device_type: str):
+    from onnxruntime.capi import _pybind_state as ORTC
+
     if device_type == "cuda":
         return ORTC.OrtDevice.cuda()
     if device_type == "cpu":
@@ -305,6 +320,8 @@ def _get_onnx_devices(
         ...,
     ],
 ) -> Tuple["ORTC.OrtDevice", ...]:
+    from onnxruntime.capi import _pybind_state as ORTC
+
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
 
@@ -337,7 +354,9 @@ def _get_onnx_devices(
 
 def _get_ortvalues_from_torch_tensors(
     tensors: Tuple[torch.Tensor, ...], devices: Tuple["ORTC.OrtDevice", ...]
-) -> Tuple[torch.Tensor, ...]:
+) -> Tuple[torch.Tensor, ...]:    
+    from onnxruntime.capi import _pybind_state as ORTC
+
     ortvalues = ORTC.OrtValueVector()
     ortvalues.reserve(len(tensors))
     dtypes = []
@@ -436,6 +455,9 @@ def _run_onnx_session_with_ortvaluevector(
         ...,
     ],
 ) -> Tuple[Union[torch.Tensor, int, float, bool], ...]:
+    import onnxruntime
+    from onnxruntime.capi import _pybind_state as ORTC
+
     _nvtx_range_push("contiguous")
     inputs = tuple(
         _adjust_scalar_from_fx_to_onnx(arg, value_info)
@@ -514,6 +536,8 @@ def _run_onnx_session_with_fetch(
         ...,
     ],
 ) -> Tuple[Union[torch.Tensor, int, float, bool], ...]:
+    import onnxruntime
+
     inputs = tuple(
         _adjust_scalar_from_fx_to_onnx(arg, value_info)
         for arg, value_info in zip(inputs, input_value_infos)
@@ -548,7 +572,7 @@ class OrtExecutionInfoPerSession:
         example_outputs: Union[Tuple[torch.Tensor, ...], torch.Tensor],
     ):
         # Carrier of ONNX model and its executor.
-        self.session: onnxruntime.InferenceSession = session
+        self.session: "onnxruntime.InferenceSession" = session
         # For the ONNX model stored in self.session, self.input_names[i] is the
         # name of the i-th positional input.
         self.input_names: Tuple[str, ...] = input_names
@@ -560,9 +584,9 @@ class OrtExecutionInfoPerSession:
         self.output_value_infos: Tuple[onnx.ValueInfoProto, ...] = output_value_infos  # type: ignore[name-defined]
         # For the ONNX model stored in self.session, self.input_devices[i] is the
         # i-th positional input's device.
-        self.input_devices: Tuple[ORTC.OrtDevice, ...] = input_devices
+        self.input_devices: Tuple["ORTC.OrtDevice", ...] = input_devices
         # Similar to self.input_devices, but for outputs.
-        self.output_devices: Tuple[ORTC.OrtDevice, ...] = output_devices
+        self.output_devices: Tuple["ORTC.OrtDevice", ...] = output_devices
         # This is the outputs of executing the original torch.fx.GraphModule with example inputs
         # (i.e., args passed into OrtBackend._ort_acclerated_call).
         self.example_outputs: Union[Tuple[torch.Tensor, ...], torch.Tensor] = (
@@ -728,6 +752,8 @@ class OrtBackend:
     """
 
     def __init__(self, options: Optional[OrtBackendOptions] = None):
+        from onnxruntime.capi import _pybind_state as ORTC
+
         self._options: Final = OrtBackendOptions() if options is None else options
 
         # options.export_options contains information shared between exporter and DORT.
@@ -849,6 +875,8 @@ class OrtBackend:
         it means we delegate the computation to _ort_acclerated_call and therefore
         onnxruntime.InferenceSession.
         """
+        import onnxruntime
+
         cached_execution_info_per_session = (
             self._all_ort_execution_info.search_reusable_session_execution_info(
                 graph_module, *args
