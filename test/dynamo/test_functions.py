@@ -164,13 +164,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
         expected = fn(
-            [torch.ones(2, 2), torch.ones(2, 2)],
+            [torch.ones(2, 2) * 4.26, torch.ones(2, 2) * 3.14],
             [torch.ones(2, 2), torch.ones(2, 2)],
             torch.tensor(0.5),
         )
 
         actual = fn_opt(
-            [torch.ones(2, 2), torch.ones(2, 2)],
+            [torch.ones(2, 2) * 4.26, torch.ones(2, 2) * 3.14],
             [torch.ones(2, 2), torch.ones(2, 2)],
             torch.tensor(0.5),
         )
