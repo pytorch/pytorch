@@ -75,6 +75,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   // The master runs on a single thread so only
   // one handler can be executed at a time
   void validateHandler(int socket);
+  void pingHandler(int socket);
   void setHandler(int socket);
   void compareSetHandler(int socket);
   void addHandler(int socket);
@@ -267,6 +268,10 @@ void TCPStoreMasterDaemon::query(int socket) {
       TORCH_CHECK(
           false, "Miscellaneous client without VALIDATE query is detected");
     }
+
+  } else if (qt == QueryType::PING) {
+    pingHandler(socket);
+
   } else if (qt == QueryType::SET) {
     setHandler(socket);
 
@@ -332,6 +337,12 @@ void TCPStoreMasterDaemon::validateHandler(int socket) {
         false,
         "Miscellaneous client with incorrect VALIDATE query is detected");
   }
+}
+
+void TCPStoreMasterDaemon::pingHandler(int socket) {
+  uint32_t nonce = 0;
+  tcputil::recvBytes<uint32_t>(socket, &nonce, 1);
+  tcputil::sendValue<uint32_t>(socket, nonce);
 }
 
 void TCPStoreMasterDaemon::setHandler(int socket) {

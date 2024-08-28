@@ -4,17 +4,16 @@
 #include <ATen/autocast_mode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <optional>
 
 #include <stack>
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -65,7 +64,7 @@ std::optional<AutocastScope> parseAutocast(
     const AutocastContext& context) {
   if (!isAutocastNode(value)) {
     // Not an autocast...
-    return c10::nullopt;
+    return std::nullopt;
   }
   if (value->node()->kind() == prim::CreateObject) {
     AutocastScope scope;
@@ -79,10 +78,10 @@ std::optional<AutocastScope> parseAutocast(
       if (use.user->kind() == prim::SetAttr &&
           use.user->s(attr::name) == "_enabled") {
         // Search for `prim::SetAttr[name="_enabled"]`
-        auto ret = constant_as<bool>(use.user->input(1));
+        enabled = constant_as<bool>(use.user->input(1));
         TORCH_CHECK(
-            ret.has_value(), "Autocast _enabled argument must be a constant");
-        enabled = ret.value();
+            enabled.has_value(),
+            "Autocast _enabled argument must be a constant");
       } else if (
           use.user->kind() == prim::SetAttr &&
           use.user->s(attr::name) == "device") {
@@ -135,7 +134,7 @@ std::optional<AutocastScope> parseAutocast(
     AT_ERROR("Unsupported autocast syntax");
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void castTensorInputs(
@@ -269,7 +268,7 @@ void updateAutocastEnabledCheck(Node* node, bool is_jit_enabled) {
 void handleBlock(Block* block, AutocastContext initial_state) {
   std::stack<AutocastScope> autocast_stack;
 
-  std::optional<bool> incompatible_amp = c10::nullopt;
+  std::optional<bool> incompatible_amp = std::nullopt;
 
   // The current autocast enabled/disabled state
   auto current_state = [&] {
@@ -532,5 +531,4 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nAfter Autocast: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -84,7 +84,7 @@ inline std::optional<Tensor> _allreduce_return_trivial(
   if (self.numel() == 0) {
     return at::scalar_tensor(ident, self.options());
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 #define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \
@@ -370,7 +370,7 @@ inline void resize_reduction(
   auto shape = get_reduction_shape(self, dims_, keepdim, allow_empty_dims);
   if (self.layout() == kStrided) {
     meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
-  } else if (shape.size() == 0) {
+  } else if (shape.empty()) {
     meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype).layout(kStrided));
   } else {
     TORCH_CHECK(false, "resize_reduction: support for output with ", self.layout(), " layout is not implemented yet");

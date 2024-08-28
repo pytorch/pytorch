@@ -1,25 +1,33 @@
 # mypy: ignore-errors
 
-MAX_CYCLE = 3000
-
 import itertools
 import operator
+from typing import Dict, List, Optional, TYPE_CHECKING
 
-from typing import Dict, List, Optional
-
-from .. import polyfill, variables
-from ..exc import unimplemented
-
+from .. import polyfills, variables
+from ..exc import (
+    handle_observed_exception,
+    ObservedUserStopIteration,
+    raise_observed_exception,
+    unimplemented,
+)
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+MAX_ITERATOR_LIMIT = 100 * 1024  # 100k
+
+
 class ItertoolsVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"ItertoolsVariable({self.value})"
 
     def python_type(self):
@@ -29,7 +37,10 @@ class ItertoolsVariable(VariableTracker):
         return self.value
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             self.value is itertools.product
@@ -163,6 +174,12 @@ class ItertoolsVariable(VariableTracker):
                     from_exc=e,
                 )
             return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
+        elif self.value is itertools.islice:
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(tx, polyfills.islice), args, kwargs
+            )
         elif self.value is itertools.repeat:
             if len(args) < 2:
                 return variables.RepeatIteratorVariable(
@@ -172,14 +189,18 @@ class ItertoolsVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.repeat), args, kwargs
+                SourcelessBuilder.create(tx, polyfills.repeat), args, kwargs
             )
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.cycle:
             return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.dropwhile:
-            return variables.UserFunctionVariable(polyfill.dropwhile).call_function(
+            return variables.UserFunctionVariable(polyfills.dropwhile).call_function(
+                tx, args, kwargs
+            )
+        elif self.value is itertools.zip_longest:
+            return variables.UserFunctionVariable(polyfills.zip_longest).call_function(
                 tx, args, kwargs
             )
         else:
@@ -187,7 +208,7 @@ class ItertoolsVariable(VariableTracker):
 
 
 class IteratorVariable(VariableTracker):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
     def next_variable(self, tx):
@@ -195,7 +216,7 @@ class IteratorVariable(VariableTracker):
 
 
 class RepeatIteratorVariable(IteratorVariable):
-    def __init__(self, item: VariableTracker, **kwargs):
+    def __init__(self, item: VariableTracker, **kwargs) -> None:
         super().__init__(**kwargs)
         self.item = item
 
@@ -205,7 +226,7 @@ class RepeatIteratorVariable(IteratorVariable):
 
 
 class CountIteratorVariable(IteratorVariable):
-    def __init__(self, item: int = 0, step: int = 1, **kwargs):
+    def __init__(self, item: int = 0, step: int = 1, **kwargs) -> None:
         super().__init__(**kwargs)
         if not isinstance(item, VariableTracker):
             item = ConstantVariable.create(item)
@@ -230,7 +251,7 @@ class CycleIteratorVariable(IteratorVariable):
         saved_index: int = 0,
         item: Optional[VariableTracker] = None,
         **kwargs,
-    ):
+    ) -> None:
         if saved is None:
             saved = []
         super().__init__(**kwargs)
@@ -245,7 +266,7 @@ class CycleIteratorVariable(IteratorVariable):
         if self.iterator is not None:
             try:
                 new_item = self.iterator.next_variable(tx)
-                if len(self.saved) > MAX_CYCLE:
+                if len(self.saved) > MAX_ITERATOR_LIMIT:
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
                     )
@@ -255,7 +276,8 @@ class CycleIteratorVariable(IteratorVariable):
                 if self.item is None:
                     return self.next_variable(tx)
                 return self.item
-            except StopIteration:
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -263,4 +285,4 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise StopIteration
+            raise_observed_exception(StopIteration, tx, self)

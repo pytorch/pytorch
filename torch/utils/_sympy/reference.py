@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-
 import operator
 
 import sympy
@@ -12,6 +11,8 @@ from torch.utils._sympy.functions import (
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
+    Max,
+    Min,
     Mod,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
@@ -170,11 +171,11 @@ class ReferenceAnalysis:
 
     @staticmethod
     def minimum(a, b):
-        return sympy.Min(a, b)
+        return Min(a, b)
 
     @staticmethod
     def maximum(a, b):
-        return sympy.Max(a, b)
+        return Max(a, b)
 
     @staticmethod
     def round_to_int(a, dtype):
@@ -219,7 +220,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def to_dtype(x, dtype):
         if dtype == torch.float64:
-            return float(x)
+            return torch.sym_float(x)
         raise NotImplementedError(f"to_dtype {dtype} NYI")
 
     @staticmethod

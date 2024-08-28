@@ -4,12 +4,9 @@ import itertools
 from typing import Callable, List
 
 import torch
-
 import torch._prims_common as utils
 import torch._subclasses.functional_tensor
-
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
 from torch._C._functorch import _add_batch_dim, get_unwrapped, maybe_get_bdim
 from torch._higher_order_ops.utils import (
@@ -18,7 +15,6 @@ from torch._higher_order_ops.utils import (
     reenter_make_fx,
     unique_graph_id,
 )
-
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -26,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+
 
 aten = torch._ops.ops.aten
 
@@ -40,10 +37,22 @@ def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
     return combined_leaves
 
 
+class AssociativeScanOp(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("associative_scan")
+
+    def __call__(self, combine_fn, input, dim):
+        return super().__call__(combine_fn, input, dim)
+
+
+associative_scan_op = AssociativeScanOp()
+
+
 def associative_scan(
     combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
     input: pytree.PyTree,
     dim: int,
+    reverse: bool = False,
 ) -> torch.Tensor:
     r"""
     Performs an inclusive scan with an associative pointwise combine function.
@@ -64,6 +73,7 @@ def associative_scan(
         input (torch.Tensor): The input tensor, or nested pytree of tensors.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
+        reverse (bool): A boolean stating if the scan should be reversed with respect to the dimension.
 
 
     Example::
@@ -80,10 +90,13 @@ def associative_scan(
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
             return torch.compile(associative_scan, fullgraph=True)(
-                combine_fn, input, dim
+                combine_fn, input, dim, reverse=reverse
             )
 
     leaves, spec = pytree.tree_flatten(input)
+
+    if reverse:
+        leaves = [torch.flip(elem, [dim]) for elem in leaves]
 
     assert len(leaves) >= 1, "expected at least 1 input leaf"
     assert all(
@@ -102,10 +115,10 @@ def associative_scan(
 
     result_flat = associative_scan_op(combine_fn, leaves, dim)
 
+    if reverse:
+        result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
+
     return pytree.tree_unflatten(result_flat, spec)
-
-
-associative_scan_op = HigherOrderOperator("associative_scan")
 
 
 def trace_associative_scan(
@@ -171,10 +184,7 @@ associative_scan_op.py_impl(DispatchKey.Autograd)(
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
 def associative_scan_proxy_mode(mode, combine_fn, input, dim):
-    if mode.enable_tracing:
-        return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim)
-    else:
-        return associative_scan_op(mode, associative_scan_op, combine_fn, input, dim)
+    return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim)
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
@@ -187,7 +197,8 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim):
 def associative_scan_functionalize(ctx, combine_fn, input, dim):
     unwrapped_input = ctx.unwrap_tensors(input)
     with ctx.redispatch_to_next() as m:
-        ret = associative_scan_op(combine_fn, unwrapped_input, dim)
+        functional_combine_fn = ctx.functionalize(combine_fn)
+        ret = associative_scan_op(functional_combine_fn, unwrapped_input, dim)
     return ctx.wrap_tensors(ret)
 
 

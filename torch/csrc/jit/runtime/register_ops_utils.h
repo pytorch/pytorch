@@ -878,6 +878,6 @@ struct OperatorGeneratorArgs {
 
 TORCH_API at::Generator make_generator_for_device(
     c10::Device device,
-    std::optional<int64_t> seed = c10::nullopt);
+    std::optional<int64_t> seed = std::nullopt);
 
 } // namespace torch::jit

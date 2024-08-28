@@ -18,11 +18,13 @@
 # NB: C++ API doc generation using doxygen / breathe / exhale is currently only
 # enabled on nightlies (and not trunk or on PRs) due to OOM errors in CI.
 # See https://github.com/pytorch/pytorch/issues/79992.
+
 import os
+import textwrap
+
 
 # sys.path.insert(0, os.path.abspath('.'))
 
-import textwrap
 
 # -- General configuration ------------------------------------------------
 

@@ -2,17 +2,18 @@
 import collections
 import functools
 import warnings
-
 from typing import Any, Optional
 
 import torch
 from torch.types import _dtype
+
 
 try:
     import numpy as np
 
     HAS_NUMPY = True
 except ModuleNotFoundError:
+    HAS_NUMPY = False
     np = None  # type: ignore[assignment]
 
 __all__ = [
@@ -80,7 +81,7 @@ class autocast:
             loss.backward()
             optimizer.step()
 
-    See the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
+    See the :ref:`Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
     in more complex scenarios (e.g., gradient penalty, multiple models/losses, custom autograd functions).
 
     :class:`autocast` can also be used as a decorator, e.g., on the ``forward`` method of your model::

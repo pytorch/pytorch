@@ -1,21 +1,28 @@
 # mypy: allow-untyped-defs
 
 import hashlib
+from itertools import chain
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
 import torch
 import torch.fx
-from typing import Any, Dict, Optional, TYPE_CHECKING
-from torch.fx.node import _get_qualified_name, _format_arg
-from torch.fx.graph import _parse_stack_trace
-from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
-from itertools import chain
+from torch.fx.graph import _parse_stack_trace
+from torch.fx.node import _format_arg, _get_qualified_name
+from torch.fx.operator_schemas import normalize_function
+from torch.fx.passes.shape_prop import TensorMetadata
 
-__all__ = ['FxGraphDrawer']
+
 try:
     import pydot
+
     HAS_PYDOT = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PYDOT = False
+    pydot = None
+
+
+__all__ = ["FxGraphDrawer"]
 
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',
@@ -69,11 +76,13 @@ if HAS_PYDOT:
             skip_node_names_in_args: bool = True,
             parse_stack_trace: bool = False,
             dot_graph_shape: Optional[str] = None,
+            normalize_args: bool = False,
         ):
             self._name = name
             self.dot_graph_shape = (
                 dot_graph_shape if dot_graph_shape is not None else "record"
             )
+            self.normalize_args = normalize_args
             _WEIGHT_TEMPLATE["shape"] = self.dot_graph_shape
 
             self._dot_graphs = {
@@ -90,7 +99,6 @@ if HAS_PYDOT:
 
                 if not isinstance(leaf_node, torch.fx.GraphModule):
                     continue
-
 
                 self._dot_graphs[f"{name}_{node.target}"] = self._to_dot(
                     leaf_node,
@@ -109,7 +117,7 @@ if HAS_PYDOT:
                 >>> # xdoctest: +REQUIRES(module:ubelt)
                 >>> # define module
                 >>> class MyModule(torch.nn.Module):
-                >>>     def __init__(self):
+                >>>     def __init__(self) -> None:
                 >>>         super().__init__()
                 >>>         self.linear = torch.nn.Linear(4, 5)
                 >>>     def forward(self, x):
@@ -241,10 +249,21 @@ if HAS_PYDOT:
                 label += extra + r"\n"
             else:
                 label += f"|target={self._typename(node.target)}" + r"\n"
-                if len(node.args) > 0:
-                    label += _get_str_for_args_kwargs(node.args)
-                if len(node.kwargs) > 0:
-                    label += _get_str_for_args_kwargs(node.kwargs)
+                if self.normalize_args:
+                    try:
+                        args, kwargs = normalize_function(  # type: ignore[misc]
+                            node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
+                        )
+                    except Exception:
+                        # Fallback to not normalizing if there's an exception.
+                        # Some functions need overloads specified to normalize.
+                        args, kwargs = node.args, node.kwargs
+                else:
+                    args, kwargs = node.args, node.kwargs
+                if len(args) > 0:
+                    label += _get_str_for_args_kwargs(args)
+                if len(kwargs) > 0:
+                    label += _get_str_for_args_kwargs(kwargs)
                 label += f"|num_users={len(node.users)}" + r"\n"
 
             tensor_meta = node.meta.get('tensor_meta')
@@ -418,6 +437,7 @@ else:
                 skip_node_names_in_args: bool = True,
                 parse_stack_trace: bool = False,
                 dot_graph_shape: Optional[str] = None,
+                normalize_args: bool = False,
             ):
                 raise RuntimeError('FXGraphDrawer requires the pydot package to be installed. Please install '
                                    'pydot through your favorite Python package manager.')

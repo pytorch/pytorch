@@ -21,6 +21,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx.graph_module import _print_readable
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -133,6 +134,22 @@ class InterpreterModule(torch.nn.Module):
             if node.op == "placeholder":
                 self.arg_names.append(node.target)
 
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "InterpreterModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
+
 
 class FlatArgsAdapter(abc.ABC):
     """
@@ -192,7 +209,9 @@ class UnflattenedModule(torch.nn.Module):
         for name in self.graph_signature.parameters:  # this loop adds used params
             param = state_dict[name]
             if id(param) not in id_to_param:
-                id_to_param[id(param)] = torch.nn.Parameter(param.clone())
+                id_to_param[id(param)] = torch.nn.Parameter(
+                    param.clone(), requires_grad=param.requires_grad
+                )
 
             _assign_attr(
                 id_to_param[id(param)],
@@ -465,6 +484,22 @@ class UnflattenedModule(torch.nn.Module):
         )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "UnflattenedModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
+
 
 def unflatten(
     module: ExportedProgram, flat_args_adapter: Optional[FlatArgsAdapter] = None
@@ -561,9 +596,13 @@ def _compute_accessor(parent_fqn: str, child_fqn: str) -> str:
     parent_split = parent_fqn.split(".")
     child_split = child_fqn.split(".")
 
-    assert (
-        child_split[: len(parent_split)] == parent_split
-    ), f"Child module '{child_fqn}' is not a descendant of parent module '{parent_fqn}'"
+    # TODO: support skip connection by inlining the child module.
+    if child_split[: len(parent_split)] != parent_split:
+        raise RuntimeError(
+            f"Child module '{child_fqn}' is not a descendant of parent mldule '{parent_fqn}'."
+            "This is currently unsupported."
+            "Please try to make child module attach to parent module direclty."
+        )
     return ".".join(child_split[len(parent_split) :])
 
 
@@ -650,12 +689,12 @@ def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Mo
 class _ModuleFrame:
     def __init__(
         self,
-        flat_graph,
-        nodes,
+        flat_graph: torch.fx.Graph,
+        nodes: Tuple[torch.fx.Node, ...],
         seen_nodes,
         seen_modules,
         parent,
-        module_stack,
+        module_stack: List[str],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[torch.nn.Module] = None,
@@ -792,16 +831,54 @@ class _ModuleFrame:
         placeholder_node.meta = copy.copy(x.meta)
         self.node_to_placeholder[x] = placeholder_node
 
+    def copy_sym_call_function(self, x):
+        # This only exists because we deduplicate sym_size nodes in the flat export graph,
+        # and if preserve_module_call_signature is set, we may not be able to pass sym_size
+        # nodes, or their downstream users, as inputs to submodule calls.
+        # To avoid this we copy these call_function nodes with sym_type results.
+        # This should however only be done for sym_type nodes - call_function nodes on tensors
+        # should not be deduplicated in the first place.
+        args = tuple(
+            self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
+            for _x in x.args
+        )
+        kwargs = {
+            k: self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
+            for k, _x in x.kwargs.items()
+        }
+        node = self.graph.call_function(x.target, args, kwargs)
+        node.meta = copy.copy(x.meta)
+        self.node_map[x] = node
+        return node
+
     def remap_input(self, x):
         assert x.graph is self.flat_graph
         if x in self.node_map:
             return self.node_map[x]
-        if x not in self.node_to_placeholder:
+        self.print(f"remap_input({x})")
+        if x in self.node_to_placeholder:
+            return self.node_to_placeholder[x]
+        elif (
+            x.op == "placeholder"
+            or self.module_call_graph.get(self.fqn) is None
+            # allow placeholder creation if we are not preserving module call signature
+        ):
             self.add_placeholder(x)
             if self.parent_call_module is not None:
                 # Important to *prepend* the output to match how we are
                 # inserting placeholder nodes.
-                self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
+                with self.parent.graph.inserting_before(self.parent_call_module):
+                    self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
+            return self.node_to_placeholder[x]
+        elif x.op == "call_function":
+            # export deduplicates sym_size nodes, and may need to re-copy them
+            # if module call signature needs to be preserved
+            self.copy_sym_call_function(x)
+            return self.node_map[x]
+        else:
+            raise RuntimeError(
+                f"Could not run remap_input() on op type: {x.op} for node {x}"
+            )
         return self.node_to_placeholder[x]
 
     def finalize_outputs(self):

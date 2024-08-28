@@ -4,6 +4,8 @@ namespace {
 
 using namespace c10d::symmetric_memory;
 
+static bool is_finalizing_ = false;
+
 class AllocatorMap {
  public:
   static AllocatorMap& get() {
@@ -28,9 +30,7 @@ class AllocatorMap {
   }
 
   ~AllocatorMap() {
-    for (auto& it : map_) {
-      it.second.release();
-    }
+    is_finalizing_ = true;
   }
 
  private:
@@ -108,6 +108,10 @@ static at::Tensor empty_strided_p2p_persistent(
 namespace c10d {
 namespace symmetric_memory {
 
+bool is_finalizing() {
+  return is_finalizing_;
+}
+
 void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
@@ -172,7 +176,7 @@ at::Tensor empty_strided_p2p(
 TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
     const at::Tensor& tensor) {
   auto allocator = get_allocator(tensor.device().type());
-  return allocator->rendezvous(tensor.data_ptr());
+  return allocator->rendezvous(tensor.storage().data_ptr().get());
 }
 
 c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
@@ -185,5 +189,9 @@ c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
   return allocator->rendezvous(tensor.data_ptr());
 }
 
+TORCH_API bool has_multicast_support(c10::DeviceType device_type) {
+  auto allocator = get_allocator(device_type);
+  return allocator->has_multicast_support();
+}
 } // namespace symmetric_memory
 } // namespace c10d

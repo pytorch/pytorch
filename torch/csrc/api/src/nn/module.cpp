@@ -66,7 +66,8 @@ const std::string& Module::name() const noexcept {
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone(const optional<Device>& device) const {
+std::shared_ptr<Module> Module::clone(
+    const std::optional<Device>& device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
@@ -364,7 +365,7 @@ void Module::pretty_print_recursive(
   }
 }
 
-void Module::clone_(Module& other, const optional<Device>& device) {}
+void Module::clone_(Module& other, const std::optional<Device>& device) {}
 
 void Module::apply_to_submodules(
     const NamedModulePointerApplyFunction& function,

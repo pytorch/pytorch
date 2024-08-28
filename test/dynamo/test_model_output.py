@@ -3,10 +3,10 @@ import dataclasses
 import unittest.mock
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
+
 
 try:
     from transformers import modeling_outputs
@@ -229,11 +229,22 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(obj), opt_fn(obj))
 
     @maybe_skip
+    def test_mo_reconstruct_bytecode(self):
+        def fn(inp):
+            return BaseModelOutput(attentions=inp + 1)
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(fn(inp).attentions, opt_fn(inp).attentions)
+
+    @maybe_skip
     def test_HF_bert_model_output(self):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
         class BertPooler(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.dense = torch.nn.Linear(768, 768).to("cuda")
+                self.dense = torch.nn.Linear(768, 768).to(device)
                 self.activation = torch.nn.Tanh()
 
             def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -245,7 +256,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
                 return pooled_output
 
         class BertEncoder(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(
@@ -261,7 +272,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
                 )
 
         class BertModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.encoder = BertEncoder()
                 self.pooler = BertPooler()
@@ -291,7 +302,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
                 result["pooler_output"] = pooled_output
                 return result
 
-        sequence_output = torch.rand(1, 12, 768).to("cuda")
+        sequence_output = torch.rand(1, 12, 768).to(device)
         model = BertModel()
         orig_result = model(sequence_output)
         compiled_model = torch.compile(model, backend="eager")

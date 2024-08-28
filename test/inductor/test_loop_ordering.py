@@ -7,6 +7,7 @@ from torch._inductor import config as inductor_config, metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
 if HAS_CUDA:
     torch.set_default_device("cuda")
 

@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static void clearUndefinedness(Value* o) {
   if (o->type()->kind() == TensorType::Kind) {
@@ -35,5 +34,4 @@ void ClearUndefinedness(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After removeUndefinedness: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

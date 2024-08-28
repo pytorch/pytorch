@@ -3,12 +3,11 @@ import inspect
 import math
 import operator
 from collections.abc import Iterable
-from typing import Any, Dict, final, List, Optional, Tuple, Type
+from typing import Any, Dict, final, List, Tuple, Type, TYPE_CHECKING
 
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     CustomObjArgument,
     InputKind,
@@ -17,8 +16,9 @@ from torch.export.graph_signature import (
     TokenArgument,
 )
 from torch.fx import GraphModule
-from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
 
+if TYPE_CHECKING:
+    from torch.export.exported_program import ExportedProgram
 
 class SpecViolationError(Exception):
     pass
@@ -34,6 +34,8 @@ def _check_has_fake_tensor(node: torch.fx.Node) -> None:
 
 
 def _check_val(node: torch.fx.Node) -> None:
+    from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
+
     def _check_correct_val(val):
         if val is None:
             return True
@@ -131,11 +133,11 @@ class Verifier(metaclass=_VerifierMeta):
             operator.abs,
             math.ceil,
             math.floor,
+            math.trunc,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
-        from torch._export.serde.serialize import allowed_registered_op_types  # Avoid circular import.
-        return (OpOverload, HigherOrderOperator, *allowed_registered_op_types())
+        return (OpOverload, HigherOrderOperator)
 
     def allowed_getattr_types(self) -> Tuple[Type[Any], ...]:
         return (torch.fx.GraphModule,)
@@ -147,10 +149,9 @@ class Verifier(metaclass=_VerifierMeta):
         """
         Additional checks that are specific to some dialects.
         """
-        pass
 
     @final
-    def check(self, ep: ExportedProgram) -> None:
+    def check(self, ep: "ExportedProgram") -> None:
         self._check_graph_module(ep.graph_module)
         _verify_exported_program_signature(ep)
 
@@ -198,7 +199,8 @@ class Verifier(metaclass=_VerifierMeta):
 
             if isinstance(op, OpOverload):
                 # All ops functional
-                if not is_functional(op):
+                # TODO (tmanlaibaatar) more proper way is needed here
+                if self.dialect != "TRAINING" and not is_functional(op):
                     raise SpecViolationError(
                         f"operator '{op}' is not functional"
                     )
@@ -265,6 +267,10 @@ class Verifier(metaclass=_VerifierMeta):
         self.check_additional(gm)
 
 
+class TrainingIRVerifier(Verifier):
+    dialect = "TRAINING"
+
+
 def _verify_exported_program_signature(exported_program) -> None:
     # Check ExportedProgram signature matches
     gs = exported_program.graph_signature
@@ -275,7 +281,7 @@ def _verify_exported_program_signature(exported_program) -> None:
     if len(input_node_names) != len(gs.input_specs):
         raise SpecViolationError(
             f"Number of graph inputs ({len(input_node_names)}) "
-            f"does not match number of inputs in the graph signature ({len(gs.user_inputs)})"
+            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})"
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
@@ -424,7 +430,7 @@ def _verify_exported_program_signature(exported_program) -> None:
             )
 
 
-def load_verifier(dialect: str) -> Optional[Type[Verifier]]:
+def load_verifier(dialect: str) -> Type[Verifier]:
     if dialect == "ATEN" or dialect == "":
-        return _VerifierMeta._registry.get(dialect)
+        return _VerifierMeta._registry.get(dialect, Verifier)
     return _VerifierMeta._registry[dialect]

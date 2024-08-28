@@ -1228,6 +1228,12 @@ class TestReductions(TestCase):
         self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)
 
+    @onlyNativeDeviceTypes
+    @dtypes(*complex_types())
+    def test_invalid_0dim_aminmax(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, 'not implemented'):
+            torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
+
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
     #   reductions and summary ops?
     def test_bincount(self, device):
@@ -1492,7 +1498,13 @@ class TestReductions(TestCase):
         self.assertEqual(res1, res2.to(dtype=dtype))
 
     def test_prod_bool(self, device):
-        vals = [[True, True], [True, False], [False, False], []]
+        vals = [
+            [True, True],
+            [True, False],
+            [False, False],
+            [],
+            [False] * 256,  # https://github.com/pytorch/pytorch/issues/127866
+        ]
         for val in vals:
             result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
             expect = np.prod(np.array(val), dtype=bool)

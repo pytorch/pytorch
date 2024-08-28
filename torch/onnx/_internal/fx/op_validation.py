@@ -4,18 +4,15 @@
 from __future__ import annotations
 
 import logging
-
-from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
+from typing import Any, Callable, Sequence
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator  # type: ignore[import]
 
 import torch
 import torch.fx
-
 from torch.fx.experimental import symbolic_shapes
 from torch.onnx import _constants, _type_utils as jit_type_utils
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
     diagnostics,
     fx_onnx_interpreter,
@@ -24,12 +21,11 @@ from torch.onnx._internal.fx import (
 from torch.utils import _pytree
 
 
-@_beartype.beartype
 def _op_level_debug_message_formatter(
     fn: Callable,
     self,
     node: torch.fx.Node,
-    symbolic_fn: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
+    symbolic_fn: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
     *args,
     **kwargs,
 ) -> str:
@@ -39,7 +35,6 @@ def _op_level_debug_message_formatter(
     )
 
 
-@_beartype.beartype
 @diagnostics.diagnose_call(
     diagnostics.rules.op_level_debugging,
     diagnostic_message_formatter=_op_level_debug_message_formatter,
@@ -47,9 +42,9 @@ def _op_level_debug_message_formatter(
 def validate_op_between_ort_torch(
     diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
-    symbolic_fn: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
-    fx_args: List[fx_type_utils.Argument],
-    fx_kwargs: Dict[str, fx_type_utils.Argument],
+    symbolic_fn: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
+    fx_args: list[fx_type_utils.Argument],
+    fx_kwargs: dict[str, fx_type_utils.Argument],
     fx_graph_module: torch.fx.GraphModule,
 ):
     """Validate the op between ONNX Runtime and PyTorch.
@@ -176,7 +171,6 @@ def validate_op_between_ort_torch(
                 diagnostic.level = diagnostics.levels.WARNING
 
 
-@_beartype.beartype
 def _convert_symint_to_int_in_shape(shape: torch.Size) -> torch.Size:
     """Convert SymInt to int in shape
 
@@ -203,7 +197,6 @@ def _convert_symint_to_int_in_shape(shape: torch.Size) -> torch.Size:
     return torch.Size(list_int_shape)
 
 
-@_beartype.beartype
 def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
     shape = _convert_symint_to_int_in_shape(shape)
 
@@ -240,17 +233,16 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
     return torch.randn(shape, dtype=dtype)
 
 
-@_beartype.beartype
 def _fx_args_to_torch_args(
-    fx_args: List[fx_type_utils.Argument], fx_graph_module: torch.fx.GraphModule
-) -> List[fx_type_utils.Argument]:
+    fx_args: list[fx_type_utils.Argument], fx_graph_module: torch.fx.GraphModule
+) -> list[fx_type_utils.Argument]:
     """Recursively convert fx args to torch args"""
-    wrapped_args: List[fx_type_utils.Argument] = []
+    wrapped_args: list[fx_type_utils.Argument] = []
     for arg in fx_args:
         if isinstance(arg, torch.fx.Node):
             fake_tensor = arg.meta.get("val")
             if fake_tensor is None and arg.op == "get_attr":
-                fake_tensor = getattr(fx_graph_module, arg.target)  # type: ignore[operator]
+                fake_tensor = getattr(fx_graph_module, arg.target)  # type: ignore[operator, arg-type]
             # NOTE: Currently, we are aware of
             # FakeTensor/Tensor/SymInt/SymFloat/Symbool/int/float/bool could be in
             # arg.meta["val"]/get_attr.
@@ -261,8 +253,8 @@ def _fx_args_to_torch_args(
                 wrapped_args.append(real_tensor)
             elif isinstance(fake_tensor, (int, float, bool)):
                 wrapped_args.append(fake_tensor)
-            elif symbolic_shapes.has_hint(fake_tensor):
-                wrapped_args.append(symbolic_shapes.hint_int(fake_tensor))
+            elif symbolic_shapes.has_hint(fake_tensor):  # type: ignore[arg-type]
+                wrapped_args.append(symbolic_shapes.hint_int(fake_tensor))  # type: ignore[arg-type]
             else:
                 raise ValueError(
                     f"Unexpected input argument type found inside fx.Node. arg: {arg}; "
@@ -270,7 +262,7 @@ def _fx_args_to_torch_args(
                     f"{type(fake_tensor)}."
                 )
         elif isinstance(arg, Sequence):
-            wrapped_args.append(_fx_args_to_torch_args(arg, fx_graph_module))
+            wrapped_args.append(_fx_args_to_torch_args(arg, fx_graph_module))  # type: ignore[arg-type]
         elif isinstance(arg, (int, float, torch.dtype)) or arg is None:
             wrapped_args.append(arg)
         elif isinstance(arg, torch.device):
@@ -283,29 +275,27 @@ def _fx_args_to_torch_args(
     return wrapped_args
 
 
-@_beartype.beartype
 def _wrap_fx_args_as_torch_args(
-    fx_args: List[fx_type_utils.Argument],
-    fx_kwargs: Dict[str, fx_type_utils.Argument],
+    fx_args: list[fx_type_utils.Argument],
+    fx_kwargs: dict[str, fx_type_utils.Argument],
     fx_graph_module: torch.fx.GraphModule,
-) -> Tuple[List[fx_type_utils.Argument], Dict[str, fx_type_utils.Argument]]:
+) -> tuple[list[fx_type_utils.Argument], dict[str, fx_type_utils.Argument]]:
     """Prepare torch format args and kwargs for op-level validation by using fake tensor to create real tensor to feed in ops"""
 
     # NOTE: This function only supports FakeTensor with concrete shapes
-    torch_args: List[fx_type_utils.Argument] = _fx_args_to_torch_args(
+    torch_args: list[fx_type_utils.Argument] = _fx_args_to_torch_args(
         fx_args, fx_graph_module
     )
     return torch_args, fx_kwargs
 
 
 # NOTE: Referenced from onnxscript internal function: _tag_arguments_with_param_schemas.
-@_beartype.beartype
 def _convert_torch_args_to_onnxfunction_args(
     param_schemas: Sequence[onnxscript.values.ParamSchema],
-    args: List[fx_type_utils.Argument],
-    kwargs: Dict[str, fx_type_utils.Argument],
+    args: list[fx_type_utils.Argument],
+    kwargs: dict[str, fx_type_utils.Argument],
     allow_extra_kwargs: bool = False,
-) -> Tuple[List[Any], Dict[str, Any],]:
+) -> tuple[list[Any], dict[str, Any]]:
     """Convert Python args and kwargs to OnnxFunction acceptable with matching ONNX ParamSchema.
 
     NOTE: This is different from the param_schema separating in dispatcher, since at this point
@@ -360,12 +350,13 @@ def _convert_torch_args_to_onnxfunction_args(
     return tagged_args, tagged_kwargs
 
 
-@_beartype.beartype
 def _convert_tensor_to_numpy(input: fx_type_utils.Argument) -> Any:
     try:
         import numpy as np
-    except ImportError as exc:
-        raise ImportError(f"{__name__} needs numpy, but it's not installed.") from exc
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            f"{__name__} needs numpy, but it's not installed."
+        ) from exc
 
     if isinstance(input, torch.Tensor):
         if torch.is_complex(input):
@@ -373,7 +364,7 @@ def _convert_tensor_to_numpy(input: fx_type_utils.Argument) -> Any:
             input = torch.view_as_real(input.resolve_conj())
         return input.detach().cpu().numpy()
     if isinstance(input, torch.dtype):
-        return int(jit_type_utils.JitScalarType.from_dtype(input).onnx_type())  # type: ignore[union-attr]
+        return int(jit_type_utils.JitScalarType.from_dtype(input).onnx_type())  # type: ignore[union-attr,call-overload]
     if isinstance(input, (tuple, list)):
         if len(input) == 0:
             return np.array((), dtype=np.int64)

@@ -272,7 +272,7 @@ Tensor q_maxpool_2d(
             .memory_format(qx.suggest_memory_format()),
           qx.q_scale(),
           qx.q_zero_point(),
-          c10::nullopt);
+          std::nullopt);
     }
     qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
     return qy;
@@ -422,7 +422,7 @@ Tensor q_maxpool_3d(
           .memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     qmaxpool_3d_nthwc_stub(qx.device().type(), qx, iC, iT, iH, iW, oT, oH, oW, kT, kH, kW, sT, sH, sW, pT, pH, pW, dT, dH, dW, qy);
     return qy;
   } else {

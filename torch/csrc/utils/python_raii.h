@@ -1,5 +1,5 @@
-#include <c10/util/Optional.h>
 #include <torch/csrc/utils/pybind.h>
+#include <optional>
 #include <tuple>
 
 namespace torch::impl {
@@ -17,7 +17,7 @@ struct RAIIContextManager {
   }
 
   void exit() {
-    guard_ = c10::nullopt;
+    guard_ = std::nullopt;
   }
 
  private:
@@ -50,7 +50,7 @@ struct DeprecatedRAIIContextManager {
   void enter() {}
 
   void exit() {
-    guard_ = c10::nullopt;
+    guard_ = std::nullopt;
   }
 
  private:

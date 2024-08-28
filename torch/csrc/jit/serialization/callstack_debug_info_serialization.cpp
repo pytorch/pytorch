@@ -6,7 +6,7 @@
 namespace torch::jit {
 
 namespace {
-const int64_t kInvalidSourceRangeTag = -1;
+constexpr int64_t kInvalidSourceRangeTag = -1;
 } // namespace
 
 c10::IValue InlinedCallStackSerializer::serialize(
@@ -173,7 +173,7 @@ std::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
         const c10::IValue& iv,
         const std::shared_ptr<CompilationUnit>& cu) {
   if (iv.isNone()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto tup = iv.toTuple();
   auto it = cached_module_instance_info_.find(tup);
@@ -209,7 +209,7 @@ std::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
 
 ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
     unpickle(
-        at::DataPtr&& data,
+        const at::DataPtr& data,
         size_t size,
         const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
         const std::shared_ptr<CompilationUnit>& cu) {

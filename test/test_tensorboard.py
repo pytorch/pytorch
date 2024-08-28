@@ -1,13 +1,16 @@
 # Owner(s): ["module: unknown"]
 
-import expecttest
 import io
-import numpy as np
 import os
 import shutil
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+
+import expecttest
+import numpy as np
+
 
 TEST_TENSORBOARD = True
 try:
@@ -36,13 +39,15 @@ skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_MACOS,
+    IS_WINDOWS,
     parametrize,
-    TestCase,
     run_tests,
     TEST_WITH_CROSSREF,
-    IS_WINDOWS,
-    IS_MACOS,
+    TestCase,
+    skipIfTorchDynamo,
 )
+
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -75,15 +80,16 @@ class BaseTestCase(TestCase):
 
 
 if TEST_TENSORBOARD:
-    from tensorboard.compat.proto.graph_pb2 import GraphDef
-    from torch.utils.tensorboard import summary, SummaryWriter
-    from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
-    from tensorboard.compat.proto.types_pb2 import DataType
-    from torch.utils.tensorboard.summary import int_to_half, tensor_proto
-    from torch.utils.tensorboard._convert_np import make_np
-    from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
     from PIL import Image
+    from tensorboard.compat.proto.graph_pb2 import GraphDef
+    from tensorboard.compat.proto.types_pb2 import DataType
+
+    from torch.utils.tensorboard import summary, SummaryWriter
+    from torch.utils.tensorboard._convert_np import make_np
+    from torch.utils.tensorboard._pytorch_graph import graph
+    from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
+    from torch.utils.tensorboard.summary import int_to_half, tensor_proto
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
     def test_pytorch_np(self):
@@ -289,9 +295,8 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
         self.assertTrue(passed)
 
     def test_pathlib(self):
-        import pathlib
         with tempfile.TemporaryDirectory(prefix="test_tensorboard_pathlib") as d:
-            p = pathlib.Path(d)
+            p = Path(d)
             with SummaryWriter(p) as writer:
                 writer.add_scalar('test', 1)
 
@@ -515,7 +520,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         dummy_input = (torch.zeros(1, 3),)
 
         class myLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
@@ -592,7 +597,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
     def test_pytorch_graph_dict_input(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
@@ -600,7 +605,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
                 return self.l(x)
 
         class ModelDict(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
@@ -635,7 +640,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         # However, it should not raise an error during
         # the add_graph call and still continue.
         class myMLP(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.input_len = 1 * 28 * 28
                 self.fc1 = torch.nn.Linear(self.input_len, 1200)
@@ -756,6 +761,7 @@ class TestTensorProtoSummary(BaseTestCase):
             (torch.bfloat16, DataType.DT_BFLOAT16),
         ],
     )
+    @skipIfTorchDynamo("Unsuitable test for Dynamo, behavior changes with version")
     def test_half_tensor_proto(self, tensor_type, proto_type):
         float_values = [1.0, 2.0, 3.0]
         actual_proto = tensor_proto(

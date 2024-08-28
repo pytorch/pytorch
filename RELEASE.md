@@ -34,7 +34,6 @@
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
   - [Python](#python)
-    - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
   - [Operating Systems](#operating-systems)
@@ -51,6 +50,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- |
+| 2.4 | >=3.8, <=3.12 | CUDA 11.8, CUDA 12.1, CUDNN 9.1.0.70  | CUDA 12.4, CUDNN 9.1.0.70 | ROCm 6.1 |
 | 2.3 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 6.0 |
 | 2.2 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.7 |
 | 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.6 |
@@ -60,15 +60,19 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ## Release Cadence
 
-Following is the release cadence for year 2023/2024. All dates below are tentative, for latest updates on the release scheduled please follow [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27).
+Following is the release cadence for year 2023/2024. All dates below are tentative, for latest updates on the release scheduled please follow [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27). Please note: Patch Releases are optional.
 
 | Minor Version | Release branch cut | Release date | First patch release date | Second patch release date|
 | --- | --- | --- | --- | --- |
 | 2.1 | Aug 2023 | Oct 2023 | Nov 2023 | Dec 2023 |
 | 2.2 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
 | 2.3 | Mar 2024 | Apr 2024 | Jun 2024 | Not planned |
-| 2.4 | Jun 2024 | Jul 2024 | Aug 2024 | Sep 2024 |
-| 2.5 | Aug 2024 | Oct 2024 | Nov 2024 | Dec 2024 |
+| 2.4 | Jun 2024 | Jul 2024 | (Sept 2024) | Not planned |
+| 2.5 | Sep 2024 | Oct 2024 | (Nov 2024) | (Dec 2024) |
+| 2.6 | Dec 2024 | Jan 2025 | (Feb 2025) | (Mar 2025) |
+| 2.7 | Mar 2025 | Apr 2025 | (May 2025) | (Jun 2025) |
+| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sep 2025) |
+| 2.9 | Aug 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
 
 ## General Overview
 
@@ -407,12 +411,13 @@ PyTorch has a support matrix across a couple of different axis. This section sho
 
 ## Python
 
-For versions of Python that we support we follow the [NEP 29 policy](https://numpy.org/neps/nep-0029-deprecation_policy.html), which was originally drafted by numpy.
+PyTorch supports all minor versions of CPython that are not EOL: https://devguide.python.org/versions/
 
-### TL;DR
+For each minor release independently, we only support patch releases as follows:
+- If the latest patch release is a bugfix release, we only support this one.
+- Otherwise, we support all the non-bugfix patch releases.
 
-* All minor versions of Python released 42 months prior to the project, and at minimum the two latest minor versions.
-* All minor versions of numpy released in the 24 months prior to the project, and at minimum the last three minor versions.
+See https://github.com/pytorch/rfcs/blob/master/RFC-0038-cpython-support.md for details on the rules and process for upgrade and sunset of each version.
 
 ## Accelerator Software
 

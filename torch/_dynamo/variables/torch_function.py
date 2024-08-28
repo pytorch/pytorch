@@ -4,19 +4,24 @@ import inspect
 from typing import Dict, List, TYPE_CHECKING
 
 import torch.utils._pytree as pytree
-
+from torch._guards import Source
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
+from torch.utils._device import DeviceContext
+
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GlobalSource
-from ..utils import has_torch_function, is_tensor_base_attr_getter
+from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
+from ..utils import get_safe_global_name, has_torch_function, is_tensor_base_attr_getter
+from .base import VariableTracker
 from .constant import ConstantVariable
+from .ctx_manager import ContextWrappingVariable
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
 from .user_defined import UserDefinedObjectVariable
 
+
 if TYPE_CHECKING:
-    from .base import VariableTracker
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 # [Note: __torch_function__] This feature is a prototype and has some rough edges (contact mlazos with issues):
@@ -46,6 +51,96 @@ banned_attrs = [
     for fn in get_default_nowrap_functions()
     if is_tensor_base_attr_getter(fn)
 ]
+
+# Today set default device is placed in the graph and guarded on separately
+# so we should not trace through it. In the future we can trace it once
+# mode tracing is implemented and not put in the graph, but this is more
+# of a BE project and can be evaluated later
+IGNORED_MODES = {DeviceContext}
+
+
+class TorchFunctionModeStackVariable(VariableTracker):
+    """Fake VT to use as a dummy object, indicating the presence of torch function mode stack mutation"""
+
+    # singleton value representing the global torch function mode stack
+    # singleton (it exists in C++)
+    stack_value_singleton = object()
+
+    # offset is used to track if we have inserted/removed a
+    # device context which is always placed at the bottom of the stack
+    # if a device context is inserted, the graph will run this mutation
+    # so when we want to reconstruct any other modes on the stack
+    # their indices should be shifted right by 1 (+1)
+    # Conversely, if there was a device context on the stack, and the graph
+    # mutates the stack to remove that context (set default device to None)
+    # each of the indices of other modes should be shifted left by 1 (-1)
+    offset = 0
+
+    def __init__(self, source, symbolic_stack):
+        self.source = source
+        self.symbolic_stack = symbolic_stack
+
+    @classmethod
+    def reset(cls):
+        cls.offset = 0
+
+    @classmethod
+    def register_mutation(cls, tx: "InstructionTranslator"):
+        if cls.stack_value_singleton not in tx.output.side_effects:
+            var = cls(
+                source=Source(), symbolic_stack=tx.symbolic_torch_function_mode_stack
+            )
+            tx.output.side_effects.track_mutable(cls.stack_value_singleton, var)
+            tx.output.side_effects.mutation(var)
+
+    @classmethod
+    def register_device_context_insertion(cls, tx: "InstructionTranslator"):
+        stack = tx.symbolic_torch_function_mode_stack
+        if stack and cls.is_device_context(stack[0]):
+            return
+        else:
+            cls.offset += 1
+            tx.symbolic_torch_function_mode_stack.insert(
+                0,
+                TorchFunctionModeVariable(
+                    None, source=TorchFunctionModeStackSource(-cls.offset)
+                ),
+            )
+
+    @classmethod
+    def clear_default_device(cls, tx: "InstructionTranslator"):
+        stack = tx.symbolic_torch_function_mode_stack
+        if stack and cls.is_device_context(stack[0]):
+            stack.popleft()
+            cls.offset -= 1
+
+    @staticmethod
+    def is_device_context(var):
+        return isinstance(var.value, DeviceContext) or var.value is None
+
+    @classmethod
+    def get_mode_index(cls, ind):
+        return ind + cls.offset
+
+
+class TorchFunctionModeVariable(ContextWrappingVariable):
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+        self.value = value
+
+    @staticmethod
+    def get_global_mangled_name(tx, val):
+        return get_safe_global_name(
+            tx, f"__torch_function_mode_{val.__class__.__name__}", val
+        )
+
+    def reconstruct(self, codegen):
+        # We don't support locally created torch function modes yet
+        assert self.source
+        self.source.reconstruct(codegen)
+
+    def _call_func(self, tx, values):
+        unimplemented("torch function mode context manager is not supported yet")
 
 
 def _get_all_args(args, kwargs):
@@ -80,7 +175,7 @@ def _get_subclass_type(var):
     return var.python_type()
 
 
-def _get_subclass_type_var(tx, var):
+def _get_subclass_type_var(tx: "InstructionTranslator", var):
     assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
     if isinstance(var, TensorWithTFOverrideVariable):
         return var.class_type_var(tx)
@@ -88,12 +183,12 @@ def _get_subclass_type_var(tx, var):
         from .builder import SourcelessBuilder, VariableBuilder
 
         if var.source:
-            return VariableBuilder(tx, var.source)(var.python_type())
+            return VariableBuilder(tx, TypeSource(var.source))(var.python_type())
         else:
             return SourcelessBuilder.create(tx, var.python_type())
 
 
-def _is_attr_overidden(tx, var, name):
+def _is_attr_overidden(tx: "InstructionTranslator", var, name):
     import torch
 
     overridden = False
@@ -123,7 +218,7 @@ def call_torch_function(
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
 
-def build_torch_function_fn(tx, value, source):
+def build_torch_function_fn(tx: "InstructionTranslator", value, source):
     from .builder import SourcelessBuilder, VariableBuilder
 
     if source:
@@ -135,13 +230,13 @@ def build_torch_function_fn(tx, value, source):
         return SourcelessBuilder.create(tx, value.__torch_function__.__func__)
 
 
-def can_dispatch_torch_function(tx, args, kwargs):
+def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
     return tx.output.torch_function_enabled and any(
         has_torch_function(arg) for arg in _get_all_args(args, kwargs)
     )
 
 
-def dispatch_torch_function(tx, fn, args, kwargs):
+def dispatch_torch_function(tx: "InstructionTranslator", fn, args, kwargs):
     """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
 
     all_args = _get_all_args(args, kwargs)
@@ -172,7 +267,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
     Represents a tensor subclass instance with a __torch_function__ override.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         self.torch_function_fn = kwargs.pop("torch_function_fn")
         super().__init__(*args, **kwargs)
 
@@ -207,19 +302,15 @@ class TensorWithTFOverrideVariable(TensorVariable):
         )
 
     def global_mangled_class_name(self, tx):
-        # The global_mangled_class_name should be different for different
-        # invocations of torch.compile. Otherwise, we can run into a situation
-        # where multiple torch.compile invocations re-use the same global name,
-        # but the global's lifetime is tied to the first invocation (and
-        # may be deleted when the first torch.compile invocation is deleted)
-        # We mangle it based off of the output_graph's id.
-        compile_id = tx.output.compile_id
-        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{id}"
+        return get_safe_global_name(
+            tx, f"__subclass_{self.class_type.__name__}", self.class_type
+        )
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         # [Note: __torch_function__] We currently only support attributes that are defined on
         # base tensors, custom attribute accesses will graph break.
         import torch
+
         from .builder import SourcelessBuilder
 
         if name in banned_attrs:
@@ -252,7 +343,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         else:
             return super().var_getattr(tx, name)
 
-    def call_torch_function(self, tx, fn, types, args, kwargs):
+    def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         return call_torch_function(
             tx,
             self.class_type_var(tx),
@@ -274,6 +365,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # of `call_method`.
         if tx.output.torch_function_enabled:
             import torch
+
             from .builder import SourcelessBuilder, VariableBuilder
 
             if _is_attr_overidden(tx, self, name):

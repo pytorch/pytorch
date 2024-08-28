@@ -97,8 +97,8 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
       mtl_setBuffer(computeEncoder, self, 0);
       mtl_setBuffer(computeEncoder, other, 1);
       mtl_setBuffer(computeEncoder, output, 2);
-      [computeEncoder setBytes:strides.data() length:sizeof(uint64_t) * strides.size() atIndex:3];
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_setBytes(computeEncoder, strides, 3);
+      mtl_setBytes(computeEncoder, sizes, 4);
       mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
@@ -124,9 +124,12 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
   static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
-  return always_use_metal || self.stride(0) > max_stride_size || self.stride(1) > max_stride_size ||
-      self.size(0) > max_stride_size || self.size(1) > max_stride_size || other.stride(0) > max_stride_size ||
-      other.stride(1) > max_stride_size || other.size(0) > max_stride_size || other.size(1) > max_stride_size;
+  static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+  return always_use_metal ||
+      (!is_macos_14_4_or_newer &&
+       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
+        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
+        other.size(0) > max_stride_size || other.size(1) > max_stride_size));
 }
 
 } // anonymous namespace
@@ -160,8 +163,8 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
   status_tensors.reserve(batchSize);
   pivots_list.reserve(batchSize);
   for (C10_UNUSED const auto i : c10::irange(batchSize)) {
-    status_tensors.push_back(at::zeros(1, kInt, c10::nullopt, kMPS, c10::nullopt));
-    pivots_list.push_back(at::zeros(numPivots, kInt, c10::nullopt, kMPS, c10::nullopt));
+    status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
+    pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
   }
 
   // Since the MPSMatrixDecompositionLU functions in-place if the result matrix completely aliases the source matrix,
@@ -243,6 +246,8 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support mm for non-float inputs");
@@ -272,8 +277,16 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
       std::tie(newCachedGraph->inputTensor_, newCachedGraph->otherTensor_, newCachedGraph->outputTensor_) =
           do_mm(mpsGraph, self, other);
     });
-    auto selfPlaceholder = self.numel() != 0 ? Placeholder(cachedGraph->inputTensor_, self) : Placeholder();
-    auto otherPlaceholder = other.numel() != 0 ? Placeholder(cachedGraph->otherTensor_, other) : Placeholder();
+    // MPS TODO:
+    // Strided API doesn't play nice with complex data types (at least not in case of matmul).
+    auto selfPlaceholder = self.numel() != 0
+        ? Placeholder(
+              cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, !isComplexType(self.scalar_type()))
+        : Placeholder();
+    auto otherPlaceholder = other.numel() != 0
+        ? Placeholder(
+              cachedGraph->otherTensor_, other, nil, true, MPSDataTypeInvalid, !isComplexType(other.scalar_type()))
+        : Placeholder();
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     auto feeds = self.numel() != 0 ? dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder) : nil;
@@ -448,13 +461,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = nil;
-      MPSGraphTensor* otherTensor = nil;
-      MPSGraphTensor* productTensor = nil;
       MPSGraphTensor* biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
 
       // TODO: Use alpha and beta here with fill_.Scalar and mul
-      std::tie(selfTensor, otherTensor, productTensor) = do_mm(mpsGraph, self, other);
+      auto [selfTensor, otherTensor, productTensor] = do_mm(mpsGraph, self, other);
 
       auto productTimesAlphaTensor = productTensor;
       if (alpha.toDouble() != 1.0) {
@@ -509,21 +519,26 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     return result;
   }
 
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   MPSShape* shape = nil;
   bool doTranspose = false;
 
   // Handle transposes for the second batch of matrices.
-  if (batch2.is_view() && !batch2.is_contiguous()) {
-    if (batch2.numel() == batch2._base().numel()) {
-      const IntArrayRef& viewSizes = batch2.sizes();
+  // In macOS 15 this is detected automatically (for all shapes/ranks)
+  // through the strided MPS support.
+  if (!is_macOS_15_0_or_newer) {
+    if (batch2.is_view() && !batch2.is_contiguous()) {
+      if (batch2.numel() == batch2._base().numel()) {
+        const IntArrayRef& viewSizes = batch2.sizes();
 
-      // Handle 3D and 4D tensors.
-      // For 4D tensors, first it must have been reshaped from 4D to 3D and then transposed.
-      int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
-      if (batch2._base().stride(0) == batch2.stride(0) &&
-          batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
-        shape = @[ @(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1]) ];
-        doTranspose = true;
+        // Handle 3D and 4D tensors.
+        // For 4D tensors, first it must have been reshaped from 4D to 3D and then transposed.
+        int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
+        if (batch2._base().stride(0) == batch2.stride(0) &&
+            batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
+          shape = @[ @(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1]) ];
+          doTranspose = true;
+        }
       }
     }
   }
@@ -847,7 +862,7 @@ Tensor& linalg_solve_triangular_mps_out(const Tensor& A,
 }
 
 Tensor linalg_solve_triangular_mps(const Tensor& A, const Tensor& B, bool upper, bool left, bool unitriangular) {
-  Tensor out = at::empty({0}, A.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   mps::linalg_solve_triangular_mps_impl(A, B, upper, /*transpose=*/false, left, unitriangular, out);
   return out;
 }
@@ -861,7 +876,7 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
  const Tensor& result,
  const Tensor& clone_A) {
   clone_A.copy_(A);
-  Tensor out = at::empty({0}, A.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   mps::linalg_solve_triangular_mps_impl(A, self, upper, transpose, /*left=*/true, unitriangular, out);
   result.resize_(out.sizes());
   result.copy_(out);

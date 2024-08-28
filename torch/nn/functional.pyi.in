@@ -1,4 +1,6 @@
+# ${generated_comment}
 # mypy: allow-untyped-defs
+
 from typing import (
     Any,
     Callable,
