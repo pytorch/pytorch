@@ -174,7 +174,7 @@ TrOCRForCausalLM,pass,6
 
 
 
-XGLMForCausalLM,fail_accuracy,6
+XGLMForCausalLM,pass,6
 
 
 
