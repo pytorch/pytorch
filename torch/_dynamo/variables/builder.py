@@ -18,6 +18,7 @@ import types
 import weakref
 from typing import (
     Any,
+    FrozenSet,
     List,
     MutableMapping,
     NamedTuple,
@@ -321,8 +322,14 @@ class FrameStateSizeEntry:
     stride: Optional[List[int]]
 
 
+# All class-based iterators in itertools
+ITERTOOLS_TYPES: FrozenSet[type] = frozenset(
+    member
+    for name, member in vars(itertools).items()
+    if not name.startswith("_") and inspect.isclass(member)
+)
 # Will be updated later in torch/_dynamo/polyfills/itertools.py
-ITERTOOLS_POLYFILLED_CLASSES: Set[type] = set()
+ITERTOOLS_POLYFILLED_TYPES: Set[type] = set()
 
 
 class VariableBuilder:
@@ -880,11 +887,7 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif (
-            istype(value, type)
-            and value in itertools.__dict__.values()
-            and value not in ITERTOOLS_POLYFILLED_CLASSES
-        ):
+        elif value in ITERTOOLS_TYPES and value not in ITERTOOLS_POLYFILLED_TYPES:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
