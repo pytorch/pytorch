@@ -135,6 +135,11 @@ if(USE_CUDA)
         list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cudnn)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
     endif()
+    if(USE_CUSPARSELT)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cusparselt)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUSPARSELT)
+    endif()
+
     if(TARGET torch::nvtx3)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtx3)
     else()
@@ -172,6 +177,10 @@ if(USE_CUDNN OR USE_ROCM)
           PROPERTIES COMPILE_DEFINITIONS "USE_STATIC_CUDNN"
         )
     endif()
+endif()
+
+if(USE_CUSPARSELT)
+    list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/cuda/shared/cusparselt.cpp)
 endif()
 
 if(USE_MPS)
@@ -328,11 +337,17 @@ endif()
 
 # in case of the split build we need to add compile definitions
 if(BUILD_LIBTORCHLESS)
+
+  if(USE_UCC)
+    target_link_libraries(torch_python PRIVATE __caffe2_ucc)
+    target_compile_definitions(torch_python PRIVATE USE_UCC)
+  endif()
+
   if(USE_UCC AND USE_C10D_UCC)
     target_compile_definitions(torch_python PRIVATE USE_C10D_UCC)
   endif()
 
-  if(USE_UCC AND USE_C10D_NCCL)
+  if(USE_NCCL AND USE_C10D_NCCL)
     target_compile_definitions(torch_python PRIVATE USE_C10D_NCCL)
   endif()
 

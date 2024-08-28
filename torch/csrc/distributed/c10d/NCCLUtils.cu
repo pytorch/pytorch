@@ -1,7 +1,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/torch.h>
 #include <algorithm>
 
@@ -20,7 +20,7 @@ __global__ void checkForNaN(T* data, size_t size) {
 }
 
 // CHECK if a Tensor contains NAN in any of its element
-void checkForNan(const at::Tensor& tensor) {
+void checkForNan(const at::Tensor& tensor, at::cuda::CUDAStream& stream) {
   // skip check for non float types
   if (!torch::is_floating_point(tensor)) {
     return;
@@ -40,7 +40,7 @@ void checkForNan(const at::Tensor& tensor) {
       tensor.scalar_type(),
       "checkForNaN",
       [&] {
-        checkForNaN<scalar_t><<<numBlocks, numThreadsPerBlock>>>(
+        checkForNaN<scalar_t><<<numBlocks, numThreadsPerBlock, 0, stream>>>(
             tensor.data_ptr<scalar_t>(), tensor.numel());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
