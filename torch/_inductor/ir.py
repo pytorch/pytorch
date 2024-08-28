@@ -3714,7 +3714,7 @@ class ComputedBuffer(OperationBuffer):
         on CPU by preventing indexing simplifications and obtaining index/reduce ranges for
         the scheduler node compatible with other nodes.
         Optional argument recompute_sizes_body_func can be used to recompute sizes and body
-        at the beginning. This can be useful to append additional loop transformations.
+        on the default body. This can be useful to append additional loop transformations.
         """
         (
             (index_size, reduce_size),
