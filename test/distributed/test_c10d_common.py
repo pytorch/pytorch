@@ -1848,7 +1848,6 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 pg = c10d._get_default_group()
                 self.assertEqual(pg.rank(), self.rank)
                 self.assertEqual(pg.size(), self.world_size)
-                print(backend, excepted_backend, pg.name())
                 self.assertEqual(pg.name(), str(excepted_backend))
 
                 dist.destroy_process_group()

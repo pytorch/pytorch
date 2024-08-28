@@ -4609,7 +4609,6 @@ def _new_group_with_tag(
     if not backend:
         backend = default_backend
     backend = Backend(backend)
-    print(backend)
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)

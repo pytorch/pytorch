@@ -1,13 +1,17 @@
 # Owner(s): ["module: inductor"]
 
+from typing import List
+
 import torch
 from functorch import make_fx
+from torch import Tensor
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.logging_utils import logs_to_string
 
 
 aten = torch.ops.aten
@@ -151,6 +155,32 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         result = torch.compile(f)(x)
         self.assertEqual(result, x.sin().sin().sin())
         self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_lists(self):
+        @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
+        def mutate_op(y: List[Tensor]) -> None:
+            y[0].add_(2)
+            y[1].add_(3)
+
+        @torch.compile(fullgraph=True, dynamic=False, backend="inductor")
+        def f(b):
+            mutate_op([b[0], b[1]])
+
+        x1 = torch.tensor([0.3, 0.4], device=device)
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            torch.compile(f, backend="inductor", fullgraph=True)(x1)
+        post_grad_graphs = "\n".join(
+            log_stream.getvalue().strip().split("\n")[3:]
+        ).strip()
+
+        # Can't reinplace on views yet (1 for the "entire list" failing to reinplace)
+        self.assertEqual(num_reinplacing_failures(), 1)
+
+        # Both list inputs failed to reinplace. So we should have emitted clones for them.
+        self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
 
 
 if __name__ == "__main__":
