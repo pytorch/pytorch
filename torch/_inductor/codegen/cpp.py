@@ -3370,7 +3370,26 @@ class TilingSelect:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
-                            if _node.target in ["index_expr", "load", "store"]:
+
+                            def can_get_index_name(_node):
+                                # In general case we saw among 3 test suits
+                                # * _node is a FX Node with target in ["index_expr", "load", "store"]
+                                # * _node.args[arg_idx] is another FX node with target get_index
+                                # * _node.args[arg_idx].args[0] is the name (str) of index expression
+                                # It's not true in some FB internal testcase. So, add the condition check to work around it
+                                if not (
+                                    isinstance(_node, torch.fx.node.Node)
+                                    and _node.target in ["index_expr", "load", "store"]
+                                ):
+                                    return False
+                                arg_idx = 1 if _node.target == "index_expr" else 2
+                                return (
+                                    isinstance(_node.args[arg_idx], torch.fx.node.Node)
+                                    and _node.args[arg_idx].target == "get_index"
+                                    and isinstance(_node.args[arg_idx].args[0], str)
+                                )
+
+                            if can_get_index_name(_node):
                                 # get the index and replace prefix from z to x
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
