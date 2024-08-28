@@ -102,7 +102,7 @@ void col2im_out_cuda_template(
   output.resize_({batch_size, n_output_plane, output_height, output_width});
   int64_t output_batch_stride = output.stride(0);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kBool,
       input.scalar_type(), "col2im_out_cuda", [&] {
     int64_t height_col = (output_height + 2 * pad_height -
                           (dilation_height * (kernel_height - 1) + 1)) /
