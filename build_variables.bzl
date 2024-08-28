@@ -495,6 +495,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
     "torch/csrc/distributed/c10d/GroupRegistry.cpp",
+    "torch/csrc/distributed/c10d/LockGuard.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
@@ -689,7 +690,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
-    "torch/csrc/distributed/c10d/Utils.cu",
+    "torch/csrc/distributed/c10d/NCCLUtils.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
