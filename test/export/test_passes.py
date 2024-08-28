@@ -18,7 +18,6 @@ from torch._export.non_strict_utils import (
     _gather_constant_attrs,
 )
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
-from torch._export.passes.move_to_device_pass import move_to_device_pass
 from torch._export.passes.replace_set_grad_with_hop_pass import (
     _is_set_grad_enabled_node,
     _is_set_grad_enabled_sub_mod,
@@ -42,6 +41,7 @@ from torch.export._remove_auto_functionalized_pass import (
     unsafe_remove_auto_functionalized_pass,
 )
 from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
+from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport

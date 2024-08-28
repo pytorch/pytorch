@@ -22,12 +22,13 @@ from tools.flight_recorder.components.types import (
 from tools.flight_recorder.components.utils import (
     check_no_missing_dump_files,
     check_size_alltoall,
-    check_trace_from_beginning,
     check_version,
     find_coalesced_group,
+    format_frames,
     just_print_entries,
     match_coalesced_groups,
     match_one_event,
+    sort_trace_from_beginning,
 )
 
 
@@ -122,7 +123,7 @@ def build_nccl_call(
 
 
 def build_collectives(
-    all_entries: Dict[str, List[Dict[str, Any]]],
+    all_entries: Dict[int, List[Dict[str, Any]]],
     _groups: Dict[str, Group],
     _memberships: Dict[str, Set[Any]],
 ) -> Tuple[List[Traceback], List[Collective], List[NCCLCall]]:
@@ -186,6 +187,11 @@ def build_collectives(
         pg_name, desc = entries[0]["process_group"]
         profiling_name = entries[0]["profiling_name"]
         collective_seq_id = entries[0]["collective_seq_id"]
+        record_id = entries[0]["record_id"]
+        input_sizes = entries[0]["input_sizes"]
+        output_sizes = entries[0]["output_sizes"]
+        collective_state = entries[0]["state"]
+        collective_frames = format_frames(entries[0]["frames"])
         expected_ranks = set(_memberships[pg_name])
         candidate_ranks = {first_rank}
         candidate_idx = {}
@@ -244,7 +250,7 @@ def build_collectives(
                 nccl_calls.extend(reversed(reversed_calls))
         else:
             has_undecided_case = False
-            errors = Set()
+            errors = set()
             for o in expected_ranks.intersection(set(other_ranks)):
                 for i, e in enumerate(all_entries[o]):  # type: ignore[index]
                     # step over ops from other PGs
@@ -265,15 +271,25 @@ def build_collectives(
                         else:
                             candidate_ranks.add(o)
                             candidate_idx[o] = i
-                            errors.add(match_state)
+                            if match_state not in [
+                                MatchState.FULLY_MATCHED,
+                                MatchState.UNDECIDED,
+                            ]:
+                                # Here we assume the current rank is not the source of the error.
+                                # But it's possible that the current rank is the culprit, then users will
+                                # see lots of normal ranks reported as culprit.
+                                # TODO: we need to figure out a better way to handle the case mentioned above.
+                                errors.add((o, match_state))
                         break
 
             # case one: not every rank join the collective or in the flight recorder.
             if (candidate_ranks | found_ranks) != expected_ranks:
                 mismatch[pg_name] += 1
                 print(
-                    f"Not all ranks joining collective for group {pg_name}:{desc} collective {profiling_name}",
-                    f"Missing ranks are {expected_ranks - (candidate_ranks | found_ranks)}",
+                    f"Not all ranks joining collective for group {pg_name}:{desc} collective {profiling_name} ",
+                    f"Missing ranks are {expected_ranks - (candidate_ranks | found_ranks)} ",
+                    f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
+                    f"\nCollective stack traces: \n{collective_frames}",
                 )
             elif len(candidate_ranks) == 1:
                 # case two: alltoall or alltoall_base case.
@@ -281,14 +297,20 @@ def build_collectives(
                     alltoall_cases = [entries[0]] + [
                         all_entries[o][found_idx[o]] for o in found_ranks
                     ]
-                    check_result, input_numel, output_numel = check_size_alltoall(
+                    fail_check, input_numel, output_numel = check_size_alltoall(
                         alltoall_cases
                     )
-                    if not check_result:
+                    # We don't log the input/output sizes for alltoall so we don't consider the size mismatch as an error for now.
+                    fail_check = False
+                    if fail_check:
+                        # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
                         mismatch[pg_name] += 1
                         print(
-                            f"Input/output mismatch in the collective for group {pg_name}:{desc} collective {profiling_name}",
-                            f"input_numel {input_numel} output_numel{output_numel}",
+                            f"Input/output mismatch in the collective {record_id} ",
+                            f"for group {pg_name}:{desc} collective {profiling_name} ",
+                            f"input_numel {input_numel} output_numel {output_numel} ",
+                            f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
+                            f"\nCollective stack traces: \n{collective_frames}",
                         )
                         candidate_ranks.update(found_ranks)
                         candidate_idx.update(found_idx)
@@ -306,11 +328,16 @@ def build_collectives(
                     candidate_idx.clear()
                     candidate_ranks.clear()
             # case four: mismatch cases due to not same type, size mismatch or state mismatch.
-            else:
-                error_msg = ", ".join(error.name for error in errors)
+            elif len(errors) > 0:
+                mismatch[pg_name] += 1
+                error_msg = ", ".join(
+                    f"Error rank {error[0]}, {str(error[1])}" for error in errors
+                )
                 print(
-                    f"Collective errors for group {pg_name}:{desc} collective {profiling_name}",
-                    f"Found errors: {error_msg}",
+                    f"Collective {record_id} errors for group {pg_name}:{desc} collective {profiling_name} ",
+                    f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
+                    f"\nFound errors: {error_msg}\n",
+                    f"\nCollective stack traces: \n{collective_frames} ",
                 )
                 candidate_ranks.update(found_ranks)
                 candidate_idx.update(found_idx)
@@ -373,7 +400,7 @@ def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Da
         pg_config[rank] = dump["pg_config"]
 
     check_version(version)
-    check_trace_from_beginning(entries)
+    entries = sort_trace_from_beginning(entries)
 
     # flattened database
     groups, _groups, memberships, _memberships = build_groups_memberships(pg_config)

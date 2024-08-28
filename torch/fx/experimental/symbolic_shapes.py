@@ -63,7 +63,7 @@ from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
-    FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
+    Application, FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
 )
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.numbers import int_oo
@@ -1267,13 +1267,14 @@ def _is_supported_equivalence(expr):
         )
     return isinstance(expr, sympy.Symbol)
 
-def _has_unsupported_sympy_function(expr) -> bool:
+def _has_uninterpretable_sympy_function(expr) -> bool:
+    """
+    Add functions that our sympy interpreter can't reify into FX nodes
+    """
     return expr.has(
         torch.utils._sympy.functions.ToFloat,
         torch.utils._sympy.functions.TruncToInt,
         torch.utils._sympy.functions.CeilToInt,
-        # add more sympy functions that involve float<->int conversion here
-        # since our solver does not know what to do with them
     )
 
 @dataclass(frozen=True)
@@ -1675,6 +1676,15 @@ class DimConstraints:
         # symbols that are marked dynamic
         self._marked_dynamic = marked_dynamic
 
+        # track supported sympy functions and subtract from list of all sympy functions
+        self._supported_sympy_functions: Set[sympy.Function] = {
+            Application,
+            Mod,
+            PythonMod,
+            FloorDiv,
+        }
+        self._enumerate_sympy_functions()
+
     def rewrite_with_congruences(self, s, expr):
         """
         Eliminate expressions of the form b // d and b % d while adding congruences of the form b % d == k.
@@ -1741,6 +1751,20 @@ class DimConstraints:
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
+    def _enumerate_sympy_functions(self):
+        module = torch.utils._sympy.functions
+        all_functions = set()
+        for attr in dir(module):
+            if isinstance(func := getattr(module, attr), sympy.FunctionClass):
+                all_functions.add(func)
+        self._unsupported_sympy_functions = all_functions.difference(self._supported_sympy_functions)
+
+    def _has_unsupported_sympy_function(self, expr) -> bool:
+        """
+        Tracks list of sympy.Functions the export solver doesn't know how to handle.
+        """
+        return expr.has(*self._unsupported_sympy_functions)
+
     def add(self, expr) -> bool:
         """Add an expression to the set of constraints.
 
@@ -1757,7 +1781,7 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne) or _has_unsupported_sympy_function(expr):
+        if isinstance(expr, sympy.Ne) or self._has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
@@ -3817,7 +3841,10 @@ class ShapeEnv:
                 s = val.node.expr
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
-                    if constraint is not None:
+                    if (
+                        constraint is not None
+                        and not isinstance(constraint, RelaxedUnspecConstraint)
+                    ):
                         symbol_to_constraints[s].add(constraint)
                 else:
                     constraint_violated = False
@@ -5479,6 +5506,17 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         return result
 
 
+def _find_user_code_frame():
+    frame = inspect.currentframe()
+    while frame is not None:
+        if not frame.f_code.co_filename.startswith(
+            os.path.dirname(inspect.getfile(torch)) + os.path.sep
+        ):
+            break
+        frame = frame.f_back
+    return frame
+
+
 def _blame_user_code(e, frame):
     frame_summary = traceback.FrameSummary(
         frame.f_code.co_filename,
@@ -5547,54 +5585,25 @@ def _suggest_fixes_for_data_dependent_error_non_strict(e):
     2. suggested fixes for the error in terms of live variables at that location.
     """
 
-    frame = inspect.currentframe()
-    while frame is not None:
-        # walk the stack up from the data-dependent error until a non-torch frame is found
-        if not frame.f_code.co_filename.startswith(os.path.dirname(inspect.getfile(torch))):
-            # add frame info to error message
-            _blame_user_code(e, frame)
+    # walk the stack up from the data-dependent error until a non-torch frame is found
+    frame = _find_user_code_frame()
+    if frame is not None:
+        # add frame info to error message
+        _blame_user_code(e, frame)
 
-            # map symbol names reachable via frame locals to their source-level names
-            src_map = defaultdict(list)
-            for var, val in frame.f_locals.items():
-                # figure out how to access any symbol inside `val` through `var`
-                for path, leaf in pytree.tree_leaves_with_path(val):
-                    name = var + pytree.keystr(path)
-                    if isinstance(leaf, torch.SymInt):
-                        src_map[str(leaf.node.expr)].append(name)
-                    elif isinstance(leaf, torch.Tensor):
-                        for i, dim in enumerate(leaf.shape):
-                            if isinstance(dim, torch.SymInt):
-                                src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")
+        # map symbol names reachable via frame locals to their source-level names
+        src_map = defaultdict(list)
+        for var, val in frame.f_locals.items():
+            # figure out how to access any symbol inside `val` through `var`
+            for path, leaf in pytree.tree_leaves_with_path(val):
+                name = var + pytree.keystr(path)
+                if isinstance(leaf, torch.SymInt):
+                    src_map[str(leaf.node.expr)].append(name)
+                elif isinstance(leaf, torch.Tensor):
+                    for i, dim in enumerate(leaf.shape):
+                        if isinstance(dim, torch.SymInt):
+                            src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")
 
-            # add suggested torch.check()s based on `src_map` to the error message
-            # replacing unbacked symints in the unresolved condition in the error
-            _suggest_torch_checks(e, src_map)
-            break
-        frame = frame.f_back
-
-
-class _DataDependentErrorHandlerNonStrict(torch.overrides.TorchFunctionMode):
-    """
-    Handles data-dependent errors raised by torch function calls.
-
-    Any data-dependent error is due to some condition on unbacked symints
-    that cannot be resolved. A mechanical way of fixing the error is to use
-    a torch._check() call to assert either that condition or its negation.
-    The handler suggests these options as code and points to the location
-    of the torch function call that raised the error as part of the error
-    message shown to the user, who can then simply select and copy-paste
-    a suggested fix at that location.
-
-    NOTE: Not all data-dependent errors are raised by torch function calls.
-    In particular, conditions on unbacked symints can appear outside such
-    calls, and as such are not handled here.
-    """
-
-    def __torch_function__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
-        try:
-            return func(*args, **kwargs)
-        except GuardOnDataDependentSymNode as e:
-            _suggest_fixes_for_data_dependent_error_non_strict(e)
-            raise
+        # add suggested torch.check()s based on `src_map` to the error message
+        # replacing unbacked symints in the unresolved condition in the error
+        _suggest_torch_checks(e, src_map)
