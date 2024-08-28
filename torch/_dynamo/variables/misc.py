@@ -37,7 +37,12 @@ from ..utils import (
     set_example_value,
 )
 from .base import VariableTracker
-from .functions import NestedUserFunctionVariable, UserFunctionVariable, wrap_bound_arg
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+    wrap_bound_arg,
+)
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -380,12 +385,16 @@ class InspectSignatureVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "parameters":
+            if isinstance(self.inspected, UserMethodVariable):
+                parameters = list(self.signature.parameters.items())[1:]
+            else:
+                parameters = list(self.signature.parameters.items())
             return variables.ConstDictVariable(
                 {
-                    variables.ConstantVariable.create(name): InspectParameterVariable(
-                        param
-                    )
-                    for name, param in self.signature.parameters.items()
+                    variables.ConstantVariable.create(
+                        param[0]
+                    ): InspectParameterVariable(param[1])
+                    for param in parameters
                 },
                 user_cls=dict,
             )
