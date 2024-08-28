@@ -239,7 +239,7 @@ class ShardingPropagator:
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
-                expected_input_specs = []
+                expected_input_specs: List[DTensorSpec] = []
 
                 # in case where the op does not specify input_specs and output_specs
                 # is a DTensorSpec, we use output_specs as the spec for each DTensor

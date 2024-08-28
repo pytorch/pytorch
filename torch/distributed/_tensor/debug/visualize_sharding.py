@@ -8,6 +8,9 @@ from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.placement_types import Placement, Shard
 
 
+__all__ = ["visualize_sharding"]
+
+
 def _mesh_to_coordinate(mesh, device_type):
     """
     Given a n-dimensional list of device mesh, this function creates a map of
@@ -82,7 +85,7 @@ def _create_table(blocks):
     return tabulate(matrix, headers=col_headers, showindex=row_headers)
 
 
-def compute_local_shape_and_global_offset(
+def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
     mesh: DeviceMesh,
     placements: Sequence[Placement],
@@ -163,7 +166,7 @@ def visualize_sharding(dtensor, header=""):
     device_map = _mesh_to_coordinate(device_mesh, device_type)
     all_offsets = []
     for device in device_map:
-        local_shape, global_offset = compute_local_shape_and_global_offset(
+        local_shape, global_offset = _compute_local_shape_and_global_offset(
             dtensor.shape, device_mesh, placements, device_map[device]
         )
         all_offsets.append([local_shape, global_offset, device])

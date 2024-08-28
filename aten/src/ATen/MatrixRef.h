@@ -2,8 +2,6 @@
 #include <ATen/Utils.h>
 #include <c10/util/ArrayRef.h>
 
-#include <vector>
-
 namespace at {
 /// MatrixRef - Like an ArrayRef, but with an extra recorded strides so that
 /// we can easily view it as a multidimensional array.
