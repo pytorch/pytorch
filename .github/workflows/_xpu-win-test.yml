@@ -7,6 +7,10 @@ on:
         required: true
         type: string
         description: Top-level label for what's being built/tested.
+      cuda-version:
+        required: true
+        type: string
+        description: What CUDA version to build with, "cpu" for none.
       use-xpu:
         required: false
         type: boolean
@@ -62,6 +66,21 @@ jobs:
       - name: Clean up leftover processes on non-ephemeral Windows runner
         uses: pytorch/test-infra/.github/actions/cleanup-runner@main
 
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            To forward remote desktop on your local machine ssh as follows:
+              ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
+            And then change password using `passwd` command.
+
+            To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
+            Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
+              call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+              set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -73,11 +92,12 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
+      #TODO - Add driver installation condition in install_xpu.bat
       - name: Setup XPU
         if: ${{ inputs.use-xpu }}
         shell: bash
         run: |
-          ".ci/pytorch/win-test-helpers/installation-helpers/install_xpu.bat"
+          call ".ci/pytorch/win-test-helpers/installation-helpers/install_xpu.bat"
 
       - name: Install pip dependencies
         uses: nick-fields/retry@v3.0.0
@@ -104,6 +124,43 @@ jobs:
           name: ${{ inputs.build-environment }}
           path: C:\${{ github.run_id }}\build-results
 
+      - name: Build TorchVision
+        shell: cmd
+        run: |
+          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+          set DISTUTILS_USE_SDK=1
+          if exist "vision" (
+            rmdir /s /q "vision"
+          )
+          git clone https://github.com/pytorch/vision.git vision > git_vision_repo_log.txt
+          for %%f in (C:\${{ github.run_id }}\build-results\torch-*.whl) do (
+            set "TORCH_WHL=%%f"
+            echo "INFO - torch whl found"
+          )
+          if defined TORCH_WHL (
+            pip install %TORCH_WHL%
+            echo "INFO - torch whl installed"
+          ) else (
+            echo "INFO - No torch whl found in C:\${{ github.run_id }}\build-results\"
+            exit /b 1
+          )
+          cd vision
+          pip install -r docs\requirements.txt
+          echo "INFO - Building torchvision wheel"
+          python setup.py bdist_wheel
+          echo "INFO - torchvision wheel built"
+          for %%f in (dist\torchvision-*.whl) do (
+            set "TORCHVISION_WHL=%%f"
+            echo "INFO - torchvision whl found"
+          )
+          if defined TORCHVISION_WHL (
+            pip install %TORCHVISION_WHL%
+            echo "INFO - torchvision whl installed"
+          ) else (
+            echo "INFO - No torchvision whl found."
+            exit /b 1
+          )
+
       - name: Check build-results folder
         shell: powershell
         run: |
@@ -112,11 +169,6 @@ jobs:
       - name: Download TD artifacts
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
-
-      - name: Parse ref
-        id: parse-ref
-        shell: bash
-        run: python3 .github/scripts/parse_ref.py
 
       - name: Get workflow job id
         id: get-job-id
@@ -141,6 +193,7 @@ jobs:
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
+      # TODO - Check test scope
       - name: Test
         id: test
         shell: bash
