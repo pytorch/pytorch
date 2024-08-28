@@ -241,10 +241,10 @@ def substitute_in_graph(
                 f"substitute_in_graph expects a class but got {type(original_fn)!r}"
             )
 
-        from .variables.builder import ITERTOOLS_POLYFILLED_TYPES, ITERTOOLS_TYPES
+        from .variables.builder import ITERTOOLS_POLYFILLED_TYPE_IDS, ITERTOOLS_TYPE_IDS
 
-        if original_fn in ITERTOOLS_TYPES:
-            ITERTOOLS_POLYFILLED_TYPES.add(original_fn)
+        if id(original_fn) in ITERTOOLS_TYPE_IDS:
+            ITERTOOLS_POLYFILLED_TYPE_IDS.add(id(original_fn))
 
     def wrapper(traceable_fn: _F) -> _F:
         if not is_function(traceable_fn):
