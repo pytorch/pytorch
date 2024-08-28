@@ -598,8 +598,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # for each base in all_bases check if its in-placable.
             inplaceable_bases = [can_inplace(node, arg) for arg in all_bases]
 
-            # When two bases in all_bases shares storage, in that case this means thats some pass
-            # have changed auto_functionalize, like CSE and added such aliasing, because when auto_functionalize is created, it
+            # When two bases in all_bases shares storage, in that case this means thats some pass have changed
+            # auto_functionalize, like CSE and added such aliasing, because when auto_functionalize is created, it
             # assert that all_bases have unique storages.
 
             # To avoid mutating same storage by the custom op that was not originally mutated in the original program,
@@ -618,7 +618,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 else:
                     inplaced_storage.add(storage)
 
-            # The loop bellow is only needed to generate the log message and count
+            # The loop bellow is only needed to generate the log message and possibly_missed_reinplacing_opportunities.
             args_cloned = []
             possibly_missed_reinplacing_opportunities = []
             args_view_info = deserialize_views_meta(

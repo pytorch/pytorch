@@ -36,7 +36,7 @@ from torch.fx.experimental.proxy_tensor import (
 # then returns (output, Tensors with the new values)
 #
 # if the passed inputs are views of another inputs, we return the changed
-# based tensor and regenerate the future views from it.
+# base tensor of and regenerate the future views from it.
 
 
 class AutoFunctionalized(HigherOrderOperator):
@@ -250,7 +250,7 @@ def auto_functionalized_dense(
     # create new args
     new_kwargs = dict(**kwargs)
 
-    # re-generate all inputs from _all_bases using args_view_info and add them to new_kwargs.
+    # re-generate all inputs from all_bases_new using args_view_info and add them to new_kwargs.
     for arg_name in mutable_args_names:
         if args_view_info[arg_name] is None:
             new_kwargs[arg_name] = None
@@ -377,8 +377,7 @@ def do_auto_functionalize(
     # Map arg_name to the index of its base in all_basis.
     arg_to_base_index: Dict[str, Any] = {}
 
-    
-    def update_dict(tensor,arg_name, index=None):
+    def update_dict(tensor, arg_name, index=None):
         base = tensor if tensor._base is None else tensor._base
 
         def set_result(base_index):
@@ -394,12 +393,11 @@ def do_auto_functionalize(
         else:
             set_result(all_basis_addresses.index(base._cdata))
 
-
     for arg_name in mutable_args_names:
         arg = normalized_kwargs[arg_name]
         if arg is None:
             continue
-    
+
         if isinstance(arg, list):
             arg_to_base_index[arg_name] = {}
             for i, tensor in enumerate(arg):

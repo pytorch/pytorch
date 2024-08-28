@@ -307,7 +307,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             log_stream.getvalue().strip().split("\n")[3:]
         ).strip()
 
-        # We are to inplace the base y. no clones emitted.
+        # We can inplace the base y. no clones emitted.
         self.assertEqual(num_reinplacing_failures(), 0)
         self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
 
