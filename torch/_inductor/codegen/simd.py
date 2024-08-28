@@ -1069,6 +1069,7 @@ class SIMDScheduling(BaseScheduling):
         # reduction loop has ended
         not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
         current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
+        maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1105,10 +1106,27 @@ class SIMDScheduling(BaseScheduling):
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
+            nonlocal maybe_split_index
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
             else:
+                # flush out any other runnable nodes to reduce number of loops
+                not_ready_yet_nodes.add(node.get_name())
+                for other_node in nodes[index + 1 :]:
+                    if (
+                        other_node not in done
+                        and fits_in_main_body(other_node)
+                        and not (not_ready_yet_nodes & other_node.ancestors)
+                        and expect_improved_memory_usage(other_node)
+                    ):
+                        schedule_node_in_loop(other_node)
+                    else:
+                        not_ready_yet_nodes.add(other_node.get_name())
                 node_schedule.append(DisableReduction)
+            if maybe_split_index:
+                node_schedule.insert(maybe_split_index, DisableReduction)
+                node_schedule.insert(maybe_split_index + 1, EnableReduction)
+                maybe_split_index = None
             yield
             node_schedule.append(EnableReduction)
             not_ready_yet_nodes.clear()
@@ -1130,11 +1148,16 @@ class SIMDScheduling(BaseScheduling):
             done.add(node)
 
             if fits_in_main_body(node):
-                if requires_closing_previous_reduction(node, node_schedule) or (
-                    current_loop_buffer_usage and not expect_improved_memory_usage(node)
-                ):
+                if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
+
+                if current_loop_buffer_usage and not expect_improved_memory_usage(node):
+                    # If we don't imporve memory usage, then it is better to split into two loops
+                    maybe_split_index = maybe_split_index or len(node_schedule)
+                else:
+                    # Memory usage got improved, cancel the loop split
+                    maybe_split_index = None
 
                 schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
