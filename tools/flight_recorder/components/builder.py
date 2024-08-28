@@ -300,6 +300,8 @@ def build_collectives(
                     check_result, input_numel, output_numel = check_size_alltoall(
                         alltoall_cases
                     )
+                    # We don't log the input/output sizes for alltoall so we don't consider the size mismatch as an error for now.
+                    check_result = True
                     if not check_result:
                         # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
                         mismatch[pg_name] += 1
@@ -327,6 +329,7 @@ def build_collectives(
                     candidate_ranks.clear()
             # case four: mismatch cases due to not same type, size mismatch or state mismatch.
             elif len(errors) > 0:
+                mismatch[pg_name] += 1
                 error_msg = ", ".join(
                     f"Error rank {error[0]}, {str(error[1])}" for error in errors
                 )
