@@ -950,7 +950,7 @@ class CppVecOverrides(CppOverrides):
             code.writeline("[&]()")
             vec_dtype = args[0].dtype
             n_vec = kernel._get_num_vectors(vec_dtype)
-            tiling_factor = kernel.tiling_factor
+            size = kernel.tail_size if kernel.tail_size else kernel.tiling_factor
             scalar_args = []
             cdtype = DTYPE_TO_CPP[vec_dtype]
             output_mask = scalar_func.__name__ in (
@@ -965,28 +965,25 @@ class CppVecOverrides(CppOverrides):
                         assert arg.is_vec
                         assert arg.dtype == vec_dtype
                         code.writeline(
-                            f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf{argidx};"
+                            f"__at_align__ std::array<{cdtype}, {size}> tmpbuf{argidx};"
                         )
-                        code.writeline(
-                            f"{arg}.store(tmpbuf{argidx}.data(), {tiling_factor});"
-                        )
+                        code.writeline(f"{arg}.store(tmpbuf{argidx}.data(), {size});")
                         scalar_args.append(f"tmpbuf{argidx}[i]")
                     else:
                         scalar_args.append(arg)
-                code.writeline(
-                    f"__at_align__ std::array<{octype}, {tiling_factor}> tmpbuf_out;"
-                )
+                code.writeline(f"__at_align__ std::array<{octype}, {size}> tmpbuf_out;")
                 res = scalar_func(*scalar_args)
-                code.writeline(f"for (int i = 0; i < {tiling_factor}; i++)")
+                code.writeline(f"for (int i = 0; i < {size}; i++)")
                 with code.indent():
                     code.writeline(f"tmpbuf_out[i] = {res};")
                 if output_mask:
+                    assert not kernel.tail_size
                     code.writeline(
                         f"return at::vec::VecMask<{cdtype},{n_vec}>::from(tmpbuf_out.data());"
                     )
                 else:
                     code.writeline(
-                        f"return at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu(tmpbuf_out.data(), {tiling_factor});"
+                        f"return at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu(tmpbuf_out.data(), {size});"
                     )
             code.writeline("()")
             return code
@@ -1626,7 +1623,7 @@ class CppVecOverrides(CppOverrides):
             return tuple(V.kernel.cse.cache[cache_key] for cache_key in cache_keys)
 
         cdtype = DTYPE_TO_CPP[x.dtype]
-        tiling_factor = V.kernel.tiling_factor
+        size = V.kernel.tail_size if V.kernel.tail_size else V.kernel.tiling_factor
         code = BracesBuffer()
         exponent = V.kernel.cse.newvar()
         mantissa = V.kernel.cse.newvar()
@@ -1637,26 +1634,22 @@ class CppVecOverrides(CppOverrides):
         code.writeline(f"at::vec::VectorizedN<{cdtype}, {n_vec}> {mantissa};")
         code.writeline("[&]()")
         with code.indent():
+            code.writeline(f"__at_align__ std::array<{cdtype}, {size}> tmpbuf;")
+            code.writeline(f"{x}.store(tmpbuf.data(), {size});")
+            code.writeline(f"__at_align__ std::array<int32_t, {size}> tmpbuf_exponent;")
             code.writeline(
-                f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf;"
+                f"__at_align__ std::array<{cdtype}, {size}> tmpbuf_mantissa;"
             )
-            code.writeline(f"{x}.store(tmpbuf.data(), {tiling_factor});")
-            code.writeline(
-                f"__at_align__ std::array<int32_t, {tiling_factor}> tmpbuf_exponent;"
-            )
-            code.writeline(
-                f"__at_align__ std::array<{cdtype}, {tiling_factor}> tmpbuf_mantissa;"
-            )
-            code.writeline(f"for (int i = 0; i < {tiling_factor}; i++)")
+            code.writeline(f"for (int i = 0; i < {size}; i++)")
             with code.indent():
                 code.writeline(
                     "tmpbuf_mantissa[i] = std::frexp(tmpbuf[i], &tmpbuf_exponent[i]);"
                 )
             code.writeline(
-                f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {tiling_factor});"
+                f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {size});"
             )
             code.writeline(
-                f"{mantissa} = at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu(tmpbuf_mantissa.data(), {tiling_factor});"
+                f"{mantissa} = at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu(tmpbuf_mantissa.data(), {size});"
             )
         code.writeline("();")
         V.kernel.compute.splice(code)
@@ -2916,10 +2909,7 @@ class CppVecKernel(CppKernel):
         elif src_dtype == torch.bool and dtype != torch.bool:
             expr = f"{src}.to<{dst_cpp_type},{dst_num_vectors}>()"
         elif src_dtype != dtype:
-            if src_num_vectors == dst_num_vectors == 1:
-                expr = f"at::vec::convert<{dst_cpp_type}>({src})"
-            else:
-                expr = f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+            expr = f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
         return expr
 
 
