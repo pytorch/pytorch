@@ -7092,6 +7092,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         expected_grad.unbind()[1].add_(1.0)
         torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
+    # See https://github.com/pytorch/pytorch/issues/128649
+    @xfailIfTorchDynamo
     @dtypes(torch.float32)
     def test_composite_op_in_inference_mode(self, device, dtype):
         # expect view
