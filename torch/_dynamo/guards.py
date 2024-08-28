@@ -575,6 +575,8 @@ class GuardBuilder(GuardBuilderBase):
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
 
+        self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
+
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
         if isinstance(dict_mgr, DictGuardManager):
@@ -1663,6 +1665,13 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
+            # Check that the guard has not been inserted already
+            key = (ref_a, ref_b)
+            if key in self._cached_duplicate_input_guards:
+                return
+            self._cached_duplicate_input_guards.add((ref_a, ref_b))
+            self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
             install_object_aliasing_guard(
                 self.get_guard_manager(guard),
                 self.get_guard_manager_from_source(source_b),
