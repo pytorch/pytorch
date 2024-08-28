@@ -85,13 +85,13 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     _lazy_import()
     exclude_tags = set(exclude_tags or ())
 
-    loaded = [
+    backends = [
         name
         for name in _BACKENDS.keys()
         if name not in _COMPILER_FNS
         or not exclude_tags.intersection(_COMPILER_FNS[name]._tags)
     ]
-    return sorted(loaded)
+    return sorted(backends)
 
 
 @functools.lru_cache(None)
@@ -105,11 +105,11 @@ def _lazy_import():
 
     assert dynamo_minifier_backend is not None
 
-    _register_entrypoint_backends()
+    _discover_entrypoint_backends()
 
 
 @functools.lru_cache(None)
-def _register_entrypoint_backends():
+def _discover_entrypoint_backends():
     # importing here so it will pick up the mocked version in test_backends.py
     from importlib.metadata import entry_points
 

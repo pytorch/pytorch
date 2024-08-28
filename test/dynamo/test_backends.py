@@ -325,7 +325,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             from torch._dynamo.backends import registry
 
             registry._lazy_import.cache_clear()
-            registry._register_entrypoint_backends.cache_clear()
+            registry._discover_entrypoint_backends.cache_clear()
 
             backends = list_backends()
             assert name in backends, (name, backends)
