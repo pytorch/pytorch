@@ -367,9 +367,9 @@ void cpu_flash_attention(
 
   int64_t qSplitSize = q_split_size > qSize ? qSize : q_split_size;
   int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
-  int64_t qSlice = (qSize - 1) / qSplitSize + 1;
-  int64_t kvSlice = (kvSize - 1) / kvSplitSize + 1;
-  int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
+  int64_t qSlice = (qSize + qSplitSize - 1) / qSplitSize;
+  int64_t kvSlice = (kvSize + kvSplitSize - 1) / kvSplitSize;
+  int64_t kvTail = kvSize % kvSplitSize;
   int64_t num_thread = at::get_num_threads();
 
   const auto dtype = query.scalar_type();
