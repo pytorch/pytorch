@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # @generated DO NOT EDIT MANUALLY
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
@@ -3325,5 +3324,3 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
-=======
->>>>>>> b986aefea6 ([split build] refactor split build binaries into its own workflows + make them periodic)
