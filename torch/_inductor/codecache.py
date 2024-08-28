@@ -1904,10 +1904,15 @@ class AotCodeCompiler:
                     run_command_and_check(link_cmd)
 
                 if use_mmap_weights:
+                    import resource
+
+                    page_size_ = resource.getpagesize()
+                    page_size = max(16384, page_size_)
+
                     with open(output_so, "a+b") as f_so:
                         so_size = f_so.tell()
                         # Page align the weights
-                        f_so.write(b" " * (16384 - so_size % 16384))
+                        f_so.write(b" " * (page_size - so_size % page_size))
                         f_so.write(serialized_weights)
                         f_so.write(struct.pack("q", magic_number))
 

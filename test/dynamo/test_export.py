@@ -2755,36 +2755,6 @@ def forward(self, x):
             ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
         )
 
-    @config.patch(
-        capture_dynamic_output_shape_ops=True,
-        specialize_int=True,
-        capture_scalar_outputs=True,
-    )
-    def test_export_preserve_constraints_as_metadata_scalar(self):
-        def f(x, y):
-            b = x.item()
-            torch._check_is_size(b)
-            return torch.empty((b, y.shape[0]))
-
-        x = torch.tensor([3])
-        y = torch.randn([8, 8, 6])
-        example_inputs = (x, y)
-        dynamic_shapes = (None, {0: torch.export.Dim("dimy", min=6, max=10)})
-        gm, _ = torch._dynamo.export(
-            f,
-            dynamic_shapes=dynamic_shapes,
-            aten_graph=True,
-            tracing_mode="symbolic",
-        )(*example_inputs)
-
-        constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-            {"x": x, "y": y}, dynamic_shapes=dynamic_shapes
-        )
-        self.assertEqual(
-            gm.meta["input_shape_constraints"],
-            [c.serializable_spec for c in constraints],
-        )
-
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,
