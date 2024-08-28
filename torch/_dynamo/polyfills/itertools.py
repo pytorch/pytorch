@@ -68,13 +68,11 @@ def islice(iterable: Iterable[_T], *args: int | None) -> Iterator[_T]:
     if stop is None:
         # TODO: use indices = itertools.count() and merge implementation with the else branch
         #       when we support infinite iterators
-        i = 0
         next_i = start
-        for element in iterable:
+        for i, element in enumerate(iterable):
             if i == next_i:
                 yield element
                 next_i += step
-            i += 1
     else:
         indices = range(max(start, stop))
         next_i = start
