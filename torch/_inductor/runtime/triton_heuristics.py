@@ -183,6 +183,7 @@ class CachingAutotuner(KernelInterface):
         super().__init__()
 
         assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
+        # makes sure there are no pre-hooks on any of the triton configs
         (validate_triton_config(cfg) for cfg in configs)
 
         self.fn = fn
@@ -658,7 +659,6 @@ class CachingAutotuner(KernelInterface):
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
         def kernel_call():
-            # Note: we don't call (triton config).pre_hook OR self.pre_hook here.
             cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
             launcher(
                 *cloned_args,
