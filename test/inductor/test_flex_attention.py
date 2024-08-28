@@ -1813,6 +1813,15 @@ class TestBlockMask(InductorTestCase):
         assert block_mask.q_indices.is_cuda
         assert block_mask.q_num_blocks.is_cuda
 
+    def test_compiling_create_block_mask(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 512, 512, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
+
     @supported_platform
     def test_block_mask_viz(self):
         def causal_mask(b, h, q, kv):

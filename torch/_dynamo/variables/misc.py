@@ -382,8 +382,10 @@ class InspectSignatureVariable(VariableTracker):
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    variables.ConstantVariable.create(name): InspectParameterVariable()
-                    for name in self.inspected.inspect_parameter_names()
+                    variables.ConstantVariable.create(name): InspectParameterVariable(
+                        param
+                    )
+                    for name, param in self.signature.parameters.items()
                 },
                 user_cls=dict,
             )
@@ -439,7 +441,21 @@ class InspectSignatureVariable(VariableTracker):
 
 
 class InspectParameterVariable(VariableTracker):
-    """This is not implemented, if used will graph break."""
+    """represents inspect.Parameter(...)"""
+
+    def __init__(self, value, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        attr_value = getattr(self.value, name)
+        if self.source:
+            attr_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, attr_source)(attr_value)
+        else:
+            return SourcelessBuilder.create(tx, attr_value)
 
 
 class InspectBoundArgumentsVariable(VariableTracker):
