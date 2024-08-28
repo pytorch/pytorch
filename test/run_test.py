@@ -4,6 +4,7 @@ import argparse
 import copy
 import glob
 import json
+import numpy
 import os
 import pathlib
 import re
@@ -16,6 +17,7 @@ import time
 from collections import defaultdict
 from contextlib import ExitStack
 from datetime import datetime
+from packaging.version import Version
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import pkg_resources
@@ -184,6 +186,9 @@ ROCM_BLOCKLIST = [
     "test_jit_cuda_fuser",
     "distributed/_tensor/test_attention",
 ]
+# Remove test_typing if python version is 3.9.* or less
+if Version(numpy.__version__) < Version('1.21'):
+    ROCM_BLOCKLIST.extend(["test_typing"])
 
 XPU_BLOCKLIST = [
     "test_autograd",
