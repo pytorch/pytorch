@@ -5757,7 +5757,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     # produces weird results.
     # This is under investigations in
     # https://github.com/pytorch/pytorch/issues/131805
-    @unittest.expectedFailure
+    @unittest.skip("Skip this flip test for the moment. It is under investigation")
     def test_flip_bad_accuracy(self):
         import torch
         import torch._dynamo.config

@@ -7,9 +7,9 @@ import torch._dynamo.testing
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
-    decorateIf,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -707,10 +707,7 @@ class AssociativeScanTests(TestCase):
     # produces weird results.
     # This is under investigations in
     # https://github.com/pytorch/pytorch/issues/131805
-    @decorateIf(
-        unittest.skip,
-        lambda params: params["device"] == GPU_TYPE
-    )
+    @decorateIf(unittest.skip, lambda params: params["device"] == GPU_TYPE)
     def test_associative_scan_CUDA_flip(self, combine_mode, backend, device):
         def fct(x: torch.Tensor, y: torch.Tensor):
             return x + y
