@@ -23,15 +23,16 @@ struct VecMaskLoad<
   static inline VectorizedN<T, dst_n> apply(
       const T* ptr,
       const VecMask<mask_t, mask_n>& vec_mask) {
-    VecMask<mask_t, 2> tmp_mask;
+    VectorizedN<mask_t, 2> tmp_vec;
     VectorizedN<T, dst_n> result;
 #ifndef _MSC_VER
 #pragma unroll
 #endif
     for (int i = 0; i < dst_n; i++) {
-      tmp_mask[0] = vec_mask[2 * i];
-      tmp_mask[1] = vec_mask[2 * i + 1];
-      auto int_mask = tmp_mask.template cast<int, 1>()[0];
+      tmp_vec[0] = vec_mask[2 * i];
+      tmp_vec[1] = vec_mask[2 * i + 1];
+      auto int64_mask = VecMask<mask_t, 2>(tmp_vec).template cast<int64_t, 2>();
+      auto int_mask = int64_mask.template cast<int, 1>()[0];
       if constexpr (std::is_same_v<T, float>) {
         result[i] = Vectorized<T>(
             _mm256_maskload_ps(ptr + i * Vectorized<T>::size(), int_mask));
@@ -44,27 +45,25 @@ struct VecMaskLoad<
   }
 };
 
-template <typename T, int dst_n, typename mask_t, int mask_n>
+template <typename T, int dst_n, typename mask_t>
 struct VecMaskLoad<
     T,
     dst_n,
     mask_t,
-    mask_n,
+    dst_n,
     typename std::enable_if_t<
-        (mask_n == dst_n && dst_n >= 1) &&
-            (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
-             std::is_same_v<T, uint32_t>),
+        std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
+            std::is_same_v<T, uint32_t>,
         void>> {
   static inline VectorizedN<T, dst_n> apply(
       const T* ptr,
-      const VecMask<mask_t, mask_n>& vec_mask) {
-    VecMask<mask_t, 1> tmp_mask;
+      const VecMask<mask_t, dst_n>& vec_mask) {
     VectorizedN<T, dst_n> result;
 #ifndef _MSC_VER
 #pragma unroll
 #endif
     for (int i = 0; i < dst_n; i++) {
-      tmp_mask[0] = vec_mask[i];
+      auto tmp_mask = VecMask<mask_t, 1>(vec_mask[i]);
       auto int_mask = tmp_mask.template cast<int, 1>()[0];
       if constexpr (std::is_same_v<T, float>) {
         result[i] = Vectorized<T>(
