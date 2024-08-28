@@ -18,10 +18,7 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.associative_scan import associative_scan_op
-from torch._higher_order_ops.triton_kernel_wrap import (
-    triton_kernel_wrapper_functional,
-    triton_kernel_wrapper_mutation,
-)
+from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -6172,39 +6169,6 @@ def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
         kernel_args={**kwargs, **constant_args},
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
-
-
-@register_lowering(triton_kernel_wrapper_functional)
-def triton_kernel_wrap(
-    *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
-):
-    new_kwargs = {}
-    for name, value in kwargs.items():
-        if isinstance(value, ir.TensorBox):
-            x = value.data
-            has_non_rv_views = False
-            while isinstance(x, ir.BaseView):
-                if not isinstance(x, ir.ReinterpretView):
-                    has_non_rv_views = True
-                    break
-                x = x.data
-            if has_non_rv_views:
-                # we realize the inputs wrapped into any view which is not
-                # ReinterpretView to convert them into ReinterpretView during
-                # realization; all views being ReinterpretView is assumed by
-                # the downstream code (e.g., preserving ReinterpretView in
-                # cloning; layout should be available in mutation marking)
-                value = ir.TensorBox(ir.ExternKernel.realize_input(value))
-            if name in tensors_to_clone:
-                value = clone_preserve_reinterpret_view(value)
-        new_kwargs[name] = value
-
-    return triton_kernel_wrap_(
-        kernel_idx=kernel_idx,
-        constant_args_idx=constant_args_idx,
-        grid=grid,
-        kwargs=new_kwargs,
-    )
 
 
 @register_lowering(torch.ops.higher_order.cond)
