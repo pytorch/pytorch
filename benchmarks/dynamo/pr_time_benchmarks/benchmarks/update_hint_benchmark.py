@@ -37,8 +37,7 @@ class Benchmark(BenchmarkBase):
                 torch._check(x <= self.N)
             return a.split(xs)
 
-        for i in range(1000):
-            f(self.input, self.splits)
+        f(self.input, self.splits)
 
 
 def main():
