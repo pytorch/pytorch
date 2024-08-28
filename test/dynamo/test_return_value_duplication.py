@@ -1,11 +1,11 @@
 # Owner(s): ["module: dynamo"]
 import typing
-import unittest
 
 import torch
+import torch.testing._internal.common_utils
 
 
-class TestReturnValueDuplication(unittest.TestCase):
+class TestReturnValueDuplication(torch.testing._internal.common_utils.TestCase):
     """Tests that compiled functions returning identically constructed but otherwise
     separate tensors still return separate tensors.
 
