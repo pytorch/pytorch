@@ -62,7 +62,7 @@ int GetStrideBFromParams(const GemmAndBiasParams<T>* params) {
 
 template <typename T>
 int GetStrideBFromParams(const GemmStridedBatchedParams<T>* params) {
-  return params->stride_a;
+  return params->stride_b;
 }
 
 template <typename T>
@@ -82,7 +82,7 @@ int GetStrideCFromParams(const GemmAndBiasParams<T>* params) {
 
 template <typename T>
 int GetStrideCFromParams(const GemmStridedBatchedParams<T>* params) {
-  return params->stride_a;
+  return params->stride_c;
 }
 
 template <typename T>
@@ -421,9 +421,9 @@ class CublasltGemmOp : public Callable<ParamsT> {
                 }
             }
 
-            at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, params->lda, opa == CUBLAS_OP_T);
-            at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, params->ldb, opb == CUBLAS_OP_T);
-            at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, params->ldc);
+            at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, lda, opa == CUBLAS_OP_T);
+            at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, ldb, opb == CUBLAS_OP_T);
+            at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, ldc);
 
             int batch_size = GetBatchFromParams<T>(params);
             if (batch_size > 1) {
@@ -610,13 +610,13 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
         }
     }
 
-    at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, params->lda, opa == CUBLAS_OP_T);
-    at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, params->ldb, opb == CUBLAS_OP_T);
-    at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, params->ldc);
+    at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, lda, opa == CUBLAS_OP_T);
+    at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, ldb, opb == CUBLAS_OP_T);
+    at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, ldc);
     if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<T>>) {
-        Cdesc = at::cuda::blas::CuBlasLtMatrixLayout(bias_datatype, params->m, params->n, params->ldc);
+        Cdesc = at::cuda::blas::CuBlasLtMatrixLayout(bias_datatype, params->m, params->n, ldc);
     }
-    at::cuda::blas::CuBlasLtMatrixLayout Ddesc(c_dtype, params->m, params->n, params->ldc);
+    at::cuda::blas::CuBlasLtMatrixLayout Ddesc(c_dtype, params->m, params->n, ldc);
 
     int batch_size = GetBatchFromParams<T>(params);
     if (batch_size > 1) {
@@ -657,7 +657,7 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
         Adesc.descriptor(),
         Bdesc.descriptor(),
         Cdesc.descriptor(),
-        Ddesc.descriptor(),
+        std::is_same_v<ParamsT, ScaledGemmParams<T>> ? Ddesc.descriptor() : Cdesc.descriptor(),
         preference.descriptor(),
         8,
         heuristicResults,
