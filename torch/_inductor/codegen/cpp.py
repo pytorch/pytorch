@@ -36,6 +36,7 @@ from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
     get_fused_kernel_name,
+    has_free_symbols,
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
