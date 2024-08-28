@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import copy
 import logging
 import os
@@ -17,9 +19,9 @@ from torch.distributed.pipelining import (
     pipeline,
     PipelineStage,
     Schedule1F1B,
+    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
-    ScheduleFlexibleInterleaved1F1B,
     SplitPoint,
 )
 from torch.distributed.tensor.parallel import (
@@ -96,6 +98,7 @@ class ParallelDims:
     def model_parallel_size(self):
         return self.tp * self.pp
 
+
 class Test3DComposability(FSDPTest):
     logger = logging.getLogger()
     logger.info("Starting job: 3D composability test")
@@ -152,9 +155,7 @@ class Test3DComposability(FSDPTest):
 
         def _warn_overwrite_env(env, val):
             if env in os.environ:
-                self.logger.warning(
-                    f"ENV[{env}] = {os.environ[env]} will be overridden to {val} based on job config"
-                )
+                self.logger.warning("ENV will be overridden based on job config")
             os.environ[env] = val
 
         _warn_overwrite_env(ASYNC_ERROR_HANDLING, SKIP_CLEANUP)
@@ -315,7 +316,7 @@ class Test3DComposability(FSDPTest):
                 parallelize_plan=layer_plan,
             )
         self.logger.info(
-            f"Applied {'Float8 ' if enable_float8 else ''}{'Async ' if enable_async_tp else ''}"
+            f"Applied {'Float8 ' if enable_float8 else ''}{'Async ' if enable_async_tp else ''}"  # noqa: G004
             "Tensor Parallelism to the model"
         )
 
@@ -393,13 +394,13 @@ class Test3DComposability(FSDPTest):
         model_config: ModelArgs,
         loss_fn: Callable[..., torch.Tensor],
     ):
-        split_mode = "manual"
+        split_mode = "tracer"
         valid_split_modes = ("manual", "tracer")
         if split_mode == "manual":
             stages, models = self._pipeline_llama_manual(
                 model, pp_mesh, parallel_dims, device, model_config
             )
-        """ TODO: finish "tracer" mode
+        """ TODO: enable tracer
         elif split_mode == "tracer":
             stages, models = self._pipeline_llama_tracer(
                 model, pp_mesh, parallel_dims, device, model_config
@@ -412,7 +413,9 @@ class Test3DComposability(FSDPTest):
             "interleaved_1f1b",
             "flexible_interleaved_1f1b",
         ]
-        pp_schedule = self._build_pipeline_schedule(parallel_dims.pp, schedule_class[3], stages, loss_fn)
+        pp_schedule = self._build_pipeline_schedule(
+            parallel_dims.pp, schedule_class[3], stages, loss_fn
+        )
 
         return pp_schedule, models
 
@@ -531,8 +534,8 @@ class Test3DComposability(FSDPTest):
                 is_last=stage_idx == num_stages - 1,
             )
             self.logger.info(
-                f"PP rank {pp_rank} is building stage_idx {stage_idx}"
-                f" with start_layer {start_layer}, stop_layer {stop_layer}: model chunk \n{model_chunk}"
+                f"PP rank {pp_rank} is building stage_idx {stage_idx}"  # noqa: G004
+                f" with start_layer {start_layer}, stop_layer {stop_layer}: model chunk \n{model_chunk}"  # noqa: G004
             )
             stages.append(stage)
             models.append(model_chunk)
@@ -576,7 +579,7 @@ class Test3DComposability(FSDPTest):
             device=device,
         )
         stage_idx = pp_rank
-        split_spec = {layer_name: SplitPoint.BEGINNING for layer_name in ["layers.2"]}
+        split_spec = {layer_name: SplitPoint.BEGINNING for layer_name in ["layers.1"]}
         num_stages = len(split_spec) + 1
         pipe = pipeline(
             model,
@@ -599,7 +602,9 @@ class Test3DComposability(FSDPTest):
             )
         return stages, models
 
-    def _build_pipeline_schedule(self, pp_dim, pipeline_parallel_schedule, stages, loss_fn):
+    def _build_pipeline_schedule(
+        self, pp_dim, pipeline_parallel_schedule, stages, loss_fn
+    ):
         looped_schedule = False
 
         if pipeline_parallel_schedule == "1f1b":
@@ -612,7 +617,9 @@ class Test3DComposability(FSDPTest):
         elif pipeline_parallel_schedule == "flexible_interleaved_1f1b":
             schedule_class = ScheduleFlexibleInterleaved1F1B
             looped_schedule = True
-        self.logger.info(f"Using pipeline schedule {pipeline_parallel_schedule}")
+        self.logger.info(
+            f"Using pipeline schedule {pipeline_parallel_schedule}"  # noqa: G004
+        )
         n_microbatches = pp_dim
 
         return schedule_class(
@@ -620,6 +627,7 @@ class Test3DComposability(FSDPTest):
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
         )
+
 
 if __name__ == "__main__":
     run_tests()
