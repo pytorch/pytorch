@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-
-import builtins
 import functools
 import inspect
 import warnings
