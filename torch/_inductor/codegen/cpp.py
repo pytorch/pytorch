@@ -3382,11 +3382,13 @@ class TilingSelect:
                                     and _node.target in ["index_expr", "load", "store"]
                                 ):
                                     return False
-                                arg_idx = 1 if _node.target == "index_expr" else 2
+                                get_index_node = _node.args[
+                                    1 if _node.target == "index_expr" else 2
+                                ]
                                 return (
-                                    isinstance(_node.args[arg_idx], torch.fx.node.Node)
-                                    and _node.args[arg_idx].target == "get_index"
-                                    and isinstance(_node.args[arg_idx].args[0], str)
+                                    isinstance(get_index_node, torch.fx.node.Node)
+                                    and get_index_node.target == "get_index"
+                                    and isinstance(get_index_node.args[0], str)
                                 )
 
                             if can_get_index_name(_node):
