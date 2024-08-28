@@ -654,6 +654,19 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
 #endif // defined(USE_FLASH_ATTENTION)
 }
 
+#if USE_ROCM
+bool check_causal_fp32(sdp_params const& params, bool debug) {
+  auto query_dtype = params.query.dtype();
+  if (query_dtype == at::kFloat && params.is_causal) {
+    if (debug) {
+      TORCH_WARN("[ROCM] Efficient attention is disabled with is_causal and float32 dtype due to large numerical errors");
+      return false;
+    }
+  }
+  return true;
+}
+#endif
+
 bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifndef USE_MEM_EFF_ATTENTION
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with memory efficient attention.");
@@ -676,6 +689,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
 #ifdef USE_ROCM
+      check_causal_fp32,
       check_head_dim_size_flash
 #else
       check_head_dim_size_mem_efficient
