@@ -71,8 +71,7 @@ C10_DEFINE_int(
     4096,
     "Set the size for the shape cache used for shape inference");
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 std::string& getLTCForceFallback() {
   static std::string config;
@@ -87,5 +86,4 @@ std::string& getLTCForceFallback() {
   return config;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy
