@@ -9289,7 +9289,7 @@ class TestSDPA(TestCaseMPS):
 
             self._compare_tensors(y.cpu(), y_ref)
 
-            if requires_grad:
+            if requires_grad and torch.is_grad_enabled():
                 y.sum().backward()
                 y_ref.sum().backward()
 
@@ -9318,6 +9318,9 @@ class TestSDPA(TestCaseMPS):
 
     def test_sdpa_no_mask_no_causal_fp32_grad(self):
         self._test_sdpa_no_mask(False, torch.float32, requires_grad=True)
+
+        with torch.no_grad():
+            self._test_sdpa_no_mask(False, torch.float32, requires_grad=True)
 
     def _test_sdpa_mask(self, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int = 32, HS: int = 128):
         torch.manual_seed(1729)
