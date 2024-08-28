@@ -7951,7 +7951,6 @@ class CommonTemplate:
         out = [torch.empty_like(x) for _ in range(2)]
         y = g(x)
 
-    @expectedFailureXPU
     def test_functionalize_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But
         # currently the plan is to introduce these operators at the partitioner
@@ -11022,7 +11021,6 @@ class CommonTemplate:
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
 
-    @skipIfWindows(msg="torch._dynamo.exc.BackendCompilerFailed")  # TODO: FIX IT
     def test_randint_int64_mod(self):
         # This used to not compile due to a wrong return type of randint64_cpu
         # See https://github.com/pytorch/pytorch/issues/117435
@@ -11912,7 +11910,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
                 func_opt = torch._dynamo.optimize("inductor")(func)
                 code = run_and_get_triton_code(func_opt, *inps)
-                fp32_cast_in_code = "float32" in code
+                fp32_cast_in_code = "to(tl.float32)" in code
                 self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
