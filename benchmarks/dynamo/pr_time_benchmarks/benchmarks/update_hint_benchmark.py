@@ -20,7 +20,6 @@ class Benchmark(BenchmarkBase):
         torch.manual_seed(0)
 
         self.splits = torch.randint(10, (self.N,))
-        print(self.splits)
         sz = self.splits.sum().item()
         self.input = torch.randn(sz)
 
