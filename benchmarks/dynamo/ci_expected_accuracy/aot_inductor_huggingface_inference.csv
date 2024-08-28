@@ -10,10 +10,6 @@ AlbertForQuestionAnswering,pass,0
 
 
 
-AllenaiLongformerBase,fail_to_run,0
-
-
-
 BartForCausalLM,pass,0
 
 

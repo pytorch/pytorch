@@ -10,10 +10,6 @@ AlbertForQuestionAnswering,pass,0
 
 
 
-AllenaiLongformerBase,fail_to_run,0
-
-
-
 BartForCausalLM,pass,0
 
 
@@ -127,10 +123,6 @@ MobileBertForMaskedLM,pass,0
 
 
 MobileBertForQuestionAnswering,pass,0
-
-
-
-OPTForCausalLM,pass,0
 
 
 
