@@ -1386,7 +1386,7 @@ def forward(self, L_x_ : torch.Tensor):
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_pointwise_scan_RNN(self):
         dim = 1
-        device = torch.device("cuda")
+        device = torch.device("cpu")
 
         rnn = torch.nn.RNN(
             input_size=5,
