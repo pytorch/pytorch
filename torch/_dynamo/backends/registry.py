@@ -86,8 +86,10 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     exclude_tags = set(exclude_tags or ())
 
     loaded = [
-        name for name in _BACKENDS.keys()
-        if name not in _COMPILER_FNS or not exclude_tags.intersection(_COMPILER_FNS[name]._tags)
+        name
+        for name in _BACKENDS.keys()
+        if name not in _COMPILER_FNS
+        or not exclude_tags.intersection(_COMPILER_FNS[name]._tags)
     ]
     return sorted(loaded)
 
@@ -110,6 +112,7 @@ def _lazy_import():
 def _register_entrypoint_backends():
     # importing here so it will pick up the mocked version in test_backends.py
     from importlib.metadata import entry_points
+
     group_name = "torch_dynamo_backends"
     if sys.version_info < (3, 10):
         eps = entry_points()
