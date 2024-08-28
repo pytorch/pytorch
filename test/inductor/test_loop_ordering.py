@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
-
 import unittest
 
 import numpy as np
@@ -10,14 +9,12 @@ import torch
 from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-
 from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
-
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_cuda import SM90OrLater

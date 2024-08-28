@@ -5,9 +5,8 @@ import sys
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_CI,

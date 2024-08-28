@@ -6,7 +6,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -55,6 +55,9 @@ class Dep(abc.ABC):
     def is_contiguous(self) -> bool:
         pass
 
+    def normalize_with_stride_order(self, prefix="t"):
+        return self
+
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
@@ -98,8 +101,23 @@ class MemoryDep(Dep):
         # Extract strides for both expression
         self_strides = V.graph.sizevars.stride_hints(self.index, self.var_names)
         other_strides = V.graph.sizevars.stride_hints(other.index, other.var_names)
-        assert len(set(self_strides)) == len(self_strides), f"{self_strides=}"
-        assert len(set(other_strides)) == len(other_strides), f"{other_strides=}"
+
+        # Even if the shape contains no 0/1, some complex index expression may
+        # still have duplicate stride values. Here is an example:
+        # https://gist.github.com/shunting314/511a7e1ec88aa2e1a8ec85d8445ab129
+        # We don't reorder the loop for these cases for now, but in theory
+        # we could improve the algorithm to detect the correct loop orders.
+        if len(set(self_strides)) != len(self_strides) or len(
+            set(other_strides)
+        ) != len(other_strides):
+            log.debug(
+                "unable to decide loop order. self_dep=%s v.s. other_dep=%s, self_strides=%s v.s. other_strides=%s",
+                self,
+                other,
+                self_strides,
+                other_strides,
+            )
+            return None
 
         # May hanppen if self and other are as follows
         # MemoryDep('addmm_6', 393216*d0 + 768*d1 + d2, {d0: 16, d1: 512, d2: 768}, None)

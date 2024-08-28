@@ -1021,6 +1021,22 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
 
+def refresh_group_node_dependencies(group_snode: BaseSchedulerNode) -> None:
+    snodes = group_snode.snodes  # type: ignore[attr-defined]
+    group_snode.set_read_writes(
+        dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
+    )
+
+    group_snode.unmet_dependencies = (
+        OrderedSet(
+            dep
+            for dep in OrderedSet.union(*[x.unmet_dependencies for x in snodes])
+            if dep.name not in group_snode.get_buffer_names()
+        )
+        - group_snode.read_writes.writes
+    )
+
+
 def init_group_node(
     group_snode: BaseSchedulerNode,
     scheduler: Scheduler,
@@ -1034,18 +1050,7 @@ def init_group_node(
         *[x.ancestors for x in snodes if x.ancestors is not None]
     )
 
-    group_snode.set_read_writes(
-        dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
-    )
-
-    group_snode.unmet_dependencies = (
-        OrderedSet(
-            dep
-            for dep in OrderedSet.union(*[x.unmet_dependencies for x in snodes])
-            if dep.name not in group_snode.get_buffer_names()
-        )
-        - group_snode.read_writes.writes
-    )
+    refresh_group_node_dependencies(group_snode)
 
     group_snode.min_order = min(x.min_order for x in group_snode.snodes)
     group_snode.max_order = max(x.max_order for x in group_snode.snodes)
@@ -1107,6 +1112,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
         for snode in self.snodes:
             assert isinstance(snode, SchedulerNode)
             snode.apply_new_loop_order(new_order)  # type: ignore[arg-type]
+
+        refresh_group_node_dependencies(self)
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
@@ -2860,7 +2867,6 @@ class Scheduler:
                 node1.get_name(),
                 node2.get_name(),
             )
-            pass
 
         return self.score_fusion_memory(node1, node2) > 0
 
