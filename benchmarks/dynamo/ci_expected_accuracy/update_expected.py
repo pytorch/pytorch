@@ -152,8 +152,10 @@ if __name__ == "__main__":
             [
                 "aot_eager",
                 "aot_inductor",
+                "cpu_aot_inductor",
                 "cpu_inductor",
                 "dynamic_aot_eager",
+                "dynamic_cpu_aot_inductor",
                 "dynamic_cpu_inductor",
                 "dynamic_inductor",
                 "dynamo_eager",

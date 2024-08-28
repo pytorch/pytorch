@@ -184,6 +184,20 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             all(node.target is not torch.sigmoid for node in gm1.graph.nodes)
         )
 
+    def test_disable_no_recompile(self):
+        def gn(x):
+            return torch.cos(x)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = torch.sin(x)
+            x = torch._dynamo.disable(gn, recursive=True)(x)
+            return torch.sin(x)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(5):
+                fn(torch.randn(4))
+
     def test_allow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -264,10 +278,19 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         counters.clear()
 
+        with self.assertRaisesRegex(TypeError, "Signature mismatch"):
+
+            @torch._dynamo.substitute_in_graph(operator.indexOf)
+            def _(sequence, x):
+                for i, item in enumerate(sequence):
+                    if item is x or item == x:
+                        return i
+                raise ValueError("sequence.index(x): x not in sequence")
+
         @torch._dynamo.substitute_in_graph(operator.indexOf)
-        def polyfill(sequence, x):
-            for i, item in enumerate(sequence):
-                if item is x or item == x:
+        def polyfill(a, b):
+            for i, item in enumerate(a):
+                if item is b or item == b:
                     return i
             raise ValueError("sequence.index(x): x not in sequence")
 
