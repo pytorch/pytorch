@@ -3194,6 +3194,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     def test_bool_input(self):
+        # Specialize on whichever branch the example input for b is
         class Model(torch.nn.Module):
             def forward(self, x, b):
                 if b:
@@ -3378,7 +3379,6 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
 
     def test_size_from_multi_output(self):
-        # Specialize on whichever branch the example input for b is
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()

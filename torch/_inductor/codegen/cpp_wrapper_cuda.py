@@ -63,7 +63,7 @@ class DeferredCudaKernelLine(DeferredLineBase):
 
 class DeferredCudaDefaultGrid:
     """
-    A marker to
+    A container for the default grid, which may be used by DeferredCudaGridLine
     """
 
     def __init__(
