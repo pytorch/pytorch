@@ -8,7 +8,7 @@ import itertools
 from typing import Iterable, Iterator, TypeVar
 
 from ..decorators import substitute_in_graph
-from ..variables.builder import ITERTOOLS_POLYFILLED_CLASSES
+from ..variables.builder import ITERTOOLS_POLYFILLED_TYPES
 
 
 __all__ = [
@@ -38,7 +38,7 @@ def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
     return itertools.chain(*iterable)
 
 
-ITERTOOLS_POLYFILLED_CLASSES.add(itertools.chain)
+ITERTOOLS_POLYFILLED_TYPES.add(itertools.chain)
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
