@@ -1840,8 +1840,31 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048)
+        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512)
+        assert block_mask.kv_num_blocks.shape == (4, 2, 4)
+        assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
+        # Index on batch dimension
+        new_block_mask = block_mask[0]
+        assert new_block_mask.kv_num_blocks.shape == (2, 4)
+        assert new_block_mask.kv_indices.shape == (2, 4, 4)
+
+        # Index on batch and head dimension
+        new_block_mask = block_mask[0, 1]
+        assert new_block_mask.kv_num_blocks.shape == (4,)
+        assert new_block_mask.kv_indices.shape == (4, 4)
+
+        # slicing on batch and head dimension
+        new_block_mask = block_mask[0:2, 1:2]
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
+        assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
+
+        # slicing on batch, head, and query dimension
+        new_block_mask = block_mask[0:2, 1:2, 1:3]
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 2)
+        assert new_block_mask.kv_indices.shape == (2, 1, 2, 4)
+
+        # slicing on batch, head, and query dimension
         q_index = torch.tensor([0])
         new_block_mask = block_mask[:, :, q_index]
 
