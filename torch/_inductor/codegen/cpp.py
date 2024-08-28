@@ -1632,8 +1632,13 @@ class CppVecOverrides(CppOverrides):
         exponent.update_on_args("frexp", (x,), kwargs={})
         mantissa.update_on_args("frexp", (x,), kwargs={})
         n_vec = V.kernel._get_num_vectors(x.dtype)
+        mantissa_t = (
+            f"at::vec::Vectorized<{cdtype}>"
+            if n_vec == 1
+            else f"at::vec::VectorizedN<{cdtype}, {n_vec}>"
+        )
         code.writeline(f"at::vec::Vectorized<int32_t> {exponent};")
-        code.writeline(f"at::vec::VectorizedN<{cdtype}, {n_vec}> {mantissa};")
+        code.writeline(f"{mantissa_t} {mantissa};")
         code.writeline("[&]()")
         with code.indent():
             code.writeline(f"__at_align__ std::array<{cdtype}, {size}> tmpbuf;")
@@ -1651,7 +1656,7 @@ class CppVecOverrides(CppOverrides):
                 f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {size});"
             )
             code.writeline(
-                f"{mantissa} = at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu(tmpbuf_mantissa.data(), {size});"
+                f"{mantissa} = {mantissa_t}::loadu(tmpbuf_mantissa.data(), {size});"
             )
         code.writeline("();")
         V.kernel.compute.splice(code)
