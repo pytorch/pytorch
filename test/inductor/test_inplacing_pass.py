@@ -125,7 +125,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         counter = 0
         for node in graph.nodes:
             if node.target == torch.ops.higher_order.auto_functionalized:
-                counter += len(node.meta["only_clone_these_tensors"])
+                counter += len(node.meta["only_clone_these_bases"])
         return counter
 
     def test_view_inplaced(self):
@@ -307,11 +307,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             log_stream.getvalue().strip().split("\n")[3:]
         ).strip()
 
-        # Can't reinplace on views yet (1 for the "entire list" failing to reinplace)
-        self.assertEqual(num_reinplacing_failures(), 1)
-
-        # Both list inputs failed to reinplace. So we should have emitted clones for them.
-        self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
+        # We are to inplace the base y. no clones emitted.
+        self.assertEqual(num_reinplacing_failures(), 0)
+        self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
 
 
 if __name__ == "__main__":

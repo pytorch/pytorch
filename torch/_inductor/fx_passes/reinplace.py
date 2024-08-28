@@ -590,132 +590,78 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             )
 
             _mutable_op = node.args[0]
-            tensors_to_clone, arg_types = get_mutable_args(_mutable_op)
+            arg_names, arg_types = get_mutable_args(_mutable_op)
 
             kwargs = node.kwargs
             all_bases = kwargs["_all_bases"]
-            args_view_info = deserialize_views_meta(
-                tensors_to_clone, arg_types, kwargs, all_bases, pop_args=False
-            )
-
-            # Don't try to reinplace Optional[Tensor] args that are None.
-            tensors_to_clone = [
-                t for t in tensors_to_clone if args_view_info[t] is not None
-            ]
-
-            old_tensors_to_clone = tensors_to_clone
-            possibly_missed_reinplacing_opportunities = []
 
             # for each base in all_bases check if its in-placable.
             inplaceable_bases = [can_inplace(node, arg) for arg in all_bases]
 
-            # In general if a base satisfy inplace requirements then all views on top it are also inplacable.
-
-            # Note1: One exception is when two bases in all_bases shares storage, in that case this means thats some pass
+            # When two bases in all_bases shares storage, in that case this means thats some pass
             # have changed auto_functionalize, like CSE and added such aliasing, because when auto_functionalize is created, it
             # assert that all_bases have unique storages.
 
             # To avoid mutating same storage by the custom op that was not originally mutated in the original program,
-            # we only allow inplacing one arg in such condition. `storage_to_inplace_once`` tracks identify tensors such that only
-            # one tensors of that storage should be inplaced and `inplaced_storage` tracks inplaced storages.
+            # we only allow inplacing one base in such condition.
 
-            storage_to_inplace_once = set()
-            seen_storage = set()
-            for i, base in enumerate(all_bases):
-                storage = get_node_storage(base)
-                if storage in seen_storage:
-                    storage_to_inplace_once.add(storage)
-                else:
-                    seen_storage.add(storage)
-
-            seen_storage = None
-
-            # only include inplaced_storage for storages in storage_to_inplace_once
+            changed_inplaceable_bases = set()
             inplaced_storage = set()
+            for i, base in enumerate(all_bases):
+                if not inplaceable_bases[i]:
+                    continue
 
-            do_not_clone = []
-            for arg_name in tensors_to_clone:
-                view_info = args_view_info[arg_name]
+                storage = get_node_storage(base)
+                if storage in inplaced_storage:
+                    inplaceable_bases[i] = False
+                    changed_inplaceable_bases.add(i)
+                else:
+                    inplaced_storage.add(storage)
 
+            # The loop bellow is only needed to generate the log message and count
+            args_cloned = []
+            possibly_missed_reinplacing_opportunities = []
+            args_view_info = deserialize_views_meta(
+                arg_names, arg_types, kwargs, all_bases, pop_args=False
+            )
+            for arg_name, view_info in args_view_info.items():
                 if view_info is None:
                     continue
 
-                if isinstance(view_info, (list, tuple)):
-                    view_info_no_none = [v for v in view_info if v is not None]
+                if isinstance(view_info, list):
+                    for i, v in enumerate(view_info):
+                        if v is None:
+                            continue
 
-                    unique_storages = {
-                        get_node_storage(v.base) for v in view_info_no_none
-                    }
-
-                    # see Note1
-                    if any(
-                        (
-                            storage in storage_to_inplace_once
-                            and storage in inplaced_storage
-                        )
-                        for storage in unique_storages
-                    ):
-                        # we do not consider this in possibly_missed_reinplacing_opportunities
-                        continue
-
-                    # if any two items in the list shares storage we do not inplace.
-                    # TODO revisit this, why not?
-                    if len(unique_storages) != len(view_info_no_none):
-                        possibly_missed_reinplacing_opportunities.append(arg_name)
-                        continue
-
-                    # if any of the items in the list has non inplaceable base we do not inplace.
-                    if any(
-                        not inplaceable_bases[item_view.base_index]
-                        for item_view in view_info_no_none
-                    ):
-                        possibly_missed_reinplacing_opportunities.append(arg_name)
-                        continue
-
-                    for item_view in view_info_no_none:
-                        storage = get_node_storage(item_view.base)
-                        if storage in storage_to_inplace_once:
-                            inplaced_storage.add(storage)
-
-                    # we inplace this arg yeey!
-                    do_not_clone.append(arg_name)
+                        if not inplaceable_bases[v.base_index]:
+                            args_cloned.append(f"{arg_name}[{i}]")
+                            if v.base_index not in changed_inplaceable_bases:
+                                possibly_missed_reinplacing_opportunities.append(
+                                    f"{arg_name}[{i}]"
+                                )
 
                 else:
-                    # arg is a single tensor
-                    storage = get_node_storage(view_info.base)
-
-                    # see Note1
-                    if (
-                        storage in storage_to_inplace_once
-                        and storage in inplaced_storage
-                    ):
-                        # we do not consider this in possibly_missed_reinplacing_opportunities
-                        continue
-
                     if not inplaceable_bases[view_info.base_index]:
-                        possibly_missed_reinplacing_opportunities.append(arg_name)
-                        continue
-
-                    if storage in storage_to_inplace_once:
-                        inplaced_storage.add(storage)
-
-                    # we inplace this arg yeey!
-                    do_not_clone.append(arg_name)
-
-            for t in do_not_clone:
-                tensors_to_clone.remove(t)
+                        args_cloned.append(arg_name)
+                        # we want exclude those from the counter
+                        if view_info.base_index not in changed_inplaceable_bases:
+                            possibly_missed_reinplacing_opportunities.append(arg_name)
 
             log_inplace_results(
                 _mutable_op._name,
-                old_tensors_to_clone,
-                tensors_to_clone,
+                arg_names,
+                args_cloned,
                 possibly_missed_reinplacing_opportunities,
             )
 
             # Stash the metadata. There is a pass later on where we decompose
             # auto_functionalized into clones + a mutable op; this metadata
             # tells the decomp to only clone the following inputs
-            node.meta["only_clone_these_tensors"] = tensors_to_clone
+            only_clone_these_bases = []
+            for i in range(len(all_bases)):
+                if not inplaceable_bases[i]:
+                    only_clone_these_bases.append(i)
+            node.meta["only_clone_these_bases"] = only_clone_these_bases
         elif node.target in inplaceable_triton_ops:
             kernel_idx = node.kwargs["kernel_idx"]
             kernel = kernel_side_table.get_kernel(kernel_idx)

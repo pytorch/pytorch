@@ -37,7 +37,7 @@ def unsafe_remove_auto_functionalized_pass(
                     assert isinstance(func, torch._ops.OpOverload)
                     mutable_args_names, _ = get_mutable_args(func)
                     # re-inplace everything
-                    node.meta["only_clone_these_tensors"] = []
+                    node.meta["only_clone_these_bases"] = []
             decompose_auto_functionalized(ep.graph)
             remove_self_clone(ep.graph)
             ep.graph.eliminate_dead_code()

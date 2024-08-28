@@ -140,7 +140,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
     decompose_auto_functionalized(gm.graph)
-    remove_self_clone(gm.graph)
 
     comms.reinplace_fsdp_all_gather(gm.graph)
 
@@ -811,8 +810,8 @@ def decompose_auto_functionalized(graph):
     def replacement(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
-        only_clone_these_tensors = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        only_clone_these_bases = tuple(
+            match.nodes[0].meta.get("only_clone_these_bases", [])
         )
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
@@ -822,7 +821,7 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
+            return auto_functionalized_dense(*args, only_clone_these_bases, **kwargs)
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
