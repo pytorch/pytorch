@@ -65,6 +65,15 @@ def triton_config_to_hashable(cfg):
     return tuple(items)
 
 
+def validate_triton_config(cfg):
+    # [Note: Triton pre_hook in inductor]
+    # pre-hook is a lambda function, which we don't attempt to serialize.
+    # right now, if a pre-hook is attached to the config, it will not be saved;
+    # and then it won't be used when the config is loaded from cache.
+    # So we assert - if we do get a pre_hook, it might get ignored after caching.
+    assert not hasattr(cfg, "pre_hook") or cfg.pre_hook is None
+
+
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=True):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     slow = ms > 0.012 and gb_per_s < 650

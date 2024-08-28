@@ -40,6 +40,7 @@ from .runtime_utils import (
     get_num_bytes,
     next_power_of_2,
     triton_config_to_hashable,
+    validate_triton_config,
 )
 
 
@@ -182,6 +183,8 @@ class CachingAutotuner(KernelInterface):
         super().__init__()
 
         assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
+        (validate_triton_config(cfg) for cfg in configs)
+
         self.fn = fn
         self.device_props: DeviceProperties = triton_meta["device"]
         self.triton_meta = {
@@ -655,11 +658,7 @@ class CachingAutotuner(KernelInterface):
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
         def kernel_call():
-            if launcher.config.pre_hook is not None:
-                launcher.config.pre_hook(
-                    {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
-                )
-
+            # Note: we don't call (triton config).pre_hook OR self.pre_hook here.
             cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
             launcher(
                 *cloned_args,
@@ -847,11 +846,6 @@ class CachingAutotuner(KernelInterface):
         (launcher,) = self.launchers
         if launcher.store_cubin:
             self.save_gpu_kernel(grid, stream, launcher)
-
-        if launcher.config.pre_hook is not None:
-            launcher.config.pre_hook(
-                {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
-            )
 
         if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
             _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
