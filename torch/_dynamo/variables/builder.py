@@ -15,6 +15,7 @@ import random
 import re
 import sys
 import types
+import warnings
 import weakref
 from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
 
@@ -25,7 +26,7 @@ from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
-from torch._subclasses.meta_utils import is_sparse_any
+from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -170,7 +171,11 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
 )
-from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
+from .nn_module import (
+    FSDPManagedNNModuleVariable,
+    UnspecializedBuiltinNNModuleVariable,
+    UnspecializedNNModuleVariable,
+)
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
@@ -214,6 +219,12 @@ static_inputs_log = torch._logging.getArtifactLogger(
 
 
 DimList = List
+
+
+def safe_has_grad(t):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+        return hasattr(t, "grad")
 
 
 class _missing:
@@ -1320,7 +1331,11 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            result = UnspecializedNNModuleVariable(value, source=self.source)
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
+                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
+            else:
+                result = UnspecializedNNModuleVariable(value, source=self.source)
+
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
@@ -1349,6 +1364,7 @@ class VariableBuilder:
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
                 or self.source.guard_source().is_specialized_nn_module()
+                or self.source.guard_source().is_unspecialized_builtin_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
@@ -1392,7 +1408,12 @@ class VariableBuilder:
         if (
             config.inline_inbuilt_nn_modules
             and not is_static_input
-            and isinstance(value, torch.nn.Parameter)
+            and (
+                isinstance(value, torch.nn.Parameter)
+                # mark tensor attributes of nn modules static. This is done to keep inline_inbuilt_nn_modules behavior
+                # compatible with previous behavior.
+                or (source and source.guard_source().is_unspecialized_nn_module())
+            )
         ):
             self.mark_static_input(value, guard=False)
 
@@ -1496,6 +1517,18 @@ class VariableBuilder:
             # export + sparsity is being added but we need to create
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
             unimplemented("torch.compile does not support sparse Tensors")
+
+        if (
+            safe_has_grad(value)
+            and safe_grad(value) is not None
+            and value.dtype != safe_grad(value).dtype
+        ):
+            unimplemented(
+                "Inconsistent dtype between tensor and its gradient. "
+                "This can happen in FSDP and crashes meta tensor creation. "
+                "This is potentially a workaround. Fixing it correctly "
+                "requires some design around FSDP + torch.compile."
+            )
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
@@ -2426,39 +2459,27 @@ def _automatic_dynamic(
     t_id = id(e)
     dim2constraint = {}
 
-    def update_dim2constraint(dim, constraint_range, debug_name):
+    def update_dim2constraint(dim, constraint_range, name):
         if dim in dim2constraint:
             from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
-            old_constraint_range, old_debug_name = dim2constraint[dim]
+            old_constraint_range, old_name = dim2constraint[dim]
             new_constraint_range = StrictMinMaxConstraint(
                 vr=constraint_range.vr & old_constraint_range.vr,
                 warn_only=False,
             )
-            # It is possible for (non-None) old_debug_name and debug_name to be different
+            # It is possible for (non-None) old_name and name to be different
             # but this will only happen the corresponding Dims can be derived equal.
-            new_debug_name = old_debug_name or debug_name
-            dim2constraint[dim] = new_constraint_range, new_debug_name
+            new_name = old_name or name
+            dim2constraint[dim] = new_constraint_range, new_name
         else:
-            dim2constraint[dim] = constraint_range, debug_name
+            dim2constraint[dim] = constraint_range, name
 
     if tx.output.export_constraints:
         for constraint in tx.output.export_constraints:
             if constraint.t_id == t_id:
                 update_dim2constraint(
-                    constraint.dim, constraint.constraint_range, constraint.debug_name
-                )
-            if constraint.shared is not None and constraint.shared.t_id == t_id:
-                # We process constraint ranges for each shared dimension separately
-                # so that we can directly check range constraint violations on them
-                # without looking up which other shared dimensions have this info.
-                # In other words, for this t_id, we will have processed all of its
-                # constraint ranges, no matter where / how they were specified, by
-                # by the end of this loop.
-                update_dim2constraint(
-                    constraint.shared.dim,
-                    constraint.constraint_range,
-                    constraint.debug_name,
+                    constraint.dim, constraint.constraint_range, constraint.name
                 )
 
     dynamic_sizes = []
@@ -2530,11 +2551,10 @@ def _automatic_dynamic(
                 constraint_size = None
                 constraint_stride = None
         else:
-            constraint_size, debug_name = constraint
+            constraint_size, name_ = constraint
             constraint_stride = None
-            if debug_name is not None:
-                dim_name = f"{name}.size()[{i}]"
-                tx.output.shape_env.source_name_to_debug_name[dim_name] = debug_name
+            dim_name = f"{name}.size()[{i}]"
+            tx.output.shape_env.source_name_to_debug_name[dim_name] = name_
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
@@ -2585,7 +2605,9 @@ def wrap_to_fake_tensor_and_record(
     ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(
-            e, is_tensor, guard_source=source.guard_source()
+            e,
+            is_tensor,
+            tensor_source=source,
         )
 
         if not parent_context:
