@@ -1089,7 +1089,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         A_compressed = torch._cslt_compress(A)
 
-        max_alg_id = torch._cslt_sparse_mm_max_alg_id(A_compressed, B.t())
+        max_alg_id = torch._cslt_sparse_mm_get_attr('CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID', A_compressed, B.t())
         for alg_id in range(max_alg_id):
             # alg_id=3 not supported for float32 dtype
             if dtype == torch.float32 and alg_id == 3:
@@ -1109,11 +1109,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         A_compressed = torch._cslt_compress(A)
         alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
-        # for cuSPARSELt v0.4.0 there is a bug where although there are 5 alg_ids, we run into an error
-        # when setting using the last one (4)
-        # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
-        # TODO Move this into the cuSPARSELt backend
-        max_alg_id = torch._cslt_sparse_mm_max_alg_id(A_compressed, B.t())
+        max_alg_id = torch._cslt_sparse_mm_get_attr('CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID', A_compressed, B.t())
         assert alg_id in range(max_alg_id + 1)
 
     def test_cusparselt_backend(self):

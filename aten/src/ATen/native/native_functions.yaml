@@ -3363,9 +3363,9 @@
   dispatch:
     CUDA: _cslt_sparse_mm_search
 
-- func: _cslt_sparse_mm_max_alg_id(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False) -> int
+- func: _cslt_sparse_mm_get_attr(str attr_name, Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False) -> int
   dispatch:
-    CUDA: _cslt_sparse_mm_max_alg_id
+    CUDA: _cslt_sparse_mm_get_attr
 
 - func: _sparse_semi_structured_tile(Tensor input, str algorithm="", bool use_cutlass=True) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   dispatch:

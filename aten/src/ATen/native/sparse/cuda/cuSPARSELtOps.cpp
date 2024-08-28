@@ -106,8 +106,9 @@ std::tuple<int64_t, at::Tensor, int64_t> _cslt_sparse_mm_impl(
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
     int alg_id,
+    cusparseLtMatmulAlgAttribute_t attr_enum,
     bool search_alg_id,
-    bool get_max_alg_id_only
+    bool get_attr_only
 )
 {
   if (!handle_initialized){
@@ -293,12 +294,12 @@ std::tuple<int64_t, at::Tensor, int64_t> _cslt_sparse_mm_impl(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
 
-  int max_alg_id = 0;
+  int attr = 0;
 
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
-      &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID, &max_alg_id, sizeof(max_alg_id)));
+      &handle, &alg_sel, attr_enum, &attr, sizeof(attr)));
   // don't need to run the matmul
-  if(!get_max_alg_id_only) {
+  if(!get_attr_only) {
       if(search_alg_id){
         // run matmul search
         TORCH_CUDASPARSE_CHECK(cusparseLtMatmulSearch(
@@ -346,7 +347,7 @@ std::tuple<int64_t, at::Tensor, int64_t> _cslt_sparse_mm_impl(
   // destroy plan
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
 
-  return {alg_id, res, (int64_t) max_alg_id};
+  return {alg_id, res, (int64_t) attr};
 }
 
 at::Tensor _cslt_sparse_mm(
@@ -367,6 +368,7 @@ at::Tensor _cslt_sparse_mm(
         out_dtype_opt,
         transpose_result,
         (int) alg_id,
+	CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
         false,
 	false);
     return std::get<1>(result);
@@ -390,12 +392,32 @@ int64_t _cslt_sparse_mm_search(
         out_dtype_opt,
         transpose_result,
         alg_id_int,
+        CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
         true,
 	false);
     return (int64_t) std::get<0>(result);
 }
 
-int64_t _cslt_sparse_mm_max_alg_id(
+auto _str_to_cslt_attr_enum(c10::string_view attr_name) {
+  if (attr_name == "CUSPARSELT_MATMUL_ALG_CONFIG_ID") {
+    return CUSPARSELT_MATMUL_ALG_CONFIG_ID;
+  } else if (attr_name == "CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID") {
+    return CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID;
+  } else if (attr_name == "CUSPARSELT_MATMUL_SEARCH_ITERATIONS") {
+    return CUSPARSELT_MATMUL_SEARCH_ITERATIONS;
+  } else if (attr_name == "CUSPARSELT_MATMUL_SPLIT_K") {
+    return CUSPARSELT_MATMUL_SPLIT_K;
+  } else if (attr_name == "CUSPARSELT_MATMUL_SPLIT_K_MODE") {
+    return CUSPARSELT_MATMUL_SPLIT_K_MODE;
+  } else if (attr_name == "CUSPARSELT_MATMUL_SPLIT_BUFFERS") {
+    return CUSPARSELT_MATMUL_SPLIT_K_BUFFERS;
+  } else {
+    TORCH_CHECK(false, "unrecognized CUSPARSELT attr name");
+  }
+}
+
+int64_t _cslt_sparse_mm_get_attr(
+    c10::string_view attr_name,
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
@@ -405,6 +427,7 @@ int64_t _cslt_sparse_mm_max_alg_id(
 )
 {
     int alg_id_int = 0;
+    auto attr_enum = _str_to_cslt_attr_enum(attr_name);
     auto result = _cslt_sparse_mm_impl(
         compressed_A,
         dense_B,
@@ -413,6 +436,7 @@ int64_t _cslt_sparse_mm_max_alg_id(
         out_dtype_opt,
         transpose_result,
         alg_id_int,
+	attr_enum,
         true,
 	true);
     return (int64_t) std::get<2>(result);

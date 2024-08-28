@@ -45,7 +45,7 @@ ignored_c_binding_in_graph_function_names = {
     # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
-    "torch._cslt_sparse_mm_max_alg_id",
+    "torch._cslt_sparse_mm_get_attr",
     "torch._C._abort",
     "torch._C._mps_is_on_macos_or_newer",
     "torch._C._swap_tensor_impl",
