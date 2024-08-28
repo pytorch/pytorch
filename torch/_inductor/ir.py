@@ -5103,10 +5103,19 @@ class UserDefinedTritonKernel(ExternKernel):
         raw_args = [
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         ]
+
+        # NOTE: raw_args doesn't include autotuned args.
+        # But, kernel.constexprs includes indices of autotuned args.
+        # So, let's recalculate constexpr indices wrt to raw_args.
+        constexpr_indices = []
+        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+            if kernel.arg_names.index(kwarg) in kernel.constexprs:
+                constexpr_indices.append(idx)
+
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
+            new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
