@@ -819,9 +819,16 @@ static variable_list call_tensor_pre_hooks(Node& fn, variable_list inputs) {
 static variable_list call_post_hooks(
     Node& fn,
     variable_list outputs,
-    const variable_list& inputs) {
+    const variable_list& inputs,
+    const bool had_post_hooks) {
   for (const auto& hook : fn.post_hooks()) {
-    outputs = (*hook)(outputs, inputs);
+    if (had_post_hooks) {
+      outputs = (*hook)(outputs, inputs);
+    } else {
+      variable_list null_inputs;
+      null_inputs.resize(inputs.size());
+      outputs = (*hook)(outputs, null_inputs);
+    }
   }
   return outputs;
 }
@@ -976,11 +983,8 @@ static variable_list call_function(
     return ss.str();
   });
 
-  if (has_post_hooks) {
-    // NOLINTNEXTLINE(bugprone-use-after-move)
-    return call_post_hooks(fn, std::move(outputs), inputs);
-  }
-  return outputs;
+  // NOLINTNEXTLINE(bugprone-use-after-move)
+  return call_post_hooks(fn, std::move(outputs), inputs, has_post_hooks);
 }
 
 void Engine::evaluate_function(
