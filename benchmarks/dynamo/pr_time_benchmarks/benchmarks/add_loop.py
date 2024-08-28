@@ -7,10 +7,11 @@ import torch
 
 
 class Benchmark(BenchmarkBase):
-    N = 20
+    def __init__(self, backend):
+        self.backend = backend
 
     def name(self):
-        return "add_loop"
+        return f"add_loop_{self.backend}"
 
     def description(self):
         return "a loop over 100 add node"
@@ -25,7 +26,7 @@ class Benchmark(BenchmarkBase):
         gc.disable()
 
     def _work(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(backend=self.backend, fullgraph=True)
         def f(a, b):
             result = a.clone()
             for i in range(1000):
@@ -42,9 +43,12 @@ class Benchmark(BenchmarkBase):
 
 def main():
     result_path = sys.argv[1]
-    Benchmark().enable_compile_time_instruction_count().collect_all().append_results(
-        result_path
-    )
+    Benchmark(
+        "eager"
+    ).enable_compile_time_instruction_count().collect_all().append_results(result_path)
+    Benchmark(
+        "inductor"
+    ).enable_compile_time_instruction_count().collect_all().append_results(result_path)
 
 
 if __name__ == "__main__":
