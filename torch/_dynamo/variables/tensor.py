@@ -448,7 +448,7 @@ class TensorVariable(VariableTracker):
         if result is not None:
             return result
 
-        return super().var_getattr(tx, name)
+        raise NotImplementedError
 
     def call_id(self, tx):
         if not self.source:

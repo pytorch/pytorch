@@ -115,14 +115,12 @@ FusedKernelCUDA::FusedKernelCUDA(
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
   prop_ = at::cuda::getCurrentDeviceProperties();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int major, minor;
+  int major = 0, minor = 0;
   bool compile_to_sass = false;
   codegenOutputQuery(prop_, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  nvrtcProgram program;
+  nvrtcProgram program{};
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
@@ -144,17 +142,14 @@ FusedKernelCUDA::FusedKernelCUDA(
       "compute_" +
 #endif
       std::to_string(major) + std::to_string(minor);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const std::vector<const char*> args = {
       "--std=c++17", compute.c_str(), "-default-device"};
 #endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
   if (result != NVRTC_SUCCESS) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t logsize;
+    size_t logsize = 0;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<char> log(logsize);
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
@@ -164,8 +159,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t ptx_size;
+  size_t ptx_size = 0;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
