@@ -1878,6 +1878,21 @@ class CommonTemplate:
         b = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float64, device=self.device)
         self.common(fn, (a, b), rtol=1e-4, atol=1e-5, check_lowp=False)
 
+    @config.patch(max_autotune_pointwise=True)
+    def test_split_cumsum_index(self):
+        # Split scan uses a workspace that needs to be zeroed before use.
+        # data[index] does indirect indexing that should catch issues if the
+        # workspace is not zeroed.
+        def fn(lengths, data):
+            offsets = torch.cumsum(lengths, 0)
+            return data[offsets]
+
+        lengths = torch.full((2**14,), 2**2, dtype=torch.int64, device=self.device)
+        lengths[-2] = 3
+        lengths[-1] = 3
+        data = make_tensor((2**16,), dtype=torch.float32, device=self.device)
+        self.common(fn, (lengths, data))
+
     def test_split_cumprod(self):
         def fn(a):
             return torch.cumprod(a, -1)

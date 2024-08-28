@@ -2626,6 +2626,11 @@ class TritonKernel(SIMDKernel):
                 mutated_args.add(self.args.output_buffers[mutation])
         mutated_args = sorted(mutated_args)
 
+        workspace_to_init: List[str] = []
+        for argname, arg in zip(argdefs, signature):
+            if isinstance(arg, WorkspaceArg) and arg.zero_fill:
+                workspace_to_init.append(argname)
+
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype
         )
@@ -2644,6 +2649,7 @@ class TritonKernel(SIMDKernel):
             "no_x_dim": self.no_x_dim,
             "num_load": self.num_load,
             "num_reduction": self.num_reduction,
+            "workspace_to_init": workspace_to_init,  # See [Note: Autotune pre-hook for workspace inputs]
             **self.inductor_meta_common(),
         }
 
