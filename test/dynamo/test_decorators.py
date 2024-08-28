@@ -647,7 +647,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_mod3(x)
 
         # Must be 3 compilations. If not marked static there would be 2, because strides would be converted to symints.
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 3)
 
 
 if __name__ == "__main__":
