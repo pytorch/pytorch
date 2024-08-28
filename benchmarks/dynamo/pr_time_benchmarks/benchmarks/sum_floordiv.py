@@ -14,7 +14,7 @@ class Benchmark(BenchmarkBase):
     def description(self):
         return "information at https://github.com/pytorch/pytorch/issues/134133"
 
-    def prepare_once(self):
+    def _prepare_once(self):
         class M(torch.nn.Module):
             def forward(self, x):
                 total = sum(t.item() for t in x)
@@ -23,10 +23,10 @@ class Benchmark(BenchmarkBase):
         self.m = M()
         self.input = [torch.tensor(i + 2) for i in range(self.N)]
 
-    def prepare(self):
+    def _prepare(self):
         torch._dynamo.reset()
 
-    def work(self):
+    def _work(self):
         torch.export.export(self.m, (self.input,))
 
 
@@ -37,4 +37,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
