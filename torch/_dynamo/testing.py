@@ -229,6 +229,14 @@ def normalize_gm(gm_str) -> str:
     return remove_trailing_space(strip_comment(gm_str))
 
 
+def empty_line_normalizer(code: str) -> str:
+    """
+    Normalize code: remove empty lines.
+    """
+    normal_code = re.sub(r"[\r\n]+", "\n", code)
+    return normal_code
+
+
 def standard_test(
     self,
     fn,
