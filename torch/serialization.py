@@ -92,7 +92,15 @@ else:
 # (1) map_location (needed for wrapper subclasses/third party devices to torch._utils)
 # (2) skip_data (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
 # (3) materialize_fake_tensors (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
-_serialization_tls = threading.local()
+class _SerializationLocal(threading.local):
+    def __init__(self):
+        super().__init__()
+        self.map_location: Optional[MAP_LOCATION] = None
+        self.skip_data: bool = False
+        self.materialize_fake_tensors: bool = False
+
+
+_serialization_tls = _SerializationLocal()
 
 
 class SourceChangeWarning(Warning):
@@ -292,14 +300,14 @@ class skip_data:
         self.materialize_fake_tensors = materialize_fake_tensors
 
     def __enter__(self):
-        self._old_skip_data = getattr(_serialization_tls, "skip_data", False)
-        self._old_materialize_fake_tensors = getattr(
-            _serialization_tls, "materialize_fake_tensors", False
-        )
+        global _serialization_tls
+        self._old_skip_data = _serialization_tls.skip_data
+        self._old_materialize_fake_tensors = _serialization_tls.materialize_fake_tensors
         _serialization_tls.skip_data = True
         _serialization_tls.materialize_fake_tensors = self.materialize_fake_tensors
 
     def __exit__(self, type, value, tb):
+        global _serialization_tls
         _serialization_tls.skip_data = self._old_skip_data
         _serialization_tls.materialize_fake_tensors = self._old_materialize_fake_tensors
 
@@ -783,7 +791,7 @@ def save(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)  # noqa: B950
+    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)
 
     Saves an object to a disk file.
 
@@ -833,7 +841,8 @@ def save(
             )
             return
     else:
-        if getattr(_serialization_tls, "skip_data", False):
+        global _serialization_tls
+        if _serialization_tls.skip_data:
             raise RuntimeError(
                 "Cannot use skip_data=True with _use_new_zipfile_serialization=False"
             )
@@ -1077,7 +1086,8 @@ def _save(
         name = f"data/{key}"
         storage = serialized_storages[key]
         num_bytes = storage.nbytes()
-        if getattr(_serialization_tls, "skip_data", False):
+        global _serialization_tls
+        if _serialization_tls.skip_data:
             zip_file.write_record_metadata(name, num_bytes)
         else:
             # given that we copy things around anyway, we might use storage.cpu()
@@ -1236,7 +1246,8 @@ def load(
             updated_message += message
         return updated_message + DOCS_MESSAGE
 
-    skip_data = getattr(_serialization_tls, "skip_data", False)
+    global _serialization_tls
+    skip_data = _serialization_tls.skip_data
     if skip_data:
         raise RuntimeError(
             "`torch.load` called within a torch.serialization.skip_data context manager "
@@ -1817,9 +1828,10 @@ def _load(
     unpickler.persistent_load = persistent_load
     # Needed for tensors where storage device and rebuild tensor device are
     # not connected (wrapper subclasses and tensors rebuilt using numpy)
+    global _serialization_tls
     _serialization_tls.map_location = map_location
     result = unpickler.load()
-    del _serialization_tls.map_location
+    _serialization_tls.map_location = None
 
     torch._utils._validate_loaded_sparse_tensors()
     torch._C._log_api_usage_metadata(

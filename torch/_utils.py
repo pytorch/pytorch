@@ -114,7 +114,7 @@ def _get_restore_location(device):
     Used for rebuild functions where the tensor device is distinct from the storage
     """
 
-    map_location = getattr(torch.serialization._serialization_tls, "map_location", None)
+    map_location = torch.serialization._serialization_tls.map_location
     if map_location is None:
         return device
     else:

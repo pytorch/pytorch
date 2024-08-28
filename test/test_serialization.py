@@ -1,5 +1,6 @@
 # Owner(s): ["module: serialization"]
 
+import contextlib
 import copy
 import gc
 import gzip
@@ -4247,13 +4248,16 @@ class TestSerialization(TestCase, SerializationMixin):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)
 
-    def test_skip_data_serialization_preserves_views(self):
-        t = torch.randn(2, 3)
-        t_view = t.view(-1)
-        t_slice = t[1]
+    @parametrize("materialize_fake", (True, False))
+    def test_skip_data_serialization_preserves_views(self, materialize_fake):
+        ctx = FakeTensorMode if materialize_fake else contextlib.nullcontext
+        with ctx():
+            t = torch.randn(2, 3)
+            t_view = t.view(-1)
+            t_slice = t[1]
         sd = {'t': t, 't_view': t_view, 't_slice': t_slice}
         with BytesIOContext() as f:
-            with skip_data():
+            with skip_data(materialize_fake_tensors=materialize_fake):
                 torch.save(sd, f)
             f.seek(0)
             sd_loaded = torch.load(f, weights_only=True)

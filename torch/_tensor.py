@@ -209,18 +209,16 @@ class Tensor(torch._C.TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        skip_data = getattr(torch.serialization._serialization_tls, "skip_data", False)
-        materialize_fake_tensors = getattr(
-            torch.serialization._serialization_tls, "materialize_fake_tensors", False
+        materialize_fake_tensors = (
+            torch.serialization._serialization_tls.materialize_fake_tensors
         )
         state = torch._utils._get_obj_state(self)
         # Ignore all state when using FakeTensor with skip_data(materialize_fake_tensors) because FakeTensor has
         # some state that cannot be pickled
         if (
             type(self) is torch._subclasses.fake_tensor.FakeTensor
-            and skip_data
             and materialize_fake_tensors
-        ) or (type(self) is Tensor and not state):
+        ) or (type(self) is not Tensor and not state):
             # Fast path for regular tensor without Python state.
             return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
@@ -262,9 +260,9 @@ class Tensor(torch._C.TensorBase):
         warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
 
-        skip_data = getattr(torch.serialization._serialization_tls, "skip_data", False)
-        materialize_fake_tensors = getattr(
-            torch.serialization._serialization_tls, "materialize_fake_tensors", False
+        skip_data = torch.serialization._serialization_tls.skip_data
+        materialize_fake_tensors = (
+            torch.serialization._serialization_tls.materialize_fake_tensors
         )
 
         # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
