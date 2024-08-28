@@ -71,7 +71,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def generate_kernel_call(
         self,
-        name,
+        kernel_name: str,
         call_args,
         grid=None,
         device_index=None,
@@ -81,6 +81,7 @@ class CppWrapperCpu(WrapperCodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        autotune_configs=None,
         grid_extra_kwargs="",
     ):
         """
@@ -94,14 +95,18 @@ class CppWrapperCpu(WrapperCodeGen):
         """
         if cuda:
             return super().generate_kernel_call(
-                name,
+                kernel_name,
                 call_args,
                 grid,
                 device_index,
                 cuda,
                 triton,
                 arg_types,
+                raw_args,
                 grid_fn,
+                triton_meta,
+                autotune_configs,
+                grid_extra_kwargs,
             )
         else:
             if config.abi_compatible:
@@ -119,9 +124,9 @@ class CppWrapperCpu(WrapperCodeGen):
                     else:
                         # arg is a scalar
                         new_args.append(arg)
-                self.writeline(self.wrap_kernel_call(name, new_args))
+                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
             else:
-                self.writeline(self.wrap_kernel_call(name, call_args))
+                self.writeline(self.wrap_kernel_call(kernel_name, call_args))
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -152,12 +157,9 @@ class CppWrapperCpu(WrapperCodeGen):
             )
 
         if config.abi_compatible:
-            if config.c_shim_version == "1":
-                self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
-            else:
-                self.header.splice(
-                    f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
-                )
+            self.header.splice(
+                f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
+            )
             self.header.splice(
                 """
                 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
@@ -1192,20 +1194,8 @@ class CppWrapperCpu(WrapperCodeGen):
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
-        if config.c_shim_version == "1":
-            # For sdpa, we need the v2 version since v1 didn't consider optional arg
-            # FIXME: no need to do this after we switch to the torchgen-ed C shim
-            if kernel_suffix == "_scaled_dot_product_flash_attention":
-                shim_fn = "aoti_torch__scaled_dot_product_flash_attention_v2"
-            elif kernel_suffix == "_scaled_mm":
-                shim_fn = "aoti_torch__scaled_mm_v2"
-            elif kernel_suffix.startswith("wrapped_fbgemm"):
-                assert self.device == "cpu", "Using wrapped_fbgemm out of CPU!"
-                shim_fn = f"aoti_torch_cpu_{kernel_suffix}"
-            else:
-                shim_fn = f"aoti_torch_{kernel_suffix}"
-        else:
-            shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
+
+        shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
         return shim_fn
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
@@ -1335,19 +1325,11 @@ class CppWrapperCpu(WrapperCodeGen):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
-        # TODO: needs updates to use C shim v2
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
-            if config.c_shim_version == "1":
-                cpp_kernel_name = (
-                    "aoti_torch_scatter_reduce_out"
-                    if python_kernel_name.startswith("aten.scatter_reduce")
-                    else "aoti_torch_scatter_out"
-                )
-            else:
-                cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
-                # C shim only contains out-variant instead of inplace-variant
-                cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+            cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
+            # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
+            cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
             inputs_wrapped = [
                 f"convert_arrayref_tensor_to_tensor({x})"
                 if isinstance(x, str)
@@ -1375,7 +1357,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
-        # TODO: needs updates to use C shim v2
+        # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         if config.abi_compatible:
             # See the comment in codegen_reinterpret_view about why having something like
             # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
@@ -2484,7 +2466,7 @@ if (py_{buf_name}.get() == NULL) {{
                             f"{self.c_type_for_prim_type(element_type)} {var_name} = {self.val_to_arg_str(val, element_type)};"
                         )
                         return f"&{var_name}"
-                elif config.c_shim_version == "2":
+                else:
                     # type_ is Optional[Tensor]
                     # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                     base_handle = self.val_to_arg_str(val, element_type)

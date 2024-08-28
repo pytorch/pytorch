@@ -76,16 +76,13 @@ class TypePromotionRule(abc.ABC):
     # A class that overrides __eq__() and does not define __hash__() will have its __hash__() implicitly set to None.
     # Ref: https://docs.python.org/3/reference/datamodel.html#object.__hash__
     @abc.abstractmethod
-    def __hash__(self) -> int:
-        ...
+    def __hash__(self) -> int: ...
 
     @abc.abstractmethod
-    def __repr__(self):
-        ...
+    def __repr__(self): ...
 
     @abc.abstractmethod
-    def __eq__(self, other: object) -> bool:
-        ...
+    def __eq__(self, other: object) -> bool: ...
 
     def is_valid(self) -> bool:
         """Check if the rule is valid."""
