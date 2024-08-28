@@ -1773,6 +1773,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
 
     def test_static_dim_constraints(self):
+        from torch.export.dynamic_shapes import DIM
+
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1801,7 +1803,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ((dx, None), (dy, 4), (dz, 3)),
             ((None, 6), (5, None), (None, None)),
             ((4, 6), {0: None, 1: 4}, {0: None, 1: 3}),
-            (None, None, (Dim.STATIC, Dim.STATIC)),
+            (None, None, (DIM.STATIC, DIM.STATIC)),
         ]:
             ep = export(foo, inputs, dynamic_shapes=dynamic_shapes)
             self.assertEqual(foo(*inputs), ep.module()(*inputs))
@@ -1948,7 +1950,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
     def test_mismatched_dynamic_shapes(self):
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
+        from torch.export.dynamic_shapes import DIM
+
+        AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1980,7 +1984,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             + re.escape(
                 "specified at `dynamic_shapes[0]['k']['k'][0]` "
                 "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                " where each dimension is None, an int, a Dim, Dim.AUTO, or Dim.STATIC)"
+                " where each dimension is None, an int, a Dim, DIM.AUTO, or DIM.STATIC)"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -2057,7 +2061,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
-                "Specifying both `Dim.AUTO` and `Dim` or `DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
+                "Specifying both `DIM.AUTO` and `Dim` or `DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
                 "and can easily lead to constraint violation errors or obscure errors in torch.export."
             ),
         ):
@@ -2461,7 +2465,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     def test_mark_and_auto_dynamic(self):
         # for this use case, mark_dynamic() and AUTO should have same effect.
         # check that same symbol gets allocated to both dims without raising constraint violation.
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
+        from torch.export.dynamic_shapes import DIM
+
+        AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -2489,7 +2495,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     def test_dont_duck_size_for_auto_dynamic(self):
         # for this use case, mark_dynamic() and AUTO should have same effect.
         # check that same symbol gets allocated to both dims without raising constraint violation.
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
+        from torch.export.dynamic_shapes import DIM
+
+        AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -6868,7 +6876,9 @@ def forward(self, x, y):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
         # with runtime asserts. Check that we specialize to static values when the program says so.
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
+        from torch.export.dynamic_shapes import DIM
+
+        AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         # case 1: direct equality between symbols
         class SimpleEquality(torch.nn.Module):
@@ -6933,7 +6943,9 @@ def forward(self, x, y):
         )
 
     def test_automatic_dynamic_shapes_constant_relation(self):
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
+        from torch.export.dynamic_shapes import DIM
+
+        AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         # case 2: related by constant: s0 + 4 = s1
         class OffBy4(torch.nn.Module):
@@ -6976,7 +6988,9 @@ def forward(self, x, y):
         )
 
     def test_automatic_dynamic_shapes_linear_relation(self):
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
+        from torch.export.dynamic_shapes import DIM
+
+        AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         # case 3: linear relation
         class LinearRel(torch.nn.Module):
