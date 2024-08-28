@@ -585,11 +585,17 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 template <>
 inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
   // load from src to registers
-  __mmask16 src_mask = (1 << N) - 1;
   __m512 input[16];
   int i;
-  for (i = 0; i < M; ++i) {
-    input[i] = _mm512_maskz_loadu_ps(src_mask, &src[i * ld_src]);
+  if (N == 16) {
+    for (i = 0; i < M; ++i) {
+      input[i] = _mm512_loadu_ps(&src[i * ld_src]);
+    }
+  } else {
+    __mmask16 src_mask = (1 << N) - 1;
+    for (i = 0; i < M; ++i) {
+      input[i] = _mm512_maskz_loadu_ps(src_mask, &src[i * ld_src]);
+    }
   }
   for (; i < 16; ++i) {
     // Not really needed but to avoid uninitialized variable warning.
@@ -639,86 +645,31 @@ inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, i
         _mm512_shuffle_f32x4(input[8 * i + 3], input[8 * i + 7], 0xdd);
   }
 
-  // store from registers to dst
-  __mmask16 dst_mask = (1 << M) - 1;
   for (i = 0; i < N; ++i) {
     if (i < 8) {
       input[i] = _mm512_shuffle_f32x4(temp[i], temp[8 + i], 0x88);
     } else {
       input[i] = _mm512_shuffle_f32x4(temp[i - 8], temp[i], 0xdd);
     }
-    _mm512_mask_storeu_ps(&dst[i * ld_dst], dst_mask, input[i]);
+  }
+
+  // store from registers to dst
+  if (M == 16) {
+    for (i = 0; i < N; ++i) {
+      _mm512_storeu_ps(&dst[i * ld_dst], input[i]);
+    }
+  } else {
+    __mmask16 dst_mask = (1 << M) - 1;
+    for (i = 0; i < N; ++i) {
+      _mm512_mask_storeu_ps(&dst[i * ld_dst], dst_mask, input[i]);
+    }
   }
 }
 
 template <typename T, int M, int N,
           typename std::enable_if_t<std::is_same<T, float>::value && M <= 16 && N <= 16, int> = 0>
 inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
-  // load from src to registers
-  __mmask16 src_mask = (1 << N) - 1;
-  __m512 input[16];
-  int i;
-  for (i = 0; i < M; ++i) {
-    input[i] = _mm512_maskz_loadu_ps(src_mask, &src[i * ld_src]);
-  }
-  for (; i < 16; ++i) {
-    // Not really needed but to avoid uninitialized variable warning.
-    // Shouldn't be much overhead because xor can be executed in parallel with
-    // other instructions.
-    input[i] = _mm512_setzero_ps();
-  }
-
-  // unpacking and interleaving 32-bit elements
-  __m512 temp[16];
-  for (i = 0; i < (M + 1) / 2; ++i) {
-    temp[2 * i] = _mm512_unpacklo_ps(input[2 * i], input[2 * i + 1]);
-    temp[2 * i + 1] = _mm512_unpackhi_ps(input[2 * i], input[2 * i + 1]);
-  }
-  for (i = i * 2; i < 16; ++i) {
-    temp[i] = _mm512_setzero_ps();
-  }
-
-  // unpacking and interleaving 64-bit elements
-  for (i = 0; i < (M + 3) / 4; ++i) {
-    input[4 * i] = _mm512_castpd_ps(_mm512_unpacklo_pd(
-        _mm512_castps_pd(temp[4 * i]), _mm512_castps_pd(temp[4 * i + 2])));
-    input[4 * i + 1] = _mm512_castpd_ps(_mm512_unpackhi_pd(
-        _mm512_castps_pd(temp[4 * i]), _mm512_castps_pd(temp[4 * i + 2])));
-    input[4 * i + 2] = _mm512_castpd_ps(_mm512_unpacklo_pd(
-        _mm512_castps_pd(temp[4 * i + 1]), _mm512_castps_pd(temp[4 * i + 3])));
-    input[4 * i + 3] = _mm512_castpd_ps(_mm512_unpackhi_pd(
-        _mm512_castps_pd(temp[4 * i + 1]), _mm512_castps_pd(temp[4 * i + 3])));
-  }
-
-  //  shuffle 128-bits (composed of 4 32-bit elements)
-  for (i = 0; i < (M + 7) / 8; ++i) {
-    temp[8 * i] = _mm512_shuffle_f32x4(input[8 * i], input[8 * i + 4], 0x88);
-    temp[8 * i + 1] =
-        _mm512_shuffle_f32x4(input[8 * i + 1], input[8 * i + 5], 0x88);
-    temp[8 * i + 2] =
-        _mm512_shuffle_f32x4(input[8 * i + 2], input[8 * i + 6], 0x88);
-    temp[8 * i + 3] =
-        _mm512_shuffle_f32x4(input[8 * i + 3], input[8 * i + 7], 0x88);
-    temp[8 * i + 4] =
-        _mm512_shuffle_f32x4(input[8 * i], input[8 * i + 4], 0xdd);
-    temp[8 * i + 5] =
-        _mm512_shuffle_f32x4(input[8 * i + 1], input[8 * i + 5], 0xdd);
-    temp[8 * i + 6] =
-        _mm512_shuffle_f32x4(input[8 * i + 2], input[8 * i + 6], 0xdd);
-    temp[8 * i + 7] =
-        _mm512_shuffle_f32x4(input[8 * i + 3], input[8 * i + 7], 0xdd);
-  }
-
-  // store from registers to dst
-  __mmask16 dst_mask = (1 << M) - 1;
-  for (i = 0; i < N; ++i) {
-    if (i < 8) {
-      input[i] = _mm512_shuffle_f32x4(temp[i], temp[8 + i], 0x88);
-    } else {
-      input[i] = _mm512_shuffle_f32x4(temp[i - 8], temp[i], 0xdd);
-    }
-    _mm512_mask_storeu_ps(&dst[i * ld_dst], dst_mask, input[i]);
-  }
+  transpose_mxn<float>(src, ld_src, dst, ld_dst, M, N);
 }
 
 #endif
