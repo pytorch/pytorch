@@ -218,7 +218,7 @@ class Tensor(torch._C.TensorBase):
         if (
             type(self) is torch._subclasses.fake_tensor.FakeTensor
             and materialize_fake_tensors
-        ) or (type(self) is not Tensor and not state):
+        ) or (type(self) is Tensor and not state):
             # Fast path for regular tensor without Python state.
             return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
