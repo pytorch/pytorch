@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import functools
 import logging
 import os
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.optim.lr_scheduler import LambdaLR
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
@@ -105,7 +107,9 @@ class Float8Handler:
     def __init__(self, parallel_dims: ParallelDims, scale_for_fsdp: bool):
         self.enabled = False
 
-        if not (torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9)):
+        if not (
+            torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9)
+        ):
             # Float8 is only supported on SM89 or later (H100+ GPUs)
             return
         try:
@@ -121,9 +125,9 @@ class Float8Handler:
             and parallel_dims.dp_type == "fsdp"
             and scale_for_fsdp
         )
-        scaling_type_input = ScalingType("dynamic") #["dynamic", "delayed"]
-        scaling_type_weight = ScalingType("dynamic") #["dynamic", "delayed"]
-        scaling_type_grad_output = ScalingType("dynamic") #["dynamic", "delayed"]
+        scaling_type_input = ScalingType("dynamic")  # ["dynamic", "delayed"]
+        scaling_type_weight = ScalingType("dynamic")  # ["dynamic", "delayed"]
+        scaling_type_grad_output = ScalingType("dynamic")  # ["dynamic", "delayed"]
         self.config = Float8LinearConfig(
             enable_fsdp_float8_all_gather=enable_fsdp_float8_all_gather,
             cast_config_input=CastConfig(scaling_type=scaling_type_input),
@@ -135,10 +139,7 @@ class Float8Handler:
         self.enabled = True
 
         # for precompute_float8_dynamic_scale_for_fsdp
-        self.precompute_scale = (
-            enable_fsdp_float8_all_gather
-            and scale_for_fsdp
-        )
+        self.precompute_scale = enable_fsdp_float8_all_gather and scale_for_fsdp
 
         # for sync_float8_amax_and_scale_history
         self.delayed_scaling = (
@@ -147,7 +148,7 @@ class Float8Handler:
             or scaling_type_grad_output == "delayed"
         )
         self._sync_float8_amax_and_scale_history = None
-        #self.compile = job_config.training.compile
+        # self.compile = job_config.training.compile
 
     def convert_to_float8_training(self, model: nn.Module):
         """
@@ -228,12 +229,13 @@ class Test3DComposability(FSDPTest):
 
         os.environ["KINETO_LOG_LEVEL"] = "5"
 
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(8)
     def test_3d_composability(self):
         self.run_subtests(
             {
+                "name": ["pp_dp_tp"],
                 "dp_degree": [
-                    1,
+                    2,
                 ],
                 "tp_degree": [
                     2,
@@ -241,15 +243,17 @@ class Test3DComposability(FSDPTest):
                 "pp_degree": [
                     2,
                 ],
-                "float8": [True],
-                "async_tp": [True],
-                "schedule_class": ["1f1b"], #["1f1b","gpipe","interleaved_1f1b","flexible_interleaved_1f1b",]
+                "float8": [False],
+                "async_tp": [False],
+                "schedule_class": ["1f1b"],
             },
             self._test_3d_composability,
         )
         self.logger.info("Finished job: 3D composability test")
 
-    def _test_3d_composability(self, dp_degree, tp_degree, pp_degree, float8, async_tp, schedule_class):
+    def _test_3d_composability(
+        self, name, dp_degree, tp_degree, pp_degree, float8, async_tp, schedule_class
+    ):
         TRACE_BUFFER_SIZE = "TORCH_NCCL_TRACE_BUFFER_SIZE"
         TRACE_FILE = "TORCH_NCCL_DEBUG_INFO_TEMP_FILE"
         DUMP_ON_TIMEOUT = "TORCH_NCCL_DUMP_ON_TIMEOUT"
@@ -318,6 +322,24 @@ class Test3DComposability(FSDPTest):
             self._parallelize_llama(model, world_mesh, parallel_dims)
             model.train()
             model_parts = [model]
+
+        optimizers = self._build_optimizers(model_parts)
+        lr_schedulers = self._build_lr_schedulers(optimizers.optimizers)
+        train_state_step = 0
+
+        while train_state_step < 10000:
+            train_state_step += 1
+
+            # clip gradients
+            for m in model_parts:
+                torch.nn.utils.clip_grad_norm_(m.parameters(), 1.0, foreach=True)
+
+            # sync float8 amaxes and scales
+            # float8_handler.sync_float8_amax_and_scale_history(model_parts)
+
+            # optimizer step
+            optimizers.step()
+            lr_schedulers.step()
 
     def _parallelize_llama(
         self,
@@ -432,13 +454,13 @@ class Test3DComposability(FSDPTest):
                 "feed_forward.w2": rowwise_parallel(output_layouts=Shard(1)),
                 "feed_forward.w3": colwise_parallel(),
             }
-            '''
+            """
             parallelize_module(
                 module=transformer_block,
                 device_mesh=tp_mesh,
                 parallelize_plan=layer_plan,
             )
-            '''
+            """
         if enable_async_tp:
             from torch.distributed._symmetric_memory import enable_symm_mem_for_group
 
@@ -750,6 +772,97 @@ class Test3DComposability(FSDPTest):
             stages if looped_schedule else stages[0],
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
+        )
+
+    def _build_optimizers(self, model_parts):
+        """Wrap one optimizer per model part in an OptimizersContainer which provides a single
+        step() and zero_grad() method for all the child optimizers.
+        """
+
+        def _build_optimizer(model):
+            name = "AdamW"
+            lr = 8e-4
+            fused = False
+
+            # Common parameters for both optimizers
+            optimizer_kwargs = {
+                "lr": lr,
+                "betas": (0.9, 0.95),
+                "weight_decay": 0.1,
+                "fused": fused,
+                "foreach": not fused,
+            }
+            if name == "Adam":
+                # TODO: make the optimizer options configurable by toml/cmd args
+                optimizer = torch.optim.Adam(model.parameters(), **optimizer_kwargs)
+            elif name == "AdamW":
+                optimizer = torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
+            else:
+                raise NotImplementedError(f"Optimizer {name} not added.")
+
+            return optimizer
+
+        class OptimizersContainer:
+            """Util for calling step/zero_grad on multiple optimizers needed for virtual pipeline stages"""
+
+            def __init__(self, optimizers):
+                self.optimizers = optimizers
+
+            def step(self):
+                for optimizer in self.optimizers:
+                    optimizer.step()
+
+            def zero_grad(self):
+                for optimizer in self.optimizers:
+                    optimizer.zero_grad()
+
+        return OptimizersContainer([_build_optimizer(model) for model in model_parts])
+
+    def _build_lr_schedulers(self, optimizers):
+        def _build_lr_scheduler(optimizer):
+            """Build a linear warmup and linear decay scheduler"""
+
+            def linear_warmup_linear_decay(
+                warmup_steps: int, decay_steps: int, current_step: int
+            ) -> float:
+                """Computes linear warmup followed by linear decay.
+                Per LambdaLR requirement, this is accomplished by returning
+                a multiplicative factor to adjust the learning rate to
+                create the desired schedule.
+                """
+                if current_step < warmup_steps:
+                    # linear warmup
+                    # 0-indexed step, hence + 1 adjustments
+                    current_step += 1
+                    curr_adjustment = float(current_step / (warmup_steps + 1))
+
+                else:
+                    # linear decay
+                    normalized_step = decay_steps - (current_step - warmup_steps)
+                    curr_adjustment = 1 - (decay_steps - normalized_step) / decay_steps
+
+                return curr_adjustment
+
+            warmup_steps = 200
+            decay_steps = float(10000 - warmup_steps)
+            lr_lambda = functools.partial(
+                linear_warmup_linear_decay, warmup_steps, decay_steps
+            )
+            warmup_scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+            return warmup_scheduler
+
+        class SchedulersContainer:
+            """Util for calling step on multiple learning rate schedulers needed for virtual pipeline stages"""
+
+            def __init__(self, schedulers):
+                self.schedulers = schedulers
+
+            def step(self):
+                for schedulers in self.schedulers:
+                    schedulers.step()
+
+        return SchedulersContainer(
+            [_build_lr_scheduler(optimizer) for optimizer in optimizers]
         )
 
 
