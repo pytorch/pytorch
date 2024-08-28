@@ -162,6 +162,7 @@ dtype_precisions = {
     torch.bfloat16: (0.016, 1e-4),
     torch.float32: (1.3e-6, 1e-5),
     torch.float64: (1e-7, 1e-7),
+    torch.uint8: (1.0, 1e-4),
     torch.complex32: (0.001, 1e-5),
     torch.complex64: (1.3e-6, 1e-5),
     torch.complex128: (1e-7, 1e-7),
@@ -1197,10 +1198,35 @@ class DecompOneOffTests(TestCase):
                 )
                 return attn_output
 
-        query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
-        key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
-        value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        data_type = torch.float if dtype == torch.uint8 else dtype
+        query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=data_type)
+        key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=data_type)
+        value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=data_type)
         masks = [None, torch.ones((1, 1, 100, 100), device=device, dtype=torch.bool)]
+        q_zp = 0
+        q_scale = 1.0
+        k_zp = 0
+        k_scale = 1.0
+        v_zp = 0
+        v_scale = 1.0
+        a_zp = 0
+        a_scale = 1.0
+        o_zp = 0
+        o_scale = 1.0
+        if dtype == torch.uint8:
+            query_layer *= 100
+            key_layer *= 100
+            value_layer *= 100
+            q_zp = 127
+            q_scale = 1.7907238006591797
+            k_zp = 125
+            k_scale = 1.8039721250534058
+            v_zp = 127
+            v_scale = 1.839004635810852
+            a_zp = 120
+            a_scale = 0.003919653594493866
+            o_zp = 128
+            o_scale = 1.8191684484481812
 
         atol, rtol = dtype_precisions[dtype]
 
@@ -1209,7 +1235,22 @@ class DecompOneOffTests(TestCase):
             attention = ScaledDotProductAttention()
             decomposed_res = (
                 torch._decomp.decompositions.scaled_dot_product_flash_attention_for_cpu(
-                    query_layer, key_layer, value_layer, 0.0, is_causal, attn_mask=mask
+                    query_layer,
+                    key_layer,
+                    value_layer,
+                    0.0,
+                    is_causal,
+                    attn_mask=mask,
+                    q_zp=q_zp,
+                    q_scale=q_scale,
+                    k_zp=k_zp,
+                    k_scale=k_scale,
+                    v_zp=v_zp,
+                    v_scale=v_scale,
+                    a_zp=a_zp,
+                    a_scale=a_scale,
+                    o_zp=o_zp,
+                    o_scale=o_scale,
                 )
             )
             eager_res = op(
@@ -1219,6 +1260,16 @@ class DecompOneOffTests(TestCase):
                 attn_mask=mask,
                 dropout_p=0.0,
                 is_causal=is_causal,
+                q_zp=q_zp,
+                q_scale=q_scale,
+                k_zp=k_zp,
+                k_scale=k_scale,
+                v_zp=v_zp,
+                v_scale=v_scale,
+                a_zp=a_zp,
+                a_scale=a_scale,
+                o_zp=o_zp,
+                o_scale=o_scale,
             )
 
             self.assertTrue(
