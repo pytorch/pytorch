@@ -17,7 +17,7 @@ import typing_extensions
 import warnings
 import weakref
 from collections import defaultdict
-from contextlib import contextmanager, ExitStack, nullcontext
+from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -1072,8 +1072,8 @@ class PythonKeyTracer(Tracer):
 
 
 def _make_temp_remove_mode_context_manager(
-    mode_ty,
-) -> Callable[[], Generator[None, None, None]]:
+    mode_ty: Type[TorchFunctionMode],
+) -> Callable[[], _GeneratorContextManager[None]]:
     @contextmanager
     def context_manager_fn() -> Generator[None, None, None]:
         from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
