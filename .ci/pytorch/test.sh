@@ -575,10 +575,10 @@ test_single_dynamo_benchmark() {
     fi
 
     if [[ "${TEST_CONFIG}" == *_avx2* ]]; then
-      TEST_CONFIG=${TEST_CONFIG::-5}
+      TEST_CONFIG=${TEST_CONFIG//_avx2/}
     fi
     if [[ "${TEST_CONFIG}" == *_avx512* ]]; then
-      TEST_CONFIG=${TEST_CONFIG::-7}
+      TEST_CONFIG=${TEST_CONFIG//_avx512/}
     fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
