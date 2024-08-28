@@ -191,7 +191,7 @@ def build_collectives(
         input_sizes = entries[0]["input_sizes"]
         output_sizes = entries[0]["output_sizes"]
         collective_state = entries[0]["state"]
-        colletive_frames = format_frames(entries[0]["frames"])
+        collective_frames = format_frames(entries[0]["frames"])
         expected_ranks = set(_memberships[pg_name])
         candidate_ranks = {first_rank}
         candidate_idx = {}
@@ -289,7 +289,7 @@ def build_collectives(
                     f"Not all ranks joining collective for group {pg_name}:{desc} collective {profiling_name} ",
                     f"Missing ranks are {expected_ranks - (candidate_ranks | found_ranks)} ",
                     f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
-                    f"\nCollective stack traces: \n{colletive_frames}",
+                    f"\nCollective stack traces: \n{collective_frames}",
                 )
             elif len(candidate_ranks) == 1:
                 # case two: alltoall or alltoall_base case.
@@ -297,12 +297,12 @@ def build_collectives(
                     alltoall_cases = [entries[0]] + [
                         all_entries[o][found_idx[o]] for o in found_ranks
                     ]
-                    check_result, input_numel, output_numel = check_size_alltoall(
+                    fail_check, input_numel, output_numel = check_size_alltoall(
                         alltoall_cases
                     )
                     # We don't log the input/output sizes for alltoall so we don't consider the size mismatch as an error for now.
-                    check_result = True
-                    if not check_result:
+                    fail_check = False
+                    if fail_check:
                         # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
                         mismatch[pg_name] += 1
                         print(
@@ -310,7 +310,7 @@ def build_collectives(
                             f"for group {pg_name}:{desc} collective {profiling_name} ",
                             f"input_numel {input_numel} output_numel {output_numel} ",
                             f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
-                            f"\nCollective stack traces: \n{colletive_frames}",
+                            f"\nCollective stack traces: \n{collective_frames}",
                         )
                         candidate_ranks.update(found_ranks)
                         candidate_idx.update(found_idx)
@@ -337,7 +337,7 @@ def build_collectives(
                     f"Collective {record_id} errors for group {pg_name}:{desc} collective {profiling_name} ",
                     f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
                     f"\nFound errors: {error_msg}\n",
-                    f"\nCollective stack traces: \n{colletive_frames} ",
+                    f"\nCollective stack traces: \n{collective_frames} ",
                 )
                 candidate_ranks.update(found_ranks)
                 candidate_idx.update(found_idx)

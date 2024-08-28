@@ -253,15 +253,14 @@ def sort_trace_from_beginning(
 
     maximum_starting_record_id = 0
     for rank in entries:
-        # Since this is a ring buffer, we want to first sort the entries by `record_id` to
-        # find the largest starting point. For example, if the buffer has the following entries:
+        # Although this is a ring buffer, we already sort the entries by `record_id` when dumping, we just
+        # need to find the largest starting point. For example, if the buffer has the following entries:
         # Rank 0: [0, 1, 2, 3, 4, 5, 6]
-        # Rank 1: [7, 1, 2, 3, 4, 5, 6]
-        # Rank 2: [7, 8, 2, 3, 4, 5, 6]
+        # Rank 1: [1, 2, 3, 4, 5, 6, 7]
+        # Rank 2: [2, 3, 4, 5, 6, 7, 8]
         # Rank 3: [0, 1, 2, 3, 4, 5, None]
         # Then we should start from collective 2 not 0 because any collective before,
         # we don't have complete records from all ranks so we need to ignore them.
-        entries[rank] = sorted(entries[rank], key=lambda entry: entry["record_id"])
         first_record_id = entries[rank][0]["record_id"]
         maximum_starting_record_id = max(maximum_starting_record_id, first_record_id)
 
