@@ -4974,7 +4974,6 @@ class TestCudaOptims(TestCase):
     )
     def test_graph_scaling_fused_optimizers(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        print(f"optim_cls:{optim_cls}")
 
         steps_warmup = 3
         steps_train = 2
