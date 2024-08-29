@@ -122,13 +122,16 @@ Memory management
      change_current_allocator
 
 .. autoclass:: torch.cuda.MemPool
-   :members:
+    :members:
+    :undoc-members:
 
 .. autoclass:: torch.cuda.MemPoolContext
-   :members:
+    :members:
+    :undoc-members:
 
 .. autoclass:: torch.cuda.use_mem_pool
-   :members:
+    :members:
+    :undoc-members:
 
 .. FIXME The following doesn't seem to exist. Is it supposed to?
    https://github.com/pytorch/pytorch/issues/27785
