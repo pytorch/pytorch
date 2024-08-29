@@ -6680,6 +6680,38 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad)
         self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Platform doesn't support flash or mem-efficient attention",
+    )
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @skipIfTorchDynamo()
+    def test_sdpa_flop_counter(self, device):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        def get_flops(nt):
+            flop_counter = FlopCounterMode(display=False)
+            with flop_counter:
+                ret = torch.nn.functional.scaled_dot_product_attention(nt, nt, nt)
+                ret.values().sum().backward()
+            return flop_counter.get_total_flops()
+
+        values = torch.randn(
+            (8 * 16, 4, 16), requires_grad=True, device=device, dtype=torch.float16
+        )
+        offsets = torch.arange(0, 8 * 16 + 1, 16, device=device, dtype=torch.int32)
+        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+
+        values_meta = torch.randn(
+            (8 * 16, 4, 16), requires_grad=True, device="meta", dtype=torch.float16
+        )
+        offsets_meta = torch.arange(0, 8 * 16 + 1, 16, device="meta", dtype=torch.int32)
+        nt_meta = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+
+        self.assertEqual(get_flops(nt), get_flops(nt_meta))
+
     @skipIfTorchDynamo()
     def test_nested_tensor_activation_checkpoint(self, device):
         values = torch.randn(
