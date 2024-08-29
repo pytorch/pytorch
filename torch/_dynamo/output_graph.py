@@ -1832,7 +1832,6 @@ class SubgraphTracer(fx.Tracer):
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
         self.prev_inst = None
-        self.under_checkpoint = False
         self.within_forward_hook_under_checkpoint = False
 
         self._cur_code = None
@@ -1849,11 +1848,6 @@ class SubgraphTracer(fx.Tracer):
             self.source_fn_stack = self.parent.source_fn_stack + [
                 (self.graph._target_to_str(source_target), source_target)
             ]
-
-    def set_under_checkpoint(self, under_checkpoint: bool) -> bool:
-        under_checkpoint_prev_value = self.under_checkpoint
-        self.under_checkpoint = under_checkpoint
-        return under_checkpoint_prev_value
 
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(self, tx, node):

@@ -419,8 +419,8 @@ class SideEffects:
         # the .closures field, from which we will see if we need to keep
         # any mutations to cell variables alive.
 
-        for k, v in self.id_to_variable.items():
-            print(f"prune: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}, k: {k}, v: {v}, is_live: {is_live(v)}")
+        # for k, v in self.id_to_variable.items():
+        #     print(f"prune: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}, k: {k}, v: {v}, is_live: {is_live(v)}")
             
         self.id_to_variable = {
             k: v for k, v in self.id_to_variable.items() if is_live(v)
@@ -562,7 +562,7 @@ class SideEffects:
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
         for var in self._get_modified_vars():
-            print(f"here1: var: {var}")
+            # print(f"here1: var: {var}")
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)
