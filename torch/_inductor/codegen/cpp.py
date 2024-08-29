@@ -3329,10 +3329,7 @@ class TilingSelect:
                 var_sizes_list, key=lambda sizes: len(sizes[1])
             )
             call_ranges = tuple(group) + tuple(reduction_group)
-            itervars = [
-                sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
-                for n in range(len(call_ranges))
-            ]
+
             if config.cpp.enable_tiling_heuristics:
 
                 def _try_get_stride(
@@ -3344,6 +3341,14 @@ class TilingSelect:
                     itervar = itervars[tiling_indices[0]]
                     stride = stride_at_vec_range(index, itervar, tiling_factor)
                     return stride if stride.is_number else None
+
+                def _update_negative_op_count(
+                    node_name, non_contig_indexing_op_counter
+                ):
+                    if node_name not in non_contig_indexing_op_counter:
+                        non_contig_indexing_op_counter[node_name] = 1
+                    else:
+                        non_contig_indexing_op_counter[node_name] += 1
 
                 def _is_valid_indices(
                     itervars,
@@ -3360,14 +3365,10 @@ class TilingSelect:
                         < len(itervars)
                     )
 
-                def _update_negative_op_count(
-                    node_name, non_contig_indexing_op_counter
-                ):
-                    if node_name not in non_contig_indexing_op_counter:
-                        non_contig_indexing_op_counter[node_name] = 1
-                    else:
-                        non_contig_indexing_op_counter[node_name] += 1
-
+                itervars = [
+                    sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
+                    for n in range(len(call_ranges))
+                ]
                 reduction_depth = len(group)
                 vars, reduction_vars = (
                     itervars[:reduction_depth],
