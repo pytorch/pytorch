@@ -526,6 +526,38 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_seqlen_lt_default_sparse_block_size(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        # _DEFAULT_SPARSE_BLOCK_SIZE is 128
+        attention = functools.partial(
+            flex_attention,
+            score_mod=score_mod,
+            kernel_options={"FORCE_USE_FLEX_ATTENTION": True},
+        )
+        self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(causal_mask, 1, 1, 64, 64, BLOCK_SIZE=256)
+        attention = functools.partial(
+            flex_attention,
+            score_mod=score_mod,
+            block_mask=block_mask,
+            kernel_options={"FORCE_USE_FLEX_ATTENTION": True},
+        )
+        self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
+
     @expectedFailure  # TODO: supports block sparsity with dynamic shapes
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -1593,6 +1625,51 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
 
     @supported_platform
+    def test_force_write_lse(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 16),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        out_eager, lse_eager = flex_attention(query, key, value, return_lse=True)
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        out_compiled, lse_compiled = flex_compile(query, key, value, return_lse=True)
+
+        torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
+
+    @supported_platform
+    def test_small_q_kv_len(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (1, 1, 1, 16),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        kernel_options = {"FORCE_USE_FLEX_ATTENTION": True}
+        out_eager, lse_eager = flex_attention(
+            query, key, value, return_lse=True, kernel_options=kernel_options
+        )
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        out_compiled, lse_compiled = flex_compile(
+            query, key, value, return_lse=True, kernel_options=kernel_options
+        )
+
+        assert torch.equal(out_eager, out_compiled)
+        assert torch.equal(lse_eager, lse_compiled)
+
+        grads_eager = torch.autograd.grad(out_eager.sum(), (query, key, value))
+        grads_compile = torch.autograd.grad(out_compiled.sum(), (query, key, value))
+
+        torch.testing.assert_close(grads_eager, grads_compile)
+
+    @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3
@@ -1664,7 +1741,7 @@ class GraphModule(torch.nn.Module):
         child_7: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_7 = None
         child_8: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_8 = None
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True, 'IS_DIVISIBLE': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -1705,7 +1782,7 @@ class GraphModule(torch.nn.Module):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True, 'IS_DIVISIBLE': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -1780,6 +1857,16 @@ class TestBlockMask(InductorTestCase):
         assert block_mask.kv_num_blocks.is_cuda
         assert block_mask.q_indices.is_cuda
         assert block_mask.q_num_blocks.is_cuda
+
+    @supported_platform
+    def test_compiling_create_block_mask(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 512, 512, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
 
     @supported_platform
     def test_block_mask_viz(self):
