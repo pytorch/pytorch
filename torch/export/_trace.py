@@ -23,6 +23,7 @@ from torch._export.db.logging import (
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
+    _NonStrictTorchFunctionHandler,
     make_constraints,
     make_fake_inputs,
     produce_guards_and_solve_constraints,
@@ -62,7 +63,6 @@ from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
-    _DataDependentErrorHandlerNonStrict,
     ConstraintViolationError,
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
@@ -312,18 +312,12 @@ def _get_param_buffer_mapping(
     of a traced module to what the original module contains.
     """
 
-    param_lookup: Dict[int, List[str]] = {}
-    buffer_lookup: Dict[int, List[str]] = {}
+    param_lookup: Dict[int, str] = {}
+    buffer_lookup: Dict[int, str] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup.setdefault(id(param), []).append(name)
+        param_lookup[id(param)] = name
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
-        buffer_lookup.setdefault(id(buffer), []).append(name)
-
-    # reverse lists so FQN assignment is FIFO wrt model structure
-    for name, fqns in param_lookup.items():
-        param_lookup[name] = fqns[::-1]
-    for name, fqns in buffer_lookup.items():
-        buffer_lookup[name] = fqns[::-1]
+        buffer_lookup[id(buffer)] = name
 
     param_buffer_table: Dict[str, str] = {}
     for dynamo_name, dynamo_param in traced_module.named_parameters(
@@ -331,14 +325,14 @@ def _get_param_buffer_mapping(
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_param) in param_lookup:
-            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)]
 
     for dynamo_name, dynamo_buffer in traced_module.named_buffers(
         remove_duplicate=False
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_buffer) in buffer_lookup:
-            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)]
 
     return param_buffer_table
 
@@ -1703,7 +1697,7 @@ def _non_strict_export(
             _is_torch_jit_trace=_is_torch_jit_trace,
         )
 
-    with fake_mode, _DataDependentErrorHandlerNonStrict(), torch._dynamo.config.patch(
+    with fake_mode, _NonStrictTorchFunctionHandler(), torch._dynamo.config.patch(
         assume_static_by_default=False
     ):
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (

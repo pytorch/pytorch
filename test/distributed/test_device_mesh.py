@@ -605,6 +605,11 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         ]
         self.assertEqual(flatten_mesh_root_dims, (0, 2))
 
+        # Test flatten with a flattened mesh_dim_name
+        cp_tp_mesh = mesh_3d["cp", "tp"]
+        cp_tp_mesh._flatten("dummy")
+        self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
+
     @with_comms
     def test_reconstruct_mesh_with_flatten_dim(self):
         mesh_3d = init_device_mesh(
@@ -686,6 +691,17 @@ class TestMeshEnv(DTensorTestBase):
 
         self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "DP"), 0)
         self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "TP"), 1)
+
+    @with_comms
+    def test_get_all_submeshes(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, 4), mesh_dim_names=("replicate", "shard")
+        )
+        all_submeshes = _mesh_resources._get_all_submeshes(mesh_2d, "replicate")
+        self.assertEqual(len(all_submeshes), 4)
+        self.assertEqual(
+            all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True
+        )
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

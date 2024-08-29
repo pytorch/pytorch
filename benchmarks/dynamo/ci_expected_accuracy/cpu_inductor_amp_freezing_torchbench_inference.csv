@@ -10,10 +10,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,model_fail_to_load,0
-
-
-
 LearningToPaint,pass,0
 
 
@@ -142,10 +138,6 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,61
-
-
-
 hf_DistilBert,pass,0
 
 
@@ -158,15 +150,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Longformer,pass,4
-
-
-
 hf_Reformer,pass,5
-
-
-
-hf_T5,pass,0
 
 
 
@@ -198,10 +182,6 @@ maml_omniglot,pass,0
 
 
 
-mnasnet1_0,pass,0
-
-
-
 mobilenet_v2,pass,0
 
 
@@ -211,10 +191,6 @@ mobilenet_v2_quantized_qat,pass,2
 
 
 mobilenet_v3_large,pass,0
-
-
-
-moco,model_fail_to_load,0
 
 
 
@@ -279,10 +255,6 @@ resnet50_quantized_qat,pass,2
 
 
 resnext50_32x4d,pass,0
-
-
-
-shufflenet_v2_x1_0,pass,0
 
 
 

@@ -32,9 +32,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -145,8 +154,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cpu-build
-    runs-on: windows.4xlarge.nonephemeral
+    needs:
+      - conda-py3_9-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -276,7 +287,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -388,8 +400,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_9-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_9-cuda11_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -521,7 +535,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -633,8 +648,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_9-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_9-cuda12_1-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -766,7 +783,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -878,8 +896,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_9-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda12_4-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_9-cuda12_4-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1011,7 +1031,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1122,8 +1143,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cpu-build
-    runs-on: windows.4xlarge.nonephemeral
+    needs:
+      - conda-py3_10-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1253,7 +1276,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1365,8 +1389,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_10-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_10-cuda11_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1498,7 +1524,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1610,8 +1637,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_10-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_10-cuda12_1-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1743,7 +1772,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1855,8 +1885,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_10-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda12_4-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_10-cuda12_4-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1988,7 +2020,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2099,8 +2132,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_11-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cpu-build
-    runs-on: windows.4xlarge.nonephemeral
+    needs:
+      - conda-py3_11-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2230,7 +2265,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2342,8 +2378,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_11-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_11-cuda11_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2475,7 +2513,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2587,8 +2626,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_11-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_11-cuda12_1-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2720,7 +2761,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2832,8 +2874,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_11-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda12_4-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_11-cuda12_4-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2965,7 +3009,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3076,8 +3121,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_12-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cpu-build
-    runs-on: windows.4xlarge.nonephemeral
+    needs:
+      - conda-py3_12-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3207,7 +3254,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_12-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3319,8 +3367,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_12-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_12-cuda11_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3452,7 +3502,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_12-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3564,8 +3615,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_12-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_12-cuda12_1-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3697,7 +3750,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_12-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3809,8 +3863,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_12-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda12_4-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - conda-py3_12-cuda12_4-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch

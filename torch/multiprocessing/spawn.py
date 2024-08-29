@@ -233,6 +233,7 @@ def start_processes(
         start_method == "forkserver"
         and os.environ.get(ENV_VAR_PARALLEL_START, "0") == "1"
     ):
+        log.info("Starting processes in parallel.")
         start_parallel = True
     else:
         # Set env var TORCH_MP_PARALLEL_START to 0 to disable parallel start
