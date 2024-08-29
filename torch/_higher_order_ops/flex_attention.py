@@ -526,9 +526,6 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             buffer.requires_grad
             for buffer in score_mod_other_buffers + mask_mod_other_buffers
         )
-        assert (
-            not any_buffer_requires_grad
-        ), "Captured buffers that require grad are not yet supported."
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
