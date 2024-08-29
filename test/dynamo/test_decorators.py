@@ -615,7 +615,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_mark_static_nn_module(self):
         # Inspired from detectron2
 
-        @torch._dynamo.mark_static_nn_module
+        @torch._dynamo.mark_static
         class Conv2d(torch.nn.Conv2d):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)

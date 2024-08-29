@@ -1695,7 +1695,7 @@ class VariableBuilder:
                                 (
                                     f"{name} is converted to a symbolic integer. It is an attribute of a "
                                     "user defined nn module class. If you wish to keep it static, you can "
-                                    "mark the nn module class as `torch._dynamo.mark_static_nn_module`."
+                                    "mark the nn module class as `torch._dynamo.mark_static`."
                                 ),
                             )
                         frame_state_entry.scalar = None
