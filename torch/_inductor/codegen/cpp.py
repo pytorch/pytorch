@@ -1013,9 +1013,10 @@ class CppVecOverrides(CppOverrides):
                 if vectors:
                     return func(*new_args, **kwargs)
                 else:
+                    # fallback to scalar ops
                     scalar_ops = super(CppVecOverrides, self)
                     scalar_func = getattr(
-                        scalar_ops, func.__name__, getattr(V.ops, func.__name__)  # type: ignore[attr-defined]
+                        scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__)  # type: ignore[attr-defined]
                     )
                     assert scalar_func is not None
                     return scalar_func(*args, **kwargs)
@@ -1027,11 +1028,7 @@ class CppVecOverrides(CppOverrides):
                 "masked",
                 "index_expr",
             ]:
-                setattr(
-                    self,
-                    name,
-                    wrap(method.__func__),
-                )
+                setattr(self, name, wrap(method.__func__))
 
         return self
 
