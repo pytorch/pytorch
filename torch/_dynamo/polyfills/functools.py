@@ -1,5 +1,5 @@
 """
-Python polyfills for builtins
+Python polyfills for functools
 """
 
 

@@ -210,6 +210,7 @@ def init_backend_registration():
         }
         if config.cpu_backend == "triton":
             import os
+
             assert (
                 os.environ.get("TRITON_CPU_BACKEND", "0") == "1"
             ), "TRITON_CPU_BACKEND=1 must be set if you are using Triton on the CPU"

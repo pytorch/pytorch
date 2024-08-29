@@ -10,10 +10,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,model_fail_to_load,0
-
-
-
 LearningToPaint,pass,0
 
 
@@ -82,7 +78,7 @@ detectron2_fcos_r_50_fpn,pass,23
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_accuracy,57
+detectron2_maskrcnn_r_101_c4,pass,57
 
 
 
@@ -186,10 +182,6 @@ maml_omniglot,pass,0
 
 
 
-mnasnet1_0,pass,0
-
-
-
 mobilenet_v2,pass,0
 
 
@@ -199,10 +191,6 @@ mobilenet_v2_quantized_qat,pass,2
 
 
 mobilenet_v3_large,pass,0
-
-
-
-moco,model_fail_to_load,0
 
 
 
@@ -267,10 +255,6 @@ resnet50_quantized_qat,pass,2
 
 
 resnext50_32x4d,pass,0
-
-
-
-shufflenet_v2_x1_0,pass,0
 
 
 
