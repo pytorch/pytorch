@@ -3325,21 +3325,6 @@ class TilingSelect:
 
         if tiling_indices:
 
-            def _is_valid_indices(
-                itervars,
-                tiling_indices,
-            ):
-                return (
-                    len(tiling_indices) == 1
-                    and len(itervars) > 0
-                    and (
-                        tiling_indices[0]
-                        if tiling_indices[0] >= 0
-                        else tiling_indices[0] + len(itervars)
-                    )
-                    < len(itervars)
-                )
-
             group, reduction_group = max(
                 var_sizes_list, key=lambda sizes: len(sizes[1])
             )
@@ -3359,6 +3344,21 @@ class TilingSelect:
                     itervar = itervars[tiling_indices[0]]
                     stride = stride_at_vec_range(index, itervar, tiling_factor)
                     return stride if stride.is_number else None
+
+                def _is_valid_indices(
+                    itervars,
+                    tiling_indices,
+                ):
+                    return (
+                        len(tiling_indices) == 1
+                        and len(itervars) > 0
+                        and (
+                            tiling_indices[0]
+                            if tiling_indices[0] >= 0
+                            else tiling_indices[0] + len(itervars)
+                        )
+                        < len(itervars)
+                    )
 
                 def _update_negative_op_count(
                     node_name, non_contig_indexing_op_counter
@@ -3443,34 +3443,22 @@ class TilingSelect:
                     # when needed.
                     return [], []
 
-            if dtype in DTYPE_LOWP_FP and _is_valid_indices(itervars, tiling_indices):
-                # For lower precision data type, if the tiling_len is not long enough,
+            if dtype in DTYPE_LOWP_FP and len(call_ranges) > max(tiling_indices):
+                # For lower precision data type, if the call_range is not long enough,
                 # use tiling_factor // 2 for better performance
+                factor_lowp = cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype)
                 for tiling_indice in tiling_indices:
                     if has_free_symbols(call_ranges):
-                        # For dynamic shape, if tiling_len is less than cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype),
-                        # use tiling_factor // 2
-                        tiling_len = V.graph.sizevars.size_hint(
+                        # For dynamic shape, use tiling_factor // 2 if call_range is less than factor_lowp
+                        call_range = V.graph.sizevars.size_hint(
                             call_ranges[tiling_indice], fallback=0
                         )
-                        if tiling_len < cpu_vec_isa.pick_vec_isa().nelements(
-                            dtype=dtype
-                        ):
-                            V.graph.sizevars.guard_lt(
-                                tiling_len,
-                                cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype),
-                            )
-                            tiling_factor = (
-                                cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype) // 2
-                            )
+                        if call_range < factor_lowp:
+                            V.graph.sizevars.guard_lt(call_range, factor_lowp)
+                            tiling_factor = factor_lowp // 2
                             break
-                    elif (
-                        call_ranges[tiling_indice]
-                        < cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype) // 2 + 4
-                    ):
-                        tiling_factor = (
-                            cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype) // 2
-                        )
+                    elif call_ranges[tiling_indice] < factor_lowp // 2 + 4:
+                        tiling_factor = factor_lowp // 2
                         break
 
             if len(tiling_indices) == 1:
