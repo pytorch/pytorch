@@ -1073,6 +1073,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
+#ifdef USE_ROCM
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
         if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
           if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
@@ -1101,7 +1102,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
                 BLASOP_A, BLASOP_B> scaledgemm{&params};                       \
             scaledgemm(&params);                                        \
           }                                                             \
-        } else if (mat1.scalar_type() == ScalarType::Float8_e4m3fn) {        \
+        } 
+#else
+#define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
+        if (mat1.scalar_type() == ScalarType::Float8_e4m3fn) {        \
           if (mat2.scalar_type() == ScalarType::Float8_e4m3fn) {      \
             static at::cuda::tunable::ScaledGemmTunableOp<              \
                 at::Float8_e4m3fn, at::Float8_e4m3fn, scalar_t,     \
@@ -1129,6 +1133,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
             scaledgemm(&params);                                        \
           }                                                             \
         }
+#endif
     AT_DISPATCH_V2(out_dtype_, "_tunable_scaled_gemm", AT_WRAP([&] {
       bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
       bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
