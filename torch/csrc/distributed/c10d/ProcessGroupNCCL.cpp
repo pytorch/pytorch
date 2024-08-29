@@ -1028,7 +1028,12 @@ void ProcessGroupNCCL::setSequenceNumberForGroup() {
 } // NCCL just starts sequence numbers at 0.
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
-  return seqCollective_;
+  // This is to define the unique sequence number inside the group
+  // for both collective operations and p2p operations.
+  // This number is used to identify the collective operation or p2p
+  // in the execution trace file. For example, "wait" operation uses
+  // this number to identify the operation that it is waiting for.
+  return seqCollective_ + seqP2P_;
 }
 
 void ProcessGroupNCCL::registerOnCompletionHook(
@@ -2425,7 +2430,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       device,
       rank,
       opType,
-      seqCollective_,
+      this->getSequenceNumberForGroup(),
       profilingTitle,
       profilingTitle != nullptr ? std::optional<std::vector<at::Tensor>>(inputs)
                                 : std::nullopt,
