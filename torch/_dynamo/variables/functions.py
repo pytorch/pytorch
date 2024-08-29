@@ -141,6 +141,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(**kwargs)
+        if "fwd_pre_hook" in str(fn):
+            import traceback
+            traceback.print_stack()
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
@@ -330,7 +333,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 *mod._forward_pre_hooks.values(),
             ):
                 assert self.source
-                # TODO(yf225): how do I check why side effect in forward is not played?
+                # TODO(yf225): how do I check why side effect in forward is not played? what triggers the replaying of side effects?
                 with torch._dynamo.variables.higher_order_ops.dynamo_within_forward_hook_under_checkpoint(tx):
                     return variables.ForwardPreHookUnderCheckpoint(mod_var, self, source=self.source).call_function(
                         tx, args, kwargs
