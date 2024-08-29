@@ -386,25 +386,25 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
   if (M == 64 && N >= 3072) {
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
-        /*Transposed=*/false,
+        /*Transposed=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
   if (N == 64 && M >= 3072) {
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
-        /*Transposed=*/true,
+        /*Transposed=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
   if (M == 192 && N >= 4096) {
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
-        /*Transposed=*/true,
+        /*Transposed=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
   if (N == 192 && M >= 4096) {
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
-        /*Transposed=*/false,
+        /*Transposed=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 
@@ -413,13 +413,13 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
     if (M % 256 > 0 && N % 256 == 0) {
       return handle_transposition<
           /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
-          /*Transposed=*/true,
+          /*Transposed=*/std::true_type,
           Types...>(XQ, WQ, x_scale, w_scale, bias, out);
     }
     if (N % 256 > 0 && M % 256 == 0) {
       return handle_transposition<
           /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
-          /*Transposed=*/false,
+          /*Transposed=*/std::false_type,
           Types...>(XQ, WQ, x_scale, w_scale, bias, out);
     }
   }
@@ -427,12 +427,12 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
     if ((M <= N) ^ (M * N <= 1024 * 1024)) {
       return handle_transposition<
           /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
-          /*Transpose=*/true,
+          /*Transposed=*/std::true_type,
           Types...>(XQ, WQ, x_scale, w_scale, bias, out);
     } else {
       return handle_transposition<
           /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
-          /*Transpose=*/false,
+          /*Transposed=*/std::false_type,
           Types...>(XQ, WQ, x_scale, w_scale, bias, out);
     }
   }
@@ -441,12 +441,12 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
   if ((M <= N) ^ (M >= 2048 && N >= 2048)) {
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
-        /*Transpoed=*/true,
+        /*Transposed=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
-        /*Transpoed=*/true,
+        /*Transposed=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
