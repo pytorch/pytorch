@@ -1939,7 +1939,7 @@ class TestMPS(TestCaseMPS):
         output_cpu = torch.bmm(batch1_cpu, batch2_cpu)
         output_mps = torch.bmm(batch1_mps, batch2_mps)
 
-        #Using the low precision comparison for FP16
+        # Using the low precision comparison for FP16
         self.assertEqual(output_cpu, output_mps, atol=1e-2, rtol=1e-2)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
