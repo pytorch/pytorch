@@ -28,7 +28,7 @@ jobs:
 
     - name: Compare runner-determinator script embedded in workflow with checked in script
       run: |
-        # Compare the generated runner_determinator.py with the existing one
+        # Compare the extracted runner_determinator script with the existing one
         diff runner_determinator_workflow.py .github/scripts/runner_determinator.py
       # Fail the job if the scripts are not identical
       continue-on-error: false
