@@ -82,7 +82,14 @@ struct GemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    char buf[256];
+    int ret;
+
+    ret = snprintf(buf, 256, "%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+
+    TORCH_CHECK(ret > 0 && ret < 256, "TunableOp: Signature formatting error occured. Return value = ", ret);
+
+    return std::string(buf);
   }
 
   size_t GetSizeA() const {
