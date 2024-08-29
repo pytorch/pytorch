@@ -22,6 +22,7 @@
 #include <ATen/ops/allclose.h>
 #include <ATen/ops/from_blob.h>
 #endif
+#include <cstdio>
 
 namespace at::cuda::tunable {
 
