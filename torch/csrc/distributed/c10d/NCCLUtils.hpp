@@ -10,11 +10,12 @@
 #include <thread>
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
 #include <nccl.h>
+#include <torch/csrc/distributed/c10d/LockGuard.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
-#include <torch/csrc/distributed/c10d/logging.h>
 #include <optional>
 
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -714,6 +715,11 @@ struct NCCLTraceBuffer {
       bool includeStackTraces,
       bool onlyActive);
 };
+
+// Check for NaNs in a tensor on a given stream. If any are found, throw a
+// device-side error.
+void checkForNan(const at::Tensor& tensor, at::cuda::CUDAStream& stream);
+
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
