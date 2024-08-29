@@ -1369,7 +1369,10 @@ class VariableBuilder:
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
                 # tuples are immutable, so consider tuple elements static
-                or is_tuple_getitem(self.source)
+                or (
+                    not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+                    and is_tuple_getitem(self.source)
+                )
                 # TODO: Delete this condition when rollout is done.  NB: this
                 # condition never evaluates True in open source
                 or (
