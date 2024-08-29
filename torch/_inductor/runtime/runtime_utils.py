@@ -72,7 +72,7 @@ def validate_triton_config(cfg):
     # and then it won't be used when the config is loaded from cache.
     # So we assert - if we do get a pre_hook, it might get ignored after caching.
     assert (
-        not hasattr(cfg, "pre_hook") or cfg.pre_hook is None
+        getattr(cfg, "pre_hook", None) is None
     ), "triton configs with pre_hooks not supported"
 
 
