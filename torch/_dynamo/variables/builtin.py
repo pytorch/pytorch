@@ -49,9 +49,9 @@ from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
     DictView,
+    FrozensetVariable,
     is_hashable,
     SetVariable,
-    FrozensetVariable,
 )
 from .lists import (
     BaseListVariable,

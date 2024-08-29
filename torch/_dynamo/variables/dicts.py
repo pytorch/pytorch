@@ -582,12 +582,10 @@ class FrozensetVariable(SetVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
-        from . import ListVariable, TupleVariable
-
-        # We foward the calls to the dictionary model
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
-            RuntimeError(f"Illegal call_method {name} on a frozenset")
+            raise RuntimeError(f"Illegal call_method {name} on a frozenset")
         return super().call_method(tx, name, args, kwargs)
+
 
 class DictView(VariableTracker):
     """
