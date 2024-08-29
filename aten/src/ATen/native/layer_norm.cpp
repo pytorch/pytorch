@@ -295,12 +295,17 @@ Tensor rms_norm(
       eps_val = eps.value();
     }
 
-    // upcast is needed for all dtypes
-    Tensor upcasted_input = input.to(ScalarType::Float);
+    // upcast is needed for fp16 and bf16
+    Tensor upcasted_input;
+    if constexpr (std::is_same_v<scalar_t, c10::Half> || std::is_same_v<scalar_t, c10::BFloat16>) {
+      upcasted_input = input.to(ScalarType::Float);
+    } else {
+      upcasted_input = input;
+    }
+
     upcasted_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
 
-    Tensor result = input.mul(upcasted_input);
-    result = result.type_as(input);
+    Tensor result = upcasted_input.mul(upcasted_input).type_as(input);
 
     if (weight_opt.has_value()) {
       result = result.mul(weight_opt.value());
