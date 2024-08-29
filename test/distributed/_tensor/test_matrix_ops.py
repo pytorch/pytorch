@@ -302,8 +302,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         # TODO: Add test cases where is_causal=False and an attention mask is provided.
         #       Gaps include missing op support for aten.masked_fill_.Scalar.
         is_causal = True
+        enable_gqa = False
         params = torch.backends.cuda.SDPAParams(
-            query, key, value, None, dropout_p, is_causal
+            query, key, value, None, dropout_p, is_causal, enable_gqa
         )
         if torch.backends.cuda.can_use_flash_attention(params, debug=False):
             available_backends.append(SDPBackend.FLASH_ATTENTION)

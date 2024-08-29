@@ -309,6 +309,27 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, d)
         self.assertEqual(ref, res)
 
+    def test_atrribute_error(self):
+        class Mock:
+            def __init__(self):
+                self.a = 1
+
+        mock = Mock()
+
+        def fn(x):
+            try:
+                c = 2
+                mock.b
+            except AttributeError:
+                c = 3
+            return torch.sin(x) * c
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

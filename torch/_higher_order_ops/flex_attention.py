@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import math
 from typing import Any, Callable, Dict, Tuple, Union
 
 import torch
@@ -72,7 +73,6 @@ class FlexAttentionHOP(HigherOrderOperator):
 
 
 flex_attention = FlexAttentionHOP()
-flex_attention.__module__ = "torch.ops.higher_order"
 
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
@@ -87,6 +87,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         out: torch.Tensor,
         logsumexp: torch.Tensor,
         grad_out: torch.Tensor,
+        grad_logsumexp: torch.Tensor,
         fw_graph: Union[Callable, GraphModule],
         joint_graph: GraphModule,
         block_mask: Tuple,
@@ -107,6 +108,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
             out,
             logsumexp,
             grad_out,
+            grad_logsumexp,
             fw_graph,
             joint_graph,
             block_mask,
@@ -118,7 +120,6 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
 
 
 flex_attention_backward = FlexAttentionBackwardHOP()
-flex_attention_backward.__module__ = "torch.ops.higher_order"
 
 
 def _math_attention_inner(
@@ -186,6 +187,11 @@ def math_attention(
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
     """
+    # broadcast query & key along head dim for GQA
+    G = query.size(1) // key.size(1)
+    value = torch.repeat_interleave(value, G, dim=1)
+    key = torch.repeat_interleave(key, G, dim=1)
+
     _, post_mod_scores = _math_attention_inner(
         query,
         key,
@@ -198,13 +204,14 @@ def math_attention(
         mask_mod_other_buffers,
     )
 
-    # TODO Unconditionally return logsumexp for backwards
-    # if any(t.requires_grad for t in (query, key, value)):
+    # Set fully masked rows' sumexp to 0.0
     logsumexp = post_mod_scores.logsumexp(dim=-1)
+    masked_rows = torch.all(post_mod_scores == -float("inf"), dim=-1)
+    logsumexp = torch.where(masked_rows, 0.0, logsumexp)
 
-    post_mod_scores = post_mod_scores.softmax(dim=-1)
+    post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
 
-    return post_mod_scores.to(query.dtype) @ value, logsumexp
+    return post_mod_scores.to(query.dtype) @ value, logsumexp / math.log(2)
 
 
 @flex_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -315,31 +322,18 @@ def flex_attention_proxy_torch_dispatch_mode(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
-    if mode.enable_tracing:
-        return trace_flex_attention(
-            mode,
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
-    else:
-        return flex_attention(
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
+    return trace_flex_attention(
+        mode,
+        query,
+        key,
+        value,
+        score_mod,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
 
 
 @flex_attention.py_functionalize_impl
@@ -425,11 +419,13 @@ def flex_attention_fake_tensor_mode(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     with mode:
-        batch_size, num_heads, seq_len_q, head_dim = query.shape
+        v_head_dim = value.size(-1)
+        batch_size, num_heads, seq_len_q, q_head_dim = query.shape
         logsumexp = query.new_empty(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
-        return torch.empty_like(query), logsumexp
+        out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
+        return query.new_empty(out_shape), logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------
@@ -568,7 +564,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         return out, logsumexp
 
     @staticmethod
-    def backward(ctx, grad_out, logsumexp_grad):
+    def backward(ctx, grad_out, grad_logsumexp):
         fw_args = ctx.saved_tensors
         (
             query,
@@ -608,6 +604,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             out,
             logsumexp,
             grad_out,
+            grad_logsumexp,
             fw_graph,
             joint_graph,
             (
@@ -680,14 +677,23 @@ def sdpa_dense_backward(
     out: torch.Tensor,
     logsumexp: torch.Tensor,
     grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
     fw_graph: Callable,  # GraphModule type hint?
     joint_graph: Callable,
     block_mask: Tuple,
     scale: float,
     kernel_options: Dict[str, Any],
-    score_mod_other_buffers: Tuple = (),
-    mask_mod_other_buffers: Tuple = (),
+    score_mod_other_buffers: Tuple,
+    mask_mod_other_buffers: Tuple,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    G = query.size(1) // key.size(1)
+    key = torch.repeat_interleave(key, G, dim=1)
+    value = torch.repeat_interleave(value, G, dim=1)
+
+    # We're undoing the log -> log2 change of base in the forwards
+    logsumexp = logsumexp * math.log(2)
+    # The backwards formula for the log -> log2 change of base in the forwards
+    grad_logsumexp = grad_logsumexp / math.log(2)
     scores, post_mod_scores = _math_attention_inner(
         query,
         key,
@@ -699,7 +705,6 @@ def sdpa_dense_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
-
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
 
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
@@ -707,7 +712,9 @@ def sdpa_dense_backward(
     grad_softmax_scores = grad_out @ value.transpose(-2, -1)
 
     sum_scores = torch.sum(out * grad_out, -1, keepdim=True)
-    grad_score_mod = softmax_scores * (grad_softmax_scores - sum_scores)
+    grad_score_mod = softmax_scores * (
+        grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
+    )
 
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
@@ -746,6 +753,18 @@ def sdpa_dense_backward(
 
     grad_query = grad_scores @ key
     grad_key = grad_scores.transpose(-2, -1) @ query
+
+    # Reduce DK, DV along broadcasted heads.
+    grad_key = grad_key.view(
+        grad_key.size(0), -1, G, grad_key.size(-2), grad_key.size(-1)
+    )
+    grad_value = grad_value.view(
+        grad_value.size(0), -1, G, grad_value.size(-2), grad_value.size(-1)
+    )
+
+    grad_key = torch.sum(grad_key, 2, keepdim=False)
+    grad_value = torch.sum(grad_value, 2, keepdim=False)
+
     return grad_query.contiguous(), grad_key.contiguous(), grad_value.contiguous()
 
 
@@ -757,6 +776,7 @@ def trace_flex_attention_backward(
     out: torch.Tensor,
     logsumexp: torch.Tensor,
     grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
     fw_graph: Union[Callable, GraphModule],
     joint_graph: GraphModule,
     block_mask: Tuple,
@@ -773,6 +793,7 @@ def trace_flex_attention_backward(
         out,
         logsumexp,
         grad_out,
+        grad_logsumexp,
         fw_graph,
         joint_graph,
         block_mask,
@@ -798,7 +819,7 @@ def trace_flex_attention_backward(
         )
     assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     block_mask = block_mask[:-1] + (mask_graph,)
-    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
+    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)  # type: ignore[arg-type]
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     proxy_mode.tracer.root.register_module("mask_graph", mask_graph)
     node_args = (
@@ -808,6 +829,7 @@ def trace_flex_attention_backward(
         out,
         logsumexp,
         grad_out,
+        grad_logsumexp,
         fw_graph,
         joint_graph,
         block_mask,
@@ -838,6 +860,7 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     out: torch.Tensor,
     logsumexp: torch.Tensor,
     grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
     fw_graph: Union[Callable, GraphModule],
     joint_graph: GraphModule,
     block_mask: Tuple,
@@ -847,39 +870,23 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
-    if mode.enable_tracing:
-        return trace_flex_attention_backward(
-            mode,
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            fw_graph,
-            joint_graph,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
-    else:
-        return flex_attention_backward(
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            fw_graph,
-            joint_graph,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
+    return trace_flex_attention_backward(
+        mode,
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        grad_logsumexp,
+        fw_graph,
+        joint_graph,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
 
 
 @flex_attention_backward.py_functionalize_impl
@@ -891,6 +898,7 @@ def flex_attention_backward_functionalize(
     out: torch.Tensor,
     logsumexp: torch.Tensor,
     grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
     fw_graph: Union[Callable, GraphModule],
     joint_graph: GraphModule,
     block_mask: Tuple,
@@ -911,6 +919,7 @@ def flex_attention_backward_functionalize(
     out_unwrapped = ctx.unwrap_tensors(out)
     logsumexp_unwrapped = ctx.unwrap_tensors(logsumexp)
     grad_out_unwrapped = ctx.unwrap_tensors(grad_out)
+    grad_logsumexp_unwrapped = ctx.unwrap_tensors(grad_logsumexp)
     block_mask_unwrapped = ctx.unwrap_tensors(block_mask)
     score_mod_other_buffers_unwrapped = ctx.unwrap_tensors(score_mod_other_buffers)
     mask_mod_other_buffers_unwrapped = ctx.unwrap_tensors(mask_mod_other_buffers)
@@ -922,6 +931,7 @@ def flex_attention_backward_functionalize(
     assert isinstance(out_unwrapped, torch.Tensor)
     assert isinstance(logsumexp_unwrapped, torch.Tensor)
     assert isinstance(grad_out_unwrapped, torch.Tensor)
+    assert isinstance(grad_logsumexp_unwrapped, torch.Tensor)
     assert isinstance(block_mask_unwrapped, tuple)
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
@@ -941,6 +951,7 @@ def flex_attention_backward_functionalize(
             out_unwrapped,
             logsumexp_unwrapped,
             grad_out_unwrapped,
+            grad_logsumexp_unwrapped,
             functional_fw_graph,  # type: ignore[arg-type]
             functional_joint_graph,  # type: ignore[arg-type]
             block_mask_unwrapped,
@@ -962,6 +973,7 @@ def flex_attention_backward_fake_tensor_mode(
     out: torch.Tensor,
     logsumexp: torch.Tensor,
     grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
     fw_graph: Union[Callable, GraphModule],
     joint_graph: GraphModule,
     block_mask: Tuple,
