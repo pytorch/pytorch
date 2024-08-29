@@ -200,7 +200,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 def _is_intel_compiler(cpp_compiler: str) -> bool:
     try:    
         output_msg = (
-            subprocess.check_output([cpp_compiler, "--version"], stderr=subprocess.STDOUT)
+            subprocess.check_output([cpp_compiler, "--version"], stderr=subprocess.DEVNULL)
             .strip()
             .decode(*SUBPROCESS_DECODE_ARGS)
         )    
@@ -806,6 +806,20 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
         pass
 
 
+@functools.lru_cache(None)
+def perload_icx_libomp_win(cpp_compiler: str) -> None:
+    try:
+        output = subprocess.check_output([cpp_compiler, "-print-file-name=libiomp5md.dll"], stderr=subprocess.DEVNULL).decode(
+            *SUBPROCESS_DECODE_ARGS
+        )
+        omp_path = output.rstrip()
+        if os.path.isfile(omp_path):
+            os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+            omp_module = cdll.LoadLibrary(omp_path)
+    except subprocess.SubprocessError:
+        pass
+
+
 def _get_openmp_args(
     cpp_compiler: str,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
@@ -869,6 +883,7 @@ def _get_openmp_args(
         elif _is_intel_compiler(cpp_compiler):
             cflags.append("Qiopenmp")
             libs.append("libiomp5md")
+            perload_icx_libomp_win(cpp_compiler)
         else:
             # /openmp, /openmp:llvm
             # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
