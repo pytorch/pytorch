@@ -15,7 +15,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def device_guard(self, device_idx):
         return f"torch.cuda._DeviceGuard({device_idx})"
 
-    def cpp_device_guard(self,):
+    def cpp_device_guard(self):
         return "at::cuda::CUDAGuard"
 
     def cpp_aoti_device_guard(self):
