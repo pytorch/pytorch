@@ -1703,6 +1703,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp = {1: "D", 10: "B", 3: "E", 0: "F"}
         return x + 1, sorted(tmp), sorted(tmp, reverse=True)
 
+    def test_dict_hasattr(self):
+        def fn(x):
+            if hasattr(x, "to"):
+                return x.to("cpu")
+            if hasattr(x, "items"):
+                return torch.cos(x["a"])
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = dict(a=torch.randn(3))
+        self.assertEqual(fn(x), opt_fn(x))
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     @make_test
     def test_list_clear(a, b):
         tmp = [a + 1, a + 2]
