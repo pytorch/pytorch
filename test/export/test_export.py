@@ -293,59 +293,57 @@ class TestExport(TestCase):
         # )
 
     def _check_dynamic_shapes_specs_and_shapes(
-        self, model, inputs, specs, passing_shapes, failing_shapes
+        self, model, inputs, specs, passing_shapes, failing_shapes, test_serdes=False
     ):
+        from torch.export.dynamic_shapes import _dumps, _extracts, _loads
+        from torch.utils._pytree import tree_map
+
+        def _tensor_inputs(shapes):
+            def _is_tensor_leaf(x):
+                return (
+                    isinstance(x, tuple)
+                    and all(isinstance(y, int) for y in x)
+                )
+
+            return tree_map(
+                lambda x: torch.randn(*x) if _is_tensor_leaf(x) else x,
+                shapes,
+                is_leaf=_is_tensor_leaf,
+            )
+
         # exports with a list of equivalent dynamic shapes specs,
         # then tests for pass/fail on list of shapes
         for _specs in specs:
             ep = export(model, inputs, dynamic_shapes=_specs)
-            for shapes in passing_shapes:
-                test_inputs = (torch.randn(*shape) for shape in shapes)
-                ep.module()(*test_inputs)
-            for shapes in failing_shapes:
-                test_inputs = (torch.randn(*shape) for shape in shapes)
-                with self.assertRaises(RuntimeError):
+
+            eps = [ep]
+            if test_serdes:
+                # test dynamic shapes serialization
+                # test that behavior remains the same when exporting with ser/des specs.
+                # 1) serialize + deserialize original specs, and export
+                # 2) extract spec from ep, deserialize, and export
+                ep_serdes = export(
+                    model,
+                    inputs,
+                    dynamic_shapes=_loads(_dumps(_specs, inputs)),
+                )
+                ep_extract = export(
+                    model,
+                    inputs,
+                    dynamic_shapes=_loads(_extracts(ep)),
+                )
+                eps.extend([ep_serdes, ep_extract])
+
+            for ep in eps:
+                for shapes in passing_shapes:
+                    test_inputs = _tensor_inputs(shapes)
+                    # test_inputs = (torch.randn(*shape) for shape in shapes)
                     ep.module()(*test_inputs)
-            self._serdes_shapes(model, inputs, _specs)
-
-    def _serdes_shapes(self, model, inputs, dynamic_shapes, kwargs={}):
-        from torch.export.dynamic_shapes import _deserialize_spec, _extract_spec, _serialize_spec
-
-        ep = export(model, inputs, kwargs, dynamic_shapes=dynamic_shapes)
-        ep_spec = _extract_spec(ep)
-        ser_spec = _serialize_spec(dynamic_shapes, inputs, kwargs=kwargs)
-        # assert ep_spec == ser_spec
-        des_ep_spec = _deserialize_spec(ep_spec)
-        des_ser_spec = _deserialize_spec(ser_spec)
-        # assert des_ep_spec == dynamic_shapes
-        # assert des_ser_spec == dynamic_shapes
-        des_ep_ep = export(model, inputs, kwargs, dynamic_shapes=des_ep_spec)
-        des_ser_ep = export(model, inputs, kwargs, dynamic_shapes=des_ser_spec)
-        des_ep_ep_spec = _extract_spec(des_ep_ep)
-        des_ser_ep_spec = _extract_spec(des_ser_ep)
-        assert des_ep_ep_spec == des_ser_ep_spec
-
-    def test_extract_spec(self):
-        from torch.export.dynamic_shapes import DIM, _extract_spec
-        auto = DIM.AUTO
-        class Foo(torch.nn.Module):
-            def forward(self, x, y, z):
-                w = x + y[1:]
-                w = w @ torch.randn(4, 6)
-                return w.reshape([-1]) + z
-
-        inputs = (
-            torch.randn(6, 4),
-            torch.randn(7, 4),
-            torch.randn(36),
-        )
-        shapes = (
-            (auto, auto),
-            (auto, auto),
-            (auto,),
-        )
-        ep = export(Foo(), inputs, dynamic_shapes=shapes)
-        self._serdes_shapes(Foo(), inputs, shapes)
+                for shapes in failing_shapes:
+                    test_inputs = _tensor_inputs(shapes)
+                    # test_inputs = (torch.randn(*shape) for shape in shapes)
+                    with self.assertRaises(RuntimeError):
+                        ep.module()(*test_inputs)
 
     def test_basic(self):
         class Module(torch.nn.Module):
@@ -529,8 +527,6 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
-        self._serdes_shapes(m, example_args, dynamic_shapes)
-
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -614,7 +610,6 @@ graph():
         ep_ns = torch.export.export(
             foo, inp, dynamic_shapes=dynamic_shapes, strict=False
         )
-        self._serdes_shapes(foo, inp, dynamic_shapes)
 
         bad_runtime_inp1 = (
             torch.ones(6),
@@ -1229,8 +1224,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         self.assertEqual(
             ep.module()(torch.randn(6), torch.randn(7), torch.randn(8)).size()[0], 6
         )
-
-        self._serdes_shapes(foo, (u, v, w), ({0: dimx}, {0: dimy}, {0: dimz}))
 
     def test_derived_dim_out_of_order_repeat_derived(self):
         dimy = torch.export.Dim("dimy", min=5, max=7)
@@ -1880,8 +1873,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
-        self._serdes_shapes(foo, inputs, ((dx, None), (dy, 4), (dz, 3)))
-
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -2511,7 +2502,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         auto = torch.export.dynamic_shapes.DIM.AUTO
         auto_shapes = ((auto, auto),)
-        self._serdes_shapes(m, (a,), auto_shapes)
 
     def test_mark_and_auto_dynamic(self):
         # for this use case, mark_dynamic() and AUTO should have same effect.
@@ -2989,7 +2979,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ],
             ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
         )
-        self._serdes_shapes(foo, inputs, {"inputs": [{0: batch}, {0: batch}]})
 
         # pass dynamic shapes of inputs [pytree-registered classes]
         if HAS_TORCHREC:
@@ -4704,12 +4693,6 @@ def forward(self, b_a_buffer, x):
             # We are specifying dynamism on the first kwarg even though user passed in
             # different order
             dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
-        )
-        self._serdes_shapes(
-            foo,
-            (torch.randn(4, 4), torch.randn(4, 4)),
-            dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
-            kwargs={"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
         )
 
         test_inp = (torch.randn(4, 4), torch.randn(7, 4))
@@ -6950,6 +6933,7 @@ def forward(self, x, y):
                 ((4, 4), (4, 4), (4, 3)),
                 ((4, 4), (5, 4), (4, 5)),
             ],
+            test_serdes=True,
         )
         # static s1
         self._check_dynamic_shapes_specs_and_shapes(
@@ -6970,6 +6954,7 @@ def forward(self, x, y):
                 ((1, 1), (1, 1), (1, 1)),
                 ((0, 9), (0, 9), (0, 9)),
             ],
+            test_serdes=True,
         )
         # fully static
         self._check_dynamic_shapes_specs_and_shapes(
@@ -6985,6 +6970,7 @@ def forward(self, x, y):
                 ((1, 3), (1, 3), (1, 3)),
                 ((0, 9), (0, 9), (0, 9)),
             ],
+            test_serdes=True,
         )
 
     def test_automatic_dynamic_shapes_constant_relation(self):
@@ -7014,6 +7000,7 @@ def forward(self, x, y):
             failing_shapes=[
                 ((10,), (13,)),
             ],
+            test_serdes=True,
         )
         # static s1 should specialize s0
         self._check_dynamic_shapes_specs_and_shapes(
@@ -7030,6 +7017,7 @@ def forward(self, x, y):
                 ((3,), (7,)),
                 ((2,), (6,)),
             ],
+            test_serdes=True,
         )
 
     def test_automatic_dynamic_shapes_linear_relation(self):
@@ -7064,6 +7052,7 @@ def forward(self, x, y):
                 ((34,), (8,)),
                 ((22,), (5,)),
             ],
+            test_serdes=False,
         )
         # static s1 shouldn't actually specialize s0 (guard: (s0 + 2) // 4 == 5)
         self._check_dynamic_shapes_specs_and_shapes(
@@ -7082,6 +7071,7 @@ def forward(self, x, y):
             failing_shapes=[
                 ((33,), (8,)),
             ],
+            test_serdes=False,
         )
         # but static s0 will definitely specialize s1 (guard: (21 + 2) // 4 == s1 -> 5 == s1)
         self._check_dynamic_shapes_specs_and_shapes(
@@ -7096,6 +7086,109 @@ def forward(self, x, y):
             failing_shapes=[
                 ((22,), (5,)),
             ],
+            test_serdes=True,
+        )
+
+    def test_dynamic_shapes_serdes_generic(self):
+        from torch.export.dynamic_shapes import DIM, _dumps, _extracts, _loads
+        
+        class Foo(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                if d == "hello":
+                    x = a[0] + a[1][1:]
+                    b = torch.cat([b, b], dim=0).reshape([-1, 1])
+                    return x + b, c * 2
+
+        # test de/serialization on some generic specs
+        dz = Dim("dz", min=4, max=16)
+        dx = 2*dz
+        dy = dx + 1
+        inputs = (
+            [
+                torch.randn(8, 4),
+                torch.randn(9, 4),
+            ],
+            torch.randn(4),
+            torch.randn(4, 4),
+            "hello",
+        )
+        dynamic_shapes = {
+            "a": [
+                (dx, 4),
+                (dy, 4),
+            ],
+            "b": (dz,),
+            "c": None,
+            "d": None,
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
+        self._check_dynamic_shapes_specs_and_shapes(
+            Foo(),
+            inputs,
+            [dynamic_shapes],
+            [
+                ([(16, 4), (17, 4)], (8,), (4, 4), "hello"),
+                ([(24, 4), (25, 4)], (12,), (4, 4), "hello"),
+            ],
+            [
+                ([(16, 4), (17, 4)], (8,), (5, 5), "hello"),
+            ],
+            test_serdes=True,
+        )
+        self.assertExpectedInline(
+            _dumps(dynamic_shapes, inputs),
+            """{'dynamic_shapes': ([['2*dz', 4], ['2*dz + 1', 4]], ['dz'], [None, None], None), 'dims': {'dz': {'min': 4, 'max': 16, 'derived': ['2*dz', '2*dz + 1']}}}"""
+        )
+        self.assertExpectedInline(
+            _extracts(ep),
+            """{'dynamic_shapes': ([['2*s2', 4], ['2*s2 + 1', 4]], ['s2'], [4, 4], None), 'dims': {'s2': {'min': 4, 'max': 16, 'derived': ['2*s2', '2*s2 + 1']}}}""",
+        )
+        ((dx, _), (dy, _)), (dz,), (_, _), _ = _loads(_dumps(dynamic_shapes, inputs))
+        self.assertEqual(dx.root, dz)
+        self.assertEqual(dy.root, dz)
+
+    def test_dynamic_shapes_serdes_various(self):
+        # serialization for dataclass inputs, DIM.AUTO/STATIC, and kwargs
+        from torch.export.dynamic_shapes import DIM, _dumps, _extracts, _loads
+
+        auto, static = DIM.AUTO, DIM.STATIC
+
+        @dataclass
+        class Input:
+            a: Tensor
+            b: Tensor
+
+        register_dataclass_as_pytree_node(
+            Input,
+            serialized_type_name="test_dynamic_shapes_serdes_various.Input",
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x - torch.randn(4), y.a + y.b + z[1:]
+
+        args = (torch.randn(4, 4),)
+        kwargs = {
+            "y": Input(a=torch.randn(8, 8), b=torch.randn(8, 8)),
+            "z": torch.randn(9, 8),
+        }
+        dynamic_shapes = {
+            "x": (auto, static),
+            "y": [(auto, auto), (auto, auto)],
+            "z": (auto, 8),
+        }
+        
+        # dump dynamic_shapes
+        dumped = _dumps(dynamic_shapes, args, kwargs)
+        self.assertExpectedInline(
+            dumped,
+            """{'dynamic_shapes': (['DIM.AUTO', 'DIM.STATIC'], [['DIM.AUTO', 'DIM.AUTO'], ['DIM.AUTO', 'DIM.AUTO']], ['DIM.AUTO', 8]), 'dims': {}}""",
+        )
+        # export & extract dynamic shapes
+        extracted = _extracts(export(Foo(), args, kwargs, dynamic_shapes=dynamic_shapes))
+        self.assertExpectedInline(
+            extracted,
+            """{'dynamic_shapes': (['s0', 4], [[8, 8], [8, 8]], [9, 8]), 'dims': {'s0': {'min': 2, 'max': None, 'derived': []}}}""",
         )
 
     @testing.expectedFailureNonStrict

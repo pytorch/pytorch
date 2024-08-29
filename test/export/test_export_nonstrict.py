@@ -7,7 +7,6 @@ except ImportError:
     import testing
 
 from torch.export import export
-from torch.export.dynamic_shapes import _extract_spec
 
 
 test_classes = {}
@@ -15,15 +14,9 @@ test_classes = {}
 
 def mocked_non_strict_export(*args, **kwargs):
     # If user already specified strict, don't make it non-strict
-    # if "strict" in kwargs:
-    #     return export(*args, **kwargs)
-    # return export(*args, **kwargs, strict=False)
     if "strict" in kwargs:
-        ep = export(*args, **kwargs)
-    else:
-        ep = export(*args, **kwargs, strict=False)
-    _extract_spec(ep)
-    return ep
+        return export(*args, **kwargs)
+    return export(*args, **kwargs, strict=False)
 
 
 def make_dynamic_cls(cls):
