@@ -1147,8 +1147,6 @@ class LinearBinary(ExternKernelAlloc):
             self.cpp_op_schema,
             self.cpp_kernel_key,
             self.cpp_kernel_overload_name,
-            self.op_overload,
-            [*self.inputs, *self.constant_args],
         )
 
     @classmethod
