@@ -152,12 +152,9 @@ class CppWrapperCpu(WrapperCodeGen):
             )
 
         if config.abi_compatible:
-            if config.c_shim_version == "1":
-                self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
-            else:
-                self.header.splice(
-                    f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
-                )
+            self.header.splice(
+                f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
+            )
             self.header.splice(
                 """
                 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
@@ -1192,20 +1189,8 @@ class CppWrapperCpu(WrapperCodeGen):
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
-        if config.c_shim_version == "1":
-            # For sdpa, we need the v2 version since v1 didn't consider optional arg
-            # FIXME: no need to do this after we switch to the torchgen-ed C shim
-            if kernel_suffix == "_scaled_dot_product_flash_attention":
-                shim_fn = "aoti_torch__scaled_dot_product_flash_attention_v2"
-            elif kernel_suffix == "_scaled_mm":
-                shim_fn = "aoti_torch__scaled_mm_v2"
-            elif kernel_suffix.startswith("wrapped_fbgemm"):
-                assert self.device == "cpu", "Using wrapped_fbgemm out of CPU!"
-                shim_fn = f"aoti_torch_cpu_{kernel_suffix}"
-            else:
-                shim_fn = f"aoti_torch_{kernel_suffix}"
-        else:
-            shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
+
+        shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
         return shim_fn
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
@@ -1335,19 +1320,11 @@ class CppWrapperCpu(WrapperCodeGen):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
-        # TODO: needs updates to use C shim v2
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
-            if config.c_shim_version == "1":
-                cpp_kernel_name = (
-                    "aoti_torch_scatter_reduce_out"
-                    if python_kernel_name.startswith("aten.scatter_reduce")
-                    else "aoti_torch_scatter_out"
-                )
-            else:
-                cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
-                # C shim only contains out-variant instead of inplace-variant
-                cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+            cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
+            # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
+            cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
             inputs_wrapped = [
                 f"convert_arrayref_tensor_to_tensor({x})"
                 if isinstance(x, str)
@@ -1375,7 +1352,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
-        # TODO: needs updates to use C shim v2
+        # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         if config.abi_compatible:
             # See the comment in codegen_reinterpret_view about why having something like
             # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
@@ -2402,12 +2379,12 @@ if (py_{buf_name}.get() == NULL) {{
     def generate_save_uncompiled_kernels(self):
         pass
 
-    def c_type_for_prim_type(self, type_) -> str:
+    def c_type_for_prim_type(self, val, type_) -> str:
         assert (
             config.abi_compatible
         ), "c_type_for_prim_type is only used in ABI compatible mode"
         if isinstance(type_, torch.OptionalType):
-            return f"{self.c_type_for_prim_type(type_.getElementType())}*"
+            return f"{self.c_type_for_prim_type(val, type_.getElementType())}*"
         elif isinstance(type_, torch.TensorType):
             return "AtenTensorHandle"
         elif isinstance(type_, (torch.IntType, torch.SymIntType)):
@@ -2419,9 +2396,16 @@ if (py_{buf_name}.get() == NULL) {{
         elif isinstance(type_, torch.FloatType):
             return "double"
         elif isinstance(type_, torch.NumberType):
-            # Just return double as float is the more likely type
-            # FIXME: this can be a problem for complex numbers
-            return "double"
+            if isinstance(val, bool):
+                return "int32_t"
+            elif isinstance(val, int):
+                return "int64_t"
+            elif isinstance(val, float):
+                return "double"
+            else:
+                raise AssertionError(
+                    f"Unexpected type in c_type_for_prim_type: {type_=}"
+                )
         elif isinstance(type_, torch.StringType):
             return "const char*"
         else:
@@ -2512,10 +2496,10 @@ if (py_{buf_name}.get() == NULL) {{
                         return f"&{var_name}, {aux}"
                     else:
                         self.writeline(
-                            f"{self.c_type_for_prim_type(element_type)} {var_name} = {self.val_to_arg_str(val, element_type)};"
+                            f"{self.c_type_for_prim_type(val, element_type)} {var_name} = {self.val_to_arg_str(val, element_type)};"
                         )
                         return f"&{var_name}"
-                elif config.c_shim_version == "2":
+                else:
                     # type_ is Optional[Tensor]
                     # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                     base_handle = self.val_to_arg_str(val, element_type)
@@ -2549,12 +2533,12 @@ if (py_{buf_name}.get() == NULL) {{
                     # Zero-size array is not supported in the C or C++ standard, so
                     # we declare a null pointer for it.
                     self.writeline(
-                        f"const {self.c_type_for_prim_type(element_type)}* {var_name} = nullptr;"
+                        f"const {self.c_type_for_prim_type(None, element_type)}* {var_name} = nullptr;"
                     )
                 else:
                     result = f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
                     self.writeline(
-                        f"const {self.c_type_for_prim_type(element_type)} {var_name}[] = {result};"
+                        f"const {self.c_type_for_prim_type(val[0], element_type)} {var_name}[] = {result};"
                     )
                 # Need to pass the array length because we can't use std::vector
                 return f"{var_name}, {len(val)}"
