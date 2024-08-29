@@ -198,12 +198,14 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
 @functools.lru_cache(None)
 def _is_intel_compiler(cpp_compiler: str) -> bool:
-    try:    
+    try:
         output_msg = (
-            subprocess.check_output([cpp_compiler, "--version"], stderr=subprocess.DEVNULL)
+            subprocess.check_output(
+                [cpp_compiler, "--version"], stderr=subprocess.DEVNULL
+            )
             .strip()
             .decode(*SUBPROCESS_DECODE_ARGS)
-        )    
+        )
         return "Intel" in output_msg.splitlines()[0]
     except FileNotFoundError as exc:
         return False
@@ -809,9 +811,9 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
 @functools.lru_cache(None)
 def perload_icx_libomp_win(cpp_compiler: str) -> None:
     try:
-        output = subprocess.check_output([cpp_compiler, "-print-file-name=libiomp5md.dll"], stderr=subprocess.DEVNULL).decode(
-            *SUBPROCESS_DECODE_ARGS
-        )
+        output = subprocess.check_output(
+            [cpp_compiler, "-print-file-name=libiomp5md.dll"], stderr=subprocess.DEVNULL
+        ).decode(*SUBPROCESS_DECODE_ARGS)
         omp_path = output.rstrip()
         if os.path.isfile(omp_path):
             os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
