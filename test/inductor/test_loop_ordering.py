@@ -35,6 +35,7 @@ class MockScheduler:
         return TritonScheduling(cls)
 
 
+@inductor_config.patch(loop_ordering_after_fusion=True)
 class ImplDetailTest(TestCase):
     _exit_stack = None
 
@@ -168,6 +169,7 @@ class ImplDetailTest(TestCase):
 @inductor_config.patch(
     {
         "benchmark_kernel": True,
+        "loop_ordering_after_fusion": True,
         "triton.unique_kernel_names": True,
     }
 )
