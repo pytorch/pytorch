@@ -5188,11 +5188,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
     max_seqlen_batch_q = query.size(2)
     head_dim = query.size(3)
 
-    attention = torch.empty(
-        (batch_size, max_seqlen_batch_q, num_heads, head_dim),
-        dtype=query.dtype,
-        device=query.device,
-    ).transpose(1, 2)
+    attention = torch.empty_like(query)
     logsumexp = torch.empty(
         (
             batch_size,
