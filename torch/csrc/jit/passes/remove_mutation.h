@@ -5,14 +5,15 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+#include <utility>
+
+namespace torch::jit {
 
 struct TORCH_API MutationRemover {
   MutationRemover(
       std::shared_ptr<Graph> graph,
       std::optional<std::function<bool(Node*)>> mutation_filter = std::nullopt)
-      : mutation_filter_(mutation_filter),
+      : mutation_filter_(std::move(mutation_filter)),
         aliasDb_(nullptr),
         graph_(std::move(graph)) {}
 
@@ -77,5 +78,4 @@ TORCH_API bool RemoveTensorMutation(
 TORCH_API bool InplaceToFunctionalActivation(
     const std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

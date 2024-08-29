@@ -183,6 +183,7 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
 .. for tracking purposes
 .. py:module:: torch.cuda.comm
 .. py:module:: torch.cuda.error
+.. py:module:: torch.cuda.gds
 .. py:module:: torch.cuda.graphs
 .. py:module:: torch.cuda.jiterator
 .. py:module:: torch.cuda.memory

@@ -17,6 +17,8 @@ from copy import deepcopy
 from itertools import product
 from random import randint
 
+import psutil
+
 import torch
 import torch.cuda
 from torch import inf, nan
@@ -38,7 +40,12 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyNativeDeviceTypes,
 )
-from torch.testing._internal.common_optimizers import optim_db, optims, TensorTracker
+from torch.testing._internal.common_optimizers import (
+    _get_optim_inputs_including_global_cliquey_kwargs,
+    optim_db,
+    optims,
+    TensorTracker,
+)
 from torch.testing._internal.common_utils import (
     EXPANDABLE_SEGMENTS,
     freeze_rng_state,
@@ -63,6 +70,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     slowTest,
     subtest,
+    TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TEST_NUMPY,
@@ -3507,93 +3515,6 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    def test_graph_optims(self):
-        # Needs generalization if we want to extend this test to non-Adam-like optimizers.
-        cases = (
-            [
-                (
-                    optimizer_ctor,
-                    {
-                        "lr": 0.1,
-                        "betas": (0.8, 0.7),
-                        "foreach": foreach,
-                        "decoupled_weight_decay": decoupled_weight_decay,
-                        "weight_decay": weight_decay,
-                    },
-                )
-                for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
-                    (torch.optim.NAdam, torch.optim.RAdam),
-                    (False, True),
-                    (False, True),
-                    (0.0, 0.1),
-                )
-            ]
-            + [
-                (
-                    torch.optim.Rprop,
-                    {"lr": 0.1, "foreach": foreach, "maximize": maximize},
-                )
-                for foreach, maximize in product(
-                    (False, True),
-                    (False, True),
-                )
-            ]
-            + [
-                (
-                    optimizer_ctor,
-                    {
-                        "lr": 0.1,
-                        "betas": (0.8, 0.7),
-                        "foreach": foreach,
-                        "amsgrad": amsgrad,
-                    },
-                )
-                for optimizer_ctor, foreach, amsgrad in product(
-                    (torch.optim.Adam, torch.optim.AdamW),
-                    (False, True),
-                    (False, True),
-                )
-            ]
-            + [
-                (
-                    optimizer_ctor,
-                    {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad},
-                )
-                for optimizer_ctor, amsgrad in product(
-                    (torch.optim.Adam, torch.optim.AdamW), (False, True)
-                )
-            ]
-            + [
-                (
-                    optimizer_ctor,
-                    {
-                        "lr": 0.1,
-                        "foreach": foreach,
-                        "maximize": maximize,
-                        "weight_decay": weight_decay,
-                    },
-                )
-                for optimizer_ctor, foreach, maximize, weight_decay in product(
-                    (
-                        torch.optim.Adamax,
-                        torch.optim.ASGD,
-                        torch.optim.Adadelta,
-                        torch.optim.RMSprop,
-                    ),
-                    (False, True),
-                    (False, True),
-                    (0, 0.1),
-                )
-            ]
-        )
-
-        for optimizer_ctor, kwargs in cases:
-            with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
-                self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
     def test_graph_optims_with_explicitly_capturable_param_groups(self):
         # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
         n_warmup, n_replay = 3, 2
@@ -3661,125 +3582,6 @@ exit(2)
                     g.replay()
                 self.assertEqual(ref_p1, param1)
                 self.assertEqual(ref_p2, param2)
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    def test_graph_scaling_fused_optimizers(self):
-        cases = [
-            (
-                optimizer_ctor,
-                {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad},
-            )
-            for optimizer_ctor, amsgrad in product(
-                (torch.optim.Adam, torch.optim.AdamW), (False, True)
-            )
-        ] + list(
-            product(
-                (torch.optim.SGD,),
-                [
-                    {
-                        "lr": 0.1,
-                        "momentum": 0.0,
-                        "dampening": d,
-                        "weight_decay": w,
-                        "nesterov": n,
-                        "fused": True,
-                    }
-                    for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
-                ]
-                + [
-                    {
-                        "lr": 0.1,
-                        "momentum": 0.5,
-                        "dampening": d,
-                        "weight_decay": w,
-                        "nesterov": n,
-                        "fused": True,
-                    }
-                    for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
-                ],
-            )
-        )
-
-        steps_warmup = 3
-        steps_train = 2
-
-        for OptClass, kwargs in cases:
-            has_capturable_arg = OptClass in (torch.optim.Adam, torch.optim.AdamW)
-            for actually_do_graphs in (True, False) if has_capturable_arg else (True,):
-                params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
-                params_control = [p.clone().requires_grad_() for p in params]
-                params_graphed = [p.clone().requires_grad_() for p in params]
-
-                # `GradScaler` in-place updates gradients thus it's necessary to duplicate gradients.
-                grads = [
-                    [torch.randn_like(p) for p in params]
-                    for _ in range(steps_warmup + steps_train)
-                ]
-                with torch.no_grad():
-                    grads_control = [[g.clone() for g in gs] for gs in grads]
-                    grads_graphed = [[g.clone() for g in gs] for gs in grads]
-
-                # Gradient Scaler
-                scaler_for_control = torch.amp.GradScaler(
-                    device="cuda", init_scale=128.0
-                )
-                with torch.no_grad():
-                    scaler_for_control._lazy_init_scale_growth_tracker(
-                        torch.device("cuda")
-                    )
-
-                scaler_for_graphed = torch.amp.GradScaler(device="cuda")
-                scaler_for_graphed.load_state_dict(scaler_for_control.state_dict())
-                with torch.no_grad():
-                    scaler_for_graphed._lazy_init_scale_growth_tracker(
-                        torch.device("cuda")
-                    )
-
-                # Control (capturable=False)
-                if has_capturable_arg:
-                    kwargs["capturable"] = False
-                opt = OptClass(params_control, **kwargs)
-
-                for i in range(steps_warmup + steps_train):
-                    for j, p in enumerate(params_control):
-                        p.grad = grads_control[i][j]
-                    scaler_for_control.step(opt)
-                    scaler_for_control.update()
-
-                # capturable=True
-                if has_capturable_arg:
-                    kwargs["capturable"] = True
-                opt = OptClass(params_graphed, **kwargs)
-
-                for i in range(steps_warmup):
-                    for j, p in enumerate(params_graphed):
-                        p.grad = grads_graphed[i][j]
-                    scaler_for_graphed.step(opt)
-                    scaler_for_graphed.update()
-
-                if actually_do_graphs:
-                    g = torch.cuda.CUDAGraph()
-                    with torch.cuda.graph(g):
-                        scaler_for_graphed.step(opt)
-                        scaler_for_graphed.update()
-
-                for i in range(steps_train):
-                    if actually_do_graphs:
-                        for j, p in enumerate(params_graphed):
-                            p.grad.copy_(grads_graphed[i + steps_warmup][j])
-                        g.replay()
-                    else:
-                        # Passing capturable=True to the constructor and running without graphs should still be
-                        # numerically correct, even if it's not ideal for performance.
-                        for j, p in enumerate(params_graphed):
-                            p.grad = grads_graphed[i + steps_warmup][j]
-                        scaler_for_graphed.step(opt)
-                        scaler_for_graphed.update()
-
-                for p_control, p_graphed in zip(params_control, params_graphed):
-                    self.assertEqual(p_control, p_graphed)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -4050,6 +3852,16 @@ print(f"{{r1}}, {{r2}}")
 
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
+
+    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
+    def test_gds_fails_in_ci(self):
+        if IS_WINDOWS or TEST_WITH_ROCM:
+            error_msg = "is not supported on this platform"
+        else:
+            error_msg = "cuFileHandleRegister failed"
+        with TemporaryFileName() as f:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -5037,7 +4849,6 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
-    @unittest.skipIf(IS_WINDOWS, "fails in periodic")
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
 
@@ -5047,28 +4858,30 @@ class TestMemPool(TestCase):
         from torch.utils.cpp_extension import load_inline
 
         dummy_allocator_source = """
+        #include <torch/extension.h>
         extern "C" {
-          void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
-          void dummy_free(void* ptr) { }
+          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
+          C10_EXPORT void dummy_free(void* ptr) { }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
-        with tempfile.TemporaryDirectory() as tempdir:
-            dummy_allocator = load_inline(
-                name=dummy_allocator_libname,
-                cpp_sources=dummy_allocator_source,
-                is_python_module=False,
-                build_directory=tempdir,
-            )
-            allocator = torch.cuda.memory.CUDAPluggableAllocator(
-                os.path.join(tempdir, f"{dummy_allocator_libname}.so"),
-                "dummy_alloc",
-                "dummy_free",
-            )
-            pool = torch.cuda.MemPool(allocator.allocator())
+        dummy_allocator = load_inline(
+            name=dummy_allocator_libname,
+            cpp_sources=dummy_allocator_source,
+            is_python_module=False,
+            keep_intermediates=False,
+            verbose=True,
+        )
+        allocator = torch.cuda.memory.CUDAPluggableAllocator(
+            dummy_allocator,
+            "dummy_alloc",
+            "dummy_free",
+        )
+        pool = torch.cuda.MemPool(allocator.allocator())
 
-            # pool should point to the same allocator as the one passed into it
-            self.assertEqual(allocator.allocator(), pool.allocator)
+        # pool should point to the same allocator as the one passed into it
+        self.assertEqual(allocator.allocator(), pool.allocator)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
@@ -5121,9 +4934,178 @@ class TestMemPool(TestCase):
         self.assertEqual(len(set(active_pool_ids)), 4)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaOptims(TestCase):
     # These tests will be instantiate with instantiate_device_type_tests
     # to apply the new OptimizerInfo structure.
+
+    @onlyCUDA
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >=5.3 required for graphs"
+    )
+    @optims(
+        [optim for optim in optim_db if optim.has_capturable_arg],
+        dtypes=[torch.float32],
+    )
+    def test_graph_optims(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",)
+        )
+
+        steps_warmup = 3
+        steps_train = 2
+
+        for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
+
+            # lr as a Tensor is not supported when capturable=False and foreach=True for torch.optim.adam
+            # and torch.optim.adamw
+            kwargs["lr"] = 0.1
+
+            for actually_do_graphs in (True, False):
+                params = [
+                    torch.randn((i + 5, i + 5), device=device) for i in range(2)
+                ] + [torch.randn((), device=device)]
+                params_control = [p.clone().requires_grad_() for p in params]
+                params_graphed = [p.clone().requires_grad_() for p in params]
+
+                grads = [
+                    [torch.randn_like(p) for p in params]
+                    for _ in range(steps_warmup + steps_train)
+                ]
+
+                # Control (capturable=False)
+                kwargs["capturable"] = False
+
+                opt = optim_cls(params_control, **kwargs)
+                for i in range(steps_warmup + steps_train):
+                    for j, p in enumerate(params_control):
+                        p.grad = grads[i][j]
+                    opt.step()
+
+                # capturable=True
+                kwargs["capturable"] = True
+                opt = optim_cls(params_graphed, **kwargs)
+
+                for i in range(steps_warmup):
+                    for j, p in enumerate(params_graphed):
+                        p.grad = grads[i][j]
+                    opt.step()
+
+                if actually_do_graphs:
+                    g = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(g):
+                        opt.step()
+
+                for i in range(steps_train):
+                    if actually_do_graphs:
+                        for j, p in enumerate(params_graphed):
+                            p.grad.copy_(grads[i + steps_warmup][j])
+                        g.replay()
+                    else:
+                        # Passing capturable=True to the constructor and running without graphs should still be
+                        # numerically correct, even if it's not ideal for performance.
+                        for j, p in enumerate(params_graphed):
+                            p.grad = grads[i + steps_warmup][j]
+                        opt.step()
+
+                for p_control, p_graphed in zip(params_control, params_graphed):
+                    self.assertEqual(p_control, p_graphed)
+
+    @onlyCUDA
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @optims(
+        [
+            optim
+            for optim in optim_db
+            if "fused" in optim.supported_impls and "cuda" in optim.supports_fused_on
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_graph_scaling_fused_optimizers(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        steps_warmup = 3
+        steps_train = 2
+
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+            kwargs["fused"] = True
+
+            for actually_do_graphs in (
+                (True, False) if optim_info.has_capturable_arg else (True,)
+            ):
+                params = [torch.randn((i + 5, i + 5), device=device) for i in range(2)]
+                params_control = [p.clone().requires_grad_() for p in params]
+                params_graphed = [p.clone().requires_grad_() for p in params]
+
+                # `GradScaler` in-place updates gradients thus it's necessary to duplicate gradients.
+                grads = [
+                    [torch.randn_like(p) for p in params]
+                    for _ in range(steps_warmup + steps_train)
+                ]
+                with torch.no_grad():
+                    grads_control = [[g.clone() for g in gs] for gs in grads]
+                    grads_graphed = [[g.clone() for g in gs] for gs in grads]
+
+                # Gradient Scaler
+                scaler_for_control = torch.cuda.amp.GradScaler(init_scale=128.0)
+                with torch.no_grad():
+                    scaler_for_control._lazy_init_scale_growth_tracker(device)
+
+                scaler_for_graphed = torch.cuda.amp.GradScaler()
+                scaler_for_graphed.load_state_dict(scaler_for_control.state_dict())
+                with torch.no_grad():
+                    scaler_for_graphed._lazy_init_scale_growth_tracker(device)
+
+                # Control (capturable=False)
+                if optim_info.has_capturable_arg:
+                    kwargs["capturable"] = False
+                opt = optim_cls(params_control, **kwargs)
+
+                for i in range(steps_warmup + steps_train):
+                    for j, p in enumerate(params_control):
+                        p.grad = grads_control[i][j]
+                    scaler_for_control.step(opt)
+                    scaler_for_control.update()
+
+                # capturable=True
+                if optim_info.has_capturable_arg:
+                    kwargs["capturable"] = True
+                opt = optim_cls(params_graphed, **kwargs)
+
+                for i in range(steps_warmup):
+                    for j, p in enumerate(params_graphed):
+                        p.grad = grads_graphed[i][j]
+                    scaler_for_graphed.step(opt)
+                    scaler_for_graphed.update()
+
+                if actually_do_graphs:
+                    g = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(g):
+                        scaler_for_graphed.step(opt)
+                        scaler_for_graphed.update()
+
+                for i in range(steps_train):
+                    if actually_do_graphs:
+                        for j, p in enumerate(params_graphed):
+                            p.grad.copy_(grads_graphed[i + steps_warmup][j])
+                        g.replay()
+                    else:
+                        # Passing capturable=True to the constructor and running without graphs should still be
+                        # numerically correct, even if it's not ideal for performance.
+                        for j, p in enumerate(params_graphed):
+                            p.grad = grads_graphed[i + steps_warmup][j]
+                        scaler_for_graphed.step(opt)
+                        scaler_for_graphed.update()
+
+                for p_control, p_graphed in zip(params_control, params_graphed):
+                    self.assertEqual(p_control, p_graphed)
 
     @onlyNativeDeviceTypes
     @optims(
@@ -5292,6 +5274,40 @@ class TestCudaOptims(TestCase):
             scaler.update()
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
+
+
+class TestGDS(TestCase):
+    def _get_tmp_dir_fs_type(self):
+        my_path = os.path.realpath("/tmp")
+        root_type = ""
+        for part in psutil.disk_partitions():
+            if part.mountpoint == "/":
+                root_type = part.fstype
+                continue
+            if part.mountpoint == my_path:
+                return part.fstype
+        return root_type
+
+    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
+    def test_gds_read_write_tensors(self):
+        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
+            self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
+        src1 = torch.randn(1024, device="cuda")
+        src2 = torch.randn(2, 1024, device="cuda")
+        torch.cuda.gds._gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds._gds_register_buffer(src2.untyped_storage())
+        dest1 = torch.empty(1024, device="cuda")
+        dest2 = torch.empty(2, 1024, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+            file.save_storage(src1.untyped_storage(), offset=0)
+            file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
+            file.load_storage(dest1.untyped_storage(), offset=0)
+            file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+        self.assertEqual(src1, dest1)
+        self.assertEqual(src2, dest2)
+        torch.cuda.gds._gds_deregister_buffer(src1.untyped_storage())
+        torch.cuda.gds._gds_deregister_buffer(src2.untyped_storage())
 
 
 instantiate_parametrized_tests(TestCuda)
