@@ -106,7 +106,10 @@ def _maybe_reenter_make_fx(fn):
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
     _old_is_inlining = torch._dynamo.config.inline_inbuilt_nn_modules
-    from torch.fx.experimental.proxy_tensor import _temp_remove_metadata_torch_function_mode
+    from torch.fx.experimental.proxy_tensor import (
+        _temp_remove_metadata_torch_function_mode,
+    )
+
     with _temp_remove_metadata_torch_function_mode():
         try:
             # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
