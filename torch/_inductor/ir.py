@@ -3719,6 +3719,7 @@ class ComputedBuffer(OperationBuffer):
                 self.get_store_function(),
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
+                *args,
             )
         index_vars = []
         reduce_vars: List[Any] = []
@@ -3786,36 +3787,55 @@ class ComputedBuffer(OperationBuffer):
         if not V.graph.has_feature(self, BackendFeature.PREFER_STORE_LOOP_ORDER):
             memory_addrs.extend(body.reads_name2expr.values())
 
-        def simplify_and_reorder(x_vars, support_vars, sizes):
+        def simplify_and_reorder(x_vars, support_vars, sizes, simplify_loops):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
                 x_vars, support_vars, sizes, memory_addrs
             )
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
-            sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
-                x_vars,
-                sizes,
-                index_prevent_reordering(index_formulas, x_vars, sizes),
-            )
-            reindex = fuse_reindexing(reindex1, reindex2)
+
+            if simplify_loops:
+                sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
+                    x_vars,
+                    sizes,
+                    index_prevent_reordering(index_formulas, x_vars, sizes),
+                )
+                reindex = fuse_reindexing(reindex1, reindex2)
+            else:
+                reindex = reindex1
             return sizes, reindex, reindex1
 
         support_vars = index_vars + reduce_vars
+        should_merge_loops = (
+            self.get_device().type != "cuda" or not config.loop_ordering_after_fusion
+        )
         iter_ranges, iter_reindex, _ = simplify_and_reorder(
             index_vars,
             support_vars,
             index_size,
+            should_merge_loops,
         )
+
+        # Like iteration dimensions, we may also want to delay merging reduction dimensions.
+        # E.g., if we reduce a tensor [M, N, K] for its M and N dimensions followed by a pointwise
+        # kernel, merging M and N dimension too early makes it hard to decide what loop order
+        # we should pick for the piontwise kernel so that it is fusible with the reduction.
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
-            reduce_vars, support_vars, reduce_size
+            reduce_vars, support_vars, reduce_size, should_merge_loops
         )
 
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_ranges, reduce_ranges, prefix="z"
+            iter_ranges,
+            reduce_ranges,
+            prefix="z",
         )
         body = LoopBody(
-            body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
+            body,
+            [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
+            var_ranges,
+            iter_vars,
+            reduce_vars,
         )
         return (iter_ranges, reduce_ranges), body
 
@@ -3886,9 +3906,9 @@ class TemplateBuffer(OperationBuffer):
         V.graph.register_operation(self)
 
     def get_read_writes(self):
-        return self.normalized_read_writes()
+        return self.extract_read_writes(normalize=True)
 
-    def normalized_read_writes(self):
+    def extract_read_writes(self, normalize):
         name = self.get_name()
         indexer = self.layout.make_indexer()
 
@@ -3897,7 +3917,7 @@ class TemplateBuffer(OperationBuffer):
             return ops.store(name, indexer(index), "fake")
 
         deps = dependencies.extract_read_writes(
-            dummy, self.get_size(), (), normalize=True
+            dummy, self.get_size(), (), normalize=normalize
         )
         deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
         return deps
@@ -6787,9 +6807,19 @@ class LoopBody:
     indexing simplifications and makes it easier to analyze loop bodies.
     """
 
-    def __init__(self, fn, args, var_ranges):
+    def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
         super().__init__()
+
+        _flat_sizes = tuple(var_ranges.values())
+        self.sizes = (
+            _flat_sizes[: len(iter_vars)],
+            _flat_sizes[len(iter_vars) :],
+        )
+
+        self.iter_vars = iter_vars
+        self.reduce_vars = reduce_vars
         self.var_ranges = var_ranges
+
         self.indexing_exprs = {}
         self.indexing_exprs_name = {}
         self.reads = []
@@ -6803,6 +6833,112 @@ class LoopBody:
         self.indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr] = {}
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
+
+    def merge_loops(self) -> LoopBody:
+        """
+        Merge both iteration and reduction loops and return a new LoopBody.
+        """
+        old_body = self
+        old_sizes = self.sizes
+        old_iter_vars, old_reduce_vars = old_body.vars
+        old_iter_sizes, old_reduce_sizes = old_sizes
+
+        index_exprs = [*old_body.indexing_exprs.values()]
+
+        iter_sizes, iter_reindex, _ = V.graph.sizevars._simplify_loops(
+            old_iter_vars,
+            old_iter_sizes,
+            index_prevent_reordering(index_exprs, old_iter_vars, old_iter_sizes),
+        )
+
+        reduce_sizes, reduce_reindex, _ = V.graph.sizevars._simplify_loops(
+            old_reduce_vars,
+            old_reduce_sizes,
+            index_prevent_reordering(index_exprs, old_reduce_vars, old_reduce_sizes),
+        )
+
+        # if iter_sizes == old_iter_sizes:
+        #     # no dimensions get merged.
+        #     return old_sizes, old_body
+
+        # Note: if no dimension get merges, the symbol prefix will
+        # remain 'y'. But if we merge dimensions, we change prefix to
+        # 'z'. If this is an issue, we can always retrace the LoopBody
+        # to change symbol prefix to 'z'.
+        #
+        # There is indeed an issue due to symbol name conflicting.
+        # y0 maybe reused for the y dimension later.
+        (
+            iter_vars,
+            reduce_vars,
+        ), var_ranges = dependencies.index_vars_no_squeeze(
+            iter_sizes, reduce_sizes, prefix="t"
+        )
+        new_body = LoopBody(
+            old_body,
+            [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+        )
+
+        # use the original symbol prefix
+        # Can try to optimize if this is a bottleneck for compilation time
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            iter_sizes, reduce_sizes, prefix="z"
+        )
+        new_body2 = LoopBody(
+            new_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body2
+
+    def reorder_iter_loops(self, new_order) -> LoopBody:
+        """
+        Reorder iteration loops and return a new LoopBody.
+        """
+        old_body = self
+        old_sizes = self.sizes
+        assert len(old_sizes[0]) == len(new_order)
+        reorder_fn = same_reorder(new_order)
+
+        iter_size, reduce_size = old_sizes
+        new_iter_size = reorder_fn(iter_size)
+
+        new_sizes = (new_iter_size, reduce_size)
+
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            *new_sizes, prefix="t"  # type: ignore[arg-type]
+        )
+
+        inverse_order = {b: a for a, b in enumerate(new_order)}
+        inverse_order = [inverse_order[i] for i in range(len(new_order))]
+
+        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
+            index = list(itertools.chain(*indices))
+            assert len(index) == len(iter_size) + len(reduce_size)
+            iter_idx = index[: len(iter_size)]
+            reduce_idx = index[len(iter_size) :]
+            iter_idx = [iter_idx[i] for i in inverse_order]
+            return old_body(iter_idx, reduce_idx)
+
+        loop_body = LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        )
+
+        # use the original symbol prefix so we can do multiple round of reordering
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            *new_sizes, prefix="z"  # type: ignore[arg-type]
+        )
+        new_body = LoopBody(
+            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body
+
+    @property
+    def vars(self):
+        assert self.iter_vars is not None
+        assert self.reduce_vars is not None
+        return self.iter_vars, self.reduce_vars
 
     @cache_on_self
     def get_nodes(self):
@@ -6831,6 +6967,8 @@ class LoopBody:
             ]
         )
         return "\n".join(lines)
+
+    __repr__ = debug_str
 
     def add_index_expr(self, expr: sympy.Expr, category, buf_name):
         getattr(self, category).append(expr)
@@ -6872,7 +7010,9 @@ class LoopBody:
     def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert all(v not in self.var_ranges for v in index)
+        assert all(
+            v not in self.var_ranges for v in index
+        ), f"{self.var_ranges=}, {indices=}"
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)

@@ -158,6 +158,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "loop_ordering",
+    "Logs related to loop ordering",
+    off_by_default=True,
+)
+register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
     off_by_default=True,
