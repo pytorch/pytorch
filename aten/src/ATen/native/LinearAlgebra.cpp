@@ -279,7 +279,8 @@ TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
   set_output_contiguous(3, shape.slice(0, ndim - 1), A.options().dtype(kInt));
 }
 
-TORCH_META_FUNC(dot)(const Tensor& self, const Tensor& other) {
+namespace {
+  void dot_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.dim() == 1 && other.dim() == 1,
       "1D tensors expected, but got ",
@@ -304,6 +305,18 @@ TORCH_META_FUNC(dot)(const Tensor& self, const Tensor& other) {
       " and ",
       other.numel(),
       " elements respectively");
+}
+}
+
+TORCH_META_FUNC(dot)(const Tensor& self, const Tensor& other) {
+  dot_check(self, other);
+
+  // Set output tensor to be a scalar
+  set_output_raw_strided(0, {}, {}, self.options());
+}
+
+TORCH_META_FUNC(vdot)(const Tensor& self, const Tensor& other) {
+  dot_check(self, other);
 
   // Set output tensor to be a scalar
   set_output_raw_strided(0, {}, {}, self.options());
@@ -1930,16 +1943,11 @@ TORCH_IMPL_FUNC(bmm_out_cpu)
 }
 
 TORCH_IMPL_FUNC(dot_out_cpu)(const Tensor& self, const Tensor& other, const Tensor& result) {
-  // Ensure the result is a scalar
-  at::native::resize_output(result, {});
+  result.fill_(self.dot(other));
+}
 
-  // Perform the matrix multiplication
-  auto self_reshaped = self.view({1, -1});  // Reshape self to be a 1xN matrix
-  auto other_reshaped = other.view({-1, 1});  // Reshape other to be a Nx1 matrix
-  auto matmul_result = at::matmul(self_reshaped, other_reshaped);
-
-  // The result of the matrix multiplication is a 1x1 matrix, extract the scalar value
-  result.fill_(matmul_result.item());
+TORCH_IMPL_FUNC(vdot_out_cpu)(const Tensor& self, const Tensor& other, const Tensor& result) {
+ result.fill_(self.vdot(other));
 }
 
 Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {

@@ -2263,13 +2263,13 @@
 
 - func: vdot(Tensor self, Tensor other) -> Tensor
   variants: function, method
-  dispatch:
-    CPU: vdot
-    CUDA: vdot_cuda
+  structured_delegate: vdot.out
 
 - func: vdot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CompositeExplicitAutograd: vdot_out
+    CPU: vdot_out_cpu
+    CUDA: vdot_out_cuda
 
 - func: einsum(str equation, Tensor[] tensors, *, int[]? path=None) -> Tensor
 
