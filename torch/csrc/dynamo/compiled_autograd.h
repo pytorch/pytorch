@@ -165,6 +165,27 @@ struct TensorArgs {
   uint32_t _next_id = 1; // id=0 used by _undefined
 };
 
+struct LiftedIValueArg {
+  LiftedIValueArg() = delete;
+  LiftedIValueArg(const at::IValue* ptr)
+      : actual_ptr(ptr), proxy(at::IValue::uninitialized()) {}
+
+  const at::IValue* actual_ptr; // lifetime handled by autograd node
+  at::IValue proxy;
+};
+
+struct LiftedIValueArgs {
+  at::IValue& next_proxy(const at::IValue* actual_ptr) {
+    TORCH_INTERNAL_ASSERT(next < args.size());
+    auto& iv_arg = args.at(next++);
+    TORCH_INTERNAL_ASSERT(iv_arg.actual_ptr == actual_ptr);
+    return iv_arg.proxy;
+  }
+
+  std::vector<LiftedIValueArg> args;
+  size_t next = 0;
+};
+
 struct AutogradCompilerCall {
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
@@ -178,6 +199,7 @@ struct AutogradCompilerCall {
 
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
+  LiftedIValueArgs lifted_ivalue_args;
   std::vector<int64_t> dyn_size_inputs;
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
@@ -207,17 +229,30 @@ class CompiledNodeArgs {
   void collect(const at::Tensor& t) {
     collect(_compiler.tensor_args.add(t));
   }
-  void collect(const SavedVariable& t) {
-    collect(_compiler.tensor_args.add(t, _node_call.node));
+  void collect(const SavedVariable& sv, bool is_output) {
+    collect(
+        _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
   }
   void collect(const c10::SymInt& t) {
     _compiler.add_size_input(t);
+  }
+  void collect(const std::vector<SavedVariable>& t, bool is_output) {
+    collect_size(t.size());
+    for (const SavedVariable& i : t) {
+      collect(i, is_output);
+    }
   }
   template <typename T>
   void collect(const std::vector<T>& t) {
     collect_size(t.size());
     for (const T& i : t) {
       collect(i);
+    }
+  }
+  void collect(const c10::ArrayRef<SavedVariable>& t, bool is_output) {
+    collect_size(t.size());
+    for (const SavedVariable& i : t) {
+      collect(i, is_output);
     }
   }
   template <typename T>
@@ -258,12 +293,13 @@ class CompiledNodeArgs {
       collect(m.at(k));
     }
   }
-  void collect(const at::IValue& iv) {
+  void collect(const at::IValue& iv, bool nested = false) {
+    // used by AutogradContext::saved_data from CppNode
     if (iv.isList()) {
       c10::List<at::IValue> list = iv.toList();
       collect_size(list.size());
       for (auto&& value : list) {
-        collect(value);
+        collect(value, true);
       }
     } else if (iv.isGenericDict()) {
       c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
@@ -271,8 +307,15 @@ class CompiledNodeArgs {
       // NOLINTNEXTLINE(modernize-loop-convert)
       for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
         collect(it->key());
-        collect(it->value());
+        collect(it->value(), true);
       }
+    } else if (iv.isTensor()) {
+      collect(iv.toTensor());
+    } else if (
+        !nested &&
+        (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat())) {
+      // can't lift ivalues nested in collections
+      _compiler.lifted_ivalue_args.args.emplace_back(&iv);
     } else {
       try {
         collect(static_cast<uint64_t>(at::IValue::hash(iv)));
@@ -519,9 +562,7 @@ class CompiledNodeArgs {
 };
 
 struct TraceState {
-  TraceState(
-      const std::vector<std::optional<c10::SymInt>>& ss,
-      size_t num_outputs)
+  TraceState(std::vector<std::optional<c10::SymInt>>&& ss, size_t num_outputs)
       : sym_sizes(ss), outputs(num_outputs) {}
 
   void debug_asserts() {
@@ -558,8 +599,10 @@ class SwapSavedVariables {
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_variables.save(&t, std::move(t));
     if (arg.defined()) {
+      bool prior = at::SavedTensorDefaultHooks::set_tracing(true);
       TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
       t = SavedVariable(arg.proxy_tensor, false);
+      at::SavedTensorDefaultHooks::set_tracing(prior);
     }
   }
   void after(SavedVariable& t) {
@@ -577,12 +620,23 @@ class SwapSavedVariables {
     stashed_symints.restore(&t);
   }
 
-  void before(at::IValue& t) {
-    stashed_ivalues.save(&t, at::IValue(t));
+  void before(at::IValue& iv) {
+    if (iv.isTensor()) {
+      before(iv.toTensor());
+    } else {
+      stashed_ivalues.save(&iv, at::IValue(iv));
+      if (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat()) {
+        iv = compiler.lifted_ivalue_args.next_proxy(&iv);
+      }
+    }
   }
 
   void after(at::IValue& t) {
-    stashed_ivalues.restore(&t);
+    if (t.isTensor()) {
+      after(t.toTensor());
+    } else {
+      stashed_ivalues.restore(&t);
+    }
   }
 
   void before(Edge& t) {

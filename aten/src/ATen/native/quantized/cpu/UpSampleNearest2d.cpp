@@ -147,7 +147,7 @@ Tensor _upsample_nearest2d_quantized_cpu(
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
 
     // special case: just copy
     if (input_height == output_height && input_width == output_width) {
@@ -216,26 +216,6 @@ Tensor _upsample_nearest_exact2d_quantized_cpu(
     std::optional<double> scale_h,
     std::optional<double> scale_w) {
   return _upsample_nearest2d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(input, osize, scale_h, scale_w);
-}
-
-static Tensor upsample_nearest2d_quantized_cpu(
-    const Tensor& input,
-    at::OptionalIntArrayRef output_size,
-    std::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return upsample_nearest2d_quantized_cpu(input, osize, scale_h, scale_w);
-}
-
-static Tensor _upsample_nearest_exact2d_quantized_cpu(
-    const Tensor& input,
-    at::OptionalIntArrayRef output_size,
-    std::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return _upsample_nearest_exact2d_quantized_cpu(input, osize, scale_h, scale_w);
 }
 
 } // namespace native

@@ -48,6 +48,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import deprecated
 
 
 __all__ = [
@@ -159,6 +160,13 @@ class _SerializeNodeDef(NamedTuple):
 SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
 SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
+# NB: we try really hard to not import _cxx_pytree (which depends on optree)
+# as much as possible. This is for isolation: a user who is not using C++ pytree
+# shouldn't pay for it, and it helps makes things like cpython upgrades easier.
+_cxx_pytree_exists = importlib.util.find_spec("optree")  # type: ignore[attr-defined]
+_cxx_pytree_imported = False
+_cxx_pytree_pending_imports: List[Any] = []
+
 
 def register_pytree_node(
     cls: Type[Any],
@@ -208,11 +216,12 @@ def register_pytree_node(
         flatten_with_keys_fn=flatten_with_keys_fn,
     )
 
-    try:
+    if not _cxx_pytree_exists:
+        return
+
+    if _cxx_pytree_imported:
         from . import _cxx_pytree as cxx
-    except ImportError:
-        pass
-    else:
+
         cxx._private_register_pytree_node(
             cls,
             flatten_fn,
@@ -221,6 +230,14 @@ def register_pytree_node(
             to_dumpable_context=to_dumpable_context,
             from_dumpable_context=from_dumpable_context,
         )
+    else:
+        args = (cls, flatten_fn, unflatten_fn)
+        kwargs = {
+            "serialized_type_name": serialized_type_name,
+            "to_dumpable_context": to_dumpable_context,
+            "from_dumpable_context": from_dumpable_context,
+        }
+        _cxx_pytree_pending_imports.append((args, kwargs))
 
 
 def _register_namedtuple(
@@ -251,6 +268,11 @@ def _register_namedtuple(
     )
 
 
+@deprecated(
+    "`torch.utils._pytree._register_pytree_node` is deprecated. "
+    "Please use `torch.utils._pytree.register_pytree_node` instead.",
+    category=FutureWarning,
+)
 def _register_pytree_node(
     cls: Type[Any],
     flatten_fn: FlattenFunc,
@@ -287,16 +309,12 @@ def _register_pytree_node(
             Like ``flatten_fn``, but in place of a List[leaf], it should return
             a List[(keypath, leaf)].
     """
-    warnings.warn(
-        "torch.utils._pytree._register_pytree_node is deprecated. "
-        "Please use torch.utils._pytree.register_pytree_node instead.",
-        stacklevel=2,
-    )
-
     if to_str_fn is not None or maybe_from_str_fn is not None:
         warnings.warn(
-            "to_str_fn and maybe_from_str_fn is deprecated. "
-            "Please use to_dumpable_context and from_dumpable_context instead."
+            "`to_str_fn` and `maybe_from_str_fn` is deprecated. "
+            "Please use `to_dumpable_context` and `from_dumpable_context` instead.",
+            FutureWarning,
+            stacklevel=2,
         )
 
     _private_register_pytree_node(
@@ -1451,14 +1469,20 @@ def treespec_pprint(treespec: TreeSpec) -> str:
 
 
 # TODO(angelayi): remove this function after OSS/internal stabilize
+@deprecated(
+    "`pytree_to_str` is deprecated. Please use `treespec_dumps` instead.",
+    category=FutureWarning,
+)
 def pytree_to_str(treespec: TreeSpec) -> str:
-    warnings.warn("pytree_to_str is deprecated. Please use treespec_dumps")
     return treespec_dumps(treespec)
 
 
 # TODO(angelayi): remove this function after OSS/internal stabilize
+@deprecated(
+    "`str_to_pytree` is deprecated. Please use `treespec_loads` instead.",
+    category=FutureWarning,
+)
 def str_to_pytree(json: str) -> TreeSpec:
-    warnings.warn("str_to_pytree is deprecated. Please use treespec_loads")
     return treespec_loads(json)
 
 

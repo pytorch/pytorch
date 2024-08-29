@@ -7,7 +7,6 @@ import torch.nn as nn
 from torch.ao.quantization.experimental.adaround_optimization import (
     AdaptiveRoundingOptimizer,
 )
-
 from torch.nn import functional as F
 from torch.quantization.observer import MinMaxObserver
 from torch.testing._internal.common_quantization import QuantizationTestCase
@@ -29,14 +28,20 @@ class TestAdaround(QuantizationTestCase):
     ) -> None:
         model(data)
 
-    def run_adaround(self, model, img_data):
+    def feedforawrd_callback_with_wrapper(self, model, data, wrapper) -> None:
+        wrapper(model, data)
+
+    def run_adaround(self, model, img_data, wrapper=None):
         adaround_optimizer = AdaptiveRoundingOptimizer(
             model,
-            self.feedforawrd_callback,
+            self.feedforawrd_callback
+            if wrapper is None
+            else self.feedforawrd_callback_with_wrapper,
             forward_wrapper,
             img_data,
             max_iter=100,
             batch_size=10,
+            feed_forward_wrapper=wrapper,
         )
         adarounded_model = adaround_optimizer.run_adaround()
         return adarounded_model
@@ -63,9 +68,20 @@ class TestAdaround(QuantizationTestCase):
                 module.weight.data.copy_(fake_quant_module)
         return hard_fake_quant_model
 
+    def get_feed_forward_wrapper(self):
+        class FeedForwardWrapper(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, model, sample):
+                return model(sample)
+
+        wrapper_module = FeedForwardWrapper()
+        return wrapper_module
+
     def test_linear_chain(self):
         class LinearChain(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = nn.Linear(3, 4)
                 self.linear2 = nn.Linear(4, 5)
@@ -79,7 +95,9 @@ class TestAdaround(QuantizationTestCase):
 
         float_model = LinearChain()
         img_data = [torch.rand(10, 3, dtype=torch.float) for _ in range(50)]
-        adarounded_model = self.run_adaround(float_model, img_data)
+        adarounded_model = self.run_adaround(
+            float_model, img_data, self.get_feed_forward_wrapper()
+        )
         fq_model = self.get_fake_quant(float_model)
         rand_input = torch.rand(10, 3)
         with torch.no_grad():
@@ -92,7 +110,7 @@ class TestAdaround(QuantizationTestCase):
 
     def test_conv_chain(self):
         class ConvChain(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv2d1 = nn.Conv2d(3, 4, 5, 5)
                 self.conv2d2 = nn.Conv2d(4, 5, 5, 5)

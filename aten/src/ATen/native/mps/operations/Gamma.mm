@@ -519,7 +519,7 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
       mtl_setBuffer(computeEncoder, output, 1);
 
       if (func_name == "polygamma") {
-        [computeEncoder setBytes:&order length:sizeof(order) atIndex:2];
+        mtl_setBytes(computeEncoder, order, 2);
       }
 
       mtl_dispatch1DJob(computeEncoder, cplState, length);

@@ -39,6 +39,7 @@ if(USE_CUDA)
   set(CAFFE2_USE_CUDA ${USE_CUDA})
   set(CAFFE2_USE_CUDNN ${USE_CUDNN})
   set(CAFFE2_USE_CUSPARSELT ${USE_CUSPARSELT})
+  set(CAFFE2_USE_CUFILE ${USE_CUFILE})
   set(CAFFE2_USE_NVRTC ${USE_NVRTC})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
@@ -46,9 +47,7 @@ if(USE_CUDA)
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS )
-    if(CAFFE2_USE_NVRTC)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
-    else()
+    if(NOT CAFFE2_USE_NVRTC)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
@@ -61,6 +60,9 @@ if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cusparselt)
     else()
       caffe2_update_option(USE_CUSPARSELT OFF)
+    endif()
+    if(CAFFE2_USE_CUFILE)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cufile)
     endif()
     find_program(SCCACHE_EXECUTABLE sccache)
     if(SCCACHE_EXECUTABLE)
@@ -81,6 +83,7 @@ if(USE_CUDA)
     set(CAFFE2_USE_CUDA OFF)
     set(CAFFE2_USE_CUDNN OFF)
     set(CAFFE2_USE_CUSPARSELT OFF)
+    set(CAFFE2_USE_CUFILE OFF)
     set(CAFFE2_USE_NVRTC OFF)
   endif()
 endif()
@@ -89,9 +92,13 @@ endif()
 if(USE_XPU)
   include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)
   if(NOT PYTORCH_FOUND_XPU)
-    # message(WARNING "Not compiling with XPU. Could NOT find SYCL."
-    # "Suppress this warning with -DUSE_XPU=OFF.")
+    message(WARNING "Not compiling with XPU. Could NOT find SYCL."
+    "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
+  else()
+    if(LINUX)
+      string(APPEND CMAKE_CXX_FLAGS " -D__INTEL_PREVIEW_BREAKING_CHANGES")
+    endif()
   endif()
 endif()
 
@@ -144,6 +151,8 @@ endif()
 # ---[ BLAS
 
 set(AT_MKLDNN_ACL_ENABLED 0)
+set(AT_MKLDNN_ENABLED 0)
+set(AT_MKL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -235,7 +244,6 @@ else()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE)
-  set(AT_MKL_ENABLED 0)
   set(AT_MKL_SEQUENTIAL 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND))
@@ -834,104 +842,49 @@ else()
 endif()
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
+
+# ---[ Python Interpreter
+# If not given a Python installation, then use the current active Python
+if(NOT Python_EXECUTABLE)
+  execute_process(
+    COMMAND "which" "python3" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
+  if(${_exitcode} EQUAL 0)
+    if(NOT MSVC)
+      string(STRIP ${_py_exe} Python_EXECUTABLE)
+    endif()
+    message(STATUS "Setting Python to ${Python_EXECUTABLE}")
+  endif()
+endif()
+
+if(BUILD_PYTHON)
+  set(PYTHON_COMPONENTS Development.Module)
+  if(USE_NUMPY)
+    list(APPEND PYTHON_COMPONENTS NumPy)
+  endif()
+  find_package(Python COMPONENTS Interpreter OPTIONAL_COMPONENTS ${PYTHON_COMPONENTS})
+else()
+  find_package(Python COMPONENTS Interpreter)
+endif()
+
+if(NOT Python_Interpreter_FOUND)
+  message(FATAL_ERROR "Python3 could not be found.")
+endif()
+
+if(${Python_VERSION} VERSION_LESS 3.8)
+  message(FATAL_ERROR
+    "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
+endif()
+
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  # If not given a Python installation, then use the current active Python
-  if(NOT PYTHON_EXECUTABLE)
-    execute_process(
-      COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
-    if(${_exitcode} EQUAL 0)
-      if(NOT MSVC)
-        string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+  if(Python_Development.Module_FOUND)
+    if(USE_NUMPY)
+      if(NOT Python_NumPy_FOUND)
+        message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
+        caffe2_update_option(USE_NUMPY OFF)
+      else()
+        caffe2_update_option(USE_NUMPY ON)
       endif()
-      message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
-    endif()
-  endif()
-
-  # Check that Python works
-  set(PYTHON_VERSION)
-  if(DEFINED PYTHON_EXECUTABLE)
-    execute_process(
-        COMMAND "${PYTHON_EXECUTABLE}" "--version"
-        RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
-    if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
-    endif()
-    if(PYTHON_VERSION)
-      string(REGEX MATCH "([0-9]+)\\.([0-9]+)" PYTHON_VERSION ${PYTHON_VERSION})
-    endif()
-  endif()
-
-  # Seed PYTHON_INCLUDE_DIR and PYTHON_LIBRARY to be consistent with the
-  # executable that we already found (if we didn't actually find an executable
-  # then these will just use "python", but at least they'll be consistent with
-  # each other).
-  if(NOT PYTHON_INCLUDE_DIR)
-    # TODO: Verify that sysconfig isn't inaccurate
-    pycmd_no_exit(_py_inc _exitcode "import sysconfig; print(sysconfig.get_path('include'))")
-    if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
-      set(PYTHON_INCLUDE_DIR "${_py_inc}")
-      message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
-    else()
-      message(WARNING "Could not set Python's include dir to ${_py_inc} from sysconfig")
-    endif()
-  endif(NOT PYTHON_INCLUDE_DIR)
-
-  if(NOT PYTHON_LIBRARY)
-    pycmd_no_exit(_py_lib _exitcode "import sysconfig; print(sysconfig.get_path('stdlib'))")
-    if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
-      set(PYTHON_LIBRARY "${_py_lib}")
-      if(MSVC)
-        string(REPLACE "Lib" "libs" _py_static_lib ${_py_lib})
-        link_directories(${_py_static_lib})
-      endif()
-      message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
-    endif()
-  endif(NOT PYTHON_LIBRARY)
-
-  # These should fill in the rest of the variables, like versions, but resepct
-  # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8)
-  find_package(PythonInterp 3.0)
-  find_package(PythonLibs 3.0)
-
-  if(NOT PYTHONLIBS_VERSION_STRING)
-    message(FATAL_ERROR
-      "Python development libraries could not be found.")
-  endif()
-
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
-    message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
-  endif()
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.8)
-    message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python < 3.8 is no longer supported by PyTorch.")
-  endif()
-
-  # When building pytorch, we pass this in directly from setup.py, and
-  # don't want to overwrite it because we trust python more than cmake
-  if(NUMPY_INCLUDE_DIR)
-    set(NUMPY_FOUND ON)
-  elseif(USE_NUMPY)
-    find_package(NumPy)
-    if(NOT NUMPY_FOUND)
-      message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
-    endif()
-  endif()
-
-  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
-    add_library(python::python INTERFACE IMPORTED)
-    target_include_directories(python::python SYSTEM INTERFACE ${PYTHON_INCLUDE_DIRS})
-    if(WIN32)
-      target_link_libraries(python::python INTERFACE ${PYTHON_LIBRARIES})
-    endif()
-
-    caffe2_update_option(USE_NUMPY OFF)
-    if(NUMPY_FOUND)
-      caffe2_update_option(USE_NUMPY ON)
-      add_library(numpy::numpy INTERFACE IMPORTED)
-      target_include_directories(numpy::numpy SYSTEM INTERFACE ${NUMPY_INCLUDE_DIR})
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
@@ -960,10 +913,7 @@ endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
-target_link_libraries(pybind::pybind11 INTERFACE python::python)
-if(APPLE)
-  target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
-endif()
+target_link_libraries(pybind::pybind11 INTERFACE Python::Module)
 
 # ---[ OpenTelemetry API headers
 find_package(OpenTelemetryApi)
@@ -1094,7 +1044,6 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
-
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
@@ -1219,6 +1168,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
     elseif(USE_ROCM)
@@ -1339,15 +1289,12 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     add_definitions(-DONNX_ML=1)
   endif()
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
-  # Add op schemas in "ai.onnx.pytorch" domain
-  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
     if(NOT MSVC)
       set_target_properties(onnx_proto PROPERTIES CXX_STANDARD 17)
     endif()
   endif()
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   if(NOT USE_SYSTEM_ONNX)
@@ -1360,10 +1307,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
       caffe2_interface_library(onnx onnx_library)
     endif()
     list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
-    # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      target_compile_options(onnx PRIVATE -Wno-deprecated-declarations)
-    endif()
   else()
     add_library(onnx SHARED IMPORTED)
     find_library(ONNX_LIBRARY onnx)
@@ -1380,8 +1323,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     message("-- Found onnx: ${ONNX_LIBRARY} ${ONNX_PROTO_LIBRARY}")
     list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx)
   endif()
-  include_directories(${FOXI_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
@@ -1422,9 +1363,7 @@ if(NOT INTERN_BUILD_MOBILE)
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
-  if(NOT ${CUDA_VERSION} LESS 11.5)
-    string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
-  endif()
+  string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
 
   message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
   string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
@@ -1494,11 +1433,6 @@ if(NOT INTERN_BUILD_MOBILE)
     add_compile_options(-mcpu=cortex-a9)
   endif()
 
-  if(WIN32 AND NOT CYGWIN)
-    set(BLAS_INSTALL_LIBRARIES "OFF"
-      CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
-  endif()
-
   find_package(LAPACK)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
@@ -1521,8 +1455,6 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_ROCM_ENABLED 1)
   endif()
 
-  set(AT_MKLDNN_ENABLED 0)
-  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1632,7 +1564,14 @@ if(USE_KINETO)
     message(STATUS "Using Kineto with Roctracer support")
   endif()
 
-  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
+  if(NOT USE_XPU)
+    set(LIBKINETO_NOXPUPTI ON CACHE STRING "" FORCE)
+  else()
+    set(LIBKINETO_NOXPUPTI OFF CACHE STRING "")
+    message(STATUS "Using Kineto with XPUPTI support")
+  endif()
+
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER AND LIBKINETO_NOXPUPTI)
     message(STATUS "Using CPU-only version of Kineto")
   endif()
 
@@ -1731,7 +1670,12 @@ if(USE_KINETO)
   if(LIBKINETO_NOROCTRACER)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOROCTRACER")
   endif()
-  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
+  if(LIBKINETO_NOXPUPTI)
+    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOXPUPTI=ON")
+  else()
+    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOXPUPTI=OFF")
+  endif()
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER AND LIBKINETO_NOXPUPTI)
     message(STATUS "Configured Kineto (CPU)")
   else()
     message(STATUS "Configured Kineto")
@@ -1740,3 +1684,11 @@ endif()
 
 # Include google/FlatBuffers
 include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+
+# Include cpp-httplib
+add_library(httplib INTERFACE IMPORTED)
+target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
+
+# Include nlohmann-json
+add_library(nlohmann INTERFACE IMPORTED)
+include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)

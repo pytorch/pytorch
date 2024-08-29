@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 # Owner(s): ["module: tests"]
 
 import torch
@@ -40,8 +42,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO)
+    bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -4376,6 +4378,9 @@ else:
                 getattr(x, op)(*args)
 
     # FIXME: move to an elementwise ternary test suite and make this an OpInfo test
+    # https://github.com/pytorch/pytorch/issues/126474
+    @xfailIfTorchDynamo
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/126474")
     @dtypes(torch.double)
     def test_ternary_op_mem_overlap(self, device, dtype):
         if device == "cpu" and TEST_WITH_TORCHINDUCTOR:
@@ -4587,9 +4592,10 @@ else:
     # FIXME: move to test distributions
     @deviceCountAtLeast(2)
     @onlyCUDA
+    @skipIfTorchInductor("FIXME: error not thrown")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(3, device=devices[0])
-        y = torch.empty(3, device=devices[1])
+        y = torch.empty(3, device=devices[1], dtype=torch.long)
         self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
@@ -6195,8 +6201,8 @@ else:
         GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
 
         with self.assertWarnsRegex(
-            UserWarning,
-            rf"torch.{device.type}.amp.GradScaler\(args...\) is deprecated.",
+            FutureWarning,
+            rf"`torch.{device.type}.amp.GradScaler\(args...\)` is deprecated.",
         ):
             _ = GradScaler(init_scale=2.0)
 
@@ -8394,7 +8400,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_iter(self) -> None:
         x = torch.randn(5, 5)
         for i, sub in enumerate(x):
-            self.assertEqual(sub, x[i])
+            self.assertEqual(sub, x[i])  # noqa: PLR1736
 
         x = torch.tensor([])
         self.assertEqual(list(x), [])
@@ -8427,9 +8433,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
-        if not torch.cuda.is_available():
-            self.assertRaises(RuntimeError, lambda: x.pin_memory())
-        else:
+        if torch.cuda.is_available():
             pinned = x.pin_memory()
             self.assertTrue(pinned.is_pinned())
             self.assertEqual(pinned, x)
@@ -8628,21 +8632,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         a = torch.ones(2, 3)
         # Metadata changes are allowed on view tensors that are created from detach().
 
-    @skipIfNotRegistered("LayerNorm", "Skipping as LayerNorm is not registered")
-    def test_c10_layer_norm(self):
-        # test that we can call c10 ops and they return a reasonable result
-        X = torch.rand(5, 5, dtype=torch.float)
-        weight = torch.rand(*X.size()[1:], dtype=torch.float)
-        bias = torch.rand(*X.size()[1:], dtype=torch.float)
-        epsilon = 1e-4
-
-        expected_norm = torch.nn.functional.layer_norm(
-            X, X.size()[1:], weight=weight, bias=bias, eps=epsilon)
-        actual_norm, actual_mean, actual_stdev = \
-            torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
-                weight), torch.tensor(bias), 1, epsilon, True)
-        torch.testing.assert_close(expected_norm, actual_norm)
-
     def test_memory_format(self):
         def test_helper(x, memory_format):
             y = x.contiguous(memory_format=memory_format)
@@ -8691,6 +8680,16 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertSequenceEqual(
                 dim_order, torch.empty_permuted(shape, dim_order).dim_order()
             )
+
+        for shape in [(2, 2, 2, 2), (2, 1, 2, 2), (2, 2, 1, 2), (2, 2, 2, 1), (2, 2, 1, 1), (2, 1, 1, 2)]:
+            for memory_format in (torch.contiguous_format, torch.channels_last):
+                t = torch.empty(shape).to(memory_format=memory_format)
+                if memory_format == torch.contiguous_format:
+                    dim_order_target = list(range(len(shape)))
+                elif memory_format == torch.channels_last:
+                    dim_order_target = [0, *list(range(2, len(shape))), 1]
+
+                self.assertSequenceEqual(dim_order_target, t.dim_order())
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
@@ -10620,12 +10619,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             if t1.is_floating_point():
                 t3 = t1.clone().detach().requires_grad_(True)
                 out = t3 * 2
-                with self.assertRaisesRegex(RuntimeError, "Expected single reference to a's"):
-                    torch.utils.swap_tensors(t3, t2)
-                del out
-                # Now succeeds
                 torch.utils.swap_tensors(t3, t2)
-                torch.utils.swap_tensors(t1, t2)
+                with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):
+                    out.sum().backward()
 
             wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
@@ -10675,6 +10671,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t6.c = "cat"
         t7.d = "dog"
         self._checked_swap(t6, t7)
+
+    @unittest.skipIf(torch.cuda.is_available(), "Test specific for CPU")
+    def test_bf16_supported_on_cpu(self):
+        self.assertFalse(torch.cuda.is_bf16_supported())
 
 
 # The following block extends TestTorch with negative dim wrapping tests

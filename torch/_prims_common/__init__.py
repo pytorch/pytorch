@@ -1,9 +1,9 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import operator
 import warnings
 import weakref
-
 from contextlib import nullcontext
 from enum import Enum
 from functools import cmp_to_key, reduce
@@ -21,7 +21,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import TypeAlias
+from typing_extensions import deprecated, TypeAlias
 
 
 if TYPE_CHECKING:
@@ -256,14 +256,16 @@ def is_channels_last_contiguous_2d(a: Tensor) -> bool:
     if a.ndim != 4:
         return False
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     expected_stride = 1
     for idx in (1, 3, 2, 0):
         length = a.shape[idx]
-        if length == 1:
+        if guard_size_oblivious(length == 1):
             continue
 
         stride = a.stride()[idx]
-        if stride != expected_stride:
+        if guard_size_oblivious(stride != expected_stride):
             return False
 
         expected_stride *= length
@@ -445,17 +447,23 @@ def compute_elementwise_output_logical_to_physical_perm(
     if ndim == 1:
         return [0]
 
-    # Short-circuits if contiguous, following the fake fast path.
+    # Short-circuits if contiguous or channels last, following the fake fast path.
     # This reduces the number of guards we end up making
-    # TODO: do channels last too
     is_contiguous = True
+    is_channels_last = True
     for t in tensors:
         is_contiguous = is_contiguous and t.is_contiguous(
             memory_format=torch.contiguous_format
         )
+        is_channels_last = is_channels_last and t.is_contiguous(
+            memory_format=torch.channels_last
+        )
 
-    if is_contiguous:
+    if is_contiguous and not is_channels_last:
         return list(range(ndim))
+
+    if is_channels_last and not is_contiguous:
+        return [0, *list(range(2, ndim)), 1]
 
     shape = tensors[0].shape
 
@@ -684,13 +692,7 @@ def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
     Validates that perm is a permutation of length rank.
     """
 
-    if not isinstance(perm, Sequence):
-        return False
-
-    if not (tuple(sorted(perm)) == tuple(range(0, rank))):
-        return False
-
-    return True
+    return isinstance(perm, Sequence) and sorted(perm) == list(range(rank))
 
 
 def is_same_shape(a: Sequence, b: Sequence) -> bool:
@@ -1045,17 +1047,17 @@ def type_to_dtype(typ: type) -> torch.dtype:
 
     assert isinstance(typ, type)
 
-    if typ is bool:
+    if typ in (bool, torch.SymBool):
         return torch.bool
-    if typ in [int, torch.SymInt]:
+    if typ in (int, torch.SymInt):
         return torch.long
-    if typ in [float, torch.SymFloat]:
+    if typ in (float, torch.SymFloat):
         return torch.get_default_dtype()
     # TODO: sym_complex_float?
     if typ is complex:
         return corresponding_complex_dtype(torch.get_default_dtype())
 
-    raise ValueError("Invalid type!")
+    raise ValueError(f"Invalid type {typ}!")
 
 
 def get_dtype(x: Union[torch.Tensor, NumberType]):
@@ -1362,8 +1364,12 @@ def number_type(
         return type(x)
 
 
-def expr_type(x: sympy.Expr) -> Type:
-    if x.is_integer:  # type: ignore[attr-defined]
+def expr_type(x: sympy.Basic) -> Type:
+    import sympy
+
+    if x.kind is sympy.core.kind.BooleanKind:
+        return bool
+    elif x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
         # NB: Not strictly correct, but we don't support SymPy complex or bool.
@@ -1470,13 +1476,13 @@ def elementwise_dtypes(
     import sympy
 
     for x in args:
-        if not isinstance(x, (Number, TensorLike, sympy.Expr)):
+        if not isinstance(x, (Number, TensorLike, sympy.Basic)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
-        elif isinstance(x, sympy.Expr):
+        elif isinstance(x, sympy.Basic):
             highest_type = get_higher_type(highest_type, expr_type(x))
         else:
             # x is a TensorLike
@@ -1789,6 +1795,11 @@ def check_in_bounds_for_storage(
 # NOTE: This function should ideally be removed, but some Meta internal models
 # packaged with `torch.package` are using it, so it will have to be removed
 # at some point in the future when those models no longer use this function.
+@deprecated(
+    "`torch._prims_common.check` is deprecated and will be removed in the future. "
+    "Please use `torch._check*` functions instead.",
+    category=FutureWarning,
+)
 def check(
     b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
 ) -> None:
@@ -1801,12 +1812,6 @@ def check(
     .. note:: This function is planned for removal in the future. Please use
         `torch._check*` functions instead.
     """
-    warnings.warn(
-        DeprecationWarning(
-            "'torch._prims_common.check' will be removed in the future. Please use "
-            "'torch._check*' functions instead"
-        )
-    )
     torch._check_with(exc_type, b, s)
 
 
@@ -1815,6 +1820,8 @@ def check(
 def are_strides_like_channels_last(
     shape: Sequence[int], strides: Sequence[int]
 ) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     ndim = len(shape)
 
     if ndim == 4:
@@ -1826,19 +1833,19 @@ def are_strides_like_channels_last(
     else:
         return False
 
-    if strides[1] == 0:
+    if guard_size_oblivious(strides[1] == 0):
         return False
 
     min = 0
     for d in dim_order:
-        if shape[d] == 0:
+        if guard_size_oblivious(shape[d] == 0):
             return False
-        if strides[d] < min:
+        if guard_size_oblivious(strides[d] < min):
             return False
         if d == 0 and min == strides[1]:
             return False
         min = strides[d]
-        if strides[d] > 1:
+        if guard_size_oblivious(strides[d] > 1):
             min *= shape[d]
     return True
 

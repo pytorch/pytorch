@@ -5,17 +5,11 @@ import sys
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    skipIfRocm,
-    slowTest,
-    TEST_WITH_ASAN,
-)
-
+from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -24,20 +18,9 @@ sys.path.append(pytorch_test_dir)
 import contextlib
 import unittest
 
+from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 from torch._inductor import config
 from torch._inductor.scheduler import Scheduler
-
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
-
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
 
 class TestCase(InductorTestCase):
@@ -68,7 +51,6 @@ class BenchmarkFusionTestTemplate:
         self.common(f, (torch.rand(2, 8192),))
 
     @slowTest
-    @skipIfRocm  # fail accuracy check on ROCm
     def test_resnet18(self):
         import torchvision
 
@@ -212,6 +194,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def tearDownClass(cls):
             cls._stack.close()
             super().tearDownClass()
+
+        def setUp(self):
+            super().setUp()
+            if not is_big_gpu(0):
+                return self.skipTest("Need a big GPU to run max_autotune=True")
 
         def _equivalent_output_code_impl(self, size, first_dim=None, activation=True):
             def foo(m, inp):

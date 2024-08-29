@@ -53,7 +53,6 @@ load(
 )
 
 def read_bool(section, field, default, required = True):
-    # @lint-ignore BUCKRESTRICTEDSYNTAX
     val = read_config(section, field)
     if val != None:
         if val in ["true", "True", "1"]:
@@ -147,7 +146,6 @@ def get_glsl_paths():
 def spv_shader_library():
     pass
 
-# @lint-ignore BUCKRESTRICTEDSYNTAX
 IS_OSS = read_config("pt", "is_oss", "0") == "1"  # True for OSS BUCK build, and False for internal BUCK build
 
 NOT_OSS = not IS_OSS
@@ -383,6 +381,7 @@ def get_aten_generated_files(enabled_backends):
         "core/TensorMethods.cpp",
         "core/aten_interned_strings.h",
         "core/enum_tag.h",
+        "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
     # This is tiresome.  A better strategy would be to unconditionally
@@ -467,6 +466,7 @@ def gen_aten_files(
         cmd = "$(exe {}torchgen:gen) ".format(ROOT_PATH) + " ".join([
             "--source-path $(location {}:aten_src_path)/aten/src/ATen".format(ROOT),
             "--install_dir $OUT",
+            "--aoti_install_dir $OUT/torch/csrc/inductor/aoti_torch/generated"
         ] + extra_params),
         visibility = visibility,
         compatible_with = compatible_with,
@@ -845,7 +845,6 @@ def define_buck_targets(
     # @lint-ignore BUCKLINT
     fb_native.filegroup(
         name = "metal_build_srcs",
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
         srcs = glob(METAL_SOURCE_LIST),
         visibility = [
             "PUBLIC",
@@ -856,7 +855,6 @@ def define_buck_targets(
     fb_native.filegroup(
         name = "templated_selective_build_srcs",
         # NB: no glob here, there are generated targets in this list!
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
         srcs = glob(TEMPLATE_SOURCE_LIST) + aten_ufunc_generated_all_cpu_sources(":gen_aten[{}]"),
         visibility = [
             "PUBLIC",
@@ -1042,7 +1040,6 @@ def define_buck_targets(
         srcs = [
             "aten/src/ATen/native/native_functions.yaml",
             "aten/src/ATen/native/tags.yaml",
-            # @lint-ignore BUCKRESTRICTEDSYNTAX
         ] + glob(["aten/src/ATen/templates/*"]),
         visibility = [
             "PUBLIC",

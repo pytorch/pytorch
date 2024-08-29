@@ -14,7 +14,7 @@ Tensor _empty_affine_quantized(
     const std::optional<bool> pin_memory,
     const double scale,
     const int64_t zero_point,
-    const optional<MemoryFormat> memory_format) {
+    const std::optional<MemoryFormat> memory_format) {
   api::StorageType storage_type = api::StorageType::TEXTURE_3D;
   return convert_quantized(vTensor{
       api::context(),
@@ -34,7 +34,7 @@ Tensor empty_memory_format(
     const std::optional<c10::Layout> layout,
     const std::optional<Device> device,
     const std::optional<bool> pin_memory,
-    const optional<MemoryFormat> memory_format) {
+    const std::optional<MemoryFormat> memory_format) {
   api::StorageType storage_type = api::StorageType::TEXTURE_3D;
   return convert(vTensor{
       api::context(),
@@ -49,10 +49,10 @@ Tensor empty_memory_format(
 Tensor empty_strided(
     const IntArrayRef sizes,
     const IntArrayRef /* strides */,
-    const optional<ScalarType> dtype,
-    const optional<c10::Layout> layout,
-    const optional<Device> device,
-    const optional<bool> pin_memory) {
+    const std::optional<ScalarType> dtype,
+    const std::optional<c10::Layout> layout,
+    const std::optional<Device> device,
+    const std::optional<bool> pin_memory) {
   return empty_memory_format(
       sizes, dtype, layout, device, pin_memory, c10::MemoryFormat::Contiguous);
 }

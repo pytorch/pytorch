@@ -239,7 +239,8 @@ class TestModule(TestCase):
                 with tempfile.TemporaryFile() as f:
                     torch.save(m, f)
                     f.seek(0)
-                    m_copy = torch.load(f)
+                    # weights_only=False as this is legacy code that saves the model
+                    m_copy = torch.load(f, weights_only=False)
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
 
@@ -365,9 +366,7 @@ class TestModule(TestCase):
             elif isinstance(obj, dict):
                 return any(_can_be_noncontiguous(o) for o in obj.values())
             # scalar tensors can not be non-contiguous
-            if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
-                return False
-            return True
+            return isinstance(obj, torch.Tensor) and obj.dim() != 0
 
         for module_input in module_inputs:
             if module_input.forward_input is None:
@@ -863,7 +862,8 @@ class TestModule(TestCase):
             else:
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
-    @modules([module for module in module_db if not module.is_lazy])
+    # Only run this test for float32 because the test loops over all the dtypes
+    @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
     @parametrize('swap', [True, False])
     @parametrize('set_grad', [True, False])
     @wrapSwapTensorsTest()
@@ -879,6 +879,7 @@ class TestModule(TestCase):
 
         for module_input in module_inputs:
             c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
 
             m = module_cls(*c_args, **c_kwargs)
 
@@ -896,6 +897,17 @@ class TestModule(TestCase):
                     setattr(m, n, new_b)
             _to(m, set_grad=set_grad)
 
+            # Check .to() can be run after forward and backward with swap
+            has_params = len(list(m.parameters())) > 0
+            if swap and not set_grad and has_params:
+                out = m(*args, **kwargs)
+                if isinstance(out, tuple):
+                    out = out[0]
+                out.sum().backward()
+                m.to(dtype=torch.half)
+                # reset
+                m.to(dtype=torch.float32)
+
             prev_device, prev_dtype = device, dtype
             for device_, dtype_ in product(devices, dtypes):
                 # if device/dtype do not change, grad.to(device, dtype) is a no-op so
@@ -903,6 +915,7 @@ class TestModule(TestCase):
                 # parameters will be wrapped in an nn.Parameter before swapping
                 # which will cause the ._cdata to change
                 g_no_swap = device_ == prev_device and dtype_ == prev_dtype
+                prev_prev_device, prev_prev_dtype = prev_device, prev_dtype
                 prev_device, prev_dtype = device_, dtype_
 
                 p_ids_before = [id(p) for p in m.parameters()]
@@ -939,7 +952,6 @@ class TestModule(TestCase):
                     if set_grad:
                         self.assertTrue(all(a == b for a, b in zip(g_cdatas_before, g_cdatas_after)))
                         self.assertTrue(all(a == b for a, b in zip(g_ids_before, g_ids_after)))
-
 
     @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
     @parametrize('swap', [True, False])

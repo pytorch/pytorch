@@ -6,7 +6,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

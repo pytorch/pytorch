@@ -26,7 +26,7 @@ DECLARE_DISPATCH(padding_fn, replication_pad3d_backward_kernel);
 namespace padding {
 
 template <int dim>
-static inline void check_valid_input(const Tensor& input, IntArrayRef padding) {
+inline void check_valid_input(const Tensor& input, IntArrayRef padding) {
 
   TORCH_CHECK(padding.size() == 2 * dim,
       "padding size is expected to be ", 2 * dim,

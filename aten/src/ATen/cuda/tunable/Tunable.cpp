@@ -34,15 +34,19 @@
 #include <utility>
 #include <vector>
 
+// for validators
+#ifdef USE_ROCM
+#include <rocm-core/rocm_version.h>
+#define ROCBLAS_BETA_FEATURES_API
+#include <rocblas/rocblas.h>
+#include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
+#endif
+
 namespace at::cuda::tunable {
 
-namespace {
-
-TuningContext tuning_context;
-
-} // anonymous namespace
-
 TuningContext* getTuningContext() {
+  static TuningContext tuning_context;
   return &tuning_context;
 }
 
@@ -65,16 +69,17 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
   std::scoped_lock l{lock_};
   auto kernel_map_it = results_.find(op_signature);
   if (kernel_map_it == results_.cend()) {
-    TUNABLE_LOG("missing op_signature, returning null ResultEntry");
+    TUNABLE_LOG3("missing op_signature, returning null ResultEntry for ", op_signature, ",", params_signature);
     return ResultEntry::Null();
   }
 
   const auto& km = kernel_map_it->second;
   auto it = km.find(params_signature);
   if (it == km.cend()) {
-    TUNABLE_LOG("missing params_signature, returning null ResultEntry");
+    TUNABLE_LOG3("missing params_signature, returning null ResultEntry for ", op_signature, ",", params_signature);
     return ResultEntry::Null();
   }
+  TUNABLE_LOG3("ResultEntry found for ", op_signature, ",", params_signature);
   return it->second;
 }
 
@@ -85,14 +90,14 @@ inline void TuningResultsManager::AddImpl(const std::string& op_signature,
   auto it = kernel_map.find(params_signature);
   if (it != kernel_map.end()) {
     if (it->second != best) {
-      TUNABLE_LOG(op_signature, "(", params_signature, ") already has a best kernel ",
+      TUNABLE_LOG1(op_signature, "(", params_signature, ") already has a best kernel ",
           "id=", it->second, " selected, want to add a different best kernel ", best,
           ", the new kernel id will be ignored.");
     }
     return;
   }
 
-  TUNABLE_LOG(op_signature, "(", params_signature, ") -> ", best);
+  TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", best);
   kernel_map.emplace(params_signature, best);
 }
 
@@ -120,7 +125,7 @@ void TuningResultsManager::Delete(const std::string& op_signature, const std::st
     return;
   }
 
-  TUNABLE_LOG(op_signature, "(", params_signature, ")");
+  TUNABLE_LOG2(op_signature, "(", params_signature, ")");
   it->second.erase(it2);
 }
 
@@ -131,7 +136,7 @@ inline void TuningResultsManager::DisjointMergeImpl(
   auto it = results.find(op_signature);
   if (it == results.end()) {
     for (const auto& [param_sig, kernel_id] : kernel_map) {
-      TUNABLE_LOG(op_signature, "(", param_sig, ") -> ", kernel_id);
+      TUNABLE_LOG2(op_signature, "(", param_sig, ") -> ", kernel_id);
     }
     results[op_signature] = kernel_map;
     return;
@@ -143,7 +148,7 @@ inline void TuningResultsManager::DisjointMergeImpl(
 }
 
 void TuningResultsManager::Load(const std::unordered_map<std::string, KernelMap>& results_to_load) {
-  TUNABLE_LOG("Loading results");
+  TUNABLE_LOG1("Loading results");
   std::scoped_lock l{lock_};
   for (const auto& [op_signature, kernel_map] : results_to_load) {
     DisjointMergeImpl(op_signature, kernel_map, results_);
@@ -176,6 +181,54 @@ TuningResultsValidator::TuningResultsValidator() {
       "PT_VERSION",
       [this]() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
+#ifdef USE_ROCM
+  // rocm
+  {
+    std::string rocm_version = ROCM_BUILD_INFO;
+    RegisterValidator(
+       "ROCM_VERSION",
+       [rocm_version]() { return rocm_version; },
+       [rocm_version](auto&& k) { return rocm_version == k ? OK : FAIL; });
+  }
+  // gfx arch
+  {
+    std::string gcn_arch_name = at::cuda::getCurrentDeviceProperties()->gcnArchName;
+    RegisterValidator(
+        "GCN_ARCH_NAME",
+        [gcn_arch_name]() { return gcn_arch_name; },
+        [gcn_arch_name](auto&& k) { return gcn_arch_name == k ? OK : FAIL; });
+  }
+  // rocblas
+  {
+#define STRINGIFY(s) #s
+#define XSTRINGIFY(s) STRINGIFY(s)
+    std::string rocblas_version = c10::str(
+        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
+        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
+        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
+        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
+#undef XSTRINGIFY
+#undef STRINGIFY
+    RegisterValidator(
+        "ROCBLAS_VERSION",
+        [rocblas_version]() { return rocblas_version; },
+        [rocblas_version](auto&& k) { return rocblas_version == k ? OK : FAIL; });
+  }
+  // hipblaslt
+  {
+    int version;
+    std::string revision(128, '\0');
+    auto handle = at::cuda::getCurrentCUDABlasLtHandle();
+    hipblasLtGetVersion(handle, &version);
+    hipblasLtGetGitRevision(handle, revision.data());
+    std::string hipblaslt_version =
+        c10::str(version, "-", revision.c_str());
+    RegisterValidator(
+        "HIPBLASLT_VERSION",
+        [hipblaslt_version]() { return hipblaslt_version; },
+        [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+  }
+#endif
 }
 
 std::unordered_map<std::string, std::string> TuningResultsValidator::GetAllValidators() const {
@@ -194,12 +247,12 @@ static bool CheckMandatoryKeys(
   for (const auto& k : TuningResultsValidator::mandatory_keys) {
     if (gv_funcs.find(k) == gv_funcs.end()) {
       passed = false;
-      TUNABLE_LOG("key=\"", k, "\" is not registered for Get and Validate. ");
+      TUNABLE_LOG1("key=\"", k, "\" is not registered for Get and Validate. ");
     }
 
     if (to_check.find(k) == to_check.end()) {
       passed = false;
-      TUNABLE_LOG("key=\"", k, "\" is not provided for validation. ");
+      TUNABLE_LOG1("key=\"", k, "\" is not provided for validation. ");
     }
   }
   return passed;
@@ -282,6 +335,7 @@ std::string TuningResultsValidator::GetPyTorchVersion() const {
 }
 
 TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& value) const {
+  TUNABLE_LOG1("PT_VERSION validation: expect ", value, " to match ", GetPyTorchVersion());
   if (value == GetPyTorchVersion()) {
     return OK;
   }
@@ -294,10 +348,14 @@ TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{true},
     manager_initialized_{false},
+    write_file_on_exit_{true},
+    numerics_check_enable_{false},
     max_tuning_duration_ms_{30},
     max_tuning_iterations_{100},
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
+    icache_flush_{true},
+    rotating_buffer_size_{-1},
     filename_{},
     results_count_from_input_file_{0}
 {
@@ -311,115 +369,158 @@ TuningContext::~TuningContext() {
     return;
   }
   auto filename = GetFilename();
-  if (IsTunableOpEnabled() && IsTuningEnabled() && !filename.empty()) {
+  if (IsTunableOpEnabled() && IsTuningEnabled() && !filename.empty() && write_file_on_exit_) {
     if (results_count_from_input_file_ < GetTuningResultsManager().GetSize()) {
       if (results_count_from_input_file_ > 0) {
-        TUNABLE_LOG("additional tuning results available, rewriting file ", filename);
+        TUNABLE_LOG1("additional tuning results available, rewriting file ", filename);
       }
       else {
-        TUNABLE_LOG("writing file ", filename);
+        TUNABLE_LOG1("writing file ", filename);
       }
       if (!WriteFile(filename)) {
-        TUNABLE_LOG("failed to write file ", filename);
+        TUNABLE_LOG1("failed to write file ", filename);
       }
     }
   }
 }
 
-void TuningContext::EnableTunableOp() {
-  TUNABLE_LOG("Enable TunableOp");
-  enable_ = true;
-}
-
-void TuningContext::DisableTunableOp() {
-  TUNABLE_LOG("Disable TunableOp");
-  enable_ = false;
+void TuningContext::EnableTunableOp(bool value) {
+  enable_ = value;
+  if (value) {
+    TUNABLE_LOG1("Enable TunableOp");
+  }
+  else {
+    TUNABLE_LOG1("Disable TunableOp");
+  }
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
   if (env != nullptr && strcmp(env, "1") == 0) {
-    //TUNABLE_LOG("PYTORCH_TUNABLEOP_ENABLED=1");
     return true;
   }
   return enable_;
 }
 
-void TuningContext::EnableTuning() {
-  TUNABLE_LOG("Enable Tuning for TunableOp");
-  tuning_enable_ = true;
-}
-
-void TuningContext::DisableTuning() {
-  TUNABLE_LOG("Disable Tuning for TunableOp");
-  tuning_enable_ = false;
+void TuningContext::EnableTuning(bool value) {
+  tuning_enable_ = value;
+  if (value) {
+    TUNABLE_LOG1("Enable Tuning for TunableOp");
+  }
+  else {
+    TUNABLE_LOG1("Disable Tuning for TunableOp");
+  }
 }
 
 bool TuningContext::IsTuningEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
   if (env != nullptr && strcmp(env, "0") == 0) {
-    //TUNABLE_LOG("PYTORCH_TUNABLEOP_TUNING=1");
     return false;
   }
   return tuning_enable_;
 }
 
+void TuningContext::WriteFileOnExit(bool value) {
+  write_file_on_exit_ = value;
+}
+
+void TuningContext::EnableNumericsCheck(bool value) {
+  numerics_check_enable_ = value;
+}
+
+bool TuningContext::IsNumericsCheckEnabled() const {
+  const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+  if (env != nullptr && strcmp(env, "1") == 0) {
+    return true;
+  }
+  return numerics_check_enable_;
+}
+
 void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {
-  max_tuning_duration_ms_ = max_duration_ms;
+  max_tuning_duration_ms_ = max_duration_ms < 0 ? 0 : max_duration_ms;
 }
 
 int TuningContext::GetMaxTuningDurationMs() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS");
   if (env != nullptr) {
-    return atoi(env);
+    int val = atoi(env);
+    return val < 0 ? 0 : val;
   }
   return max_tuning_duration_ms_;
 }
 
 void TuningContext::SetMaxTuningIterations(int max_iter) {
-  max_tuning_iterations_ = max_iter;
+  max_tuning_iterations_ = max_iter < 0 ? 0 : max_iter;
 }
 
 int TuningContext::GetMaxTuningIterations() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS");
   if (env != nullptr) {
-    return atoi(env);
+    int val = atoi(env);
+    return val < 0 ? 0 : val;
   }
   return max_tuning_iterations_;
 }
 
 void TuningContext::SetMaxWarmupDurationMs(int max_duration_ms) {
-  max_warmup_duration_ms_ = max_duration_ms;
+  max_warmup_duration_ms_ = max_duration_ms < 0 ? 0 : max_duration_ms;
 }
 
 int TuningContext::GetMaxWarmupDurationMs() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS");
   if (env != nullptr) {
-    return atoi(env);
+    int val = atoi(env);
+    return val < 0 ? 0 : val;
   }
   return max_warmup_duration_ms_;
 }
 
 void TuningContext::SetMaxWarmupIterations(int max_iter) {
-  max_warmup_iterations_ = max_iter;
+  max_warmup_iterations_ = max_iter < 0 ? 0 : max_iter;
 }
 
 int TuningContext::GetMaxWarmupIterations() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS");
   if (env != nullptr) {
-    return atoi(env);
+    int val = atoi(env);
+    return val < 0 ? 0 : val;
   }
   return max_warmup_iterations_;
 }
 
-void TuningContext::EnableTunableOpAndTuning() {
-  EnableTunableOp();
-  EnableTuning();
+void TuningContext::EnableICacheFlush(bool value) {
+  icache_flush_ = value;
 }
 
-void TuningContext::DisableTunableOpAndTuning() {
-  DisableTunableOp();
-  DisableTuning();
+bool TuningContext::IsICacheFlushEnabled() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED");
+  if (env != nullptr && strcmp(env, "0") == 0) {
+    return false;
+  }
+  return icache_flush_;
+}
+
+void TuningContext::SetRotatingBufferSize(int size) {
+  rotating_buffer_size_ = size < 0 ? 0 : size;
+}
+
+int TuningContext::GetRotatingBufferSize() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
+  if (env != nullptr) {
+    constexpr int MB = 1024 * 1024;
+    int val = atoi(env);
+    return val < 0 ? 0 : val * MB;  // env var is specified as MB, returned as bytes
+  }
+  else {
+    if (rotating_buffer_size_ < 0) {
+      // negative buffer size (default) means query for L2 cache size
+      int l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
+      return l2_cache_size;
+    }
+    else {
+      return rotating_buffer_size_;
+    }
+  }
 }
 
 TuningResultsManager& TuningContext::GetTuningResultsManager() {
@@ -429,7 +530,7 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
       // if SetFilename() was not already called, call it now with the default or env var
       const char *env = std::getenv("PYTORCH_TUNABLEOP_FILENAME");
       std::string filename = (env == nullptr) ? "tunableop_results.csv" : env;
-      SetFilename(filename);
+      SetFilename(filename, true);
     }
     auto filename = GetFilename();
     if (!filename.empty()) {
@@ -461,32 +562,34 @@ TuningStatus TuningContext::LoadTuningResults(const TuningResults& tr) {
   return OK;
 }
 
-void TuningContext::SetFilename(const std::string& filename) {
+void TuningContext::SetFilename(const std::string& filename, bool insert_device_ordinal) {
   filename_ = filename;
 
   if (filename_.empty()) {
     return;
   }
 
-  // differentiate filename based on device ordinal to avoid
-  // use case of one process per device writing to same file
-  std::string device = c10::str(int(c10::cuda::current_device()));
+  if (insert_device_ordinal) {
+    // differentiate filename based on device ordinal to avoid
+    // use case of one process per device writing to same file
+    std::string device = c10::str(int(c10::cuda::current_device()));
 
-  // does filename contain %d to insert device ordinal in specific location?
-  const std::string TOKEN("%d");
-  std::size_t found = filename_.find(TOKEN);
-  if (found != std::string::npos) {
-    filename_.replace(found, TOKEN.length(), device);
-  }
-  else {
-    // no %d present, so append device ordinal before final '.'
-    found = filename_.rfind(".");
+    // does filename contain %d to insert device ordinal in specific location?
+    const std::string TOKEN("%d");
+    std::size_t found = filename_.find(TOKEN);
     if (found != std::string::npos) {
-      filename_.insert(found, device);
+      filename_.replace(found, TOKEN.length(), device);
     }
     else {
-      // all else fails, just append
-      filename_.append(device);
+      // no %d present, so append device ordinal before final '.'
+      found = filename_.rfind('.');
+      if (found != std::string::npos) {
+        filename_.insert(found, device);
+      }
+      else {
+        // all else fails, just append
+        filename_.append(device);
+      }
     }
   }
 }
@@ -495,14 +598,15 @@ std::string TuningContext::GetFilename() const {
   return filename_;
 }
 
-bool TuningContext::ReadFile(const std::string& filename) {
-  TUNABLE_LOG("reading tuning results from ", filename);
+bool TuningContext::ReadFile(const std::string& filename_) {
+  std::string filename = filename_.empty() ? GetFilename() : filename_;
+  TUNABLE_LOG1("reading tuning results from ", filename);
   ResultsMap results;
   std::unordered_map<std::string, std::string> validators;
   std::string line;
   std::ifstream file(filename);
   if (!file) {
-    TUNABLE_LOG("could not open ", filename, " for reading tuning results");
+    TUNABLE_LOG1("could not open ", filename, " for reading tuning results");
     return false;
   }
   while (std::getline(file, line)) {
@@ -517,7 +621,7 @@ bool TuningContext::ReadFile(const std::string& filename) {
     }
     if (parts[0] == "Validator" && parts.size() >= 3) {
       validators[parts[1]] = parts[2];
-      TUNABLE_LOG("Validator ", parts[1], "=", parts[2]);
+      TUNABLE_LOG1("Validator ", parts[1], "=", parts[2]);
     }
     else if (parts.size() >= 4) {
       results[parts[0]].emplace(parts[1], ResultEntry(parts[2], atof(parts[3].c_str())));
@@ -527,7 +631,7 @@ bool TuningContext::ReadFile(const std::string& filename) {
       results[parts[0]].emplace(parts[1], ResultEntry(parts[2], 0));
     }
     else {
-      TUNABLE_LOG("could not parse line: ", line);
+      TUNABLE_LOG1("could not parse line: ", line);
     }
   }
   if (GetTuningResultsValidator().ValidateAll(validators) != FAIL) {
@@ -535,16 +639,17 @@ bool TuningContext::ReadFile(const std::string& filename) {
     results_count_from_input_file_ = manager_.GetSize();
   }
   else {
-    TUNABLE_LOG("results validator check failed");
+    TUNABLE_LOG1("results validator check failed");
     return false;
   }
   return true;
 }
 
-bool TuningContext::WriteFile(const std::string& filename) {
+bool TuningContext::WriteFile(const std::string& filename_) {
+  std::string filename = filename_.empty() ? GetFilename() : filename_;
   std::ofstream file(filename, std::ios::out | std::ios::trunc);
   if (!file.good()) {
-    TUNABLE_LOG("error opening tuning results file for writing ", filename);
+    TUNABLE_LOG1("error opening tuning results file for writing ", filename);
     return false;
   }
   auto validators = GetTuningResultsValidator().GetAllValidators();

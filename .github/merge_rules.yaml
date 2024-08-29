@@ -27,11 +27,9 @@
   - third_party/onnx
   - caffe2/python/onnx/**
   approved_by:
-  - BowenBao
   - justinchuby
   - liqunfu
   - shubhambhokare1
-  - thiagocrepaldi
   - titaiwangms
   - wschin
   - xadupre
@@ -244,7 +242,9 @@
   - torch/csrc/xpu/**
   - torch/xpu/**
   - test/xpu/**
+  - test/test_xpu.py
   - third_party/xpu.txt
+  - .ci/docker/ci_commit_pins/triton-xpu.txt
   approved_by:
   - EikanWang
   - jgong5
@@ -282,10 +282,13 @@
   - torch/_C/_distributed*
   - torch/csrc/distributed/**
   - torch/testing/_internal/distributed/**
+  - torch/multiprocessing/**
   - test/distributed/**
   - test/cpp/dist_autograd/**
   - test/cpp/rpc/**
+  - test/*multiprocessing*
   approved_by:
+  - wconstab
   - mrshenli
   - pritamdamania87
   - zhaojuanmao
@@ -311,6 +314,25 @@
   - EasyCLA
   - Lint
   - pull
+
+- name: DCP
+  patterns:
+  - torch/distributed/checkpoint/**
+  approved_by:
+  - LucasLLC
+  - fegin
+  - wz337
+  - saumishr
+  - daulet-askarov
+  - pradeepdfb
+  - kirtiteja
+  - mhorowitz
+  - saiteja64
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 
 - name: IDEEP
   patterns:
@@ -375,13 +397,21 @@
 
 - name: CPU inductor
   patterns:
+  - torch/_inductor/mkldnn_ir.py
   - torch/_inductor/mkldnn_lowerings.py
   - torch/_inductor/fx_passes/mkldnn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
+  - torch/_inductor/codegen/cpp_prefix.h
   - torch/_inductor/codegen/cpp.py
+  - torch/_inductor/codegen/cpp_utils.py
+  - torch/_inductor/codegen/cpp_micro_gemm.py
+  - torch/_inductor/codegen/cpp_template_kernel.py
+  - torch/_inductor/codegen/cpp_template.py
+  - torch/_inductor/codegen/cpp_gemm_template.py
   - test/inductor/test_mkldnn_pattern_matcher.py
-  - test/inductor/test_cpu_repo.py
+  - test/inductor/test_cpu_repro.py
   - test/inductor/test_cpu_cpp_wrapper.py
+  - test/inductor/test_cpu_select_algorithm.py
   - aten/src/ATen/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
   - test/quantization/core/test_quantized_op.py
@@ -495,6 +525,13 @@
   - Skylion007
   - ngimel
   - peterbell10
+  - eqy
+  - jansel
+  - jeffdaily
+  - eellison
+  - anijain2305
+  - bdhirsh
+  - zou3519
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -509,6 +546,8 @@
   - ezyang
   - dzhulgakov
   - malfet
+  - albanD
+  - ptrblck
   mandatory_checks_name:
   - EasyCLA
   - Lint

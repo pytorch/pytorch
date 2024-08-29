@@ -3,8 +3,8 @@
 #ifdef TORCH_ENABLE_LLVM
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
+#include <optional>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <llvm/ExecutionEngine/JITSymbol.h>

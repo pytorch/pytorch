@@ -19,7 +19,6 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/file_format.h>
@@ -35,6 +34,7 @@
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
+#include <optional>
 
 #ifndef DISABLE_UPGRADER
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
@@ -55,8 +55,7 @@ namespace flatbuffers = flatbuffers_fbsource;
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Our own alignment requirement does not need to be exactly the same as what
 // flatbuffers supports, but what flatbuffers supports needs to satisfy our
@@ -91,9 +90,9 @@ class FlatbufferLoader final {
       ExtraFilesMap* jit_sources,
       std::vector<IValue>* constants);
 
-  typedef TypePtr (*TypeResolver)(
+  using TypeResolver = TypePtr (*)(
       const std::string& type_str,
-      std::shared_ptr<CompilationUnit> cu);
+      const std::shared_ptr<CompilationUnit>& cu);
 
   void internal_registerTypeResolver(TypeResolver type_resolver);
 
@@ -187,7 +186,7 @@ IValue parseEnum(
 
 TypePtr resolveType(
     const std::string& type_string,
-    std::shared_ptr<CompilationUnit> cu) {
+    const std::shared_ptr<CompilationUnit>& cu) {
   TypePtr type;
   c10::string_view type_str(type_string);
   if (type_str.starts_with(kCustomClassPrefix)) {
@@ -296,6 +295,11 @@ mobile::Module FlatbufferLoader::parseModule(
       "Parsing flatbuffer module: Corrupted ivalues/object_types field");
   TORCH_CHECK(
       reinterpret_cast<const char*>(ivalues) < end, "Corrupted ivalues field");
+  TORCH_CHECK(
+      module->storage_data_size() >= 0,
+      "Parsing flatbuffer module: illegal storage_data_size: ",
+      module->storage_data_size(),
+      ", expected to be non negative");
   all_ivalues_.resize(ivalues->size());
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
@@ -359,7 +363,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
       (operator_version < caffe2::serialize::kProducedFileFormatVersion);
 
   for (const auto* op : *method->operators()) {
-    std::optional<int> num_args = c10::nullopt;
+    std::optional<int> num_args = std::nullopt;
     if (op->num_args_serialized() > -1) {
       num_args = op->num_args_serialized();
     }
@@ -394,7 +398,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
           auto arg = c10::Argument(
               arg_tb->name()->str(),
               std::move(type_ptr),
-              c10::nullopt /*N*/,
+              std::nullopt /*N*/,
               std::move(default_value));
           args.emplace_back(std::move(arg));
         }
@@ -526,7 +530,7 @@ IValue parseList(
     const mobile::serialization::IValue& ivalue) {
   const mobile::serialization::List* list = ivalue.val_as_List();
   auto res = c10::impl::GenericList(AnyType::get());
-  for (int i : *list->items()) {
+  for (auto i : *list->items()) {
     res.emplace_back(loader.getIValue(i));
   }
   auto type = loader.getOrCreateTypeAnnotations(list->annotation_str());
@@ -570,11 +574,13 @@ IValue parseTuple(
     FlatbufferLoader& loader,
     const mobile::serialization::IValue& ivalue) {
   const auto& tuple = ivalue.val_as_Tuple();
+  const auto items = tuple->items();
   std::vector<IValue> res;
-  for (int i : *tuple->items()) {
+  res.reserve(items->size());
+  for (auto i : *items) {
     res.emplace_back(loader.getIValue(i));
   }
-  return c10::ivalue::Tuple::create(res);
+  return c10::ivalue::Tuple::create(std::move(res));
 }
 
 IValue parseDict(
@@ -934,5 +940,4 @@ bool register_flatbuffer_loader() {
   return true;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

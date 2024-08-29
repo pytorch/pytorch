@@ -30,6 +30,12 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
+      runner:
+        required: false
+        type: string
+        default: "windows.4xlarge.nonephemeral"
+        description: |
+          Label of the runner this job should run on.
 
     outputs:
       test-matrix:
@@ -43,10 +49,13 @@ jobs:
   build:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, windows.4xlarge.nonephemeral]
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
+    defaults:
+      run:
+        shell: bash
     steps:
       # Duplicated in win-test because this MUST go before a checkout
       - name: Enable git symlinks on Windows and disable fsmonitor daemon
@@ -89,6 +98,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
+        shell: bash
         run: python3 .github/scripts/parse_ref.py
 
       - name: Get workflow job id

@@ -8,9 +8,9 @@
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Logging.h>
-#include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <utility>
 
@@ -577,6 +577,11 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->numel_ = src_impl->numel_;
   if (src_impl->extra_meta_ != nullptr) {
     dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
+  } else if (dest_impl->extra_meta_ != nullptr) {
+    // Clean dest_impl extra meta data, cause shallow_copy_from dest impl is a
+    // real tensor impl, which maybe take extra meta data. This info will
+    // contaminate the new dest_impl metadata info.
+    dest_impl->extra_meta_.reset(nullptr);
   }
 
   // NB: symbolic sizes and strides are copied as is custom policy, but python

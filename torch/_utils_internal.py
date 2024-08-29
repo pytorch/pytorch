@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import os
@@ -6,9 +7,21 @@ import tempfile
 from typing import Any, Dict, Optional
 
 import torch
+from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
+
 
 log = logging.getLogger(__name__)
 
+if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
+    import shutil
+
+    if not shutil.which("strobeclient"):
+        log.info(
+            "TORCH_COMPILE_STROBELIGHT is true, but seems like you are not on a FB machine."
+        )
+    else:
+        log.info("Strobelight profiler is enabled via environment variable")
+        StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -62,8 +75,6 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
         )
 
 
-# Meta only, act as nop otherwise.
-#
 # NB!  This treats "skip" kwarg specially!!
 def compile_time_strobelight_meta(phase_name):
     def compile_time_strobelight_meta_inner(function):
@@ -71,7 +82,13 @@ def compile_time_strobelight_meta(phase_name):
         def wrapper_function(*args, **kwargs):
             if "skip" in kwargs:
                 kwargs["skip"] = kwargs["skip"] + 1
-            return function(*args, **kwargs)
+
+            if not StrobelightCompileTimeProfiler.enabled:
+                return function(*args, **kwargs)
+
+            return StrobelightCompileTimeProfiler.profile_compile_time(
+                function, phase_name, *args, **kwargs
+            )
 
         return wrapper_function
 
@@ -111,12 +128,30 @@ def log_export_usage(**kwargs):
     pass
 
 
-def log_torchscript_usage(api: str):
+def log_trace_structured_event(*args, **kwargs) -> None:
+    pass
+
+
+def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
 
 
-def export_api_rollout_check() -> bool:
+def check_if_torch_exportable():
+    return False
+
+
+def log_torch_jit_trace_exportability(
+    api: str,
+    type_of_export: str,
+    export_outcome: str,
+    result: str,
+):
+    _, _, _, _ = api, type_of_export, export_outcome, result
+    return
+
+
+def capture_pre_autograd_graph_using_training_ir() -> bool:
     return False
 
 
@@ -151,6 +186,10 @@ def justknobs_getval_int(name: str) -> int:
     Read warning on justknobs_check
     """
     return 0
+
+
+def is_fb_unit_test() -> bool:
+    return False
 
 
 @functools.lru_cache(None)
@@ -197,4 +236,8 @@ REQUIRES_SET_PYTHON_MODULE = False
 
 def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
     print("Uploading profile stats (fb-only otherwise no-op)")
+    return None
+
+
+def log_chromium_event_internal(event, stack, logger_uuid, start_timestamp=None):
     return None

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -8,7 +10,7 @@ import sys
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Pattern
+from typing import Any, NamedTuple
 
 
 IS_WINDOWS: bool = os.name == "nt"
@@ -26,15 +28,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Optional[str]
-    line: Optional[int]
-    char: Optional[int]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Optional[str]
-    replacement: Optional[str]
-    description: Optional[str]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
 def as_posix(name: str) -> str:
@@ -42,7 +44,7 @@ def as_posix(name: str) -> str:
 
 
 # tools/linter/flake8_linter.py:15:13: error: Incompatibl...int")  [assignment]
-RESULTS_RE: Pattern[str] = re.compile(
+RESULTS_RE: re.Pattern[str] = re.compile(
     r"""(?mx)
     ^
     (?P<file>.*?):
@@ -56,7 +58,7 @@ RESULTS_RE: Pattern[str] = re.compile(
 )
 
 # torch/_dynamo/variables/tensor.py:363: error: INTERNAL ERROR
-INTERNAL_ERROR_RE: Pattern[str] = re.compile(
+INTERNAL_ERROR_RE: re.Pattern[str] = re.compile(
     r"""(?mx)
     ^
     (?P<file>.*?):
@@ -69,11 +71,11 @@ INTERNAL_ERROR_RE: Pattern[str] = re.compile(
 
 
 def run_command(
-    args: List[str],
+    args: list[str],
     *,
-    extra_env: Optional[Dict[str, str]],
+    extra_env: dict[str, str] | None,
     retries: int,
-) -> "subprocess.CompletedProcess[bytes]":
+) -> subprocess.CompletedProcess[bytes]:
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
@@ -94,7 +96,7 @@ severities = {
 }
 
 
-def check_mypy_installed(code: str) -> List[LintMessage]:
+def check_mypy_installed(code: str) -> list[LintMessage]:
     cmd = [sys.executable, "-mmypy", "-V"]
     try:
         subprocess.run(cmd, check=True, capture_output=True)
@@ -117,11 +119,11 @@ def check_mypy_installed(code: str) -> List[LintMessage]:
 
 
 def check_files(
-    filenames: List[str],
+    filenames: list[str],
     config: str,
     retries: int,
     code: str,
-) -> List[LintMessage]:
+) -> list[LintMessage]:
     # dmypy has a bug where it won't pick up changes if you pass it absolute
     # file names, see https://github.com/python/mypy/issues/16768
     filenames = [os.path.relpath(f) for f in filenames]
@@ -224,7 +226,7 @@ def main() -> None:
 
     # Use a dictionary here to preserve order. mypy cares about order,
     # tragically, e.g. https://github.com/python/mypy/issues/2015
-    filenames: Dict[str, bool] = {}
+    filenames: dict[str, bool] = {}
 
     # If a stub file exists, have mypy check it instead of the original file, in
     # accordance with PEP-484 (see https://www.python.org/dev/peps/pep-0484/#stub-files)

@@ -1147,6 +1147,7 @@ multiplication, and ``@`` is matrix multiplication.
    :func:`torch.addmm`; no; ``f * M[strided] + f * (M[SparseSemiStructured] @ M[strided]) -> M[strided]``
    :func:`torch.addmm`; no; ``f * M[strided] + f * (M[strided] @ M[SparseSemiStructured]) -> M[strided]``
    :func:`torch.sparse.addmm`; yes; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
+   :func:`torch.sparse.spsolve`; no; ``SOLVE(M[sparse_csr], V[strided]) -> V[strided]``
    :func:`torch.sspaddmm`; no; ``f * M[sparse_coo] + f * (M[sparse_coo] @ M[strided]) -> M[sparse_coo]``
    :func:`torch.lobpcg`; no; ``GENEIG(M[sparse_coo]) -> M[strided], M[strided]``
    :func:`torch.pca_lowrank`; yes; ``PCA(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
@@ -1292,6 +1293,7 @@ Torch functions specific to sparse Tensors
     hspmm
     smm
     sparse.softmax
+    sparse.spsolve
     sparse.log_softmax
     sparse.spdiags
 
@@ -1341,10 +1343,10 @@ see:
 
     sparse.as_sparse_gradcheck
 
-Unary functions
----------------
+Zero-preserving unary functions
+-------------------------------
 
-We aim to support all zero-preserving unary functions.
+We aim to support all 'zero-preserving unary functions': functions of one argument that map zero to zero.
 
 If you find that we are missing a zero-preserving unary function
 that you need, please feel encouraged to open an issue for a feature request.

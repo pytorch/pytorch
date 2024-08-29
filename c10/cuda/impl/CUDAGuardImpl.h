@@ -14,9 +14,9 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
 #include <c10/core/impl/PyInterpreter.h>
-#include <c10/util/Optional.h>
 #include <cuda_runtime_api.h>
 #include <cstdint>
+#include <optional>
 
 namespace c10::cuda::impl {
 
@@ -45,7 +45,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDevice(&device));
     C10_CUDA_CHECK_WARN(err);
     if (err != cudaSuccess) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     return Device(DeviceType::CUDA, device);
   }

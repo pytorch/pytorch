@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import itertools
 import operator
@@ -7,11 +8,11 @@ from functools import partial, reduce
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Type, Union
 
 import torch
-
 import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
+from torch._higher_order_ops.effects import new_token_tensor
 from torch._library.utils import is_functional_schema
 from torch._prims.debug_prims import register_debug_prims
 from torch._prims.rng_prims import register_rng_prims
@@ -33,6 +34,7 @@ from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
@@ -273,6 +275,7 @@ def _make_prim(
     doc: str,
     tags: Optional[Sequence[torch.Tag]] = None,
     use_old_custom_ops_api: bool = False,
+    register_conj_neg_fallthrough: bool = False,
 ):
     """
     Creates a primitive operation.
@@ -324,10 +327,30 @@ def _make_prim(
         )
         prim_def.register_fake(meta)
 
+        # all view ops get conj/neg fallthroughs
+        if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Conjugate")
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Negative")
+
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
     if tags:
         _prim._tags = tags
+    elif aten_packet := getattr(torch.ops.aten, name, None):
+        overload_tags = [
+            getattr(aten_packet, overload).tags for overload in aten_packet.overloads()
+        ]
+        tags_intersection = set(overload_tags[0])
+        tags_intersection.intersection_update(*overload_tags[1:])
+
+        # dont inadvertently add to prim ops
+        tags_intersection.discard(torch.Tag.core)
+        # causes errors with python ref executor tests, none of the
+        # data dependent pytorch ops actually decompose to prims
+        tags_intersection.discard(torch.Tag.data_dependent_output)
+
+        # iter over first tags for determinism
+        _prim._tags = tuple(t for t in overload_tags[0] if t in tags_intersection)
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
@@ -688,6 +711,7 @@ clone = _make_prim(
     impl_aten=torch.clone,
     doc="Returns the copy of a tensor",
     return_type=RETURN_TYPE.NEW,
+    register_conj_neg_fallthrough=True,
 )
 
 digamma = _make_elementwise_unary_prim(
@@ -2254,6 +2278,7 @@ copy_to = _make_prim(
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_copy_to_doc,
+    register_conj_neg_fallthrough=True,
 )
 
 
@@ -3062,7 +3087,7 @@ frexp = _make_prim(
 
 
 def _make_token_aten() -> TensorLikeType:
-    return torch.empty(0)
+    return new_token_tensor()
 
 
 _make_token = _make_prim(
