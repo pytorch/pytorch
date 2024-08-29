@@ -1057,6 +1057,10 @@ if(USE_XPU)
   # 2. Using add_custom_command in torch-xpu-ops to define sycl device sources
   #    compilation. add_custom_command requires an explicit dependency.
   list(APPEND ${Caffe2_XPU_INCLUDE} ${TORCH_XPU_OPS_DIR}/src/ATen/)
+  # if(USE_XCCL)
+  #   list(APPEND Caffe2_GPU_SRCS
+  #     ${TORCH_SRC_DIR}/csrc/xpu/xccl.cpp)
+  # endif()
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
 
   add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
@@ -1065,6 +1069,10 @@ if(USE_XPU)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
+    if(USE_XCCL)
+      target_link_libraries(torch_xpu PRIVATE __caffe2_xccl)
+      target_compile_definitions(torch_xpu PRIVATE USE_XCCL)
+    endif()
     if(MSVC)
       # Windows
       target_link_libraries(torch_xpu PRIVATE
@@ -1364,6 +1372,9 @@ if(USE_DISTRIBUTED)
     else()
       target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
     endif()
+  endif()
+  if(USE_C10D_XCCL)
+    target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
   endif()
   if(USE_MPI AND USE_C10D_MPI)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
