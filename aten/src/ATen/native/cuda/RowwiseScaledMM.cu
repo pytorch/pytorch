@@ -319,15 +319,17 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
   if (ceildiv(M, 64 * cute::get<0>(ClusterShape{})) *
           ceildiv(N, 128 * cute::get<1>(ClusterShape{})) <=
       kNumSMsForH100 / cute::size(ClusterShape{})) {
-    return f8f8bf16_rowwise_impl <
-               /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
-           ClusterShape, /*PingPong=*/std::false_type,
-           Types...(XQ, WQ, x_scale, w_scale, bias, out);
+    return f8f8bf16_rowwise_impl<
+        /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
+        ClusterShape,
+        /*PingPong=*/std::false_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
-    return f8f8bf16_rowwise_impl <
-               /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
-           ClusterShape, /*PingPong=*/std::true_type,
-           Types...(XQ, WQ, x_scale, w_scale, bias, out);
+    return f8f8bf16_rowwise_impl<
+        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
+        ClusterShape,
+        /*PingPong=*/std::true_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
 
