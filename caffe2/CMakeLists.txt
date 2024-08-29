@@ -1014,6 +1014,9 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
+  if(USE_XCCL)
+    append_filelist("libtorch_xpu_distributed_extra_sources" Caffe2_XPU_SRCS)
+  endif()
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
@@ -1078,6 +1081,10 @@ if(USE_XPU)
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
     include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
 
+  endif()
+  if(USE_XCCL)
+    target_link_libraries(torch_xpu PRIVATE torch::xccl)
+    target_compile_definitions(torch_xpu PRIVATE USE_XCCL)
   endif()
 endif()
 
@@ -1364,6 +1371,12 @@ if(USE_DISTRIBUTED)
     else()
       target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
     endif()
+  endif()
+  if(USE_C10D_XCCL)
+    target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
+    set_source_files_properties(
+      ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupXCCL.cpp
+      PROPERTIES COMPILE_DEFINITIONS  "CCL_ENABLE_ZE;CCL_ENABLE_SYCL")
   endif()
   if(USE_MPI AND USE_C10D_MPI)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
