@@ -3,7 +3,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAStream.h>
 
 namespace c10d {
 
