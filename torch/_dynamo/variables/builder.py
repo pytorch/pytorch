@@ -888,7 +888,10 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif id(value) in ITERTOOLS_TYPE_IDS and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS:
+        elif (
+            id(value) in ITERTOOLS_TYPE_IDS
+            and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS
+        ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
