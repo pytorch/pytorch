@@ -92,8 +92,6 @@ Tensor dirac_(Tensor tensor) {
       case 5: // Volumetric convolution
         tensor[d][d][sizes[2] / 2][sizes[3] / 2][sizes[4] / 2] = 1;
         break;
-      default:
-        break;
     }
   }
 
