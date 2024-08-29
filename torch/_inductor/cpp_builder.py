@@ -58,7 +58,7 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
-SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
 
