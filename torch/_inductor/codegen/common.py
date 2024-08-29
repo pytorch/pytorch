@@ -208,6 +208,11 @@ def init_backend_registration():
             "halide": HalideScheduling,
             "triton": TritonScheduling,
         }
+        if config.cpu_backend == "triton":
+            import os
+            assert (
+                os.environ.get("TRITON_CPU_BACKEND", "0") == "1"
+            ), "TRITON_CPU_BACKEND=1 must be set if you are using Triton on the CPU"
         register_backend_for_device(
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
@@ -1773,7 +1778,7 @@ class Kernel(CodeGen):
         if mask:
             cond = f"({cond}) | ~({mask})"
 
-        return ''
+        return ""
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool

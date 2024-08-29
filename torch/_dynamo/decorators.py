@@ -10,7 +10,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
-from .convert_frame import disabled_codes
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
@@ -56,21 +55,9 @@ def disable(fn=None, recursive=True):
     """
     if recursive:
         if fn is not None:
-            id_fn = id(fn)
-            if cached_fn := disabled_codes.get(id_fn):
-                return cached_fn
-
             fn = innermost_fn(fn)
             assert callable(fn)
-            out = DisableContext()(fn)
-
-            # Do not cache Fx graph methods. These come from Dynamo itself. Caching such graphs can increase lifetime of
-            # held objects. Since these are coming from Dynamo itself, there is no benefit of caching.
-            if not (
-                inspect.ismethod(fn) and isinstance(fn.__self__, torch.fx.GraphModule)
-            ):
-                disabled_codes[id_fn] = out
-            return out
+            return DisableContext()(fn)
         return DisableContext()
     else:
         return skip(fn)

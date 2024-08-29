@@ -15266,8 +15266,8 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
-           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_nn_unfold,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,

@@ -1482,8 +1482,6 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.8-gcc11-build ]]; then
-      # Temporarily skip test_inductor_aoti due to https://github.com/pytorch/pytorch/issues/130311
-      test_inductor_aoti
       test_inductor_distributed
     fi
   fi
