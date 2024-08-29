@@ -7257,6 +7257,24 @@ class CommonTemplate:
             [torch.randn(8, 384, 20, 20).to(memory_format=torch.channels_last)],
         )
 
+    def test_exact_stride(self):
+        full = torch.randn((16, 16), device=self.device)
+        view = torch.as_strided(full, (16, 8), full.stride())
+
+        def fn(x):
+            result = x + x
+            result_strided = torch.empty_strided(
+                x.size(), x.stride(), device=self.device
+            )
+            result_strided[:] = result
+            return result_strided
+
+        self.common(fn, [view])
+        reference_out = fn(view)
+        compiled_fn = torch.compile(fn)
+        actual_out = compiled_fn(view)
+        self.assertEqual(reference_out.stride(), actual_out.stride())
+
     def test_like_channels_last(self):
         def foo():
             randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
