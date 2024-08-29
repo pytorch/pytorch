@@ -5,9 +5,9 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/dynamo/compiled_autograd.h>
 
 namespace py = pybind11;
 
@@ -17,15 +17,15 @@ struct PySavedVariableHooks : public SavedVariableHooks {
   PySavedVariableHooks(py::function& pack_hook, py::function& unpack_hook);
   void call_pack_hook(const at::Tensor& tensor) override;
   at::Tensor call_unpack_hook() override;
-  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args, const SavedVariable& sv) override;
+  void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args,
+      const SavedVariable& sv) override;
   ~PySavedVariableHooks() override;
 
  private:
   PyObject* pack_hook_;
   PyObject* unpack_hook_;
   PyObject* data_ = nullptr;
-
-  friend struct torch::dynamo::autograd::LiftedPySavedVariableHooks;
 };
 
 struct PyDefaultSavedVariableHooks {

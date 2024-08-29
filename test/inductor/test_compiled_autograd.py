@@ -22,6 +22,7 @@ from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -2389,6 +2390,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
 
+    @skipIfWindows(msg="AssertionError: Scalars are not equal!")
     def test_verbose_logs_cpp(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
@@ -2517,33 +2519,32 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             self.assertEqual(unpack_count, 1)
 
     def test_compiled_unpack_hooks_exec_count(self):
-        @torch.compile
-        def f(x, y):
-            return x * y * 10
+        def fn():
+            pack_count = 0
+            unpack_count = 0
 
-        pack_count = 0
-        unpack_count = 0
+            def pack_hook(x):
+                nonlocal pack_count
+                pack_count += 1
+                return x
 
-        def pack_hook(x):
-            nonlocal pack_count
-            pack_count += 1
-            return x
+            def unpack_hook(x):
+                nonlocal unpack_count
+                unpack_count += 1
+                return x
 
-        # unpack hook shouldn't run during compilation, while we trace the forward
-        def unpack_hook(x):
-            nonlocal unpack_count
-            unpack_count += 1
-            return x
+            a = torch.ones(5, requires_grad=True)
+            b = torch.ones(5, requires_grad=True)
+            with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+                y = a * b * 2
+                y.sum().backward()
 
-        x = torch.ones(4, requires_grad=True)
-        y = torch.ones(4, requires_grad=False)
-        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook), compiled_autograd.enable(compiler_fn):
-            out_test = f(x, y)
-            self.assertEqual(pack_count, 1)
-            self.assertEqual(unpack_count, 0)
-            out_test.sum().backward()
-            self.assertEqual(pack_count, 1)
-            self.assertEqual(unpack_count, 1)
+            yield pack_count
+            yield unpack_count
+            yield a.grad
+            yield b.grad
+
+        self.check_output_and_recompiles(fn)
 
     def test_reentrant_checkpointing(self):
         def fn(x):

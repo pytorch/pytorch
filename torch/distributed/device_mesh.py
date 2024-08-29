@@ -4,6 +4,7 @@ import logging
 import math
 import threading
 from functools import reduce
+from itertools import chain
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -158,24 +159,45 @@ else:
 
             return res_submesh
 
-        def create_flatten_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
+        def create_flatten_mesh(
+            self, device_mesh: "DeviceMesh", mesh_dim_name: Optional[str] = None
+        ) -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+
             flatten_dims_in_root = [
                 not_none(root_mesh.mesh_dim_names).index(flattened_mesh_dim_name)
                 for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
-            flatten_mesh_dim_name = "_".join(
-                [
-                    not_none(root_mesh.mesh_dim_names)[dim]
-                    for dim in flatten_dims_in_root
-                ]
+
+            if not mesh_dim_name:
+                mesh_dim_name = "_".join(
+                    [
+                        not_none(root_mesh.mesh_dim_names)[dim]
+                        for dim in flatten_dims_in_root
+                    ]
+                )
+
+            # Check whether the mesh_dim_name for flattened mesh is valid.
+            self.flatten_name_to_root_dims.setdefault(root_mesh, {})
+            invalid_dim_names = chain(
+                *list(not_none(root_mesh.mesh_dim_names)),
+                *self.flatten_name_to_root_dims[root_mesh].keys(),
             )
+            if mesh_dim_name in invalid_dim_names:
+                raise RuntimeError(
+                    f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
+                    f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
+                    f"Please specify another valid mesh_dim_name.",
+                )
+
             # Quick return if the flatten mesh has been created before.
+            # TODO: If we decide to restrict flatten initialization once, we should remove
+            # this check and throw an error if the flatten mesh is already created before.
             if (
                 root_mesh in self.root_to_flatten_mapping
-                and flatten_mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
+                and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
             ):
-                return self.root_to_flatten_mapping[root_mesh][flatten_mesh_dim_name]
+                return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
 
             flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
 
@@ -193,13 +215,13 @@ else:
                 flattened_mesh = DeviceMesh(
                     root_mesh.device_type,
                     mesh_nd,
-                    mesh_dim_names=(flatten_mesh_dim_name,),
+                    mesh_dim_names=(mesh_dim_name,),
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
-            self.root_to_flatten_mapping.setdefault(root_mesh, {})[flatten_mesh_dim_name] = res_flattened_mesh  # type: ignore[possibly-undefined]
-            self.flatten_name_to_root_dims.setdefault(root_mesh, {})[flatten_mesh_dim_name] = tuple(flatten_dims_in_root)  # type: ignore[possibly-undefined]
+            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = res_flattened_mesh  # type: ignore[possibly-undefined]
+            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(flatten_dims_in_root)  # type: ignore[possibly-undefined]
 
             return res_flattened_mesh
 
@@ -312,6 +334,35 @@ else:
                 curr_idx = next_idx
 
             return slice_mesh_dims
+
+        def _get_all_submeshes(
+            self, device_mesh: "DeviceMesh", mesh_dim_name: str
+        ) -> List["DeviceMesh"]:
+            """
+            Return all the submeshes of a given mesh dimension of the device mesh.
+            """
+            mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
+            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+                -1, device_mesh.mesh.size(mesh_dim)
+            )
+
+            cur_rank = device_mesh.get_rank()
+            res_submeshes = []
+            for mesh_1d in pg_ranks_by_dim:
+                submesh = DeviceMesh(
+                    device_mesh.device_type,
+                    mesh_1d,
+                    mesh_dim_names=(mesh_dim_name,),
+                    _init_backend=False,
+                )
+                submesh._dim_group_infos = (
+                    [device_mesh._dim_group_infos[mesh_dim]]
+                    if cur_rank in mesh_1d
+                    else []
+                )
+                res_submeshes.append(submesh)
+
+            return res_submeshes
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -808,19 +859,25 @@ else:
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
 
-        def _flatten(self) -> "DeviceMesh":
+        def _flatten(self, mesh_dim_name: Optional[str] = None) -> "DeviceMesh":
             """
-            Returns a 1D DeviceMesh by flattening the current DeviceMesh. The mesh_dim_names
-            of the flattened mesh will be the concatenation of the current mesh_dim_names.
-            For example, flattening a 2D DeviceMesh with mesh_dim_names=("dp", "cp") will create
-            a 1D DeviceMesh with mesh_dim_names=("dp_cp").
+            Returns a 1D DeviceMesh by flattening the current DeviceMesh.
+
+            If no mesh_dim_name is provided, the default is a string concatentaing the mesh_dim_names of the
+            given submesh with each mesh_dim_name separated by "_". For example, if we have a 3D mesh
+            DeviceMesh([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], mesh_dim_names=("dp", "cp", "tp")), calling
+            mesh_3d["dp", "cp"]._flatten() will create a 1D submesh DeviceMesh([0, 1, 2, 3], mesh_dim_names=("dp_cp",))
+            on rank 0, 1, 2, 3 and a 1D submesh DeviceMesh([4, 5, 6, 7], mesh_dim_names=("dp_cp",)) on rank 4, 5, 6, 7.
+
+            After the flattened dimension is created, to access the flattened dimesnion in mesh_3d, one can use the
+            existing slicing method to obtain the flattened mesh through calling mesh_3d["dp_cp"].
             """
             if not self.mesh_dim_names:
                 raise RuntimeError(
                     "Cannot flatten a DeviceMesh without mesh_dim_names!"
                 )
 
-            return _mesh_resources.create_flatten_mesh(self)
+            return _mesh_resources.create_flatten_mesh(self, mesh_dim_name)
 
     def init_device_mesh(
         device_type: str,

@@ -87,6 +87,7 @@ class AutogradCompilerInstance:
         inputs: List[torch.Tensor],
         sizes: List[int],
         scalars: List[Union[int, float]],
+        expected_unpack_hook_calls: List[int],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
@@ -139,24 +140,24 @@ class AutogradCompilerInstance:
                 raise AssertionError("Unexpected scalar type: ", type(val))
         self.bind_tensors_to_proxies(scalars, scalars_proxy)
 
+        def pack(x):
+            return x
+
+        next_unpack_hook_call_idx = 0
+
+        def unpack(x):
+            nonlocal next_unpack_hook_call_idx
+            hook_idx = expected_unpack_hook_calls[next_unpack_hook_call_idx]
+            proxy = self.proxy_call_unpack_hook(x, hook_idx)
+            next_unpack_hook_call_idx += 1
+            return proxy
+
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
         self.stack.enter_context(self.fake_tensor_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(preserve_node_meta())
-        def pack(x):
-            print("fake pack: ", x)
-            return x
-
-        def unpack(x):
-            if x.dim() == 0:
-                # skip hook on wrapped numbers per eager semantics
-                return x
-
-            print("fake unpack: ", x)
-            return self.proxy_call_unpack_hook(x, 0)
-
         self.stack.enter_context(torch.autograd.graph.saved_tensors_hooks(pack, unpack))
         return inputs, sizes, scalars
 

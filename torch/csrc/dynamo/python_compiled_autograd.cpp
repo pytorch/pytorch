@@ -1,5 +1,6 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -11,9 +12,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <torch/csrc/utils.h>
-#include <torch/csrc/autograd/python_saved_variable_hooks.h>
-#include <torch/csrc/PyInterpreter.h>
 
 /*
 [Note: Compiled Autograd]
@@ -59,6 +57,14 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
     PyTuple_SET_ITEM(pyinput, i, PyLong_FromSsize_t(inputs[i]));
+  }
+  return pyinput;
+}
+
+static PyObject* wrap_uint_list(const std::vector<uint32_t>& inputs) {
+  PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
+  for (const auto i : c10::irange(inputs.size())) {
+    PyTuple_SET_ITEM(pyinput, i, PyLong_FromUnsignedLong(inputs[i]));
   }
   return pyinput;
 }
@@ -164,84 +170,43 @@ struct VerboseLogger {
   bool logged_node_miss = false;
 };
 
-// struct LiftedPySavedVariableHooks : public SavedVariableHooks {
-//   LiftedPySavedVariableHooks() = delete;
-//   explicit LiftedPySavedVariableHooks(CompiledNodeArgs& args, PySavedVariableHooks* hooks) {
-//     hook_id_ = args.add_unpack_hook(hooks->unpack_hook_);
-//     hook_input_ = hooks->data_;
-//   }
+size_t CompiledNodeArgs::add_unpack_hook(PyObject* obj) {
+  return _compiler.emplace_hook_with_dedup(obj);
+}
 
-//   void call_pack_hook(const at::Tensor& tensor) override {
-//     TORCH_INTERNAL_ASSERT(false, "Saving tensors during backward not yet implemented for compiled autograd");
-//   }
-
-//   // already has gil
-//   at::Tensor call_unpack_hook() override {
-//     static PyObject* method_name = PyUnicode_InternFromString("proxy_call_unpack_hook");
-//     THPObjectPtr res(check(PyObject_CallMethodObjArgs(
-//         compiler_,
-//         method_name,
-//         hook_id_,
-//         hook_input_,
-//         nullptr)));
-//     if (!res) {
-//       throw python_error();
-//     }
-//     TORCH_CHECK_TYPE(
-//         THPVariable_Check(res),
-//         "Output of saved tensor unpack_hook expected to be a Tensor but got result of type ",
-//         THPUtils_typename(res));
-//     return THPVariable_Unpack(res);
-//   }
-
-// private:
-//   int hook_id_ = -1;
-//   PyObject* hook_input_; // lifetime is longer than self
-//   PyObject* compiler_; // lifetime is longer than self
-// };
+void CompiledNodeArgs::collect(
+    const SavedVariable& sv,
+    PyObject* unpack_hook,
+    PyObject* hook_input) {
+  TORCH_CHECK(
+      THPVariable_Check(hook_input),
+      "Saved tensor pack hooks returning non-tensors not supported yet for compiled autograd");
+  size_t hook_id = add_unpack_hook(unpack_hook);
+  collect(hook_id);
+  collect(_compiler.tensor_args.add(sv, hook_input, hook_id));
+}
 
 size_t AutogradCompilerCall::emplace_hook_with_dedup(PyObject* fn) {
   if (auto it = dedup_hook_lookup.find(fn); it != dedup_hook_lookup.end()) {
     return it->second;
   }
 
-  TORCH_INTERNAL_ASSERT(dedup_hook_lookup.empty(), "Expected only one unpack hook in the backward");
   auto obj = c10::SafePyObject(fn, getPyInterpreter());
-  dedup_hooks.emplace_back(obj);
-  return emplace_hook(std::move(obj));
-  // size_t idx = dedup_hooks.size() - 1;
-  // dedup_hook_lookup[fn] = idx;
-  // return idx;
+  size_t idx = emplace_hook(std::move(obj));
+  dedup_hook_lookup.emplace(fn, idx);
+  return idx;
 }
 
-TensorArg& TensorArgs::add(const SavedVariable& sv, PyObject* hook_input, size_t hook_id) {
-  // TODO(jansel): Here we unpack the SavedVariable exactly once.  This might
-  // fire SavedTensor hooks.  In the future we should try to put saved tensor
-  // hooks into the graph.
+TensorArg& TensorArgs::add(
+    const SavedVariable& sv,
+    PyObject* hook_input,
+    size_t hook_id) {
   auto hook_input_tensor = THPVariable_Unpack(hook_input);
   TensorArg& arg = add(hook_input_tensor);
-  arg.hook_id = hook_id;
+  expected_unpack_hook_calls.emplace_back(hook_id);
   _saved_variables.emplace(&sv, &arg);
   return arg;
 }
-
-
-void CompiledNodeArgs::collect(const SavedVariable& sv, PyObject* unpack_hook, PyObject* hook_input) {
-  TORCH_CHECK(THPVariable_Check(hook_input), "Compiled autograd does not support saved tensor pack hooks returning non-tensors yet");
-  size_t hook_id = add_unpack_hook(unpack_hook);
-  collect(hook_id);
-  collect(_compiler.tensor_args.add(sv, hook_input, hook_id));
-  // graph needs to look like
-  // def graph(unpack_hook_inputs=[data_], hooks=[pyunpack]):
-  //   out = pyunpack(data_)
-  //   ... apply on out
-}
-
-// void CompiledNodeArgs::collect_hooks_from(SavedVariableHooks* hooks, const SavedVariable* sv) {
-//   auto pyhooks = dynamic_cast<torch::autograd::PySavedVariableHooks*>(hooks);
-//   TORCH_CHECK(pyhooks != nullptr, "Non-python saved tensor hooks not yet implemented for compiled autograd");
-//   auto x = LiftedPySavedVariableHooks(*this, pyhooks);
-// }
 
 struct CacheNode {
   // A node in the shadow graph, we follow next edges until we reach the end of
@@ -504,6 +469,7 @@ static TraceState call_begin_capture(
       pyinput.get(),
       pysizeinput.get(),
       pyivalueargsinput.get(),
+      wrap_uint_list(compiler_call.tensor_args.expected_unpack_hook_calls),
       nullptr)));
 
   PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr},

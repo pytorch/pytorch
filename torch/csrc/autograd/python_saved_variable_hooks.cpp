@@ -46,7 +46,9 @@ at::Tensor PySavedVariableHooks::call_unpack_hook() {
   // unpack_hook_ will be manually decrefed when the saved variable is released
 }
 
-void PySavedVariableHooks::compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args, const SavedVariable& sv) {
+void PySavedVariableHooks::compiled_args(
+    torch::dynamo::autograd::CompiledNodeArgs& args,
+    const SavedVariable& sv) {
   args.collect(sv, unpack_hook_, data_);
 }
 
