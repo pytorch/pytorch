@@ -5752,6 +5752,48 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         fn(torch.randn(4))
 
+    # https://github.com/pytorch/pytorch/issues/88813
+    def test_return_value_duplication_grad(self) -> None:
+        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            return val * 2, val * 2
+
+        x = torch.randn(2, requires_grad=True)
+
+        expect = fn(x)
+        self.assertNotEqual(
+            expect[0].storage().data_ptr(), expect[1].storage().data_ptr()
+        )
+
+        actual = torch.compile(fn)(x)
+        self.assertNotEqual(
+            actual[0].storage().data_ptr(), actual[1].storage().data_ptr()
+        )
+
+    # https://github.com/pytorch/pytorch/issues/114344
+    def test_return_value_duplication_mixed_grad(self) -> None:
+        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            with torch.no_grad():
+                out0 = val + 1
+            out1 = val + 1
+            return out0, out1
+
+        x = torch.randn(2, requires_grad=True)
+
+        with torch.enable_grad():
+            expect = fn(x)
+            self.assertNotEqual(
+                expect[0].storage().data_ptr(), expect[1].storage().data_ptr()
+            )
+            self.assertFalse(expect[0].requires_grad)
+            self.assertTrue(expect[1].requires_grad)
+
+            actual = torch.compile(fn)(x)
+            self.assertNotEqual(
+                actual[0].storage().data_ptr(), actual[1].storage().data_ptr()
+            )
+            self.assertFalse(actual[0].requires_grad)
+            self.assertTrue(actual[1].requires_grad)
+
 
 instantiate_parametrized_tests(ReproTests)
 
