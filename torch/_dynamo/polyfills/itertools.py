@@ -38,7 +38,7 @@ chain.from_iterable = chain_from_iterable  # type: ignore[method-assign]
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.islice
 @substitute_in_graph(itertools.islice, is_embedded_type=True)  # type: ignore[arg-type]
-def islice(iterable: Iterable[_T], *args: int | None) -> Iterator[_T]:
+def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
     s = slice(*args)
     start = 0 if s.start is None else s.start
     stop = s.stop
