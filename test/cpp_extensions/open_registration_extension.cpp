@@ -128,7 +128,7 @@ void quantize_tensor_per_tensor_affine_privateuse1(
 }
 
 int64_t _fused_sdp_choice_privateuse1(const at::Tensor & query, const at::Tensor & key, const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, c10::optional<double> scale, bool enable_gqa){
+    const std::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
   auto backend = sdp::SDPBackend::overrideable;
   return static_cast<int64_t>(backend);
 }
