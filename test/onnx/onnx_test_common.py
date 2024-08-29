@@ -294,7 +294,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                     *ref_input_args,
                     **ref_input_kwargs,
                     export_options=torch.onnx.ExportOptions(
-                        op_level_debug=self.op_level_debug,
                         dynamic_shapes=self.dynamic_shapes,
                         diagnostic_options=torch.onnx.DiagnosticOptions(
                             verbosity_level=logging.DEBUG
@@ -308,7 +307,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         if diagnostics.is_onnx_diagnostics_log_artifact_enabled():
             onnx_program.save_diagnostics(
                 f"test_report_{self._testMethodName}"
-                f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
                 f"_model_type_{self.model_type}"
                 ".sarif"

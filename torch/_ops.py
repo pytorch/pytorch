@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import abc
 import contextlib
 import ctypes
 import importlib
@@ -238,7 +239,7 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
 ]
 
 
-class HigherOrderOperator(OperatorBase):
+class HigherOrderOperator(OperatorBase, abc.ABC):
     # The HigherOrderOperator will appear as torch.ops.higher_order.{name}
     #
     # If you're creating a new HigherOrderOperator, please do not change the
@@ -246,20 +247,17 @@ class HigherOrderOperator(OperatorBase):
     # practice due to name collisions.
     def __init__(self, name):
         super().__init__()
+        if type(self) is HigherOrderOperator:
+            raise RuntimeError(
+                "Direct instantiation of HigherOrderOperator is not allowed. Please subclass it."
+            )
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
         _higher_order_ops[name] = self
         self._ns = "higher_order"
-
-        # For a normal HigherOrderOperator instance, we will change its __module__ from torch._ops to
-        # torch._ops.higher_order.
-        # For an instance of subclass of HigherOrderOperator (e.g. customized higher order op),
-        # the __module__ attribute will be kept unchanged.
-        if self.__class__ is HigherOrderOperator:
-            self_name_space = "." + self.namespace if self.namespace else ""
-            self.__module__ = self.__module__ + self_name_space
+        self.__module__ = "torch.ops.higher_order"
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -335,7 +333,7 @@ class HigherOrderOperator(OperatorBase):
                 else:
                     raise NotImplementedError(
                         f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
-                        "We recommend filing an issue."
+                        f"We recommend filing an issue."
                     )
                 if result is not NotImplemented:
                     return result
@@ -356,7 +354,7 @@ class HigherOrderOperator(OperatorBase):
                 else:
                     raise NotImplementedError(
                         f"There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
-                        "We recommend filing an issue."
+                        f"We recommend filing an issue."
                     )
                 if result is not NotImplemented:
                     return result
@@ -413,6 +411,7 @@ class HigherOrderOperator(OperatorBase):
         assert not isinstance(kernel, DispatchKey)
         return kernel(*args, **kwargs)
 
+    @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
@@ -435,9 +434,6 @@ class HigherOrderOperator(OperatorBase):
 
     def __str__(self):
         return f"{self.name()}"
-
-    # def __repr__(self):
-    #     return f"torch.ops._higher_order_ops.{self._name}"
 
     def name(self):
         return self._name

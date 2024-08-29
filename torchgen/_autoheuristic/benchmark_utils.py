@@ -42,3 +42,21 @@ def get_mm_tensors(
     else:
         b = torch.randn(k, n, dtype=dtype_right)
     return (a, b)
+
+
+def set_precision(dtype: Any, p_float32_prec_highest: float = 0.8) -> None:
+    if dtype == torch.float32:
+        precisions = ["high", "highest"]
+        weights = [1 - p_float32_prec_highest, p_float32_prec_highest]
+        precision = random.choices(precisions, weights)[0]
+    else:
+        precision = "high"
+    torch.set_float32_matmul_precision(precision)
+
+
+def get_random_between_pow2(min_power2: int, max_power2: int) -> int:
+    i = random.randint(min_power2, max_power2 - 1)
+    lower = 2**i + 1
+    upper = 2 ** (i + 1) - 1
+    assert lower <= upper, "lower must not be greater than upper"
+    return random.randint(lower, upper)

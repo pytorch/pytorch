@@ -1128,11 +1128,11 @@ class TestSplitCatFxPasses(TestCase):
 
         @torch._inductor.config.patch(
             pre_grad_fusion_options={
-                "optimize_cat_inputs_pass": {},
+                "split_cat_to_slices_pass": {},
             },
             post_grad_fusion_options={},
         )
-        def optimize_cat_inputs(x):
+        def split_cat_to_slices(x):
             x_c = x.clone()
             x_c_2 = x.clone()
             l1_out = torch.split(x, [50, 50, 50, 50, 50, 50, 50, 50, 50, 50], dim=0)
@@ -1203,8 +1203,10 @@ class TestSplitCatFxPasses(TestCase):
             post_grad_fusion_options={},
         )
         def unbind_cat_to_view(x):
-            x_c = x.view(10, 50, 500)
-            l1_out = torch.unbind(x_c, dim=0)
+            y = x.view(10, 50, 500)
+            z = x.view(10, 50, 500)
+            l1_out = torch.unbind(y, dim=0)
+            l2_out = torch.unbind(z, dim=0)
             item0 = l1_out[0]
             item1 = l1_out[1]
             item2 = l1_out[2]
@@ -1215,6 +1217,19 @@ class TestSplitCatFxPasses(TestCase):
             item7 = l1_out[7]
             item8 = l1_out[8]
             item9 = l1_out[9]
+            item2_0 = l2_out[0]
+            item2_1 = l2_out[1]
+            item2_2 = l2_out[2]
+            item2_3 = l2_out[3]
+            item2_4 = l2_out[4]
+            item2_5 = l2_out[5]
+            item2_6 = l2_out[6]
+            item2_7 = l2_out[7]
+            item2_8 = l2_out[8]
+            item2_9 = l2_out[9]
+            other1 = item7.clone()
+            other2 = item8.clone()
+            other3 = item9.clone()
             cat = torch.cat(
                 [
                     item0,
@@ -1224,10 +1239,196 @@ class TestSplitCatFxPasses(TestCase):
                     item4,
                     item5,
                     item6,
+                    other1,
+                    item2_0,
+                    item2_1,
+                    item2_2,
+                    item2_3,
+                    item2_4,
+                    item2_5,
+                    item2_6,
+                    item2_7,
+                    item2_8,
+                    item2_9,
+                    other2,
+                    other3,
                 ],
                 dim=1,
             )
-            return torch.cat((cat, item7, item8, item9), dim=1)
+            return cat
+
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "split_stack_to_cats_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def split_stack_to_cats_same_dim(x):
+            x_c = x.view(10, 50, 500)
+            l1_out = torch.unbind(x_c, dim=0)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            split1 = torch.split(item0, [250, 250], dim=1)
+            split2 = torch.split(item1, [250, 250], dim=1)
+            split3 = torch.split(item2, [250, 250], dim=1)
+            split4 = torch.split(item3, [250, 250], dim=1)
+            split5 = torch.split(item4, [250, 250], dim=1)
+            split6 = torch.split(item5, [250, 250], dim=1)
+            getitem0, getitem1 = split1[0], split1[1]
+            getitem2, getitem3 = split2[0], split2[1]
+            getitem4, getitem5 = split3[0], split3[1]
+            getitem6, getitem7 = split4[0], split4[1]
+            getitem8, getitem9 = split5[0], split5[1]
+            getitem10, getitem11 = split6[0], split6[1]
+            getitem0_c = getitem0.clone()
+            getitem1_c = getitem1.clone()
+            getitem2_c = getitem2.clone()
+            return torch.stack(
+                (
+                    getitem0,
+                    getitem1,
+                    getitem2,
+                    getitem3,
+                    getitem4,
+                    getitem5,
+                    getitem0_c,
+                    getitem1_c,
+                    getitem6,
+                    getitem7,
+                    getitem8,
+                    getitem9,
+                    getitem10,
+                    getitem11,
+                    getitem2_c,
+                ),
+                dim=1,
+            )
+
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "split_stack_to_cats_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def split_stack_to_cats_different_dim(x):
+            l1_out = torch.split(x, [100, 100, 100, 100, 100], dim=1)
+            x_c = x.clone()
+            l2_out = torch.split(x_c, [100, 100, 100, 100, 100], dim=1)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item0_c = l2_out[0]
+            item1_c = l2_out[1]
+            item2_c = l2_out[2]
+            item3_c = l2_out[3]
+            item4_c = l2_out[4]
+            other_1 = item0.clone()
+            other_2 = item1.clone()
+            other_3 = item2.clone()
+            return torch.stack(
+                (
+                    other_1,
+                    other_2,
+                    other_3,
+                    item0,
+                    item1,
+                    item2,
+                    item3,
+                    item4,
+                    item0_c,
+                    item1_c,
+                    item2_c,
+                    item3_c,
+                    item4_c,
+                ),
+                dim=2,
+            )
+
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "unbind_stack_to_slices_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def unbind_stack_to_slices(x):
+            x_1 = x.view(50, 10, 500)
+            l1_out = torch.unbind(x_1, dim=1)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            other_1 = item0.clone()
+            other_2 = item1.clone()
+            other_3 = item2.clone()
+            return torch.stack(
+                (
+                    other_1,
+                    other_2,
+                    other_3,
+                    item0,
+                    item1,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                    item7,
+                    item8,
+                    item9,
+                ),
+                dim=1,
+            )
+
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "normalization_pass": {},
+                "move_reshape_out_of_split_stack_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def move_reshape_out_of_split_stack(x):
+            x_c = x.view(50000, 5)
+            l1_out = torch.split(x_c, [1, 1, 1, 1, 1], dim=1)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            reshape0 = item0.reshape(-1, 5)
+            reshape1 = item1.reshape(-1, 5)
+            reshape2 = item2.reshape(-1, 5)
+            reshape3 = item3.reshape(-1, 5)
+            reshape4 = item4.reshape(-1, 5)
+            other0 = reshape0.clone()
+            other1 = reshape1.clone()
+            other2 = reshape2.clone()
+            other3 = reshape3.clone()
+            return torch.stack(
+                (
+                    other0,
+                    other1,
+                    other2,
+                    reshape0,
+                    reshape1,
+                    reshape2,
+                    reshape3,
+                    reshape4,
+                    other3,
+                ),
+                dim=0,
+            )
 
         args = [
             torch.randn(500, 500),
@@ -1236,15 +1437,22 @@ class TestSplitCatFxPasses(TestCase):
             fn,
             expected_getitem_cat_merged,
             expected_cat_removed,
-            expected_cat_optimized,
+            expected_split_cat_to_slices,
             exptected_unbind_to_cat_view,
+            expected_split_stack_to_cats,
+            exptected_unbind_stack_to_slices,
+            expected_move_reshape_out_of_split_stack,
         ) in [
-            (split_cat_split, 2, 0, 0, 0),
-            (split_cat_split_kwarg, 2, 0, 0, 0),
-            (remove_cat_node_with_all_getitmes, 0, 2, 0, 0),
-            (mutate_cat_node_with_some_getitmes, 0, 1, 0, 0),
-            (optimize_cat_inputs, 0, 0, 1, 0),
-            (unbind_cat_to_view, 0, 0, 0, 1),
+            (split_cat_split, 2, 0, 0, 0, 0, 0, 0),
+            (split_cat_split_kwarg, 2, 0, 0, 0, 0, 0, 0),
+            (remove_cat_node_with_all_getitmes, 0, 2, 0, 0, 0, 0, 0),
+            (mutate_cat_node_with_some_getitmes, 0, 1, 0, 0, 0, 0, 0),
+            (split_cat_to_slices, 0, 0, 1, 0, 0, 0, 0),
+            (unbind_cat_to_view, 0, 0, 0, 1, 0, 0, 0),
+            (split_stack_to_cats_same_dim, 0, 0, 0, 0, 1, 0, 0),
+            (split_stack_to_cats_different_dim, 0, 0, 0, 0, 1, 0, 0),
+            (unbind_stack_to_slices, 0, 0, 0, 0, 0, 1, 0),
+            (move_reshape_out_of_split_stack, 0, 0, 0, 0, 0, 0, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
@@ -1259,12 +1467,24 @@ class TestSplitCatFxPasses(TestCase):
                 expected_cat_removed,
             )
             self.assertEqual(
-                counters["inductor"]["optimize_cat_inputs_pass"],
-                expected_cat_optimized,
+                counters["inductor"]["split_cat_to_slices_pass"],
+                expected_split_cat_to_slices,
             )
             self.assertEqual(
                 counters["inductor"]["unbind_cat_to_view_pass"],
                 exptected_unbind_to_cat_view,
+            )
+            self.assertEqual(
+                counters["inductor"]["split_stack_to_cats_pass"],
+                expected_split_stack_to_cats,
+            )
+            self.assertEqual(
+                counters["inductor"]["unbind_stack_to_slices_pass"],
+                exptected_unbind_stack_to_slices,
+            )
+            self.assertEqual(
+                counters["inductor"]["move_reshape_out_of_split_stack_pass"],
+                expected_move_reshape_out_of_split_stack,
             )
             counters.clear()
 
