@@ -35,7 +35,6 @@ from torch.utils import _pytree
 if TYPE_CHECKING:
     import onnx
     import onnxruntime
-
     from onnxruntime.capi import _pybind_state as ORTC
 
 try:
@@ -572,7 +571,7 @@ class OrtExecutionInfoPerSession:
         example_outputs: Union[Tuple[torch.Tensor, ...], torch.Tensor],
     ):
         # Carrier of ONNX model and its executor.
-        self.session: "onnxruntime.InferenceSession" = session
+        self.session: onnxruntime.InferenceSession = session
         # For the ONNX model stored in self.session, self.input_names[i] is the
         # name of the i-th positional input.
         self.input_names: Tuple[str, ...] = input_names
@@ -584,9 +583,9 @@ class OrtExecutionInfoPerSession:
         self.output_value_infos: Tuple[onnx.ValueInfoProto, ...] = output_value_infos  # type: ignore[name-defined]
         # For the ONNX model stored in self.session, self.input_devices[i] is the
         # i-th positional input's device.
-        self.input_devices: Tuple["ORTC.OrtDevice", ...] = input_devices
+        self.input_devices: Tuple[ORTC.OrtDevice, ...] = input_devices
         # Similar to self.input_devices, but for outputs.
-        self.output_devices: Tuple["ORTC.OrtDevice", ...] = output_devices
+        self.output_devices: Tuple[ORTC.OrtDevice, ...] = output_devices
         # This is the outputs of executing the original torch.fx.GraphModule with example inputs
         # (i.e., args passed into OrtBackend._ort_acclerated_call).
         self.example_outputs: Union[Tuple[torch.Tensor, ...], torch.Tensor] = (
