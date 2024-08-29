@@ -1044,10 +1044,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
             for i, node in enumerate(self.snodes)
         ]
         node = self.snodes[0].node
-        assert node is not None
-        device = node.get_device()
-        if ir.is_triton(device):
-            lines.extend(debug_triton_code(self))
+        if node is not None:
+            device = node.get_device()
+            if ir.is_triton(device):
+                lines.extend(debug_triton_code(self))
 
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
