@@ -691,7 +691,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
-    "torch/csrc/distributed/c10d/NCCLUtils.cu",
+    "torch/csrc/distributed/c10d/NanCheck.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
