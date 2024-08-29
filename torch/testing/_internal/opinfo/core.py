@@ -774,6 +774,10 @@ class OpInfo:
     # defaults to supports_autograd's value
     supports_inplace_autograd: bool = None
 
+    # If True, the op supports autograd on the out= parameter.
+    # If False, the op must raise an Exception if any out= tensor has autograd.
+    supports_autograd_on_out: bool = False
+
     # Whether the operation support forward mode AD
     # If the value is True, we check that the gradients are correct
     # If the value is False, we test that forward grad is not implemented

@@ -14641,12 +14641,6 @@
   tags: view_copy
   autogen: unbind_copy.int_out
 
-# - func: unbind_copy.int_out(Tensor self, int dim=0, *, Tensor(a!)[] out) -> ()
-#   variants: function
-#   dispatch:
-#     CompositeExplicitAutograd: unbind_copy_int_out
-#   tags: view_copy
-
 - func: split_copy.Tensor_out(Tensor self, SymInt split_size, int dim=0, *, Tensor(a!)[] out) -> ()
   variants: function
   dispatch:

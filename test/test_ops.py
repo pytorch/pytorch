@@ -1045,20 +1045,11 @@ class TestCommon(TestCase):
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
 
-    @ops(
-        [
-            op
-            for op in op_db
-            if op.supports_out and (op.supports_autograd or op.is_factory_function)
-        ],
-        dtypes=OpDTypes.supported,
-        allowed_dtypes=[torch.float, torch.cfloat],
-    )
-    def test_out_requires_grad_error(self, device, dtype, op):
+    def _args_for_grads_with_out(self, device, dtype, op):
         sample = first_sample(self, op.sample_inputs(device, dtype))
 
         # Call op to get prototype for out arguments
-        expect = op(sample.input, *sample.args, **sample.kwargs)
+        out = op(sample.input, *sample.args, **sample.kwargs)
         any_requires_grad = False
 
         def set_requires_grad(x):
@@ -1070,17 +1061,58 @@ class TestCommon(TestCase):
                 x.requires_grad_(True)
             return x
 
-        out = pytree.tree_map_(set_requires_grad, expect)
+        pytree.tree_map_(set_requires_grad, out)
         if not any_requires_grad:
             # Skip ops without any floating point outputs, e.g. isnan
-            return
+            return (), {}
+        else:
+            return (sample.input, *sample.args), {'out': out, **sample.kwargs}
 
-        msg = (
-            "functions with out=... arguments don't support automatic "
-            "differentiation, but one of the arguments requires grad."
-        )
-        with self.assertRaises(RuntimeError, msg=msg):
-            op(sample.input, *sample.args, **sample.kwargs, out=out)
+    @ops(
+        [
+            op
+            for op in op_db
+            if (
+                op.supports_out
+                and (op.supports_autograd or op.is_factory_function)
+                and not op.supports_autograd_on_out
+            )
+        ],
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=[torch.float, torch.cfloat],
+    )
+    def test_out_requires_grad_error(self, device, dtype, op):
+        args, kwargs = self._args_for_grads_with_out(device, dtype, op)
+        if args:
+            msg = (
+                "functions with out=... arguments don't support automatic "
+                "differentiation, but one of the arguments requires grad."
+            )
+            with self.assertRaises(RuntimeError, msg=msg):
+                op(*args, **kwargs)
+
+    @ops(
+        [op for op in op_db if op.supports_autograd_on_out],
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=[torch.float],
+    )
+    def test_out_requires_grad_success(self, device, dtype, op):
+        args, kwargs = self._args_for_grads_with_out(device, dtype, op)
+        if args:
+            result = op(*args, **kwargs)
+            self.assertEqual(result, None)
+
+            out = kwargs["out"]
+            self.assertIsInstance(out, tuple)
+            self.assertTrue(out)
+
+            [o.backward() for o in out]
+            self.assertTrue(all(o.grad is not None for o in out))
+
+            # These next two conditions are only true for unbind_copy
+            # which is the only op in this test right now.
+            self.assertEqual({o.shape for o in out}, {out[0].shape})
+            self.assertTrue(all(torch.all(o.grad == 1.0) for o in out))
 
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
