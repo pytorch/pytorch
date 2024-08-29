@@ -7137,12 +7137,14 @@ def forward(self, x, y):
         )
         self.assertExpectedInline(
             _extracts(ep),
-            """{'dynamic_shapes': ([['2*s2', 4], ['2*s2 + 1', 4]], ['s2'], [4, 4], None), 'dims': {'s2': {'min': 4, 'max': 16, 'derived': ['2*s2', '2*s2 + 1']}}}""",
+            """{'dynamic_shapes': ([['2*d0', 4], ['2*d0 + 1', 4]], ['d0'], [4, 4], None), 'dims': {'d0': {'min': 4, 'max': 16, 'derived': ['2*d0', '2*d0 + 1']}}}""",
         )
         ((dx, _), (dy, _)), (dz,), (_, _), _ = _loads(_dumps(dynamic_shapes, inputs))
         self.assertEqual(dx.root, dz)
         self.assertEqual(dy.root, dz)
 
+    @testing.expectedFailureRetraceability  # retracing doesn't directly work for _dumps(), as re-traced signature changes
+    @testing.expectedFailureSerDer  # dataclass serialization fails
     def test_dynamic_shapes_serdes_various(self):
         # serialization for dataclass inputs, Dim.AUTO/STATIC, and kwargs
         from torch.export.dynamic_shapes import Dim, _dumps, _extracts, _loads
@@ -7184,7 +7186,7 @@ def forward(self, x, y):
         extracted = _extracts(export(Foo(), args, kwargs, dynamic_shapes=dynamic_shapes))
         self.assertExpectedInline(
             extracted,
-            """{'dynamic_shapes': (['s0', 4], [['s2', 8], ['s2', 8]], ['s2 + 1', 8]), 'dims': {'s0': {'min': 2, 'max': None, 'derived': []}, 's2': {'min': 2, 'max': None, 'derived': ['s2 + 1']}}}""",
+            """{'dynamic_shapes': (['d0', 4], [['d1', 8], ['d1', 8]], ['d1 + 1', 8]), 'dims': {'d0': {'min': 2, 'max': None, 'derived': []}, 'd1': {'min': 2, 'max': None, 'derived': ['d1 + 1']}}}""",
         )
         # deserialize & export with both specs, and check that the extracted specs match up, with some roundtrippability
         extracted_from_dumped = _extracts(export(Foo(), args, kwargs, dynamic_shapes=_loads(dumped)))

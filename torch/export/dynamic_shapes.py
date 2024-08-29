@@ -1397,6 +1397,7 @@ def _extracts(ep: ExportedProgram):
     from torch.export.graph_signature import InputKind
 
     dims: Dict[str, Dict[str, Any]] = {}
+    symbol_map: Dict[sympy.Symbol, str] = {}
 
     def _replace_call_spec(call_spec):
         """
@@ -1454,18 +1455,20 @@ def _extracts(ep: ExportedProgram):
 
         # track root symbol
         root = next(iter(expr.free_symbols))
-        if root.name not in dims:
-            dims[root.name] = {
+        if root not in symbol_map:
+            symbol_map[root] = f"d{len(dims)}"
+            dims[symbol_map[root]] = {
                 "min": ep.range_constraints[root].lower,
                 "max": ep.range_constraints[root].upper,
                 "derived": set(),
             }
 
         # track derived dims
+        sub_expr = expr.subs(symbol_map)
         if not isinstance(expr, sympy.Symbol):
-            dims[root.name]["derived"].add(str(expr))
+            dims[symbol_map[root]]["derived"].add(str(sub_expr))
 
-        return str(val)
+        return str(sub_expr)
 
     tree_shapes = _extract_shapes_from_placeholders(ep)
     serialized_shapes = tree_map(_track_dim_from_symints, tree_shapes)
