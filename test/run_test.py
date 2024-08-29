@@ -183,7 +183,6 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/_tensor/test_attention",
-    "test_transformers",
 ]
 
 XPU_BLOCKLIST = [
