@@ -4078,10 +4078,10 @@ void split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_si
   copy_tensor_array_to_out("split_with_sizes_copy_out()", tmp, out);
 }
 
-void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  out) {
-  auto tmp = self.unbind(dim);
-  copy_tensor_array_to_out("unbind_copy_int_out()", tmp, out);
-}
+// void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  out) {
+//   auto tmp = self.unbind(dim);
+//   copy_tensor_array_to_out("unbind_copy_int_out()", tmp, out);
+// }
 
 int64_t sparse_dim_default(const Tensor& self) {
   TORCH_CHECK(self.layout() == kStrided, "sparse_dim expected sparse or strided tensor layout but got ", self.layout());
