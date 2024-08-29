@@ -54,6 +54,8 @@ __all__ = [
     "LoadEndianness",
     "get_default_load_endianness",
     "set_default_load_endianness",
+    "get_default_mmap_options",
+    "set_default_mmap_options",
     "clear_safe_globals",
     "get_safe_globals",
     "add_safe_globals",
@@ -163,9 +165,9 @@ def get_default_mmap_options() -> int:
     return _default_mmap_options
 
 
-def set_default_mmap_options(flags: int):
+class set_default_mmap_options:
     """
-    Set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
+    Context manager or function to set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
 
     For now, only either ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED`` are supported.
     Please open an issue if you need any other option to be added here.
@@ -176,17 +178,27 @@ def set_default_mmap_options(flags: int):
     Args:
         flags: ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED``
     """
-    global _default_mmap_options
-    if IS_WINDOWS:
-        raise RuntimeError(
-            "Changing the default mmap options is currently not supported for Windows"
-        )
-    if flags != MAP_PRIVATE and flags != MAP_SHARED:
-        raise ValueError(
-            "Invalid argument in function set_default_mmap_options, "
-            f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}"
-        )
-    _default_mmap_options = flags
+
+    def __init__(self, flags: int) -> None:
+        if IS_WINDOWS:
+            raise RuntimeError(
+                "Changing the default mmap options is currently not supported for Windows"
+            )
+        if flags != MAP_PRIVATE and flags != MAP_SHARED:
+            raise ValueError(
+                "Invalid argument in function set_default_mmap_options, "
+                f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}"
+            )
+        global _default_mmap_options
+        self.prev = _default_mmap_options
+        _default_mmap_options = flags
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        global _default_mmap_options
+        _default_mmap_options = self.prev
 
 
 def clear_safe_globals() -> None:
