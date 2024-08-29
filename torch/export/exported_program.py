@@ -8,6 +8,7 @@ import operator
 import types
 import warnings
 from collections import namedtuple
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
@@ -135,6 +136,21 @@ def _fx_collection_equivalence_fn(
         return spec1_context == spec2_context
 
     return spec1_type is spec2_type and spec1_context == spec2_context
+
+
+@contextmanager
+def _override_decomp_aten_to_variants():
+    from torch.export._trace import _override_composite_implicit_decomp
+
+    # Preserve variants of aten::to understanding that they are mutating/aliasing
+    # and their CompositeImplicitAutograd kernels will not become NotImplemented.
+    # We will later replace them with aten._to_copy when functionalizing.
+    with _override_composite_implicit_decomp(
+        (torch.ops.aten.to.dtype_layout, torch.ops.aten.to.dtype),
+        {},
+        safe=False,
+    ):
+        yield
 
 
 def _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index):
@@ -409,7 +425,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     params_buffers_to_node_meta = _collect_param_buffer_metadata(mod)
 
-    with _ignore_backend_decomps(), fake_mode:
+    with _ignore_backend_decomps(), _override_decomp_aten_to_variants(), fake_mode:
         aten_export_artifact = _export_to_aten_ir(
             mod,
             # this requires empty kwargs, but not in pytree.flattened format

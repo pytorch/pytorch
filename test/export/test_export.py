@@ -1437,7 +1437,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 x_linear = self.linear(x_conv)
                 return x_linear.cos() + y_conv_1d.sum()
 
-        ep = torch.export._trace._export_for_training(
+        ep = torch.export.export_for_training(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
         ep_has_linear_convd = ep.run_decompositions(
@@ -1656,7 +1656,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 return self.linear(x)
 
         eager_model = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model, (torch.ones(2, 2),)
         )
         self.assertExpectedInline(
@@ -1695,7 +1695,7 @@ def forward(self, x):
 
         eager_model_for_export = Foo()
         eager_model_for_testing = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model_for_export, (torch.ones(4, 4),)
         )
         self.assertExpectedInline(
@@ -1740,7 +1740,7 @@ def forward(self, x):
         eager_model_for_export_training = Foo()
         eager_model_for_export_inference = Foo()
         eager_model_for_testing = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model_for_export_training,
             (torch.ones(4, 4),),
             dynamic_shapes=({0: Dim("x")},),
@@ -1777,7 +1777,7 @@ def forward(self, x):
                 return x + y + self.buffer.sum()
 
         eager_model = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model,
             ([torch.ones(4, 4), torch.ones(4, 4)],),
         )
@@ -1803,7 +1803,7 @@ def forward(self, x):
                 return self.linear(x) + self.buffer.sum()
 
         eager_model = Foo()
-        ep_for_training = torch.export._trace._export_for_training(
+        ep_for_training = torch.export.export_for_training(
             eager_model,
             (torch.ones(2, 2),),
         )
@@ -1859,8 +1859,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
 
     def test_static_dim_constraints(self):
-        from torch.export.dynamic_shapes import DIM
-
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1889,7 +1887,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ((dx, None), (dy, 4), (dz, 3)),
             ((None, 6), (5, None), (None, None)),
             ((4, 6), {0: None, 1: 4}, {0: None, 1: 3}),
-            (None, None, (DIM.STATIC, DIM.STATIC)),
+            (None, None, (Dim.STATIC, Dim.STATIC)),
         ]:
             ep = export(foo, inputs, dynamic_shapes=dynamic_shapes)
             self.assertEqual(foo(*inputs), ep.module()(*inputs))
@@ -2036,9 +2034,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
     def test_mismatched_dynamic_shapes(self):
-        from torch.export.dynamic_shapes import DIM
-
-        AUTO, STATIC = DIM.AUTO, DIM.STATIC
+        AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         class M(torch.nn.Module):
             def forward(self, x):
@@ -2070,7 +2066,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             + re.escape(
                 "specified at `dynamic_shapes[0]['k']['k'][0]` "
                 "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                " where each dimension is None, an int, a Dim, DIM.AUTO, or DIM.STATIC)"
+                " where each dimension is None, an int, a Dim, Dim.AUTO, or Dim.STATIC)"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -2147,7 +2143,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
-                "Specifying both `DIM.AUTO` and `Dim` or `DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
+                "Specifying both `Dim.AUTO` and `Dim` or `DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
                 "and can easily lead to constraint violation errors or obscure errors in torch.export."
             ),
         ):
@@ -2551,9 +2547,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     def test_mark_and_auto_dynamic(self):
         # for this use case, mark_dynamic() and AUTO should have same effect.
         # check that same symbol gets allocated to both dims without raising constraint violation.
-        from torch.export.dynamic_shapes import DIM
-
-        AUTO, STATIC = DIM.AUTO, DIM.STATIC
+        AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -2581,9 +2575,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     def test_dont_duck_size_for_auto_dynamic(self):
         # for this use case, mark_dynamic() and AUTO should have same effect.
         # check that same symbol gets allocated to both dims without raising constraint violation.
-        from torch.export.dynamic_shapes import DIM
-
-        AUTO, STATIC = DIM.AUTO, DIM.STATIC
+        AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -3536,8 +3528,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ):
                 _ = export(mod, inp, strict=True)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_device_to_static(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -3552,8 +3542,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_device_to_dynamic(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -3572,8 +3560,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_device_to_mutation(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -3586,8 +3572,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             export(Module(), (torch.tensor(1, device="cpu"),))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_float_conversion(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -3602,8 +3586,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_device_to_mutation_float(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -3660,6 +3642,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ep.module()(*inp_test)[1], ep_rexported.module()(*inp_test)[1]
             )
         )
+
+    def test_use_embedding_twice(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = torch.nn.Embedding(4, 4)
+
+            def forward(self, x):
+                return self.embed(x) + self.embed.weight[x]
+
+        inputs = (torch.tensor([0, 1, 2, 3]),)
+        ep = export(Foo(), inputs)
 
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
@@ -6962,9 +6956,7 @@ def forward(self, x, y):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
         # with runtime asserts. Check that we specialize to static values when the program says so.
-        from torch.export.dynamic_shapes import DIM
-
-        AUTO, STATIC = DIM.AUTO, DIM.STATIC
+        AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         # case 1: direct equality between symbols
         class SimpleEquality(torch.nn.Module):
@@ -7029,9 +7021,7 @@ def forward(self, x, y):
         )
 
     def test_automatic_dynamic_shapes_constant_relation(self):
-        from torch.export.dynamic_shapes import DIM
-
-        AUTO, STATIC = DIM.AUTO, DIM.STATIC
+        AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         # case 2: related by constant: s0 + 4 = s1
         class OffBy4(torch.nn.Module):
@@ -7074,9 +7064,7 @@ def forward(self, x, y):
         )
 
     def test_automatic_dynamic_shapes_linear_relation(self):
-        from torch.export.dynamic_shapes import DIM
-
-        AUTO, STATIC = DIM.AUTO, DIM.STATIC
+        AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         # case 3: linear relation
         class LinearRel(torch.nn.Module):

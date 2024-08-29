@@ -129,7 +129,7 @@ def _register_cia_to_meta(*args, **kwargs):
 
 
 @contextmanager
-def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
+def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -137,6 +137,14 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
     # Hence we can only do it for functional ops. One caveat is that
     # there are some composite ops that lie about their schema (claimed to be
     # functional but not really aka dropout), for these cases, we just decompose.
+
+    # When safe=False, we will assume that ops_to_preserve can be mutating/aliasing
+    # and their usual decompositions need to be shadowed rather than overridden.
+    # Thus we will avoid asserting that they are valid to preserve, and will not
+    # replace their CompositeImplicitAutograd kernels with NotImplemented.
+    # The only current users of this mode are variants of aten::to that we will
+    # replace with aten::_to_copy in FunctionalTensorMode.__torch_dispatch__.
+
     saved_tables = {}
     patched_ops = set()
     removed_decomps = {}
@@ -177,8 +185,9 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
 
             return True
 
-        # If we didn't error, it means we can go ahead
-        assert_valid_to_preserve(op_overload)
+        if safe:
+            # If we didn't error, it means we can go ahead
+            assert_valid_to_preserve(op_overload)
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -192,10 +201,12 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
         if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
             del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
 
-        def _(*args, **kwargs):
-            return NotImplemented
+        if safe:
 
-        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
+            def _(*args, **kwargs):
+                return NotImplemented
+
+            op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
 
         # For fake tensor prop, we do want to register meta kernel directly
         if torch._C.DispatchKey.Meta not in op_overload.py_kernels:
@@ -444,18 +455,12 @@ def _get_param_buffer_mapping(
     of a traced module to what the original module contains.
     """
 
-    param_lookup: Dict[int, List[str]] = {}
-    buffer_lookup: Dict[int, List[str]] = {}
+    param_lookup: Dict[int, str] = {}
+    buffer_lookup: Dict[int, str] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup.setdefault(id(param), []).append(name)
+        param_lookup[id(param)] = name
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
-        buffer_lookup.setdefault(id(buffer), []).append(name)
-
-    # reverse lists so FQN assignment is FIFO wrt model structure
-    for name, fqns in param_lookup.items():
-        param_lookup[name] = fqns[::-1]
-    for name, fqns in buffer_lookup.items():
-        buffer_lookup[name] = fqns[::-1]
+        buffer_lookup[id(buffer)] = name
 
     param_buffer_table: Dict[str, str] = {}
     for dynamo_name, dynamo_param in traced_module.named_parameters(
@@ -463,14 +468,14 @@ def _get_param_buffer_mapping(
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_param) in param_lookup:
-            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)]
 
     for dynamo_name, dynamo_buffer in traced_module.named_buffers(
         remove_duplicate=False
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_buffer) in buffer_lookup:
-            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)]
 
     return param_buffer_table
 

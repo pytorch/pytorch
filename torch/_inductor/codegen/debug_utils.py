@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 from enum import Enum
 from typing import List, Optional
 
@@ -9,6 +10,9 @@ from .. import config
 from ..virtualized import V
 from .common import TensorArg
 from .multi_kernel import MultiKernel
+
+
+log = logging.getLogger(__name__)
 
 
 # AOTI debug printing related configs
@@ -37,7 +41,7 @@ class DebugPrinterManager:
         self.kernel_name = kernel_name
         self.arg_signatures: Optional[List[type]] = None
         self.kernel = kernel
-        self.filtered_kernel_names_to_print = self.get_debug_filtered_kernel_names()
+        self.filtered_kernel_names_to_print = self._get_debug_filtered_kernel_names()
 
     def __enter__(self):
         self._perform_debug_print_or_save_helper(
@@ -81,6 +85,15 @@ class DebugPrinterManager:
                 arg_signatures=self.arg_signatures,
             )
 
+    @functools.lru_cache  # noqa: B019
+    def _get_debug_filtered_kernel_names(self) -> List[str]:
+        if config.aot_inductor.filtered_kernel_names is None:
+            return []
+        return [
+            x.strip()
+            for x in config.aot_inductor.filtered_kernel_names.lower().split(",")
+        ]
+
     def set_printer_args(
         self,
         args_to_print_or_save: List[str],
@@ -90,20 +103,14 @@ class DebugPrinterManager:
     ):
         # Note: MultiKernel debug printing is not supported for now
         if isinstance(kernel, MultiKernel):
+            log.info(
+                "MultiKernel type is not supported in AOTI debug printer tool yet."
+            )
             self.debug_printer_level = IntermediateValueDebuggingLevel.OFF
         self.args_to_print_or_save = args_to_print_or_save
         self.kernel_name = kernel_name
         self.arg_signatures = arg_signatures
         self.kernel = kernel
-
-    @functools.lru_cache  # noqa: B019
-    def get_debug_filtered_kernel_names(self) -> List[str]:
-        if config.aot_inductor.filtered_kernel_names is None:
-            return []
-        return [
-            x.strip()
-            for x in config.aot_inductor.filtered_kernel_names.lower().split(",")
-        ]
 
     def codegen_intermediate_tensor_value_save(
         self,
@@ -143,7 +150,8 @@ class DebugPrinterManager:
             ):
                 continue
             if self.debug_printer_level == IntermediateValueDebuggingLevel.PRINT_ONLY:
-                # when debug printing is enabled i.e. DEFAULT_PRINT level, check if filtered kernel name list is provided
+                # when debug printing is enabled i.e. IntermediateValueDebuggingLevel.PRINT_ONLY,
+                # check if filtered kernel name list is provided
                 if (
                     len(self.filtered_kernel_names_to_print) > 0
                     and kernel_name not in self.filtered_kernel_names_to_print
