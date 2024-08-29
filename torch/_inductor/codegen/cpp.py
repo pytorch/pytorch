@@ -942,55 +942,7 @@ class CppVecOverrides(CppOverrides):
     def __new__(cls, *args, **kargs):
         self = super().__new__(cls)
 
-        def scalarize(scalar_func, *args, **kwargs):
-            assert not kwargs
-            kernel = V.kernel
-            assert isinstance(kernel, CppVecKernel)
-            code = BracesBuffer()
-            code.writeline("[&]()")
-            vec_dtype = args[0].dtype
-            n_vec = kernel._get_num_vectors(vec_dtype)
-            size = kernel.tail_size if kernel.tail_size else kernel.tiling_factor
-            scalar_args = []
-            cdtype = DTYPE_TO_CPP[vec_dtype]
-            output_mask = scalar_func.__name__ in (
-                "isinf",
-                "isnan",
-                "signbit",
-            )
-            octype = "bool" if output_mask else cdtype
-            with code.indent():
-                for argidx, arg in enumerate(args):
-                    if isinstance(arg, CppCSEVariable):
-                        assert arg.is_vec
-                        assert arg.dtype == vec_dtype
-                        code.writeline(
-                            f"__at_align__ std::array<{cdtype}, {size}> tmpbuf{argidx};"
-                        )
-                        code.writeline(f"{arg}.store(tmpbuf{argidx}.data(), {size});")
-                        scalar_args.append(f"tmpbuf{argidx}[i]")
-                    else:
-                        scalar_args.append(arg)
-                code.writeline(f"__at_align__ std::array<{octype}, {size}> tmpbuf_out;")
-                res = scalar_func(*scalar_args)
-                code.writeline(f"for (int i = 0; i < {size}; i++)")
-                with code.indent():
-                    code.writeline(f"tmpbuf_out[i] = {res};")
-                if output_mask:
-                    assert not kernel.tail_size
-                    load_args = "tmpbuf_out.data()"
-                    load_fn = f"at::vec::VecMask<{cdtype},{n_vec}>::from"
-                else:
-                    load_args = f"tmpbuf_out.data(), {size}"
-                    if n_vec == 1:
-                        load_fn = f"at::vec::Vectorized<{cdtype}>::loadu"
-                    else:
-                        load_fn = f" at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu"
-                code.writeline(f"return {load_fn}({load_args});")
-            code.writeline("()")
-            return code
-
-        def vectorize_by_scalar_func_with_for_loop(vec_func, scalar_func):
+        def wrap(func):
             # `CppVecKernel` generates both scalar ops and vector ops according to
             # whether the inputs are scalars or vectors while all ops in `CppVecOverrides`
             # (except for some ops explained below) assume the inputs are vectors. We wrap the ops in
@@ -1003,13 +955,6 @@ class CppVecOverrides(CppOverrides):
             # `ops.index_expr`:
             #     needs to further analyze the dependency of the index expression on
             #     the tiling itervar.
-            scalar_ops = super(CppVecOverrides, self)
-            if not scalar_func:
-                scalar_func = getattr(
-                    scalar_ops, vec_func.__name__, getattr(V.ops, vec_func.__name__)  # type: ignore[attr-defined]
-                )
-            assert scalar_func is not None
-
             def wrapper(*args, **kwargs):
                 scalars = [
                     arg
@@ -1043,7 +988,7 @@ class CppVecOverrides(CppOverrides):
                     # 3. int32 and fp32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
                     if len(new_args) == 2:
                         new_args = promote_args(new_args)
-                    elif vec_func == CppVecOverrides.where:
+                    elif func == CppVecOverrides.where:
                         new_args[1:] = promote_args(new_args[1:])
 
                 # Broadcast scalar args to vector
@@ -1054,7 +999,7 @@ class CppVecOverrides(CppOverrides):
                         if (
                             isinstance(new_arg, CppCSEVariable)
                             and not new_arg.is_vec
-                            and vec_func
+                            and func
                             not in [
                                 CppVecOverrides.rand,
                                 CppVecOverrides.randn,
@@ -1066,11 +1011,13 @@ class CppVecOverrides(CppOverrides):
                     ]
 
                 if vectors:
-                    if vec_func:
-                        return vec_func(*new_args, **kwargs)
-                    else:
-                        return scalarize(scalar_func, *new_args, **kwargs)
+                    return func(*new_args, **kwargs)
                 else:
+                    scalar_ops = super(CppVecOverrides, self)
+                    scalar_func = getattr(
+                        scalar_ops, func.__name__, getattr(V.ops, func.__name__)  # type: ignore[attr-defined]
+                    )
+                    assert scalar_func is not None
                     return scalar_func(*args, **kwargs)
 
             return wrapper
@@ -1083,17 +1030,7 @@ class CppVecOverrides(CppOverrides):
                 setattr(
                     self,
                     name,
-                    vectorize_by_scalar_func_with_for_loop(method.__func__, None),
-                )
-
-        for name, method in vars(CppOverrides).items():
-            if getattr(method, "__class__", None) == staticmethod and name not in vars(
-                CppVecOverrides
-            ):
-                setattr(
-                    self,
-                    name,
-                    vectorize_by_scalar_func_with_for_loop(None, method.__func__),
+                    wrap(method.__func__),
                 )
 
         return self
@@ -1671,8 +1608,71 @@ class CppVecOverrides(CppOverrides):
             V.kernel.cse.cache[cache_key] = cse_var
         return mantissa, exponent
 
+    @classmethod
+    def scalarize(cls, scalar_func):
+        def inner(*args, **kwargs):
+            assert not kwargs
+            kernel = V.kernel
+            assert isinstance(kernel, CppVecKernel)
+            code = BracesBuffer()
+            code.writeline("[&]()")
+            vec_dtype = args[0].dtype
+            n_vec = kernel._get_num_vectors(vec_dtype)
+            size = kernel.tail_size if kernel.tail_size else kernel.tiling_factor
+            scalar_args = []
+            cdtype = DTYPE_TO_CPP[vec_dtype]
+            output_mask = scalar_func.__name__ in (
+                "isinf",
+                "isnan",
+                "signbit",
+            )
+            octype = "bool" if output_mask else cdtype
+            with code.indent():
+                for argidx, arg in enumerate(args):
+                    if isinstance(arg, CppCSEVariable):
+                        assert arg.is_vec
+                        assert arg.dtype == vec_dtype
+                        code.writeline(
+                            f"__at_align__ std::array<{cdtype}, {size}> tmpbuf{argidx};"
+                        )
+                        code.writeline(f"{arg}.store(tmpbuf{argidx}.data(), {size});")
+                        scalar_args.append(f"tmpbuf{argidx}[i]")
+                    else:
+                        scalar_args.append(arg)
+                code.writeline(f"__at_align__ std::array<{octype}, {size}> tmpbuf_out;")
+                res = scalar_func(*scalar_args)
+                code.writeline(f"for (int i = 0; i < {size}; i++)")
+                with code.indent():
+                    code.writeline(f"tmpbuf_out[i] = {res};")
+                if output_mask:
+                    assert not kernel.tail_size
+                    load_args = "tmpbuf_out.data()"
+                    load_fn = f"at::vec::VecMask<{cdtype},{n_vec}>::from"
+                else:
+                    load_args = f"tmpbuf_out.data(), {size}"
+                    if n_vec == 1:
+                        load_fn = f"at::vec::Vectorized<{cdtype}>::loadu"
+                    else:
+                        load_fn = f" at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu"
+                code.writeline(f"return {load_fn}({load_args});")
+            code.writeline("()")
+            return code
+
+        return inner
+
+    @classmethod
+    def _initialize_scalarize(cls):
+        for name, method in vars(CppOverrides).items():
+            if getattr(method, "__class__", None) == staticmethod and name not in vars(
+                CppVecOverrides
+            ):
+                func = cls.scalarize(method.__func__)
+                func.__name__ = name
+                setattr(cls, name, staticmethod(func))
+
 
 CppVecOverrides._initialize_pointwise_overrides("cppvec")
+CppVecOverrides._initialize_scalarize()
 
 
 class CppTile2DOverrides(CppVecOverrides):
