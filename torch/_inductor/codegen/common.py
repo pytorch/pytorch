@@ -124,6 +124,7 @@ class DeviceOpOverrides:
     def cpp_getStreamFromExternal(self):
         raise NotImplementedError
 
+
 device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 
 

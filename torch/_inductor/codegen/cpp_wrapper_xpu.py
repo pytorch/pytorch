@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -18,6 +18,7 @@ from .codegen_device_driver import xpu_kernel_driver, xpu_kernel_header
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
+
 
 if TYPE_CHECKING:
     from ..graph import GraphLowering
@@ -42,9 +43,7 @@ class CppWrapperXpu(CppWrapperCpu):
 
         self.header.splice("#include <filesystem>")
         if config.abi_compatible:
-            self.header.splice(
-                "#include <torch/csrc/inductor/aoti_torch/c/shim.h>"
-            )
+            self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
         else:
             self.header.splice(xpu_kernel_header())
         self.header.splice(xpu_kernel_driver())
@@ -69,9 +68,7 @@ class CppWrapperXpu(CppWrapperCpu):
                 sorted(self.src_to_kernel.values()),
                 sorted([entry[0] for entry in self.user_defined_kernel_cache.values()]),
             ):
-                self.prefix.writeline(
-                    f"static sycl::kernel *{kernel} = nullptr;"
-                )
+                self.prefix.writeline(f"static sycl::kernel *{kernel} = nullptr;")
             self.prefix.writeline("\n")
         return super().generate(is_inference)
 
@@ -124,7 +121,8 @@ class CppWrapperXpu(CppWrapperCpu):
         if V.graph.aot_mode:
             self.writeline(f"if (kernels.{name} == nullptr) {{")
             self.writeline(
-                f"""    kernels.{name} = loadKernel({stream}.queue(), "{cubin_path}", "{mangled_name}", {shared_mem}, this->cubin_dir_);"""
+                f"""    kernels.{name} = loadKernel({stream}.queue(), "{cubin_path}",
+                                            "{mangled_name}", {shared_mem}, this->cubin_dir_);"""
             )
             self.writeline("}")
         else:
@@ -153,9 +151,7 @@ class CppWrapperXpu(CppWrapperCpu):
                         self.writeline(f"{ctype} {var_name} = {arg}.item<{ctype}>();")
                 else:
                     if config.abi_compatible:
-                        self.writeline(
-                            f"void* {var_name};"
-                        )
+                        self.writeline(f"void* {var_name};")
                         self.writeline(
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
                         )
@@ -175,7 +171,14 @@ class CppWrapperXpu(CppWrapperCpu):
 
         return ", ".join(new_args)
 
-    def generate_default_grid(self, name: str, grid: List[Any], cuda: bool = True):
+    def generate_default_grid(
+        self,
+        kernel_name: str,
+        grid: List[Any],
+        cuda: bool = True,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwags,
+    ):
         """
         Generate grid configs for launching a CUDA kernel using the grid
         function from triton_heuristics.
@@ -185,10 +188,10 @@ class CppWrapperXpu(CppWrapperCpu):
         assert isinstance(grid, list), f"expected {grid=} to be a list"
         grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
         grid_fn = default_grid(*grid)
-        params = CudaKernelParamCache.get(name)
+        params = CudaKernelParamCache.get(kernel_name)
         assert (
             params is not None
-        ), f"cuda kernel parameters for {name} should already exist at this moment, only found {CudaKernelParamCache.get_keys()}"
+        ), f"kernel parameters for {kernel_name} should already exist at this moment, only found {CudaKernelParamCache.get_keys()}"
         block_cfg = {
             "XBLOCK": params["x_block"],
             "YBLOCK": params["y_block"],
@@ -198,7 +201,7 @@ class CppWrapperXpu(CppWrapperCpu):
 
     def generate_kernel_call(
         self,
-        name,
+        name: str,
         call_args,
         grid=None,
         device_index=None,
@@ -208,6 +211,8 @@ class CppWrapperXpu(CppWrapperCpu):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        autotune_configs=None,
+        grid_extra_kwargs="",
     ):
         assert arg_types is not None and len(call_args) == len(
             arg_types
@@ -272,15 +277,17 @@ class CppWrapperXpu(CppWrapperCpu):
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
-        launch_kernel_call = """launchKernel(*{}, {}, {}, {}, {}, {}, {}, {}.queue());""".format(
-            kernel_var_name,
-            f"{grid_name}.grid_x",
-            f"{grid_name}.grid_y",
-            f"{grid_name}.grid_z",
-            params["num_warps"],
-            params["shared_mem"],
-            kernel_args_var,
-            stream,
+        launch_kernel_call = (
+            """launchKernel(*{}, {}, {}, {}, {}, {}, {}, {}.queue());""".format(
+                kernel_var_name,
+                f"{grid_name}.grid_x",
+                f"{grid_name}.grid_y",
+                f"{grid_name}.grid_z",
+                params["num_warps"],
+                params["shared_mem"],
+                kernel_args_var,
+                stream,
+            )
         )
         if grid_uses_symbolic_shapes:
             # TODO: Use codegen `do_indent()` to properly generate the indentation.

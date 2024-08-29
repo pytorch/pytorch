@@ -15,10 +15,7 @@ from torch.testing._internal.inductor_utils import HAS_XPU
 
 try:
     try:
-        from . import (
-            test_torchinductor,
-            test_torchinductor_dynamic_shapes,
-        )
+        from . import test_torchinductor, test_torchinductor_dynamic_shapes
     except ImportError:
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
@@ -67,17 +64,13 @@ test_failures_xpu_wrapper = {
     "test_bernoulli1_xpu": test_torchinductor.TestFailure(
         ("xpu_wrapper",), is_skip=True
     ),
-    "test_randint_xpu": test_torchinductor.TestFailure(
-        ("xpu_wrapper",), is_skip=True
-    ),
+    "test_randint_xpu": test_torchinductor.TestFailure(("xpu_wrapper",), is_skip=True),
     "test_scaled_dot_product_efficient_attention_xpu": test_torchinductor.TestFailure(
         ("xpu_wrapper",), is_skip=True
     ),
     "test_unspec_inputs_xpu": test_torchinductor.TestFailure(
         ("xpu_wrapper",), is_skip=True
     ),
-
-
 }
 
 
@@ -209,8 +202,6 @@ if RUN_XPU:
         BaseTest("test_pointwise_hermite_polynomial_h"),
     ]:
         make_test_case(item.name, item.device, item.tests)
-
-    from torch._inductor.utils import is_big_gpu
 
     test_torchinductor.copy_tests(
         XpuWrapperTemplate, TestXpuWrapper, "xpu_wrapper", test_failures_xpu_wrapper

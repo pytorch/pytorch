@@ -30,4 +30,5 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
     def cpp_getStreamFromExternal(self):
         return "at::xpu::getStreamFromExternal"
 
+
 register_device_op_overrides("xpu", XPUDeviceOpOverrides())
