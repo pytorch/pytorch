@@ -878,6 +878,20 @@ def _get_openmp_args(
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
     elif _IS_WINDOWS:
+        """
+        On Windows, `clang` and `icx` have their specific openmp implenmention.
+        And the openmp lib is in compiler's some sub-directory.
+        For dynamic library(DLL) load, the Windows native APIs are `LoadLibraryA` and `LoadLibraryExA`, and their search
+        dependencies have some rules:
+        https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-loadlibraryexa#searching-for-dlls-and-dependencies
+        In some case, the rules may not include compiler's sub-directories.
+        So, it can't search and load compiler's openmp library correctly.
+        And then, the whole application would be broken.
+
+        To avoid the openmp load failed, we can automatic locate the openmp binary and preload it.
+        1. For clang, the function is `perload_clang_libomp_win`.
+        2. For icx, the function is `perload_icx_libomp_win`.
+        """
         if _is_clang(cpp_compiler):
             cflags.append("openmp")
             libs.append("libomp")
