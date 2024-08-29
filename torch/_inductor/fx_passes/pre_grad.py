@@ -263,7 +263,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
     from .quantization import _register_woq_mm_int4_pattern, quant_lift_up
 
     quant_lift_up(gm)
-    if config.max_autotune and "CPP" in config.max_autotune_gemm_backends
+    if config.max_autotune and "CPP" in config.max_autotune_gemm_backends:
         _register_woq_mm_int4_pattern(gm)
 
     gm.graph.lint()
