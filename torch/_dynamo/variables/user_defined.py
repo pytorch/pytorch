@@ -410,22 +410,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
-        elif self.value is list and not kwargs:
-            if len(args) == 0:
-                items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
-            else:
-                unimplemented("list() with more than 1 arg not supported")
-            return variables.ListVariable(items, mutable_local=MutableLocal())
-        elif self.value is tuple and not kwargs:
-            if len(args) == 0:
-                items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
-            else:
-                unimplemented("tuple() with more than 1 arg not supported")
-            return variables.TupleVariable(items, mutable_local=MutableLocal())
+
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one

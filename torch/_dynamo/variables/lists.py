@@ -435,7 +435,12 @@ class ListVariable(CommonListMethodsVariable):
 
     def var_getattr(self, tx, name):
         if name == "__class__":
-            return variables.UserDefinedClassVariable(self.python_type())
+            source = AttrSource(self.source, name) if self.source else None
+            class_type = self.python_type()
+            if class_type is list:
+                return variables.BuiltinVariable(class_type, source=source)
+            else:
+                return variables.UserDefinedClassVariable(class_type, source=source)
         return super().var_getattr(tx, name)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
@@ -532,7 +537,12 @@ class TupleVariable(BaseListVariable):
 
     def var_getattr(self, tx, name):
         if name == "__class__":
-            return variables.UserDefinedClassVariable(self.python_type())
+            source = AttrSource(self.source, name) if self.source else None
+            class_type = self.python_type()
+            if class_type is tuple:
+                return variables.BuiltinVariable(class_type, source=source)
+            else:
+                return variables.UserDefinedClassVariable(class_type, source=source)
         return super().var_getattr(tx, name)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
