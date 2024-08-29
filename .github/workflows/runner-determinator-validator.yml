@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/_runner-determinator.yml
+      - .github/workflows/runner_determinator_workflow.py
       - .github/scripts/runner_determinator.py
 
 jobs:
