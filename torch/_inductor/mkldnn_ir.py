@@ -623,15 +623,19 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             "scalars",
             "algorithm",
         ]
+        if not self.has_bias:
+            const_arg_names.insert(2, "bias")
         const_args = list(self.codegen_const_args(const_arg_names))
 
         x = args[0]
         packed_weight = args[1]
-        bias = args[2] if self.has_bias else const_args[0]
+        bias = args[2] if self.has_bias else const_args[2]
         w_scale, w_zp = args[-2], args[-1]
         (
             x_scale,
             x_zp,
+        ) = const_args[:2]
+        (
             stride,
             padding,
             dilation,
@@ -642,7 +646,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             unary_attr,
             unary_scalars,
             unary_algorithm,
-        ) = const_args[-12:]
+        ) = const_args[-10:]
 
         codegen_args = (
             x,
@@ -821,17 +825,21 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             "unary_scalars",
             "unary_algorithm",
         ]
+        if not self.has_bias:
+            const_arg_names.insert(4, "bias")
         const_args = list(self.codegen_const_args(const_arg_names))
 
         x = args[0]
         packed_weight = args[1]
-        bias = args[2] if self.has_bias else const_args[0]
+        bias = args[2] if self.has_bias else const_args[4]
         accum, w_scale, w_zp = args[-3], args[-2], args[-1]
         (
             x_scale,
             x_zp,
             accum_scale,
             accum_zp,
+        ) = const_args[:4]
+        (
             stride,
             padding,
             dilation,
@@ -844,7 +852,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             unary_attr,
             unary_scalars,
             unary_algorithm,
-        ) = const_args[-16:]
+        ) = const_args[-12:]
         conv_args = (
             x,
             x_scale,
