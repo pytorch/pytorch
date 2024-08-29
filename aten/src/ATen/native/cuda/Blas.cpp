@@ -620,51 +620,19 @@ TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const 
   }
 }
 
-namespace {
 
-inline void dot_check(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(
-      self.dim() == 1 && other.dim() == 1,
-      "1D tensors expected, but got ",
-      self.dim(),
-      "D and ",
-      other.dim(),
-      "D tensors");
-  TORCH_CHECK(
-      self.scalar_type() == other.scalar_type(),
-      "dot : expected both vectors to have same dtype, but found ",
-      self.scalar_type(),
-      " and ",
-      other.scalar_type());
-  TORCH_CHECK(
-      self.numel() == other.numel(),
-      "inconsistent tensor size, expected tensor [",
-      self.numel(),
-      "] and src [",
-      other.numel(),
-      "] to have the same number of elements, but got ",
-      self.numel(),
-      " and ",
-      other.numel(),
-      " elements respectively");
-  TORCH_CHECK(
-      (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
-          (other.stride(0) <= INT_MAX),
-      "dot only supports n, incx, incy with the bound [val] <= %d",
-      INT_MAX);
-}
-
-} // anonymous namespace
 void dot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& result) {
   if (self.is_complex()) {
     if (self.is_conj()) {
       if (other.is_conj()) {
-        return dot_out_cuda_impl(self.conj(), other.conj(), result);
+        dot_out_cuda_impl(self.conj(), other.conj(), result);
       } else {
-        return result.fill_(vdot_cuda(self.conj(), other)) ;
+        result.fill_(vdot_cuda(self.conj(), other));
       }
+      return;
     } else if (other.is_conj()) {
-     return result.fill_(vdot_cuda(other.conj(), self));
+      result.fill_(vdot_cuda(other.conj(), self));
+      return;
     }
   }
 
@@ -711,17 +679,22 @@ TORCH_IMPL_FUNC(dot_out_cuda)(const Tensor& self, const Tensor& other, const Ten
 
 void vdot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& result) {
   if (!self.is_complex()) {
-    return dot_out_cuda_impl(self, other, result);
+    dot_out_cuda_impl(self, other, result);
+    return;
   }
 
   if (self.is_conj()) {
     if (other.is_conj()) {
-      return vdot_out_cuda_impl(other.conj(), self.conj(), result);
+      vdot_out_cuda_impl(other.conj(), self.conj(), result);
     } else {
-      return dot_out_cuda_impl(self.conj(), other, result);
+      dot_out_cuda_impl(self.conj(), other, result);
     }
+    return;
   } else if (other.is_conj()) {
-    return (dot_cuda(self, other.conj())).conj();
+    Tensor temp_result = at::empty({}, self.options());
+    dot_out_cuda_impl(self, other.conj(), temp_result);
+    result.fill_(temp_result.conj());
+    return;
   }
 
   // Most checks are performed in the META_FUNC
@@ -732,7 +705,8 @@ void vdot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& r
     INT_MAX);
 
   if (self._is_zerotensor() || other._is_zerotensor()) {
-    return result.fill_(0);
+    result.fill_(0);
+    return;
   }
 
   const int n = static_cast<int>(self.numel());
