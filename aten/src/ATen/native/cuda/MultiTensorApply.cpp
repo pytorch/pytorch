@@ -6,7 +6,7 @@
 namespace at::native {
 
 bool supports_large_kernel_arg() {
-#if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
   static std::optional<bool> supports_large_kernel_arg_ = std::nullopt;
   if (!supports_large_kernel_arg_.has_value()) {
     int driver_ver = 0;

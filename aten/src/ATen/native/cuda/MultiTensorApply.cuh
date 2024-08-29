@@ -49,20 +49,30 @@ static constexpr int64_t kILP = 4;
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kBlockSize = 512;
 
-#if !defined(USE_ROCM) && defined(CUDART_VERSION) && CUDART_VERSION >= 12010
-#define DISPATCH_MULTI_TENSOR_APPLY(...)                \
-  if (at::native::supports_large_kernel_arg()) {        \
-    constexpr bool large_kernel_arg C10_UNUSED = true;  \
-    __VA_ARGS__();                                      \
-  } else {                                              \
-    constexpr bool large_kernel_arg C10_UNUSED = false; \
-    __VA_ARGS__();                                      \
+// MSVC has a problem with constexpr and can't handle passing them to templates
+// as arguments. We need to replace it with const static.
+// https://github.com/state-spaces/mamba/issues/12#issuecomment-1848835662
+#if !defined(_WIN32)
+#define SWITCH_TYPE constexpr bool
+#else
+#define SWITCH_TYPE const static bool
+#endif
+
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDART_VERSION) && \
+    CUDART_VERSION >= 12010
+#define DISPATCH_MULTI_TENSOR_APPLY(...)             \
+  if (at::native::supports_large_kernel_arg()) {     \
+    SWITCH_TYPE large_kernel_arg C10_UNUSED = true;  \
+    __VA_ARGS__();                                   \
+  } else {                                           \
+    SWITCH_TYPE large_kernel_arg C10_UNUSED = false; \
+    __VA_ARGS__();                                   \
   }
 #else
-#define DISPATCH_MULTI_TENSOR_APPLY(...)                \
-  do {                                                  \
-    constexpr bool large_kernel_arg C10_UNUSED = false; \
-    __VA_ARGS__();                                      \
+#define DISPATCH_MULTI_TENSOR_APPLY(...)             \
+  do {                                               \
+    SWITCH_TYPE large_kernel_arg C10_UNUSED = false; \
+    __VA_ARGS__();                                   \
   } while (0);
 #endif
 
