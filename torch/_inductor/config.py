@@ -594,7 +594,7 @@ pad_channels_last = False
 # CUDA max memory transaction size is 128 bytes for a warp.
 padding_alignment_bytes = 128
 
-# Threshold on the minimum size of a stride that will be padded.
+# Threshold on the minimum stride that will be padded.
 #
 # Don't align a too small stride since that causes too much memory increase.
 # Pad too small stride may also cause perf loss. We may result in many tiny data blocks
