@@ -3,4 +3,4 @@ Python polyfills for itertools
 """
 
 
-__all__ = []
+__all__ = []  # type: ignore[var-annotated]
