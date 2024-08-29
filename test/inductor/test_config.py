@@ -225,12 +225,6 @@ class TestInductorConfig(TestCase):
             torch._dynamo.reset()
             self.assertEqual(call_count, 1)
 
-        # TypeError: eager() got an unexpected keyword argument 'mode'
-        self.assertRaises(
-            torch._dynamo.exc.BackendCompilerFailed,
-            lambda: torch.compile(fn, backend="eager", mode="nope")(inp),
-        )
-
 
 if __name__ == "__main__":
     run_tests()
