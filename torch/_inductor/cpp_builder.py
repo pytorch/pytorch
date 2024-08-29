@@ -198,6 +198,11 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
 @functools.lru_cache(None)
 def _is_intel_compiler(cpp_compiler: str) -> bool:
+    if _IS_WINDOWS:
+        if re.search(r"((icx$)|(icx-cc$))", cpp_compiler):
+            raise RuntimeError(
+                "Please use icx-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
+            )
     try:
         output_msg = (
             subprocess.check_output(
