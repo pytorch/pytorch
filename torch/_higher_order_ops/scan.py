@@ -161,21 +161,32 @@ def generic_scan(operator, elems_flat, dim=0):
 
         ind = 1
         xs = [aten.slice(elem, dim, 0, 1, 1) for elem in elems]
-        
+
         # Approach with concatenate
         # outs = xs
-        
+
         # Approach without concatenation
         dummy_out = operator(
-                *xs,
-                *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems],
+            *xs,
+            *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems],
+        )
+        outs = [
+            torch.zeros(
+                list(dummy_out[i].size())[:dim]
+                + [num_elems]
+                + list(dummy_out[i].size())[dim + 1 :],
+                dtype=elems[0].dtype,
+                device=elems[0].device,
             )
-        outs = [torch.zeros(list(dummy_out[i].size())[:dim] + [num_elems] + list(dummy_out[i].size())[dim+1:], dtype=elems[0].dtype, device=elems[0].device) for i in range(len(elems))]
-        idxs = [torch.ones_like(dummy_out[i], dtype=torch.int64) for i in range(len(elems))]
-        
+            for i in range(len(elems))
+        ]
+        idxs = [
+            torch.ones_like(dummy_out[i], dtype=torch.int64) for i in range(len(elems))
+        ]
+
         for o, x, idx in zip(outs, xs, idxs):
             o.scatter_(dim, idx * (ind - 1), x)
-        
+
         while ind < num_elems:
             xs = operator(
                 *xs,
@@ -184,11 +195,11 @@ def generic_scan(operator, elems_flat, dim=0):
 
             # Approach with concatenate
             # outs = list(safe_map(cmb, outs, xs))
-            
+
             # Approach without concatenation
             for o, x, idx in zip(outs, xs, idxs):
                 o.scatter_(dim, idx * ind, x)
-            
+
             ind += 1
 
         return outs
