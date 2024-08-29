@@ -51,9 +51,9 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
 
     compute_mutation_region_ids(fx_g)  # type: ignore[arg-type]
 
-    # Make a list of nodes that are directly returned from the output.  This prevents us
-    # from deduplicating returned tensors which have experienced identical operations,
-    # but are separate data structures in eager mode.
+    # Make a list of nodes that are directly returned from the output, which we'll skip
+    # when pruning.  This prevents us from deduplicating returned tensors which have
+    # experienced identical operations, but are separate data structures in eager mode.
     output_node: fx.Node = list(fx_g.nodes)[-1]
     assert output_node.op == "output"
     inputs_to_output_node = output_node.all_input_nodes
