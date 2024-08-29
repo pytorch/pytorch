@@ -382,6 +382,17 @@ class ScriptObjectQualifiedNameSource(ChainedSource):
         return f"{self.base.name()}._type().qualified_name()"
 
 
+class AttrProxySource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.get_base()"
+
+
 @dataclasses.dataclass(frozen=True)
 class DefaultsSource(ChainedSource):
     idx_key: Union[int, str]
