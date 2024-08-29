@@ -109,6 +109,20 @@ class DeviceOpOverrides:
     def device_guard(self, device_idx):
         raise NotImplementedError
 
+    def cpp_device_guard(self):
+        raise NotImplementedError
+
+    def cpp_aoti_device_guard(self):
+        raise NotImplementedError
+
+    def cpp_stream_guard(self):
+        raise NotImplementedError
+
+    def cpp_aoti_stream_guard(self):
+        raise NotImplementedError
+
+    def cpp_getStreamFromExternal(self):
+        raise NotImplementedError
 
 device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 
@@ -197,6 +211,7 @@ def init_backend_registration():
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cuda import CppWrapperCuda
+    from .cpp_wrapper_xpu import CppWrapperXpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .triton import TritonScheduling
@@ -222,7 +237,12 @@ def init_backend_registration():
         )
 
     if get_scheduling_for_device("xpu") is None:
-        register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
+        register_backend_for_device(
+            "xpu",
+            TritonScheduling,
+            WrapperCodeGen,
+            CppWrapperXpu,
+        )
 
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
