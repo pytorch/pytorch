@@ -3370,36 +3370,12 @@ class TilingSelect:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
-
-                            def can_get_index_name(_node):
-                                # In general case we saw among 3 test suits
-                                # * _node is a FX Node with target in ["index_expr", "load", "store"]
-                                # * _node.args[arg_idx] is another FX node with target get_index
-                                # * _node.args[arg_idx].args[0] is the name (str) of index expression
-                                # It's not true in some FB internal testcase. So, add the condition check to work around it
-                                if not (
-                                    isinstance(_node, torch.fx.node.Node)
-                                    and _node.target in ["index_expr", "load", "store"]
-                                ):
-                                    return False
-                                get_index_node = _node.args[
-                                    1 if _node.target == "index_expr" else 2
-                                ]
-                                return (
-                                    isinstance(get_index_node, torch.fx.node.Node)
-                                    and get_index_node.target == "get_index"
-                                    and isinstance(get_index_node.args[0], str)
-                                )
-
-                            if can_get_index_name(_node):
+                            if _node.target in ["index_expr", "load", "store"]:
                                 # get the index and replace prefix from z to x
+                                arg_idx = 1 if _node.target == "index_expr" else 2
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
-                                )[
-                                    _node.args[
-                                        1 if _node.target == "index_expr" else 2
-                                    ].args[0]
-                                ]
+                                )[_node.args[arg_idx].args[0]]
                                 if _is_valid_indices(itervars, tiling_indices):
                                     stride = _try_get_stride(
                                         index, itervars, tiling_factor, tiling_indices
