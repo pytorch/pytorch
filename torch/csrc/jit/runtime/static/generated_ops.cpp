@@ -802,12 +802,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::vdot, aten_vdot, [](Node* n) -> SROperator {
       const auto& self = p_node->Input(0).toTensor();
       const auto& other = p_node->Input(1).toTensor();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::vdot(self, other);
+        p_node->Output(0) = at::cpu::vdot(self, other);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::vdot_out(self, other, out);
+      at::cpu::vdot_out(out, self, other);
     };
   }
   LogAndDumpSchema(n);
