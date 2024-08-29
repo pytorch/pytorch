@@ -2638,9 +2638,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle,
-    bool avoidRecordStreams) {
+    bool avoidRecordStreams,
+    bool nanCheck) {
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
+  nanCheck &= enableNanCheck_;
+
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   errorIfCapturingNonCapturableNCCL(capture_status);
@@ -2694,7 +2697,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
-  if (enableNanCheck_) {
+  if (nanCheck) {
     checkForNan(input, ncclStream);
   }
 
@@ -3127,7 +3130,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // is gpuGuard needed for the if block below, or can i swap them
   at::cuda::OptionalCUDAGuard gpuGuard;
 
-  if (enableNanCheck_) {
+  // Only check for NaN for send ops, for recv ops `tensor` can be a random
+  // placeholder
+  if (enableNanCheck_ && opType == OpType::SEND) {
     checkForNan(tensor, ncclStream);
   }
 
@@ -3224,7 +3229,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     Fn fn,
     OpType opType,
     const char* profilingTitle,
-    bool avoidRecordStreams) {
+    bool avoidRecordStreams,
+    bool nanCheck) {
   return collective(
       input,
       output,
@@ -3235,7 +3241,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
       opType,
       profilingTitle,
-      avoidRecordStreams);
+      avoidRecordStreams,
+      nanCheck);
 }
 
 template <typename Fn>
@@ -3485,6 +3492,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
   // avoidRecordStreams_ note: collective() will stash tensors.
   bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
 
+  const auto root = opts.rootRank + opts.rootTensor;
+  bool nanCheck = (root == rank_);
+
   return collective(
       tensor,
       tensor,
@@ -3492,7 +3502,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        const auto root = opts.rootRank + opts.rootTensor;
         return ncclBcast(
             input.data_ptr(),
             input.numel(),
@@ -3503,7 +3512,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       },
       OpType::BROADCAST,
       "nccl:broadcast",
-      avoidRecordStreams);
+      avoidRecordStreams,
+      nanCheck);
 }
 
 // _broadcast_oop adds an out-of-place broadcast in PGNCCL
@@ -3523,6 +3533,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
         "Tensor input and output of _broadcast_oop must have the same number of elements ");
   }
 
+  const auto root = opts.rootRank + opts.rootTensor;
+  bool nanCheck = (root == rank_);
+
   return collective(
       inputTensor,
       outputTensor,
@@ -3530,7 +3543,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        const auto root = opts.rootRank + opts.rootTensor;
         return ncclBroadcast(
             input.data_ptr(),
             output.data_ptr(),
@@ -3541,7 +3553,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
             stream.stream());
       },
       OpType::BROADCAST,
-      "nccl:_broadcast_oop");
+      "nccl:_broadcast_oop",
+      /*avoidRecordStreams=*/false,
+      nanCheck);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
@@ -4492,6 +4506,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   // inputs, which == inputTensors[0] on the root rank where it matters.
   bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
 
+  const auto root = opts.rootRank;
+  bool nanCheck = (rank_ == root);
+
   return collective(
       outputTensor,
       inputs[0], // just to fit the collective interface
@@ -4499,7 +4516,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
           at::Tensor& /* unused */,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        const auto root = opts.rootRank;
         if (getRank() == root) {
           if (!avoidRecordStreams) {
             for (auto input : inputs) {
@@ -4513,7 +4529,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       },
       OpType::SCATTER,
       "nccl:scatter",
-      avoidRecordStreams);
+      avoidRecordStreams,
+      nanCheck);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
