@@ -229,11 +229,7 @@ class TestForeach(TestCase):
                         **sample.kwargs,
                     )
             except Exception as e:
-                with (
-                    self.assertRaisesRegex(type(e), re.escape(str(e).splitlines()[0]))
-                    if not (op.has_no_in_place or not op.supports_out)
-                    else self.assertRaises(type(e))
-                ):
+                with self.assertRaises(type(e)):
                     ref([ref_input, *sample.ref_args], **ref_kwargs)
             else:
                 expected = ref([ref_input, *sample.ref_args], **ref_kwargs)

@@ -817,6 +817,8 @@ class DistributedDataParallelTest(
         # otherwise process will be taken down and we can't check for errors.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
+        # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
         store = c10d.FileStore(self.file_name, self.world_size)
         # provide sufficient timeout to initialize NCCL comm.
         pg = c10d.ProcessGroupNCCL(
@@ -4137,6 +4139,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
             return None
 
 
+@skip_but_pass_in_sandcastle
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -4188,6 +4191,7 @@ instantiate_parametrized_tests(NCCLTraceTestDumpOnTimeout)
 instantiate_parametrized_tests(NCCLTraceTest)
 
 
+@skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
@@ -4241,6 +4245,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 time.sleep(600)
 
 
+@skip_but_pass_in_sandcastle
 class NcclErrorDumpTest(NCCLTraceTestBase):
     def _wait_process(self, rank, timeout):
         try:

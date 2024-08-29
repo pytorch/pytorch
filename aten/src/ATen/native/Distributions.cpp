@@ -42,13 +42,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-#include <functional>
-#include <type_traits>
 #include <utility>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <float.h>
 
 namespace {
 /*
@@ -88,47 +82,38 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t k;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    double U, V, a, b, invalpha, vr, us;
 
     double slam = std::sqrt(lambda);
     double loglam = std::log(lambda);
-    b = 0.931 + 2.53 * slam;
-    a = -0.059 + 0.02483 * b;
-    invalpha = 1.1239 + 1.1328 / (b - 3.4);
-    vr = 0.9277 - 3.6224 / (b - 2);
+    double b = 0.931 + 2.53 * slam;
+    double a = -0.059 + 0.02483 * b;
+    double invalpha = 1.1239 + 1.1328 / (b - 3.4);
+    double vr = 0.9277 - 3.6224 / (b - 2);
 
     while (true) {
-      U = standard_uniform(generator) - 0.5;
-      V = standard_uniform(generator);
-      us = 0.5 - std::fabs(U);
-      k = (int64_t)std::floor((2 * a / us + b) * U + lambda + 0.43);
+      double U = standard_uniform(generator) - 0.5;
+      double V = standard_uniform(generator);
+      double us = 0.5 - std::fabs(U);
+      auto k = std::floor((2 * a / us + b) * U + lambda + 0.43);
       if ((us >= 0.07) && (V <= vr)) {
-        return k;
+        return static_cast<int64_t>(k);
       }
       if ((k < 0) || ((us < 0.013) && (V > us))) {
         continue;
       }
       if ((std::log(V) + std::log(invalpha) - std::log(a / (us * us) + b)) <=
-          (-lambda + k * loglam - std::lgamma((double)k + 1))) {
-        return k;
+          (-lambda + k * loglam - std::lgamma(k + 1))) {
+        return static_cast<int64_t>(k);
       }
     }
   } else if (lambda == 0) {
     return 0;
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t X;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    double prod, U, enlam;
-
-    enlam = std::exp(-lambda);
-    X = 0;
-    prod = 1.0;
+    auto enlam = std::exp(-lambda);
+    int64_t X = 0;
+    auto prod = 1.0;
     while (true) {
-      U = standard_uniform(generator);
+      auto U = standard_uniform(generator);
       prod *= U;
       if (prod > enlam) {
         X += 1;
@@ -604,8 +589,7 @@ Tensor& multinomial_out(const Tensor& self,
     TORCH_CHECK(
         is_valid.to<bool>(),
         "probability tensor contains either `inf`, `nan` or element < 0");
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    bool zero_prob_condition;
+    bool zero_prob_condition = false;
     if (self.dim() == 1){
       zero_prob_condition = (self.sum() == 0).item().to<bool>();
     } else {
