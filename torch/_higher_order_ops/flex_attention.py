@@ -207,7 +207,7 @@ def math_attention(
     # Set fully masked rows' sumexp to 0.0
     logsumexp = post_mod_scores.logsumexp(dim=-1)
     masked_rows = torch.all(post_mod_scores == -float("inf"), dim=-1)
-    logsumexp = torch.where(masked_rows, 0.0, logsumexp)
+    logsumexp = torch.where(masked_rows, -float("inf"), logsumexp)
 
     post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
 
@@ -705,7 +705,9 @@ def sdpa_dense_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    masked_out_rows = logsumexp == -float("inf")
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
+    softmax_scores = torch.where(masked_out_rows.unsqueeze(-1), 0, softmax_scores)
 
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 
