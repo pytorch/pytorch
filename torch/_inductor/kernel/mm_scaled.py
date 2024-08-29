@@ -192,7 +192,7 @@ scaled_mm_bias_template = TritonTemplate(
 aten__fp8_mm = ExternKernelChoice(torch._scaled_mm, "at::_scaled_mm")
 
 
-def are_compatible_scales(size_a, size_b):
+def are_compatible_scales(size_a: List[int], size_b: List[int]) -> bool:
     # Same sized scales are compatable
     if len(size_a) == len(size_b):
         return True
@@ -220,10 +220,10 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     )
 
     size_a, size_b = scale_a.get_size(), scale_b.get_size()
-    assert are_compatible_scales(
-        size_a, size_b
-    ), f"Expect scale_a and scale_b to be either both scalars (including single-element tensors) or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
-
+    assert are_compatible_scales(size_a, size_b), (
+        f"Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
+        f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
+    )
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
