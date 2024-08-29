@@ -1228,17 +1228,35 @@ def opcheck(
     ``opcheck`` tests these metadata and properties.
 
     Concretely, we test the following:
-    - test_schema: if the operator's schema is correct.
-    - test_autograd_registration: if autograd was registered correctly.
+
+    - test_schema: If the schema matches the implementation of
+      the operator. For example: if the schema specifies a Tensor is mutated,
+      then we check the implementation mutates the Tensor. If the schema
+      specifies that we return a new Tensor, then we check that the
+      implementation returns a new Tensor (instead of an existing one or
+      a view of an existing one).
+    - test_autograd_registration: If the operator supports training
+      (autograd): we check that its autograd formula is registered via
+      torch.library.register_autograd or a manual registration to one
+      or more DispatchKey::Autograd keys. Any other DispatchKey-based
+      registrations may lead to undefined behavior.
     - test_faketensor: If the operator has a FakeTensor kernel
-    (and if it is correct). The FakeTensor kernel is necessary (
-    but not sufficient) for the operator to work with PyTorch compilation
-    APIs (torch.compile/export/FX).
+      (and if it is correct). The FakeTensor kernel is necessary (
+      but not sufficient) for the operator to work with PyTorch compilation
+      APIs (torch.compile/export/FX). We check that a FakeTensor kernel
+      (also sometimes known as a meta kernel) was registered for the
+      operator and that it is correct. This test takes the result of
+      running the operator on real tensors and the result of running
+      the operator on FakeTensors and checks that they have the same
+      Tensor metadata (sizes/strides/dtype/device/etc).
     - test_aot_dispatch_dynamic: If the operator has correct behavior
-    with PyTorch compilation APIs (torch.compile/export/FX).
-    This checks that the outputs (and gradients, if applicable) are the
-    same under eager-mode PyTorch and torch.compile.
-    This test is a superset of ``test_faketensor``.
+      with PyTorch compilation APIs (torch.compile/export/FX).
+      This checks that the outputs (and gradients, if applicable) are the
+      same under eager-mode PyTorch and torch.compile.
+      This test is a superset of ``test_faketensor`` and is an e2e test;
+      other things it tests are that the operator supports
+      functionalization and that the backward pass (if it exists) also
+      supports FakeTensor and functionalization.
 
     For best results, please call ``opcheck`` multiple times with a
     representative set of inputs. If your operator supports
