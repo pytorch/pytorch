@@ -587,6 +587,66 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         d[4] = x + 2
         return len(values)
 
+    @make_test
+    def test_dict_setdefault1(x):
+        d = {"a": 1, "b": 2}
+        d.setdefault("a", 10)
+        if d["a"] == 1:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_dict_setdefault2(x):
+        d = {"a": 1, "b": 2}
+        d.setdefault("c", 10)
+        if d["c"] == 10:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_dict_setdefault3(x):
+        d = {"a": 1, "b": 2}
+        d.setdefault("c")
+        if d["c"] is None:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_defaultdict_setdefault1(x):
+        d = collections.defaultdict.fromkeys("a", "b")
+        d["a"] = 1
+        d["b"] = 2
+        d.setdefault("a", 10)
+        if d["a"] == 1:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_defaultdict_setdefault2(x):
+        d = collections.defaultdict.fromkeys("a", "b")
+        d["a"] = 1
+        d["b"] = 2
+        d.setdefault("c", 10)
+        if d["c"] == 10:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_defaultdict_setdefault3(x):
+        d = collections.defaultdict.fromkeys("a", "b")
+        d["a"] = 1
+        d["b"] = 2
+        d.setdefault("c")
+        if d["c"] is None:
+            return x + 1
+        else:
+            return x - 1
+
     def test_dict_id_guard(self):
         d1 = collections.OrderedDict({"a": 2})
         d2 = d1
@@ -1517,6 +1577,34 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_constant_set(self):
+        s = set([1, 2])
+
+        def fn(x):
+            return torch.cos(x) * len(s)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.rand(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # This should cause recompilation
+        s.add(3)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_set_add(self):
+        s = set([1, 2])
+
+        def fn(x):
+            s.add(3)
+            return torch.cos(x) * len(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.rand(4)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(s), 3)
+
     @make_test
     def test_tuple_iadd(a, b):
         output = (a, b)
@@ -1594,6 +1682,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_dict_sorted(x):
         tmp = {1: "D", 10: "B", 3: "E", 0: "F"}
         return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    def test_dict_hasattr(self):
+        def fn(x):
+            if hasattr(x, "to"):
+                return x.to("cpu")
+            if hasattr(x, "items"):
+                return torch.cos(x["a"])
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = dict(a=torch.randn(3))
+        self.assertEqual(fn(x), opt_fn(x))
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     @make_test
     def test_list_clear(a, b):
@@ -3497,6 +3601,22 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         eager_class_name = eager_default_str[1].split(" object at")[0]
         dynamo_class_name = dynamo_default_str[1].split(" object at")[0]
         self.assertEqual(eager_class_name, dynamo_class_name)
+
+    def test_pybind_object(self):
+        def fn(x, pybind_obj):
+            if pybind_obj.result:
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        pybind_obj = torch._C._dynamo.guards.GuardDebugInfo(True, ["a==1"], 0)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x, pybind_obj), fn(x, pybind_obj))
+
+        pybind_obj = torch._C._dynamo.guards.GuardDebugInfo(False, ["a==1"], 1)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x, pybind_obj), fn(x, pybind_obj))
 
 
 instantiate_parametrized_tests(FunctionTests)

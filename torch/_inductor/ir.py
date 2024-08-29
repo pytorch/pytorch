@@ -258,19 +258,6 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     return out
 
 
-def get_new_stride_with_stride_order(
-    stride: Sequence[Union[int, torch.SymInt, Expr]],
-    stride_order: Sequence[int],
-) -> Sequence[Union[int, torch.SymInt, Expr]]:
-    """
-    Convert strides order to new stride
-    """
-    new_stride = [stride[0] for _ in range(len(stride))]
-    for i, elem in enumerate(stride_order):
-        new_stride[i] = stride[elem]
-    return new_stride
-
-
 @overload
 def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
     ...
@@ -756,6 +743,22 @@ def get_reduction_combine_fn(
 
     else:
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
+
+
+def significant_strides_equal(
+    strides1: Sequence[_IntLike], strides2: Sequence[_IntLike], size: Sequence[_IntLike]
+) -> bool:
+    """
+    Returns true if the strides are equal, ignoring dimensions of size 1 .
+    """
+    non_1_indices = [
+        i
+        for i, dim in enumerate(size)
+        if V.graph.sizevars.size_hint(dim, fallback=2) != 1
+    ]
+    strides1 = [V.graph.sizevars.size_hint(strides1[i]) for i in non_1_indices]
+    strides2 = [V.graph.sizevars.size_hint(strides2[i]) for i in non_1_indices]
+    return strides1 == strides2
 
 
 @dataclasses.dataclass
@@ -4696,34 +4699,63 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def require_exact_strides(cls, x, exact_strides, allow_padding=False):
-        assert exact_strides is not None
-        unbacked_symbols_in_strides = len(free_unbacked_symbols(exact_strides)) > 0
-        if not unbacked_symbols_in_strides:
-            order = get_stride_order(V.graph.sizevars.size_hints(exact_strides))
-        else:
-            order = None
-        exact_strides = [
-            s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
-        ]
+    def require_strides(
+        cls,
+        x,
+        order: Optional[Sequence[int]] = None,
+        exact_strides: Optional[Sequence[_IntLike]] = None,
+        allow_padding=False,
+    ):
+        assert order is not None or exact_strides is not None
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
+        # require x to have the layout
         if is_storage_and_layout(x):
             while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
-                as_storage_and_layout(
-                    x,
-                    freeze=True,
-                    want_contiguous=False,
-                    stride_order=None,
-                    allow_padding=allow_padding,
-                    exact_strides=exact_strides,
-                )
-                return x
+                if order:
+                    # If the the FlexibleLayout already has the size and stride in the required order,
+                    # freeze it to a FixedLayout by using its current size and stride.
+                    # The behavior of using its current size and stride or the given order can be different
+                    # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
+                    # size=[s0, 1, 28, 28], stride=[784, 784, 28, 1]. If the required order is [3, 0, 2, 1] (channels last),
+                    # the current size and stride already satisfies this order.
+                    # However by freezing it to the required order, the layout will be changed to:
+                    # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
+
+                    # fix flexiblelayout to be FixedLayout with stride_order
+                    as_storage_and_layout(
+                        x,
+                        freeze=True,
+                        want_contiguous=False,
+                        stride_order=get_stride_order(
+                            V.graph.sizevars.size_hints(x.get_layout().stride)
+                        )
+                        if is_stride_order_storage_and_layout(x, order)
+                        else order,
+                        allow_padding=allow_padding,
+                    )
+                    return x
+                else:
+                    # If the exact_strides is given, freeze the FlexibleLayout to a FixedLayout with the exact_strides.
+                    as_storage_and_layout(
+                        x,
+                        freeze=True,
+                        want_contiguous=False,
+                        stride_order=None,
+                        allow_padding=allow_padding,
+                        exact_strides=exact_strides,
+                    )
+                    return x
             elif isinstance(x.get_layout(), FixedLayout) and (
-                list(x.get_layout().stride) == list(exact_strides)
-                or (order and x.get_layout().is_stride_ordered(order))
+                (order and x.get_layout().is_stride_ordered(order))
+                or (
+                    exact_strides
+                    and significant_strides_equal(
+                        exact_strides, x.get_layout().stride, x.get_size()
+                    )
+                )
             ):
                 return x
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
@@ -4731,13 +4763,28 @@ class ExternKernel(InputsKernel):
                     raise AssertionError(
                         "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
                     )
-                elif isinstance(x.get_layout().real_layout(), FixedLayout):
+                elif isinstance(x.get_layout().real_layout(), FixedLayout) and (
+                    (order and x.get_layout().real_layout().is_stride_ordered(order))
+                    or (
+                        exact_strides
+                        and significant_strides_equal(
+                            exact_strides,
+                            x.get_layout().real_layout().stride,
+                            x.get_size(),
+                        )
+                    )
+                ):
                     return x
+
         # TODO - Storage to InputBuffer
-        if (
-            isinstance(x, InputBuffer)
-            and order
-            and x.get_layout().is_stride_ordered(order)
+        if isinstance(x, InputBuffer) and (
+            (order and x.get_layout().is_stride_ordered(order))
+            or (
+                exact_strides
+                and significant_strides_equal(
+                    exact_strides, x.get_layout().stride, x.get_size()
+                )
+            )
         ):
             return x
         if (
@@ -4746,19 +4793,27 @@ class ExternKernel(InputsKernel):
             and not isinstance(x.data, ReinterpretView)
             and is_storage_and_layout(x.unwrap_view())
             and not isinstance(x.unwrap_view().data, ExternKernelAlloc)
-            and order
         ):
             try:
                 x.data = cls.convert_to_reinterpret_view(x.data)
-                return cls.require_stride_order(x, order, allow_padding=allow_padding)
+                if order:
+                    return cls.require_stride_order(
+                        x, order, allow_padding=allow_padding
+                    )
+                elif exact_strides:
+                    return cls.require_exact_strides(
+                        x, exact_strides, allow_padding=allow_padding
+                    )
             except NotImplementedError:
                 pass
+        # Although this is a clone, inductor is good about fusing clones into previous
+        # operations if they weren't realized and their layouts were flexible.
         x = cls.copy_input(x)
         as_storage_and_layout(
             x,
             freeze=True,
             want_contiguous=False,
-            stride_order=None,
+            stride_order=order,
             allow_padding=allow_padding,
             exact_strides=exact_strides,
         )
@@ -4767,76 +4822,14 @@ class ExternKernel(InputsKernel):
         return x
 
     @classmethod
-    def require_stride_order(cls, x, order, allow_padding=False):
-        if x.get_numel() == 0:  # Layout doesn't matter
-            return x
-
-        # require x to have the layout as strided_ordered as order
-        if is_storage_and_layout(x):
-            while isinstance(x.get_layout(), NonOwningLayout):
-                x = x.get_layout().view
-            if isinstance(x.get_layout(), FlexibleLayout):
-                # If the the FlexibleLayout already has the size and stride in the required order,
-                # freeze it to a FixedLayout by using its current size and stride.
-                # The behavior of using its current size and stride or the given order can be different
-                # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
-                # size=[s0, 1, 28, 28], stride=[784, 784, 28, 1]. If the required order is [3, 0, 2, 1] (channels last),
-                # the current size and stride already satisfies this order.
-                # However by freezing it to the required order, the layout will be changed to:
-                # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
-
-                # fix flexiblelayout to be FixedLayout with stride_order
-                as_storage_and_layout(
-                    x,
-                    freeze=True,
-                    want_contiguous=False,
-                    stride_order=get_stride_order(
-                        V.graph.sizevars.size_hints(x.get_layout().stride)
-                    )
-                    if is_stride_order_storage_and_layout(x, order)
-                    else order,
-                    allow_padding=allow_padding,
-                )
-                return x
-            elif isinstance(
-                x.get_layout(), FixedLayout
-            ) and x.get_layout().is_stride_ordered(order):
-                return x
-            elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
-                if isinstance(x.get_layout().real_layout(), FlexibleLayout):
-                    raise AssertionError(
-                        "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
-                    )
-                elif isinstance(
-                    x.get_layout().real_layout(), FixedLayout
-                ) and x.get_layout().real_layout().is_stride_ordered(order):
-                    return x
-
-        # TODO - Storage to InputBuffer
-        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
-            return x
-        if (
-            isinstance(x, TensorBox)
-            and isinstance(x.data, BaseView)
-            and not isinstance(x.data, ReinterpretView)
-            and is_storage_and_layout(x.unwrap_view())
-            and not isinstance(x.unwrap_view().data, ExternKernelAlloc)
-        ):
-            try:
-                x.data = cls.convert_to_reinterpret_view(x.data)
-                return cls.require_stride_order(x, order, allow_padding=allow_padding)
-            except NotImplementedError:
-                pass
-        x = cls.copy_input(x)
-        as_storage_and_layout(
-            x,
-            freeze=True,
-            want_contiguous=False,
-            stride_order=order,
-            allow_padding=allow_padding,
+    def require_exact_strides(cls, x, exact_strides, allow_padding=False):
+        return cls.require_strides(
+            x, exact_strides=exact_strides, allow_padding=allow_padding
         )
-        assert is_stride_order_storage_and_layout(x, order)
-        return x
+
+    @classmethod
+    def require_stride_order(cls, x, order, allow_padding=False):
+        return cls.require_strides(x, order=order, allow_padding=allow_padding)
 
     @classmethod
     def require_channels_last(cls, x):
@@ -5188,10 +5181,19 @@ class UserDefinedTritonKernel(ExternKernel):
         raw_args = [
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         ]
+
+        # NOTE: raw_args doesn't include autotuned args.
+        # But, kernel.constexprs includes indices of autotuned args.
+        # So, let's recalculate constexpr indices wrt to raw_args.
+        constexpr_indices = []
+        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+            if kernel.arg_names.index(kwarg) in kernel.constexprs:
+                constexpr_indices.append(idx)
+
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
+            new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -5999,17 +6001,9 @@ class FallbackKernel(ExternKernelAlloc):
             if V.graph.cpp_wrapper:
                 from torchgen.aoti.fallback_ops import inductor_fallback_ops
 
-                if (
-                    config.is_fbcode()
-                    and kernel not in has_c_shim
+                if config.abi_compatible and str(kernel) not in inductor_fallback_ops:
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
-                    # If you do hit a missed op, please update gen_aoti_c_shim.py.
-                    and config.c_shim_version == "1"
-                ) or (
-                    config.abi_compatible
-                    and config.c_shim_version == "2"
-                    and str(kernel) not in inductor_fallback_ops
-                ):
+                    # If you do hit a missed op, please update fallback_ops.py.
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
                         kernel,
@@ -6753,7 +6747,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
-        self.fetch_attr = submodules.__getitem__
+        self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
