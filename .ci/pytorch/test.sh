@@ -431,7 +431,7 @@ else
 fi
 
 test_perf_for_dashboard() {
-  TRITON_CPU_BACKEND=1
+  export TRITON_CPU_BACKEND=1
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
