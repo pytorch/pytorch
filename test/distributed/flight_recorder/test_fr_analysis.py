@@ -25,6 +25,7 @@ def create_one_event(
     state="scheduled",
     collective_seq_id=0,
     p2p_seq_id=0,
+    output_dtypes="float32",
 ):
     return {
         "profiling_name": f"nccl:{collectcive_name}",
@@ -32,6 +33,8 @@ def create_one_event(
         "process_group": pg_info,
         "input_sizes": input_sizes,
         "output_sizes": output_sizes,
+        "input_dtypes": "float32",
+        "output_dtypes": output_dtypes,
         "collective_seq_id": str(collective_seq_id),
         "p2p_seq_id": str(p2p_seq_id),
     }
@@ -53,10 +56,10 @@ class FlightRecorderEventTest(TestCase):
         )
 
         e3 = create_one_event(
-            "alltoall", ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
+            "all_to_all", ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
         )
         e4 = create_one_event(
-            "alltoall", ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
+            "all_to_all", ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
         )
         self.assertEqual(match_one_event(e3, e4, membership), MatchState.UNDECIDED)
 
@@ -86,6 +89,19 @@ class FlightRecorderEventTest(TestCase):
         )
         self.assertEqual(
             match_one_event(e1, e9, membership), MatchState.COLLECTIVE_STATE_MISMATCH
+        )
+
+        e10 = create_one_event(
+            "all_reduce",
+            ("0", "default"),
+            [[4, 4]],
+            [[4, 4]],
+            "completed",
+            1,
+            output_dtypes="float16",
+        )
+        self.assertEqual(
+            match_one_event(e10, e9, membership), MatchState.COLLECTIVE_DTYPE_MISMATCH
         )
 
 
