@@ -3453,7 +3453,6 @@ class TilingSelect:
                     if tiling_indice < 0 or tiling_indice >= len(call_ranges):
                         continue
                     if has_free_symbols(call_ranges):
-                        # For dynamic shape, use tiling_factor // 2 if call_range is less than factor_lowp
                         call_range = V.graph.sizevars.size_hint(
                             call_ranges[tiling_indice], fallback=0
                         )
@@ -3461,7 +3460,7 @@ class TilingSelect:
                             V.graph.sizevars.guard_lt(call_range, factor_lowp)
                             tiling_factor = factor_lowp // 2
                             break
-                    elif call_ranges[tiling_indice] < factor_lowp // 2 + 4:
+                    elif call_ranges[tiling_indice] < factor_lowp:
                         tiling_factor = factor_lowp // 2
                         break
 
