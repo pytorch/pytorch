@@ -766,6 +766,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if not tx.output.side_effects.is_attribute_mutation(self):
             unimplemented(f"setattr({self}, {name}, ...)")
 
+        print(f"here3: self: {self}, id(self): {id(self)} self.source: {self.source}, name: {name}, value: {value}")
         tx.output.side_effects.store_attr(self, name, value)
         return variables.ConstantVariable(None)
 

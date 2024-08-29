@@ -1314,12 +1314,12 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         def fwd_pre_hook(m, i):
             # TODO(yf225): explore how to support kwargs in forward hooks
             nonlocal state
-            state.fwd_pre_hook_call_count += 1
+            state.fwd_pre_hook_call_count = state.fwd_pre_hook_call_count + 1
             return i
 
         # def fwd_hook(m, i, o):
         #     nonlocal state
-        #     state.fwd_hook_call_count += 1
+        #     state.fwd_hook_call_count = state.fwd_hook_call_count + 1
         #     return o
 
         lin = torch.nn.Linear(1, 1)

@@ -95,6 +95,10 @@ class SideEffects:
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
+        import traceback
+        # traceback.print_stack()
+        print("Creation stack: " + "\n".join(traceback.format_stack()))
+        print(f"new SideEffects: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}")
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -153,6 +157,7 @@ class SideEffects:
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
             return True
+        return True
         # if self.output_graph.current_tx.output.current_tracer.within_forward_hook_under_checkpoint:
         #     # TODO(yf225): how do we detect and allow forward hook and forward pre-hook only?
         #     return True
@@ -164,6 +169,11 @@ class SideEffects:
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
+        if "fwd_pre_hook_call_count" in name:
+            print(f"id(item): {id(item)}, id(item.mutable_local): {id(item.mutable_local)}, id(item.value): {id(item.value)}, name: {name}, value: {value}")
+        # self.track_object_existing(item.value, item)
+        for k, v in self.id_to_variable.items():
+            print(f"store_attr: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}, k: {k}, v: {v}")
         if item.mutable_local not in self.store_attr_mutations:
             self.store_attr_mutations[item.mutable_local] = {}
         self.store_attr_mutations[item.mutable_local][name] = value
@@ -240,6 +250,7 @@ class SideEffects:
 
         variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
+        # print(f"here5: self.id_to_variable: {self.id_to_variable}, id(self.id_to_variable): {id(self.id_to_variable)}")
         self.keepalive.append(item)
         return variable
 
@@ -342,6 +353,23 @@ class SideEffects:
             ):
                 self.track_object_existing(other_item, other_variable)
 
+    def merge(self, other):
+        # This is only for transferring side-effects from module forward hooks within checkpoint region to the outside region.
+        # TODO(yf225): better comment
+        assert len(other.save_for_backward) == 0, f"NYI: save_for_backward: {other.save_for_backward}"
+        assert len(other.tensor_hooks) == 0, f"NYI: tensor_hooks: {other.tensor_hooks}"
+        for other_id, other_variable in other.id_to_variable.items():
+            if other_id not in self.id_to_variable:
+                self.id_to_variable[other_id] = other_variable
+            for other_item_keepalive in other.keepalive:
+                if id(other_item_keepalive) == other_id and other_item_keepalive not in self.keepalive:
+                    self.keepalive.append(other_item_keepalive)
+
+        for other_id, other_attr_mutations in other.store_attr_mutations.items():
+            if other_id not in self.store_attr_mutations:
+                self.store_attr_mutations[other_id] = {}
+            self.store_attr_mutations[other_id].update(other_attr_mutations)
+
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
 
@@ -391,6 +419,9 @@ class SideEffects:
         # the .closures field, from which we will see if we need to keep
         # any mutations to cell variables alive.
 
+        for k, v in self.id_to_variable.items():
+            print(f"prune: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}, k: {k}, v: {v}, is_live: {is_live(v)}")
+            
         self.id_to_variable = {
             k: v for k, v in self.id_to_variable.items() if is_live(v)
         }
@@ -531,6 +562,7 @@ class SideEffects:
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
         for var in self._get_modified_vars():
+            print(f"here1: var: {var}")
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)
@@ -699,5 +731,6 @@ class SideEffects:
         )
 
     def clear(self):
+        print(f"clear: id(self.id_to_variable): {id(self.id_to_variable)}")
         self.keepalive.clear()
         self.id_to_variable.clear()
