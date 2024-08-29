@@ -335,6 +335,35 @@ else:
 
             return slice_mesh_dims
 
+        def _get_all_submeshes(
+            self, device_mesh: "DeviceMesh", mesh_dim_name: str
+        ) -> List["DeviceMesh"]:
+            """
+            Return all the submeshes of a given mesh dimension of the device mesh.
+            """
+            mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
+            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+                -1, device_mesh.mesh.size(mesh_dim)
+            )
+
+            cur_rank = device_mesh.get_rank()
+            res_submeshes = []
+            for mesh_1d in pg_ranks_by_dim:
+                submesh = DeviceMesh(
+                    device_mesh.device_type,
+                    mesh_1d,
+                    mesh_dim_names=(mesh_dim_name,),
+                    _init_backend=False,
+                )
+                submesh._dim_group_infos = (
+                    [device_mesh._dim_group_infos[mesh_dim]]
+                    if cur_rank in mesh_1d
+                    else []
+                )
+                res_submeshes.append(submesh)
+
+            return res_submeshes
+
     _mesh_resources: _MeshEnv = _MeshEnv()
 
     def _get_device_handle(device_type: str = "cuda"):
