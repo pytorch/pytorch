@@ -387,7 +387,8 @@ class TestGradCollectives(MultiThreadedTestCase):
 class TestMakeFx(MultiThreadedTestCase):
     @property
     def world_size(self):
-        return 2
+        # make_fx is not thread-safe due to patching nd mutating global states.
+        return 1
 
     def setUp(self):
         super().setUp()
@@ -396,8 +397,6 @@ class TestMakeFx(MultiThreadedTestCase):
     def tearDown(self):
         super().tearDown()
 
-        # race condition with threads causes is_fx_tracing flag to be set incorrectly.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
         self.assertFalse(torch.fx._symbolic_trace.is_fx_tracing())
 
     def test_all_reduce_tracing(self):

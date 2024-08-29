@@ -794,7 +794,7 @@ class Tracer(TracerBase):
                     return _orig_module_call(mod, *args, **kwargs)
 
                 _autowrap_check(
-                    patcher,
+                    patcher,  # type: ignore[has-type]
                     getattr(getattr(mod, "forward", mod), "__globals__", {}),
                     self._autowrap_function_ids,
                 )
