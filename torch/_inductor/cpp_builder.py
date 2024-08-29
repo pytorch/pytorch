@@ -216,6 +216,9 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
         return is_intel_compiler
     except FileNotFoundError as exc:
         return False
+    except subprocess.SubprocessError:
+        # --version args not support.
+        return False
 
     return False
 
