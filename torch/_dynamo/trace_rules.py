@@ -2982,7 +2982,6 @@ def _disallowed_callable_ids() -> Dict[int, str]:
 
 @FunctionIdSet
 def _builtin_function_ids() -> Dict[int, str]:
-    # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
         id(v): f"builtins.{k}"
         for k, v in builtins.__dict__.items()
@@ -3075,7 +3074,6 @@ def is_forbidden(obj) -> bool:
 
 
 def is_builtin_callable(obj) -> bool:
-    # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     return id(obj) in _builtin_function_ids
 
 
@@ -3215,6 +3213,8 @@ if torch.distributed.is_available():
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
     }
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        LEGACY_MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
@@ -3264,6 +3264,8 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)

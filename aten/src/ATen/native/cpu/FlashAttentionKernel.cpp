@@ -388,8 +388,10 @@ void cpu_flash_attention(
   // we need to split headSize with packb_size for packing v
   if (with_pack) {
     if (dtype == at::ScalarType::BFloat16) {
+      // BF16 requires better shapes as mkl_gemm_bf16bf16f32 is faster than mkl_gemm_f16f16f32
       need_pack =
           ((kvSize < 448 && kvSize % packb_size == 0) || kvSize >= 448) &&
+          (qSize % 2 == 0) &&
           (headSize % packb_size == 0 && headSize < 320);
     } else {
       need_pack =
@@ -404,9 +406,9 @@ void cpu_flash_attention(
       // cpu_flash_attention with pack has better performance when qSize, kvSize and headSize are long enough,
       need_pack = pack_size_per_thread >= 65535 && qSize >= 320;
       // When the number of gemm is much greater than the number of pack,
-      // the pack overhead can be overlaped.
+      // the pack and padding overhead can be overlaped.
       need_pack = need_pack &&
-          (gemm_size_per_thread / pack_size_per_thread >= (dtype == at::ScalarType::BFloat16 ? 6144 : 448));
+          (gemm_size_per_thread / pack_size_per_thread >= (dtype == at::ScalarType::BFloat16 ? 7168 : 448));
     }
   }
 

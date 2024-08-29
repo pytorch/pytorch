@@ -554,10 +554,10 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
 
-  using c10::CachingDeviceAllocator::DeviceStats;
-  using c10::CachingDeviceAllocator::Stat;
-  using c10::CachingDeviceAllocator::StatArray;
-  using c10::CachingDeviceAllocator::StatType;
+  using c10::cuda::CUDACachingAllocator::DeviceStats;
+  using c10::cuda::CUDACachingAllocator::Stat;
+  using c10::cuda::CUDACachingAllocator::StatArray;
+  using c10::cuda::CUDACachingAllocator::StatType;
 
   const auto statToDict = [](const Stat& stat) {
     py::dict dict;
@@ -1279,6 +1279,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             device, mempool_id, [stream](cudaStream_t target) {
               return target == stream;
             });
+      });
+
+  m.def(
+      "_cuda_beginAllocateToPool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [](cudaStream_t) { return true; });
       });
 
   m.def(

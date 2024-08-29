@@ -534,7 +534,7 @@ class WrapperCodeGen(CodeGen):
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
-            enable_debug_printer=config.aot_inductor.debug_intermediate_value_printer
+            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
 
     def write_constant(self, name: str, hashed: str) -> None:
@@ -2014,6 +2014,8 @@ class WrapperCodeGen(CodeGen):
                 # _maybe_evaluate_static will return (s0 // (2 // s0)) as 2, but
                 # the actual codegen will still generate the full expression here.
                 return None
+            if isinstance(x, int):
+                return x
             val = V.graph._shape_env._maybe_evaluate_static(x)
             return int(val)
         except Exception:

@@ -830,7 +830,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
             ss << i;
           }
           drop(stack, num_inputs);
-          ss << std::endl;
+          ss << '\n';
           auto* handler = getPrintHandler();
           TORCH_INTERNAL_ASSERT(handler);
           handler(ss.str());
