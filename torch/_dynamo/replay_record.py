@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import dataclasses
 from dataclasses import field
 from types import CodeType, ModuleType
 from typing import Any, Dict
 
 from torch.utils._import_utils import import_dill
+
 
 dill = import_dill()
 

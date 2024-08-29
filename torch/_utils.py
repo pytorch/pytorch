@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copyreg
 import functools
 import logging
@@ -194,7 +195,13 @@ def set_tensor_metadata(tensor, metadata):
 
 
 def _rebuild_tensor_v2(
-    storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None
+    storage,
+    storage_offset,
+    size,
+    stride,
+    requires_grad,
+    backward_hooks,
+    metadata=None,
 ):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
@@ -345,7 +352,14 @@ def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
 
 
 def _rebuild_wrapper_subclass(
-    cls, dtype, size, stride, storage_offset, layout, device, requires_grad
+    cls,
+    dtype,
+    size,
+    stride,
+    storage_offset,
+    layout,
+    device,
+    requires_grad,
 ):
     device = _get_restore_location(device)
     return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
@@ -761,7 +775,9 @@ def get_current_device_index() -> int:
 
 
 def _get_device_index(
-    device: Any, optional: bool = False, allow_cpu: bool = False
+    device: Any,
+    optional: bool = False,
+    allow_cpu: bool = False,
 ) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
@@ -961,3 +977,47 @@ class CallbackRegistry(Generic[P]):
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
+
+
+# IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py
+# for use in the weights_only Unpickler.
+
+IMPORT_MAPPING = {
+    "__builtin__": "builtins",
+    "copy_reg": "copyreg",
+    "Queue": "queue",
+    "repr": "reprlib",
+    "_abcoll": "collections.abc",
+    # Non-mutual mappings.
+    "UserDict": "collections",
+    "UserList": "collections",
+    "UserString": "collections",
+    "whichdb": "dbm",
+    "StringIO": "io",
+    "cStringIO": "io",
+}
+
+
+# This contains rename rules that are easy to handle.  We ignore the more
+# complex stuff (e.g. mapping the names in the urllib and types modules).
+# These rules should be run before import names are fixed.
+NAME_MAPPING = {
+    ("__builtin__", "xrange"): ("builtins", "range"),
+    ("__builtin__", "reduce"): ("functools", "reduce"),
+    ("__builtin__", "intern"): ("sys", "intern"),
+    ("__builtin__", "unichr"): ("builtins", "chr"),
+    ("__builtin__", "unicode"): ("builtins", "str"),
+    ("__builtin__", "long"): ("builtins", "int"),
+    ("itertools", "izip"): ("builtins", "zip"),
+    ("itertools", "imap"): ("builtins", "map"),
+    ("itertools", "ifilter"): ("builtins", "filter"),
+    ("itertools", "ifilterfalse"): ("itertools", "filterfalse"),
+    ("itertools", "izip_longest"): ("itertools", "zip_longest"),
+    ("UserDict", "IterableUserDict"): ("collections", "UserDict"),
+    ("UserList", "UserList"): ("collections", "UserList"),
+    ("UserString", "UserString"): ("collections", "UserString"),
+    # Non-mutual mappings.
+    ("__builtin__", "basestring"): ("builtins", "str"),
+    ("exceptions", "StandardError"): ("builtins", "Exception"),
+    ("UserDict", "UserDict"): ("collections", "UserDict"),
+}

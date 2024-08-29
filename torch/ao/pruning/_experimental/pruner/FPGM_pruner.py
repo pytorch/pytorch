@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 from typing import Callable, Optional, Union
 
 import torch
 
 from .base_structured_sparsifier import BaseStructuredSparsifier
+
 
 __all__ = ["FPGMPruner"]
 

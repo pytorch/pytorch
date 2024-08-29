@@ -9,8 +9,8 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/Device.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <optional>
 
 /**
  * Defines the public API for loading flatbuffer-serialized mobile modules.
@@ -18,8 +18,7 @@
  * types, to avoid leaking those details to PyTorch clients.
  */
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /// All non-copied data pointers provided to `parse_and_initialize_*` functions
 /// must be aligned to this boundary. Since the Module will point directly into
@@ -58,7 +57,7 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 TORCH_API mobile::Module parse_and_initialize_mobile_module(
     void* data,
     size_t size, // of `data`, in bytes.
-    std::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = std::nullopt,
     ExtraFilesMap* extra_files = nullptr,
     bool should_copy_tensor_memory = false);
 
@@ -74,7 +73,7 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module(
 TORCH_API mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t size, // of `data`, in bytes.
-    std::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = std::nullopt,
     ExtraFilesMap* extra_files = nullptr);
 
 // Parse a mobile::Module from raw bytes, also returning JIT-related metadata.
@@ -87,7 +86,7 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module_for_jit(
     size_t size, // of `data`, in bytes.
     ExtraFilesMap& jit_sources,
     std::vector<IValue>& jit_constants,
-    std::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = std::nullopt,
     ExtraFilesMap* extra_files = nullptr);
 
 // Load a mobile::Module from a filepath.
@@ -100,7 +99,7 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module_for_jit(
 // directly.
 TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
-    std::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = std::nullopt,
     ExtraFilesMap* extra_files = nullptr);
 
 TORCH_API uint64_t get_bytecode_version(std::istream& in);
@@ -114,7 +113,7 @@ TORCH_API mobile::ModuleInfo get_module_info_from_flatbuffer(
 // its entirity to a buffer
 TORCH_API mobile::Module load_mobile_module_from_stream_with_copy(
     std::istream& in,
-    std::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = std::nullopt,
     ExtraFilesMap* extra_files = nullptr);
 
 TORCH_API mobile::Module parse_flatbuffer_no_object(
@@ -132,5 +131,4 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module(
 // no op, TODO(qihan) delete
 TORCH_API bool register_flatbuffer_loader();
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

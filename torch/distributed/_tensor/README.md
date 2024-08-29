@@ -117,7 +117,7 @@ import torch.nn as nn
 from torch.distributed._tensor import Shard, distribute_tensor, distribute_module, init_device_mesh
 
 class MyModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(8, 8)
         self.fc2 = nn.Linear(8, 8)

@@ -34,18 +34,6 @@
 
 namespace c10 {
 
-// in c++17 std::result_of has been superseded by std::invoke_result.  Since
-// c++20, std::result_of is removed.
-template <typename F, typename... args>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-using invoke_result = typename std::invoke_result<F, args...>;
-#else
-using invoke_result = typename std::result_of<F && (args && ...)>;
-#endif
-
-template <typename F, typename... args>
-using invoke_result_t = typename invoke_result<F, args...>::type;
-
 // std::is_pod is deprecated in C++20, std::is_standard_layout and
 // std::is_trivial are introduced in C++11, std::conjunction has been introduced
 // in C++17.
@@ -65,18 +53,6 @@ std::enable_if_t<
 make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
-
-template <class... B>
-using conjunction = std::conjunction<B...>;
-template <class... B>
-using disjunction = std::disjunction<B...>;
-template <bool B>
-using bool_constant = std::bool_constant<B>;
-template <class B>
-using negation = std::negation<B>;
-
-template <class T>
-using void_t = std::void_t<T>;
 
 #if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__) && !defined(__HIP__)
 
@@ -126,7 +102,7 @@ C10_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 template <typename Functor, typename... Args>
 std::enable_if_t<
     std::is_member_pointer_v<std::decay_t<Functor>>,
-    typename c10::invoke_result_t<Functor, Args...>>
+    typename std::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
 }
@@ -134,7 +110,7 @@ invoke(Functor&& f, Args&&... args) {
 template <typename Functor, typename... Args>
 std::enable_if_t<
     !std::is_member_pointer_v<std::decay_t<Functor>>,
-    typename c10::invoke_result_t<Functor, Args...>>
+    typename std::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::forward<Functor>(f)(std::forward<Args>(args)...);
 }

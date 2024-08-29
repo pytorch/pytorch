@@ -23,7 +23,6 @@ If you want to test float16
 
 """
 
-
 import argparse
 import dataclasses
 import functools
@@ -44,7 +43,6 @@ from os.path import abspath, exists
 from random import randint
 
 import matplotlib.pyplot as plt
-
 import numpy as np
 import pandas as pd
 from matplotlib import rcParams
@@ -52,8 +50,8 @@ from scipy.stats import gmean
 from tabulate import tabulate
 
 import torch
-
 import torch._dynamo
+
 
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
@@ -776,12 +774,18 @@ class ParsePerformanceLogs(Parser):
                         if not perf_row.empty:
                             if acc_row.empty:
                                 perf_row[compiler] = 0.0
+                            elif acc_row[compiler].iloc[0] in (
+                                "model_fail_to_load",
+                                "eager_fail_to_run",
+                            ):
+                                perf_row = pd.DataFrame()
                             elif acc_row[compiler].iloc[0] not in (
                                 "pass",
                                 "pass_due_to_skip",
                             ):
                                 perf_row[compiler] = 0.0
-                    perf_rows.append(perf_row)
+                    if not perf_row.empty:
+                        perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
 

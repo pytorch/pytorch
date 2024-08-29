@@ -1,23 +1,32 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
 import logging
 import operator
-from dataclasses import dataclass
+from collections import defaultdict
 from enum import Enum
-from inspect import Parameter, signature, Signature
+from inspect import Parameter, Signature, signature
 from types import MethodType
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
+from torch.distributed import ProcessGroup
 from torch.export import ExportedProgram
-from torch.export.unflatten import _assign_attr, _AttrKind, _sink_params
+from torch.export._trace import _export
+from torch.export.unflatten import (
+    _assign_attr,
+    _AttrKind,
+    _sink_params,
+    InterpreterModule,
+)
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
 
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
-from .microbatch import split_args_kwargs_into_chunks, TensorChunkSpec
+from ._utils import PipeInfo
+from .stage import _PipelineStage
 
 
 logger = logging.getLogger(__name__)
@@ -205,7 +214,7 @@ def _insert_stage_symbolic_backward(
                 input_nodes = list(node.all_input_nodes)
                 grads_proxy = fx.Proxy(grads)
                 for i, input_node in enumerate(input_nodes):
-                    assign_or_accumulate_grad(input_node, grads_proxy[i].node)
+                    assign_or_accumulate_grad(input_node, grads_proxy[i].node)  # type: ignore[index]
 
     return g
 
@@ -323,13 +332,13 @@ def pipe_split():
     no-op if your annotated module is run eagerly.
 
     Example:
-    >>> # xdoctest: +SKIP
-    >>> def forward(self, x):
-    >>>     x = torch.mm(x, self.mm_param)
-    >>>     x = torch.relu(x)
-    >>>     pipe_split()
-    >>>     x = self.lin(x)
-    >>>     return x
+        >>> # xdoctest: +SKIP
+        >>> def forward(self, x):
+        >>>     x = torch.mm(x, self.mm_param)
+        >>>     x = torch.relu(x)
+        >>>     pipe_split()
+        >>>     x = self.lin(x)
+        >>>     return x
 
     The above example will be split into two stages.
     """
@@ -407,15 +416,15 @@ class _LinearNodeList:
     def __init__(self, node_list):
         self.serialize_node_list = []
         for node in node_list:
-            node_args = fx.node.map_arg(node.args, lambda n: _NodeReference(n.name))
-            node_kwargs = fx.node.map_arg(node.kwargs, lambda n: _NodeReference(n.name))
+            node_args = fx.node.map_arg(node.args, lambda n: _NodeReference(n.name))  # type: ignore[arg-type,return-value]
+            node_kwargs = fx.node.map_arg(node.kwargs, lambda n: _NodeReference(n.name))  # type: ignore[arg-type,return-value]
             serialize_node = fx.Node(
-                graph=None,
+                graph=None,  # type: ignore[arg-type]
                 name=node.name,
                 op=node.op,
                 target=node.target,
-                args=node_args,
-                kwargs=node_kwargs,
+                args=node_args,  # type: ignore[arg-type]
+                kwargs=node_kwargs,  # type: ignore[arg-type]
                 return_type=node.type,
             )
             serialize_node.meta = copy.copy(node.meta)
@@ -438,8 +447,8 @@ class _LinearNodeList:
             deser_node = graph.create_node(
                 op=node.op,
                 target=node.target,
-                args=node_args,
-                kwargs=node_kwargs,
+                args=node_args,  # type: ignore[arg-type]
+                kwargs=node_kwargs,  # type: ignore[arg-type]
                 name=node.name,
                 type_expr=node.type,
             )
@@ -479,30 +488,42 @@ def _direct_serialization_reduce(self):
     )
 
 
+def _modify_graph_op_device(
+    gm: torch.fx.GraphModule,
+    new_device: torch.device,
+):
+    """
+    Modify the device argument of all "call_function" nodes in the graph.  This
+    is useful for moving the graph to a different device. In particular for
+    generator ops, like torch.ones.
+    """
+    modified = False
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            if "device" in node.kwargs and node.kwargs["device"] != new_device:
+                logger.debug(
+                    f"Changing device of Node {node.name} from {node.kwargs['device']} to {new_device}"  # noqa: G004
+                )
+                node.update_kwarg("device", new_device)
+                modified = True
+        elif node.op == "call_module":
+            # Recursively modify "device" in submodules
+            submod = gm.get_submodule(node.target)
+            if isinstance(submod, torch.fx.GraphModule):
+                _modify_graph_op_device(submod, new_device)
+            elif isinstance(submod, InterpreterModule):
+                # If unflattening has been performed, we need to access its graph module by `.graph_module`
+                _modify_graph_op_device(submod.graph_module, new_device)
+            else:
+                logger.warning(
+                    f"Skipping device modification for submodule {node.target} because it is a {type(submod)}"  # noqa: G004
+                )
+
+    if modified:
+        gm.recompile()
+
+
 class Pipe(torch.nn.Module):
-    # Class variables
-    """
-    args_chunk_spec:
-        Chunking specification for positional inputs. (default: `None`)
-    kwargs_chunk_spec:
-        Chunking specification for keyword inputs. (default: `None`)
-    """
-    # args_chunk_spec and kwargs_chunk_spec are used to specify how to chunk
-    # inputs. They are used to create microbatched examples before tracing.
-    # See context managers `ArgsChunkSpec` and `KwargsChunkSpec`.
-    # TODO: Do we need to support `_Replicate`? It's unclear, dropping for now.
-    args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None
-    kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None
-
-    @dataclass
-    class PipeInfo:
-        graph: fx.Graph
-        num_stages: int
-        num_chunks: int
-        has_loss_and_backward: bool
-        args_chunk_spec: Optional[Tuple[Any, ...]] = None
-        kwargs_chunk_spec: Optional[Dict[str, Any]] = None
-
     def __init__(
         self,
         split_gm: fx.GraphModule,
@@ -517,7 +538,6 @@ class Pipe(torch.nn.Module):
         self.num_stages: int = num_stages
         self.has_loss_and_backward = has_loss_and_backward
         self.loss_spec = loss_spec
-        self.pipe_info: Optional[Pipe.PipeInfo] = None
 
         for node in split_gm.graph.nodes:
             assert (
@@ -616,6 +636,9 @@ class Pipe(torch.nn.Module):
         return res
 
     def get_stage_module(self, stage_idx: int) -> torch.nn.Module:
+        """
+        Return a stage module corresponding to `stage_idx` of the `pipe`.
+        """
         if stage_idx < 0 or stage_idx >= self.num_stages:
             raise ValueError(f"Invalid stage index {stage_idx}!")
         return getattr(self.split_gm, f"submod_{stage_idx}")
@@ -708,7 +731,7 @@ class Pipe(torch.nn.Module):
 
         # TODO: what does split do with module invocations? does it move the modules
         # into the submodules?
-        split = split_module(traced, mod, split_callback)
+        split = split_module(traced, mod, split_callback)  # type: ignore[arg-type]
         # a (custom) tracer can produce dead code like orphan get_attr nodes
         split.graph.eliminate_dead_code()
 
@@ -729,38 +752,60 @@ class Pipe(torch.nn.Module):
                 # Replace old submod
                 split.register_module(name, new_submod)
 
-        # lift single-use parameter fetches into the modules that use them
         # TODO: backport this into split_module
-        def delete_user_reference(node, user, delete_node=True):
+        def delete_user_reference(node, user):
+            """
+            Delete reference of `node` from `user`'s arg list.
+            Args:
+                - node: a `get_attr` node at root.
+                - user: a submodule node that uses `node`.
+            """
             assert len(user.kwargs) == 0
             use_idxs = [i for i, arg in enumerate(user.args) if arg == node]
             assert len(use_idxs) == 1
             args_copy = list(user.args)
             args_copy.pop(use_idxs[0])
             user.args = tuple(args_copy)
-            if delete_node:
-                node.graph.erase_node(node)
-            return use_idxs[0]
+            logger.debug(
+                f"Deleted {node} from user {user}, arg index = {use_idxs[0]}"  # noqa: G004
+            )
 
         # A list of param referrals for deferred deletion.
         # To be accumulated in `move_param_to_callee`.
-        to_delete = list()
+        to_delete = []
+
+        def _recursive_getattr_with_parent(mod, fqn):
+            # Returns getattr call given a nested FQN, and the last parent
+            atoms = fqn.split(".")
+            for atom in atoms[:-1]:
+                if not hasattr(mod, atom):
+                    return None, None
+                mod = getattr(mod, atom)
+            if not hasattr(mod, atoms[-1]):
+                return mod, None
+            attr = getattr(mod, atoms[-1])
+            return mod, attr
 
         def move_param_to_callee(
             root,
             callee_name,
             param_fqn,
         ):
+            """
+            Move a parameter from the root module to a submodule.
+            Args:
+                root: The root module.
+                callee_name: The name of the submodule to move the parameter to.
+                param_fqn: The fully qualified name of the parameter to move.
+            """
             # `atoms` is a list of strings representing the path to the
             # parameter in the original model
             atoms = param_fqn.split(".")
-            # Recursively find the parent of the parameter
-            mod_itr = split
-            for atom in atoms[:-1]:
-                mod_itr = getattr(mod_itr, atom)
-            param_val = getattr(mod_itr, atoms[-1])
+            mod_itr, param_val = _recursive_getattr_with_parent(split, param_fqn)
+            # Check whether the parameter is a buffer or a parameter
             is_buffer = atoms[-1] in mod_itr._buffers
 
+            # Check whether the parameter is a tensor
             assert isinstance(param_val, torch.Tensor), (
                 f"Expected '{param_fqn}' to be {torch.Tensor} but got {type(param_val)}."
                 + (
@@ -771,17 +816,21 @@ class Pipe(torch.nn.Module):
                     else ""
                 )
             )
+
+            # Get submodule
             callee = root.get_submodule(callee_name)
             assert not hasattr(
                 callee, param_fqn
             ), f"Module {callee_name} already has a parameter named {param_fqn}"
+
+            # Assign the parameter to the submodule
             if is_buffer:
                 _assign_attr(
                     param_val,
                     callee,
                     param_fqn,
                     attr_kind=_AttrKind.BUFFER,
-                    persistent=True,
+                    persistent=True,  # TODO: handle non-persistent buffer
                 )
             else:
                 _assign_attr(
@@ -790,7 +839,7 @@ class Pipe(torch.nn.Module):
                     param_fqn,
                     attr_kind=_AttrKind.PARAMETER,
                 )
-            # logger.debug(f"Moved parameter {param_fqn} to {callee_name}")
+            logger.debug(f"Moved parameter {param_fqn} to {callee_name}")  # noqa: G004
 
             # Next step is to replace placeholder of submodule with a get_attr.
             # Those placeholders are created by `split_module` inside each
@@ -805,8 +854,11 @@ class Pipe(torch.nn.Module):
         attr_nodes = list(filter(lambda n: n.op == "get_attr", split.graph.nodes))
         for node in attr_nodes:
             # Check whether the parameter is used in only one submodule
-            if len(node.users) == 1:
-                user = next(iter(node.users))
+            if len(node.users) > 1:
+                logger.info(
+                    f"Parameter {node.target} used in multiple stages: {node.users}."  # noqa: G004
+                )
+            for user in node.users:
                 assert user.op == "call_module"
                 # Move parameter into submodule
                 move_param_to_callee(
@@ -814,198 +866,91 @@ class Pipe(torch.nn.Module):
                     user.target,
                     node.target,
                 )
-            else:
-                # TODO: re-enable support for multi-use parameters
-                raise NotImplementedError(
-                    f"""
-                    Parameter {node.target} used in multiple stages:
-                    {node.users}.
-                    Currently, we do not support multi-use parameters.
-                    """
-                )
 
-        # Deferral deletion: Remove the original attributes (to params) from the
-        # root GraphModule
-        for mod_itr, last_atom in to_delete:
-            delattr(mod_itr, last_atom)
+        # [aliasing] store tensor id -> list of FQNs, built from state dict
+        # Also assign non-persistent buffers
+        id_to_fqns: Dict[int, Set[str]] = defaultdict(set)
+        for fqn, tensor in mod.state_dict(keep_vars=True).items():
+            id_to_fqns[id(tensor)].add(fqn)
+        for fqn, tensor in mod.named_buffers():
+            id_to_fqns[id(tensor)].add(fqn)
 
         # After moving the params to their corresponding hierarchies, we also
         # need to move the `get_attr` nodes from the root of the graph to those
         # hierarchies.
-        inputs_to_state: Dict[str, List[str]] = {
-            attr.name: [attr.target] for attr in attr_nodes
-        }
-        # This is done by (1) `_sind_params` at each submodule;
+        # [aliasing] use id -> fqn mapping to list out all valid FQNs
+        inputs_to_state: Dict[str, List[str]] = {}
+        for attr in attr_nodes:
+            _, tensor = _recursive_getattr_with_parent(mod, attr.target)
+            fqns = list(id_to_fqns[id(tensor)])
+            if fqns:
+                inputs_to_state[attr.name] = fqns
+            elif attr.target in exported_program.constants:  # lifted constants
+                inputs_to_state[attr.name] = [attr.target]
+
+        # [aliasing] for each submodule split, assign attributes on FQNs that may be used.
+        # We determine this based on whether or not the FQN attribute parent exists.
+        # i.e. if the last submodule exists, assign the attribute.
+        added_attributes: Dict[str, List[str]] = defaultdict(list)
+        for fqn, tensor in mod.state_dict(keep_vars=True).items():
+            for name, submod in split.named_children():
+                if isinstance(submod, fx.GraphModule):
+                    parent, child = _recursive_getattr_with_parent(submod, fqn)
+                    if (
+                        parent and child is None
+                    ):  # parent exists, attribute doesn't -> assign
+                        added_attributes[name].append(fqn)
+                        setattr(parent, fqn.split(".")[-1], tensor)
+
+        # Deferral deletion: Remove the original attributes (to params) from the
+        # root GraphModule
+        for mod_itr, last_atom in to_delete:
+            try:
+                delattr(mod_itr, last_atom)
+            except AttributeError:
+                # This is expected if the parameter is used in multiple stages
+                pass
+
+        # This is done by (1) `_sink_params` at each submodule;
         for name, submod in split.named_children():
             if isinstance(submod, fx.GraphModule):
                 _sink_params(submod, inputs_to_state, [])
                 submod.graph.lint()
                 submod.recompile()
 
-        # And (2) remove `get_attr` nodes from the root
+        # [aliasing] This step is not super necessary, but helps reduce parameter usage/memory.
+        # After _sink_params() routine has run, clean up unused attributes that we previously added.
+        # Determine this based on the get_attr nodes - if not used, remove it.
+        for name, attributes in added_attributes.items():
+            submod = getattr(split, name)
+            unused_attributes = set(attributes)
+            # track used attributes in the submodule, running DFS on subgraph hierarchy
+            stack = [("", submod)]  # (scope, submodule)
+            while stack:
+                scope, _mod = stack.pop()
+                if isinstance(_mod, (fx.GraphModule, InterpreterModule)):
+                    for node in _mod.graph.nodes:
+                        if node.op == "get_attr":
+                            # get_attr might get access deeper level attribute
+                            fqn = scope + "." + node.target if scope else node.target
+                            if fqn in unused_attributes:  # used, remove it
+                                unused_attributes.remove(fqn)
+                for _name, _submod in _mod.named_children():
+                    stack.append((scope + "." + _name if scope else _name, _submod))
+            # delete unused attributes
+            for attr in unused_attributes:
+                mod_itr, atoms = submod, attr.split(".")
+                for atom in atoms[:-1]:
+                    mod_itr = getattr(mod_itr, atom)
+                delattr(mod_itr, atoms[-1])
+
         for node in attr_nodes:
-            if len(node.users) == 1:
-                user = next(iter(node.users))
+            # And (2): remove `get_attr` node from submod's arg list
+            for user in copy.copy(node.users):
                 assert user.op == "call_module"
-                use_idx = delete_user_reference(node, user)
-
-        split.graph.lint()
-        split.recompile()
-
-        # Handle multi-use parameters based on user's configuration
-        # TODO: generalize this to sequential
-        multi_use_param_spec = multi_use_param_spec or {}
-
-        multi_use_params_qualnames: Dict[str, Optional[MultiUseParameterConfig]] = {}
-        for node in split.graph.nodes:
-            if node.op == "get_attr" and len(node.users) > 1:
-                multi_use_params_qualnames.setdefault(node.target)
-
-        def set_multi_use_param_spec(
-            multi_use_params_qualnames,
-            multi_use_param_spec,
-        ):
-            for param in multi_use_params_qualnames:
-                if isinstance(multi_use_param_spec, MultiUseParameterConfig):
-                    multi_use_params_qualnames[param] = multi_use_param_spec
-                elif isinstance(multi_use_param_spec, dict):
-                    multi_use_params_qualnames[param] = multi_use_param_spec.get(
-                        param, MultiUseParameterConfig.TRANSMIT
-                    )
-                else:
-                    raise ValueError(
-                        "multi_use_param_spec must be MultiUseParamSpec enum or dict"
-                    )
-
-        def handle_multi_use_params(
-            split,
-            multi_use_params_qualnames,
-        ):
-            # TODO: do we maintain the invariant that `Node.users` is topologically ordered? I don't think so
-            node_to_first_user: Dict[fx.Node, fx.Node] = {}
-            for node in split.graph.nodes:
-                for input in node.all_input_nodes:
-                    if input not in node_to_first_user:
-                        node_to_first_user[input] = node
-
-            for node in split.graph.nodes:
-                if node.op == "get_attr" and node.target in multi_use_params_qualnames:
-                    reuse_type = multi_use_params_qualnames[node.target]
-                    if reuse_type == MultiUseParameterConfig.TRANSMIT:
-                        first_user = node_to_first_user[node]
-                        assert first_user.op == "call_module"
-
-                        use_idx = delete_user_reference(
-                            node, first_user, delete_node=False
-                        )
-
-                        atoms = node.target.split(".")
-                        mod_itr = split
-                        for atom in atoms[:-1]:
-                            mod_itr = getattr(mod_itr, atom)
-                        param_val = getattr(mod_itr, atoms[-1])
-                        is_buffer = atoms[-1] in mod_itr._buffers
-
-                        callee_param_def = move_param_to_callee(  # type: ignore[call-arg]
-                            split,
-                            first_user.target,
-                            param_val,
-                            use_idx,
-                            is_buffer,
-                        )
-
-                        delattr(mod_itr, atoms[-1])
-
-                        # Add extra output to the callee and switch references to the parameter
-                        # access in the pipeline graph to use this.
-                        submod = split.get_submodule(first_user.target)
-                        callee_output_nodes = [
-                            n for n in submod.graph.nodes if n.op == "output"
-                        ]
-                        assert len(callee_output_nodes) == 1
-                        callee_output_node = callee_output_nodes[0]
-
-                        # TODO: zero outputs?
-                        if isinstance(callee_output_node.args[0], tuple):
-                            new_output_args = callee_output_node.args[0] + (
-                                callee_param_def,
-                            )
-                            callee_output_node.args = (new_output_args,)
-                            new_output_idx = len(new_output_args) - 1
-                            promoted_to_tuple = False
-                        else:
-                            new_output_args = (
-                                callee_output_node.args[0],
-                                callee_param_def,
-                            )
-                            callee_output_node.args = (new_output_args,)
-                            new_output_idx = len(new_output_args) - 1
-                            promoted_to_tuple = True
-
-                        submod.graph.lint()
-                        submod.recompile()
-
-                        with split.graph.inserting_after(first_user):
-                            if promoted_to_tuple:
-                                # TODO: test this code path
-                                orig_output_getitem = split.graph.call_function(
-                                    operator.getitem, (first_user, 0)
-                                )
-                                first_user.replace_all_uses_with(orig_output_getitem)
-                                # HACK because the above replace_all_uses with ALSO replaced the instance
-                                # of first_user within the getitem node we just added
-                                orig_output_getitem.args = (
-                                    first_user,
-                                ) + orig_output_getitem.args[1:]
-
-                            transmitted_value_getitem = split.graph.call_function(
-                                operator.getitem,
-                                (first_user, new_output_idx),
-                            )
-                            node.replace_all_uses_with(transmitted_value_getitem)
-                            split.graph.erase_node(node)
-                    elif reuse_type == MultiUseParameterConfig.REPLICATE:
-                        for user in copy.copy(node.users):
-                            use_idx = delete_user_reference(
-                                node, user, delete_node=False
-                            )
-                            atoms = node.target.split(".")
-                            mod_itr = split
-                            for atom in atoms[:-1]:
-                                mod_itr = getattr(mod_itr, atom)
-                            param_val = getattr(mod_itr, atoms[-1])
-                            is_buffer = atoms[-1] in mod_itr._buffers
-
-                            move_param_to_callee(  # type: ignore[call-arg]
-                                split,
-                                user.target,
-                                param_val,
-                                use_idx,
-                                is_buffer,
-                            )
-
-                        atoms = node.target.split(".")
-                        mod_itr = split
-                        for atom in atoms[:-1]:
-                            mod_itr = getattr(mod_itr, atom)
-
-                        delattr(mod_itr, atoms[-1])
-
-                        split.graph.erase_node(node)
-                    else:
-                        raise ValueError(
-                            f"Unknown multi-use config value {reuse_type} specified for {node.target}"
-                        )
-
-        if len(multi_use_params_qualnames) > 0:
-            # TODO: re-enable support for multi-use parameters
-            raise NotImplementedError(
-                "Sharing model parameters between stages are not yet supported. "
-                "Found the following shared parameters in your model: "
-                f"{multi_use_params_qualnames}"
-            )
-            set_multi_use_param_spec(multi_use_params_qualnames, multi_use_param_spec)
-            handle_multi_use_params(split, multi_use_params_qualnames)
+                delete_user_reference(node, user)
+            # And (3): remove the `get_attr` node from the root graph.
+            split.graph.erase_node(node)
 
         split.delete_all_unused_submodules()
         split.graph.lint()
@@ -1059,17 +1004,29 @@ class Pipe(torch.nn.Module):
         example_kwargs: Optional[Dict[str, Any]] = None,
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
-        ep = torch.export.export(
-            mod,
-            example_args,
-            example_kwargs,
-        )
+        try:
+            with torch.no_grad():
+                ep = _export(
+                    mod,
+                    example_args,
+                    example_kwargs,
+                    strict=True,
+                    pre_dispatch=False,
+                )
+        except Exception as e:
+            raise RuntimeError(
+                "It seems that we cannot capture your model as a full graph. "
+                "Typical reasons include graph breaks, data/shape-dependent "
+                "control flow, or missing meta kernels for custom operators. "
+                "You can use our manual pipeline interfaces, or try to fix the "
+                "graph breaks, see https://pytorch.org/docs/stable/export.html"
+            ) from e
+
         return ep
 
     @staticmethod
     def from_tracing(
         mod: torch.nn.Module,
-        num_chunks: int,
         example_args: Tuple[Any, ...],
         example_kwargs: Optional[Dict[str, Any]] = None,
         split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
@@ -1088,19 +1045,11 @@ class Pipe(torch.nn.Module):
             )
         """
 
-        args_split, kwargs_split = split_args_kwargs_into_chunks(
-            example_args,
-            example_kwargs,
-            num_chunks,
-            Pipe.args_chunk_spec,
-            Pipe.kwargs_chunk_spec,
-        )
-
         # Trace with export
         exported_program = Pipe._trace_with_export(
             mod,
-            example_args=args_split[0],
-            example_kwargs=kwargs_split[0],
+            example_args,
+            example_kwargs,
         )
 
         pipe = Pipe._from_traced(
@@ -1140,15 +1089,6 @@ class Pipe(torch.nn.Module):
             )
             submod0.recompile()
 
-        # Create pipe info
-        pipe.pipe_info = Pipe.PipeInfo(
-            graph=pipe.split_gm.graph,
-            num_stages=pipe.num_stages,
-            num_chunks=num_chunks,
-            has_loss_and_backward=pipe.has_loss_and_backward,
-            args_chunk_spec=Pipe.args_chunk_spec,
-            kwargs_chunk_spec=Pipe.kwargs_chunk_spec,
-        )
         return pipe
 
     def __str__(self):
@@ -1158,11 +1098,53 @@ class Pipe(torch.nn.Module):
         return self.split_gm.__repr__()
 
     def info(self) -> PipeInfo:
-        if self.pipe_info is None:
-            raise RuntimeError(
-                "Pipe info is not available. Please use the `pipeline` method to create the `Pipe` object."
+        """
+        Get information about the pipe.
+
+        Returns
+        -------
+        PipeInfo
+            A dataclass containing information about the pipe.
+        """
+        return PipeInfo(
+            graph=self.split_gm.graph,
+            num_stages=self.num_stages,
+            has_loss_and_backward=self.has_loss_and_backward,
+        )
+
+    def build_stage(
+        self,
+        stage_index: int,
+        device: torch.device,
+        group: Optional[ProcessGroup] = None,
+    ) -> _PipelineStage:
+        """
+        Create a `PipelineStage` given a stage index and distributed group.
+        The `PipelineStage` can run with `PipelineSchedule`s.
+        """
+        # Find stage module
+        stage_module = self.get_stage_module(stage_index)
+
+        # Move ops argument to device
+        # Today PT2 tracer does not treat `x.device` as a symbolic device;
+        # instead, the device of tracing time got burned into the generated
+        # code.  Here we provide a workaround for users to manually modify the
+        # "device" kwarg of operations. Such operation may include:
+        # `torch.ones`, `torch.zeros`, `torch.rand`, etc.
+        if isinstance(stage_module, torch.fx.GraphModule):
+            _modify_graph_op_device(stage_module, device)
+        else:
+            logger.warning(
+                f"Expected a `torch.fx.GraphModule` but got {type(stage_module)}"  # noqa: G004
             )
-        return self.pipe_info
+
+        # Detach pipe info
+        # Note: be careful what's included in `pipe_info`. We don't want to keep
+        # a reference to `Pipe` or `Pipe.split_gm` which stops python from
+        # recycling them. When python recycles them, other stage modules (which
+        # are irrelevant to current rank) can be automatically freed.
+        pipe_info = self.info()
+        return _PipelineStage(stage_module, stage_index, pipe_info, device, group)
 
 
 class SplitPoint(Enum):
@@ -1199,7 +1181,8 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
                 predecessor_module = getattr(predecessor_module, atom)
             except AttributeError as e:
                 raise AttributeError(
-                    f'Specified target {qualname} referenced nonexistent module {".".join(atoms[:i+1])}'
+                    f"Specified target {qualname} referenced "
+                    f'nonexistent module {".".join(atoms[: i + 1])}'
                 ) from e
 
         mod_to_wrap = getattr(predecessor_module, atoms[-1])
@@ -1214,29 +1197,26 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
 
 def pipeline(
     module: torch.nn.Module,
-    num_chunks: int,
-    example_args: Tuple[Any, ...],
-    example_kwargs: Optional[Dict[str, Any]] = None,
+    mb_args: Tuple[Any, ...],
+    mb_kwargs: Optional[Dict[str, Any]] = None,
     split_spec: Optional[Dict[str, SplitPoint]] = None,
     split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
 ) -> Pipe:
     """
-    Creates a pipeline representation for the provided module.
+    Split a module based on a specification.
 
     See `Pipe` for more details.
 
     Arguments
     ---------
     module:
-        The module to be transformed into a `Pipe`.
-    num_chunks:
-        The number of microbatches to be run with this pipeline.
-    example_args:
-        Example positional inputs to be used with this pipeline.
-    example_kwargs:
-        Example keyword inputs to be used with this pipeline. (default: `None`)
+        The module to be splitted.
+    mb_args:
+        Example positional inputs, in micro-batch form.
+    mb_kwargs:
+        Example keyword inputs, in micro-batch form. (default: `None`)
     split_spec:
-        A dictionary mapping module names to `SplitPoint`s. (default: `None`)
+        A dictionary using submodule names as split marker. (default: `None`)
     split_policy:
         The policy to use for splitting the module. (default: `None`)
 
@@ -1254,75 +1234,14 @@ def pipeline(
         annotate_split_points(module, split_spec)
         return Pipe.from_tracing(
             mod=module,
-            num_chunks=num_chunks,
-            example_args=example_args,
-            example_kwargs=example_kwargs,
+            example_args=mb_args,
+            example_kwargs=mb_kwargs,
         )
     else:
         # Use split policy
         return Pipe.from_tracing(
             mod=module,
-            num_chunks=num_chunks,
-            example_args=example_args,
-            example_kwargs=example_kwargs,
+            example_args=mb_args,
+            example_kwargs=mb_kwargs,
             split_policy=split_policy,
         )
-
-
-# Context manager for setting `args_chunk_spec` during creation of Pipe
-class ArgsChunkSpec:
-    """
-    Example:
-    >>> # xdoctest: +SKIP
-    >>> # There are three positional arguments to the model, and
-    >>> # we are chunking them along dimension 0, 0 and 1, respectively
-    >>> with ArgsChunkSpec((0, 0, 1)):
-    >>>     pipe = pipeline(model, num_chunks, example_args)
-    """
-
-    def __init__(
-        self,
-        chunk_dims: Tuple[int, ...],
-    ):
-        self.args_chunk_spec = map_aggregate(
-            chunk_dims,
-            lambda dim: TensorChunkSpec(dim),
-        )
-
-    def __enter__(self):
-        # Inject into the Pipe class
-        Pipe.args_chunk_spec = self.args_chunk_spec
-        return self.args_chunk_spec
-
-    def __exit__(self, exc_type, exc_val, traceback):
-        # Remove from the Pipe class
-        Pipe.args_chunk_spec = None
-
-
-# Context manager for setting `kwargs_chunk_spec` during creation of Pipe
-class KwargsChunkSpec:
-    """
-    Example:
-    >>> # xdoctest: +SKIP
-    >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
-    >>> with KwargsChunkSpec({"id": 0, "mask": 1}):
-    >>>     pipe = pipeline(model, num_chunks, (), example_kwargs)
-    """
-
-    def __init__(
-        self,
-        chunk_dims: Dict[str, int],
-    ):
-        self.kwargs_chunk_spec = map_aggregate(
-            chunk_dims,
-            lambda dim: TensorChunkSpec(dim),
-        )
-
-    def __enter__(self):
-        # Inject into the Pipe class
-        Pipe.kwargs_chunk_spec = self.kwargs_chunk_spec
-        return self.kwargs_chunk_spec
-
-    def __exit__(self, exc_type, exc_val, traceback):
-        # Remove from the Pipe class
-        Pipe.kwargs_chunk_spec = None

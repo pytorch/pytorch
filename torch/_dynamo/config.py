@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import getpass
 import inspect
 import os
@@ -116,8 +117,9 @@ guard_nn_modules_using_dict_tags = True
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
-# torchdynamo has very limited support for tensor subclasses that implement
-# __torch_function__.  Our current support is limited to tensor subclasses
+# torchdynamo has limited support for tensor subclasses that implement
+# __torch_function__ see [Note: __torch_function__] in torch_function.py.
+# Our current support is limited to tensor subclasses
 # that DO NOT store metadata on the tensor (in general, dynamo does not
 # support Python code that stores extra attributes on tensors at present).
 # If your tensor subclass purely changes function call behavior via
@@ -225,6 +227,15 @@ capture_dynamic_output_shape_ops = (
     os.environ.get("TORCHDYNAMO_CAPTURE_DYNAMIC_OUTPUT_SHAPE_OPS", "0") == "1"
 )
 
+# hybrid backed unbacked symints
+prefer_deferred_runtime_asserts_over_guards = False
+
+# For complex dynamic shapes guards that we're unable to specify with dynamo/export's
+# range constraints + dims + derived dims language, we raise constraint violation
+# errors or specialize by default. If set to True, this flag avoids crashing/specialization,
+# and allows complex guards as runtime assertions in the graph.
+allow_complex_guards_as_runtime_asserts = False
+
 # By default, dynamo will treat all ints as backed SymInts, which means (1) it
 # will wait to see the int change over multiple runs before generalizing and
 # (2) it will still always 0/1 specialize an int.  When true, this knob
@@ -293,16 +304,18 @@ def _get_optimize_ddp_mode():
     return mode
 
 
-# If True, delays DDPOptimizer submodule compilation to 1st run of the model,
-# so that real tensor strides are used in all submodules
-# (instead of using FakeTensor strides which can differ from real tensor strides and causes error in some cases).
-# This feature is not hardened yet and it's known to cause issues to some models, so False by default.
+# Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
+skip_torchrec = True
+
+
+# No longer used
 optimize_ddp_lazy_compile = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
-# Whether to apply torch._dynamo.disable() to per-param FSDP hooks
-skip_fsdp_hooks = False
+# Whether to apply torch._dynamo.disable() to FSDP2 hooks.
+# Defaults to True. If Traceable FSDP2 is used, set this to False.
+skip_fsdp_hooks = True
 
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
@@ -326,6 +339,12 @@ error_on_nested_fx_trace = True
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
+# If true, enables feature that captures PyTorch sparsity in the
+# exported FX graph. This flag should become the default eventually
+# and be removed, but currently provides a way to fall back to old
+# graph breaking behavior.
+capture_sparse_compute = False if is_fbcode() else True
+
 # If true, error if we try to compile a function that has
 # been seen before.
 # [@compile_ignored: runtime_behaviour]
@@ -340,9 +359,6 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 # Trace through NumPy or graphbreak
 trace_numpy = True
 
-# Trace through torch.distributed code
-trace_distributed = False
-
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
 numpy_default_float = "float64"
@@ -356,9 +372,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
 
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = (
-    os.environ.get("TORCHDYNAMO_INLINE_INBUILT_NN_MODULES", "0") == "1"
-)
+inline_inbuilt_nn_modules = not is_fbcode()
 
 
 def default_debug_dir_root():
@@ -441,9 +455,20 @@ fake_tensor_cache_crosscheck_enabled = (
     os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
 )
 
-# support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
-# WARNING: this is an experimental flag and is subject to change.
-_experimental_support_context_fn_in_torch_utils_checkpoint = False
+# Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
+# Note: AOT Autograd will still trace joint graphs.
+compiled_autograd = False
+
+# Enables use of collectives *during* compilation to synchronize behavior
+# across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
+# behavior, making it so that we infer that if an input is dynamic by
+# inspecting whether or not its input size varies across ranks.  Because
+# this synchronization uses collectives, all ranks must run compilation at
+# the same time; ranks must not diverge with graph breaks.  This can be most
+# reliably achieved by ensuring PT2 only is run on SPMD programs.  If this
+# invariant is inviolated, you will likely deadlock NCCL and encounter a
+# NCCL timeout.
+enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
@@ -453,5 +478,6 @@ if TYPE_CHECKING:
 
 
 from torch.utils._config_module import install_config_module
+
 
 install_config_module(sys.modules[__name__])

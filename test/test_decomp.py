@@ -1,13 +1,13 @@
 # Owner(s): ["module: decompositions"]
 
 import functools
-
 import itertools
 import re
 import unittest
 from collections import defaultdict
 from functools import partial
 
+import torch._inductor.decomposition
 import torch.autograd
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, decomposition_table
@@ -31,7 +31,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_MACOS,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -43,8 +42,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 aten = torch.ops.aten
 
@@ -211,11 +210,20 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.hardswish.default): 2e-7,
         (torch.bfloat16, torch.ops.aten.hardswish.default): 2e-7,
         (torch.float16, torch.ops.aten.multi_margin_loss.default): 3e-2,
-        (torch.bfloat16, torch.ops.aten.multi_margin_loss.default): 3e-2,
+        (torch.bfloat16, torch.ops.aten.multi_margin_loss.default): 5e-2,
         (torch.float16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
         (torch.bfloat16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
+        (torch.float16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
+        (torch.bfloat16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
+        (torch.float16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+        (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+        (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
+        (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.mv.default): 1e-5,
+        (torch.float16, torch.ops.aten.log_sigmoid_backward.default): 2e-5,
+        (torch.float16, torch.ops.aten._softmax_backward_data.default): 3e-7,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -600,15 +608,21 @@ class TestDecomp(TestCase):
 
         self.assertEqual(xs, xs_two)
 
+    def test_cat_single_input(self, device):
+        decomp_table = torch._inductor.decomposition.select_decomp_table()
+        cat_inductor = decomp_table[torch.ops.aten.cat.default]
+
+        inp = torch.rand([2048, 2048], device=device)
+        inps = [inp for _ in range(10)]
+
+        for dim in (-1, 0, 1):
+            self.assertEqual(torch.cat(inps, dim), cat_inductor(inps, dim))
+
     def test_rrelu_with_noise(self, device):
         # rrelu_with_noise behavior depends on a) whether elements in the input
         # are <= 0, and b) whether we're in training mode. Cover all cases:
         dtype = torch.float64
-        x = torch.tensor(
-            [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0],
-            dtype=dtype,
-            device=device,
-        )
+        x = torch.tensor([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0], dtype=dtype, device=device)
         lower = 1.0
         upper = 4.0
         training = False
@@ -1053,6 +1067,17 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._log_softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
+    @onlyCUDA
+    def test_exponential_non_inf(self, device):
+        inp = torch.empty((4, 400, 256), device=device)
+
+        with torch._dynamo.utils.preserve_rng_state():
+            exp_ref = inp.exponential_()
+        exp = torch._refs.exponential(inp)
+
+        self.assertEqual(exp, exp_ref)
+        self.assertFalse(exp.isinf().any())
+
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @onlyCUDA
@@ -1146,7 +1171,7 @@ class DecompOneOffTests(TestCase):
         [
             xfail(
                 "nn.functional.scaled_dot_product_attention",
-                dtypes=[torch.half] + ([torch.bfloat16] if IS_MACOS else []),
+                dtypes=[torch.half],
             ),
         ],
     )
@@ -1156,7 +1181,7 @@ class DecompOneOffTests(TestCase):
         # add support for float16 over there we should update this test as well.
 
         class ScaledDotProductAttention(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(

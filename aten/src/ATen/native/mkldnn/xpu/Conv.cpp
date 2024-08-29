@@ -6,7 +6,7 @@
 #include <ATen/ops/neg.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <torch/library.h>

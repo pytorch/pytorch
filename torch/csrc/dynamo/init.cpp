@@ -60,6 +60,7 @@ void initDynamoBindings(PyObject* torch) {
   py::class_<CacheEntry>(m, "_CacheEntry")
       .def_readonly("check_fn", &CacheEntry::check_fn)
       .def_readonly("code", &CacheEntry::code)
+      .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_property_readonly("next", &CacheEntry::next);
 
   py::class_<ExtraState>(m, "_ExtraState")

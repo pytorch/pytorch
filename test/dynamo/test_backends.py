@@ -2,7 +2,6 @@
 import unittest
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
@@ -12,11 +11,12 @@ from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class Seq(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -106,6 +106,9 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_eager(self):
         self._check_backend_works("eager")
 
+    def test_eager_noexcept(self):
+        self._check_backend_works("eager_noexcept")
+
     @_force_skip_lazy_graph_module()
     def test_torchscript(self):
         self._check_backend_works("ts")
@@ -132,6 +135,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_tvm(self):
         self._check_backend_works("tvm")
         self._check_backend_works("tvm", options={"scheduler": None})
+        self._check_backend_works("tvm", options={"opt_level": 0})
 
     def test_list_backends(self):
         self.assertIn("inductor", torch._dynamo.list_backends())
