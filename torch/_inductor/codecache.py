@@ -1498,7 +1498,6 @@ class CudaKernelParamCache:
                 config.aot_inductor.output_path
             )[0],
         )
-        print("ETAF saved binary:", path)
         params[get_cpp_wrapper_cubin_path_name()] = path
 
         cls.cache[key] = params
@@ -2113,7 +2112,6 @@ class CppCodeCache:
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
         vec_isa_cmd = repr(command_gen.get_command_line())
-        print("ETAF: vec_isa_cmd", vec_isa_cmd)
         key, input_path = write(source_code, "cpp", extra=vec_isa_cmd)
 
         if key not in cls.cache:
