@@ -7,7 +7,6 @@ PROD_SCALAR_MICROKERNEL_SRCS = [
 ]
 
 PROD_FMA_MICROKERNEL_SRCS = [
-    "xnnpack_wrappers/amalgam/gen/fma.c",
 ]
 
 PROD_ARMSIMD32_MICROKERNEL_SRCS = [
@@ -92,7 +91,6 @@ PROD_F16C_MICROKERNEL_SRCS = [
 ]
 
 PROD_XOP_MICROKERNEL_SRCS = [
-    "xnnpack_wrappers/amalgam/gen/xop.c",
 ]
 
 PROD_FMA3_MICROKERNEL_SRCS = [
@@ -447,28 +445,16 @@ AARCH64_ASM_MICROKERNEL_SRCS = [
     "xnnpack_wrappers/qs8-qc8w-igemm/gen/qs8-qc8w-igemm-4x16c4-minmax-fp32-asm-aarch64-neondot-cortex-a55.S",
     "xnnpack_wrappers/qs8-qc8w-igemm/gen/qs8-qc8w-igemm-4x16c4-minmax-fp32-asm-aarch64-neondot-ld64.S",
     "xnnpack_wrappers/qs8-qc8w-igemm/gen/qs8-qc8w-igemm-4x16c4-minmax-fp32-asm-aarch64-neondot-ld128.S",
-    "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x8c4-minmax-rndnu-asm-aarch64-neondot-cortex-a55.S",
-    "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x8c4-minmax-rndnu-asm-aarch64-neondot-ld128.S",
     "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-cortex-a53-prfm.S",
     "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-cortex-a53.S",
     "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-cortex-a75-prfm.S",
     "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-cortex-a75.S",
     "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-ld64-prfm.S",
     "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-ld64.S",
-    "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16c4-minmax-fp32-asm-aarch64-neondot-cortex-a55.S",
-    "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16c4-minmax-fp32-asm-aarch64-neondot-ld128.S",
-    "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16c4-minmax-rndnu-asm-aarch64-neondot-cortex-a55.S",
-    "xnnpack_wrappers/qu8-gemm/gen/qu8-gemm-4x16c4-minmax-rndnu-asm-aarch64-neondot-ld128.S",
-    "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x8c4-minmax-rndnu-asm-aarch64-neondot-cortex-a55.S",
-    "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x8c4-minmax-rndnu-asm-aarch64-neondot-ld128.S",
     "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-cortex-a53-prfm.S",
     "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-cortex-a53.S",
     "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-cortex-a75-prfm.S",
     "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-cortex-a75.S",
     "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-ld64-prfm.S",
     "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16-minmax-rndnu-asm-aarch64-neon-mlal-lane-ld64.S",
-    "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16c4-minmax-fp32-asm-aarch64-neondot-cortex-a55.S",
-    "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16c4-minmax-fp32-asm-aarch64-neondot-ld128.S",
-    "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16c4-minmax-rndnu-asm-aarch64-neondot-cortex-a55.S",
-    "xnnpack_wrappers/qu8-igemm/gen/qu8-igemm-4x16c4-minmax-rndnu-asm-aarch64-neondot-ld128.S",
 ]
