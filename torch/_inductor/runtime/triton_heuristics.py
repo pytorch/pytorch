@@ -184,7 +184,8 @@ class CachingAutotuner(KernelInterface):
 
         assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
         # makes sure there are no pre-hooks on any of the triton configs
-        (validate_triton_config(cfg) for cfg in configs)
+        for cfg in configs:
+            validate_triton_config(cfg)
 
         self.fn = fn
         self.device_props: DeviceProperties = triton_meta["device"]
