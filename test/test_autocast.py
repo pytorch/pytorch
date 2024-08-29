@@ -343,6 +343,16 @@ class TestAutocastGPU(TestCase):
         finally:
             torch._C._set_cached_tensors_enabled(False)
 
+    # index_put under AMP follows a cast policy called "promote",
+    # https://github.com/pytorch/pytorch/blob/4fcd15a667df5b80e81db6563d8d3123a0cbd051/aten/src/ATen/autocast_mode.h#L205-L230
+    # That means:
+    #   (1) double precision is ignored,
+    #   (2) if any argument is float, then all arguments are promoted to float,
+    #   (3) if all arguments are of lower precision dtype, then all dtypes must be equal to the same amp autocast dtype.
+    # Since AMP autocast dtype is thread-local, it is not preserved across thread boundaries during autograd.
+    # Due to the multi-threaded nature of the autograd, the forward is being run in bfloat16, while the
+    # backward pass defaults to float16. The dtype mismatch leads to the error in the policy, as the criteria (3) is not satisfied.
+    # For more info see https://github.com/pytorch/pytorch/issues/132715.
     def test_autocast_prioritize(self):
         device = "cuda"
         dtype = torch.bfloat16
