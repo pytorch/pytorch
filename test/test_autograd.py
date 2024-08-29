@@ -367,6 +367,7 @@ class TestAutograd(TestCase):
         x = torch.ones(1, requires_grad=True)
         torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_set_materialize_non_diff_grads(self):
         class Func(torch.autograd.Function):
             @staticmethod
@@ -3307,6 +3308,7 @@ class TestAutograd(TestCase):
         y = x.masked_fill(mask, 0)
         y.sum().backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_mark_non_differentiable_mixed(self):
         class MyFunction(Function):
             @staticmethod
@@ -3982,9 +3984,11 @@ class TestAutograd(TestCase):
 
         with torch.inference_mode():
             a = torch.rand(5, requires_grad=True)
-        msg = "update to inference tensor outside InferenceMode"
-        with self.assertRaisesRegex(RuntimeError, msg):
+            # does not error
             torch.autograd.graph.increment_version(a)
+
+        # does not error
+        torch.autograd.graph.increment_version(a)
 
     def test_no_grad_input(self):
         class MyFunction(Function):
@@ -4095,6 +4099,7 @@ class TestAutograd(TestCase):
             assert_strict_equal(xc, x)
             assert_strict_equal(yc, y)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_dep_nograd(self):
         class F1(Function):
             @staticmethod
@@ -7465,7 +7470,7 @@ for shape in [(1,), ()]:
         out = a[:, indices]
         self.assertEqual(
             out.grad_fn._saved_indices, (None, indices)
-        )  # c10::List<c10::optional<Tensor>> -> Tuple[Tensor?]
+        )  # c10::List<std::optional<Tensor>> -> Tuple[Tensor?]
         self.assertIsInstance(out.grad_fn._saved_indices[1], torch.Tensor)
         self.assertIsInstance(
             out.grad_fn._raw_saved_indices[1], torch._C._autograd.SavedTensor
@@ -7495,24 +7500,24 @@ for shape in [(1,), ()]:
         out = torch.nn.functional.interpolate(a, 4, mode="linear")
         self.assertEqual(
             out.grad_fn._saved_output_size, (4,)
-        )  # c10::optional<IntArrayRef> -> int[]?
+        )  # std::optional<IntArrayRef> -> int[]?
         self.assertIsInstance(out.grad_fn._saved_output_size[0], int)
         self.assertEqual(out.grad_fn._saved_align_corners, False)  # bool -> bool
         self.assertIsInstance(out.grad_fn._saved_align_corners, bool)
         if hasattr(out.grad_fn, "_saved_scale_factors"):
             self.assertIsNone(
                 out.grad_fn._saved_scale_factors
-            )  # c10::optional<ArrayRef<double>> -> float[]?
+            )  # std::optional<ArrayRef<double>> -> float[]?
         else:
             self.assertIsNone(
                 out.grad_fn._saved_scales
-            )  # c10::optional<ArrayRef<double>> -> float[]?
+            )  # std::optional<ArrayRef<double>> -> float[]?
 
         a = torch.ones(1, 1, 3, 3, requires_grad=True)
         out = nn.Conv2d(1, 1, 3)(a)
         self.assertEqual(
             out.grad_fn._saved_bias_sym_sizes_opt, (1,)
-        )  # c10::optional<SymIntArrayRef> -> SymInt[]?
+        )  # std::optional<SymIntArrayRef> -> SymInt[]?
         out = nn.Conv2d(1, 1, 3, bias=False)(a)
         # TODO: This is BAD! we converted a std::nullopt into a (0,)
         self.assertEqual(out.grad_fn._saved_bias_sym_sizes_opt, (0,))
@@ -7552,11 +7557,11 @@ for shape in [(1,), ()]:
         out = torch.div(a, 2.0, rounding_mode="trunc")
         self.assertEqual(
             out.grad_fn._saved_rounding_mode, "trunc"
-        )  # c10::optional<std::string> -> str?
+        )  # std::optional<std::string> -> str?
         out = torch.div(a, 2.0, rounding_mode=None)
         self.assertIsNone(
             out.grad_fn._saved_rounding_mode
-        )  # c10::optional<std::string> -> str?
+        )  # std::optional<std::string> -> str?
 
         x = torch.zeros(5, requires_grad=True)
         out = torch.threshold(x, threshold=(1 + 0j), value=(1 + 0j))
@@ -8783,6 +8788,7 @@ for shape in [(1,), ()]:
 
         gradcheck(Func.apply, (a,), check_forward_ad=True)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_custom_function_forward_mode_non_differentiable(self):
         # returns differentiable type, marked non-differentiable
         class Func(torch.autograd.Function):
@@ -12513,7 +12519,6 @@ class TestAutogradInferenceMode(TestCase):
                 )
                 with self.assertRaisesRegex(RuntimeError, err_msg):
                     out.add_(2)
-                pass
             else:
                 out.add_(2)
 
@@ -12609,7 +12614,6 @@ class TestAutogradInferenceMode(TestCase):
                     err_msg = "A view was created in inference mode and is being modified inplace"
                     with self.assertRaisesRegex(RuntimeError, err_msg):
                         fn(view_out)
-                    pass
                 else:
                     fn(view_out)
 
@@ -12630,7 +12634,6 @@ class TestAutogradInferenceMode(TestCase):
                     err_msg = "A view was created in inference mode and its base or another view "
                     with self.assertRaisesRegex(RuntimeError, err_msg):
                         view_out.grad_fn
-                    pass
                 else:
                     view_out.grad_fn
 

@@ -630,6 +630,18 @@ print("arf")
             record_str,
         )
 
+    @make_logging_test(cudagraph_static_inputs=True)
+    def test_cudagraph_static_inputs(self, records):
+        @torch.compile(mode="reduce-overhead")
+        def fn(x):
+            return x + 1
+
+        x = torch.ones(2, 2)
+        torch._dynamo.mark_static_address(x)
+        fn(x)
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 4)
+
     @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
@@ -685,6 +697,7 @@ exclusions = {
     "fusion",
     "overlap",
     "aot_graphs",
+    "aot_graphs_effects",
     "post_grad_graphs",
     "compiled_autograd",
     "compiled_autograd_verbose",
@@ -708,6 +721,8 @@ exclusions = {
     "sym_node",
     "export",
     "trace_shape_events",
+    "cudagraph_static_inputs",
+    "benchmarking",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

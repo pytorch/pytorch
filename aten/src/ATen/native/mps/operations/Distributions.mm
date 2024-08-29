@@ -406,17 +406,6 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
 }
 
 Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& result) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: randperm op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-
-    auto result_cpu = result.to("cpu");
-    at::randperm_out(result_cpu, n);
-    result.resize_as_(result_cpu);
-    result.copy_(result_cpu);
-    return result;
-  }
-
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()),
               "Expected a '",
