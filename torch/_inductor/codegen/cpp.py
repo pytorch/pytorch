@@ -3185,9 +3185,10 @@ class TilingSelect:
     ) -> Tuple[List[int], List[int]]:
         # TODO(jgong5): support alternative tiling factors and data types
         loop_bodies = self._get_loop_body(fn_list)
-        if self._dtype_not_supported(loop_bodies, VECTORIZABLE_DTYPES):
+        all_dtypes = self._get_dtype_from_loopbodies(loop_bodies)
+        assert all_dtypes
+        if any(dtype not in VECTORIZABLE_DTYPES for dtype in all_dtypes):
             return [], []
-
         dtype = torch.float
         _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])
         if _lowp_fp_dtype and all(
@@ -3374,7 +3375,8 @@ class TilingSelect:
         return sorted(contig_vars_sorted, key=contig_vars_list.count)[-1:]
 
     @staticmethod
-    def _dtype_not_supported(loop_bodies, supported_dtype):
+    def _get_dtype_from_loopbodies(loop_bodies):
+        dtypes = set()
         for loop_body in loop_bodies:
             graphs = [loop_body.root_block.graph] + [
                 body.graph for body in list(loop_body.subblocks.values())
@@ -3383,9 +3385,8 @@ class TilingSelect:
                 for node in graph.nodes:
                     if node.op != "call_method":
                         continue
-                    if node.meta[OptimizationContext.key].dtype not in supported_dtype:
-                        return True
-        return False
+                    dtypes.add(node.meta[OptimizationContext.key].dtype)
+        return dtypes
 
     @staticmethod
     def _get_loop_body(fn_list):
@@ -3671,9 +3672,10 @@ class CppKernelProxy(CppKernel):
             assert len(tiling_factors) == len(tiling_indices)
             # <TODO> This should be removed after full support for vectorization is implemented.
             could_masked_vec = True
-            if TilingSelect._dtype_not_supported(
-                TilingSelect._get_loop_body(fn_list), MASKED_VECTORIZABLE_DTYPES
-            ):
+            all_dtypes = TilingSelect._get_dtype_from_loopbodies(
+                TilingSelect._get_loop_body(fn_list)
+            )
+            if any(dtype not in MASKED_VECTORIZABLE_DTYPES for dtype in all_dtypes):
                 # can be removed after masked vectorizable dtype are same with vectorizable dtype
                 could_masked_vec = False
             if has_free_symbols(self.ranges):
