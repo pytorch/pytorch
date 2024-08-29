@@ -360,9 +360,7 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
             {},
         )
         proxy.node.meta["example_value"] = None
-        ret = super().call_function_inner(tx, args, kwargs)
-        print(f"ret: {ret}, type(ret): {type(ret)}")
-        return ret
+        return super().call_function_inner(tx, args, kwargs)
 
     # def _setup_hook(self, tx: "InstructionTranslator", hook_method_name, args):
     #     from .builder import wrap_fx_proxy

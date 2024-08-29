@@ -330,12 +330,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 *mod._forward_pre_hooks.values(),
             ):
                 assert self.source
+                # TODO(yf225): how do I check why side effect in forward is not played?
                 with torch._dynamo.variables.higher_order_ops.dynamo_within_forward_hook_under_checkpoint(tx):
-                    ret1 = variables.ForwardPreHookUnderCheckpoint(mod_var, self, source=self.source).call_function(
+                    return variables.ForwardPreHookUnderCheckpoint(mod_var, self, source=self.source).call_function(
                         tx, args, kwargs
                     )
-                    print(f"ret1: {ret1}, type(ret1): {type(ret1)}")
-                    return ret1
             # elif fn in (
             #     *torch.nn.modules.module._global_forward_hooks.values(),
             #     *mod._forward_hooks.values(),
