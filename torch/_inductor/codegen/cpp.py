@@ -3324,7 +3324,6 @@ class TilingSelect:
         )
 
         if tiling_indices:
-
             group, reduction_group = max(
                 var_sizes_list, key=lambda sizes: len(sizes[1])
             )
@@ -3444,11 +3443,15 @@ class TilingSelect:
                     # when needed.
                     return [], []
 
-            if dtype in DTYPE_LOWP_FP and len(call_ranges) > max(tiling_indices):
+            if dtype in DTYPE_LOWP_FP:
                 # For lower precision data type, if the call_range is not long enough,
                 # use tiling_factor // 2 for better performance
                 factor_lowp = cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype)
                 for tiling_indice in tiling_indices:
+                    if tiling_indice < 0:
+                        tiling_indice = tiling_indice + len(call_ranges)
+                    if tiling_indice < 0 or tiling_indice >= len(call_ranges):
+                        continue
                     if has_free_symbols(call_ranges):
                         # For dynamic shape, use tiling_factor // 2 if call_range is less than factor_lowp
                         call_range = V.graph.sizevars.size_hint(
