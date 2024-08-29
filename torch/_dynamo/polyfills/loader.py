@@ -16,6 +16,7 @@ POLYFILLED_MODULE_NAMES: Tuple[str, ...] = (
     "functools",
     "itertools",
     "os",
+    "sys",
 )
 POLYFILLED_MODULES: Tuple["ModuleType", ...] = tuple(
     importlib.import_module(f".{submodule}", package=polyfills.__name__)
