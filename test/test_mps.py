@@ -1914,6 +1914,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    @xfailIf(product_version < 15.0)
     def test_large_bmm_bf16(self):
         dtype = torch.bfloat16
         batch1_cpu = torch.randn(11, 20064, 128, dtype=dtype, device='cpu')
@@ -1927,6 +1928,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    @xfailIf(product_version < 15.0)
     def test_large_bmm_fp16(self):
         dtype = torch.float16
         batch1_cpu = torch.randn(11, 20064, 128, dtype=dtype, device='cpu')
