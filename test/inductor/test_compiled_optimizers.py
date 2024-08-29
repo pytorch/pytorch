@@ -132,7 +132,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adadelta_tensor_lr_capturable_xpu": 6,
     "test_rmsprop_tensor_lr_capturable_cuda": 6,
     "test_rmsprop_tensor_lr_capturable_xpu": 6,
-    "test_adadelta_tensor_lr_capturable_foreach_cuda": 4,
+    "test_adadelta_tensor_lr_capturable_foreach_cuda": 2,
     "test_adadelta_tensor_lr_capturable_foreach_xpu": 4,
     "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
     "test_adadelta_foreach_rho_weight_decay_cpu": 12,
