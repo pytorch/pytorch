@@ -24,10 +24,10 @@ from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
+    _DimHint,
     _process_dynamic_shapes,
     _transform_shapes_for_default_dynamic,
     _tree_map_with_path,
-    DIM,
 )
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental import _config as config
@@ -351,7 +351,7 @@ def make_constraints(
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
                 dim = shape_spec[i] if shape_spec else None
-                if dim is None or isinstance(dim, DIM):
+                if dim is None or isinstance(dim, _DimHint):
                     range_constraints[d.node.expr] = shape_env.var_to_range[
                         d.node._expr
                     ]
