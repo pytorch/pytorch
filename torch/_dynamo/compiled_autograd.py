@@ -204,6 +204,7 @@ class AutogradCompilerInstance:
             hook_type="unpack_hook",
         )
         with disable_proxy_modes_tracing():
+            # TODO: this metadata may be incorrect
             outs = [hook_input.clone().detach()]
             self.bind_tensors_to_proxies(outs, proxies)
 

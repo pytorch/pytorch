@@ -2480,7 +2480,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
-    @unittest.expectedFailure
     def test_saved_tensor_unpack_hook_ordering(self):
         # not the correct behaviour, I'm just preventing this from changing silently
         def f(x, y):

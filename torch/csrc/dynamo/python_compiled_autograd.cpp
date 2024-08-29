@@ -64,7 +64,7 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
 static PyObject* wrap_uint_list(const std::vector<uint32_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
-    PyTuple_SET_ITEM(pyinput, i, PyLong_FromUnsignedLong(inputs[i]));
+    PyTuple_SET_ITEM(pyinput, i, THPUtils_packUInt32(inputs[i]));
   }
   return pyinput;
 }
