@@ -298,7 +298,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace,
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
+    
+    # TODO Merge this path with inference IR decomp, but it will require some additional work
+    # so I will leave it for now. T200307782
     if ep.verifier.dialect == "TRAINING":
         mod = ep.module()
 
