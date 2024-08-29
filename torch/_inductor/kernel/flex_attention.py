@@ -239,7 +239,7 @@ compute_flex_attention = r"""
     kv_indices = KV_IDX + sparse_kv_idx_offset
     kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
-    block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+    block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
     K_block_ptr = tl.make_block_ptr(
         base=K,
@@ -278,7 +278,7 @@ compute_flex_attention = r"""
         kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
-        block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
+        block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
         K_block_ptr = tl.make_block_ptr(
             base=K,
@@ -439,8 +439,11 @@ def forward_block_mn(
         # If this is the last block of a non divisible seqlen, we still need to load [BLOCK_M, BLOCK_N] elements,
         # which is larger than the actual number of elements. To avoid access memory out of bound,
         # we need to mask out the elements that are out of Q_LEN & KV_LEN.
-        offs_m = offs_m % Q_LEN
-        offs_n = offs_n % KV_LEN
+        m = offs_m % Q_LEN
+        n = offs_n % KV_LEN
+    else:
+        m = offs_m
+        n = offs_n
 
     {{ modification(
         subgraph_number=0,
@@ -448,8 +451,8 @@ def forward_block_mn(
         score="qk",
         b="off_z",
         h="off_h",
-        m="offs_m",
-        n="offs_n",
+        m="m",
+        n="n",
         out="qk"
     ) | indent_except_first(1) }}
 
@@ -464,8 +467,8 @@ def forward_block_mn(
             score="qk",
             b="off_z",
             h="off_h",
-            m="offs_m",
-            n="offs_n",
+            m="m",
+            n="n",
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
@@ -1192,7 +1195,7 @@ def bwd_dq_inner(
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
-    hi = tl.minimum(sparse_kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N2, 1))
+    hi = tl.minimum(sparse_kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N2), 1))
     if not IS_DIVISIBLE:
         if hi >= 1:
             for start_n in range(0, hi - 1):
@@ -1373,7 +1376,7 @@ def bwd_dkdv_inner(
     do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
-    hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(Q_LEN // BLOCK_M1, 1))
+    hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(tl.cdiv(Q_LEN, BLOCK_M1), 1))
 
     if not IS_DIVISIBLE:
         if hi >= 1:
@@ -1602,9 +1605,6 @@ def flex_attention_backward(*args, **kwargs):
             full_q_indices,
         ]
     )
-
-    if _use_flex_decoding(query, kernel_options):
-        raise NotImplementedError("Flex decoding backward pass is not implemented. ")
 
     device = query.get_device()
     dtype = query.get_dtype()
