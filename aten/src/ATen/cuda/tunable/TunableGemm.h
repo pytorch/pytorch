@@ -219,7 +219,14 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
   }
 
   std::string Signature() override {
-    return c10::str("GemmTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    char buf[256];
+    int ret;
+
+    ret = snprintf(buf, 256, "GemmTunableOp_%s_%c_%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
+
+    TORCH_CHECK(ret > 0 && ret < 256, "TunableOp: Signature formatting error occured. Return value = ", ret);
+
+    return std::string(buf);
   }
 };
 
