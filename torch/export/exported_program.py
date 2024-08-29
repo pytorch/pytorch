@@ -45,7 +45,6 @@ from torch._export.utils import (
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
     _detect_fake_mode_from_gm,
-    _get_shape_env_from_gm,
     _name_hoo_subgraph_placeholders,
     _overwrite_signature_for_non_persistent_buffers,
     _populate_param_buffer_metadata_to_new_gm,
@@ -54,12 +53,6 @@ from torch._export.utils import (
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch.export._remove_unneccessary_copy_op_pass import (
-    _remove_unneccessary_copy_op_pass,
-)
-from torch.export._reorder_placeholder_same_as_original_ep_pass import (
-    _reorder_placeholder_same_as_original_ep_pass,
-)
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
@@ -153,12 +146,105 @@ def _override_decomp_aten_to_variants():
         yield
 
 
-def _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index):
+def _decompose_and_get_gm_with_new_signature_constants(
+    ep,
+    *,
+    decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    _preserve_ops: Tuple[torch._ops.OpOverload],
+    joint_loss_index: Optional[int],
+):
     from torch._functorch.aot_autograd import aot_export_module
+    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.export._trace import (
+        _export_to_aten_ir,
+        _fakify_params_buffers,
         _ignore_backend_decomps,
         _override_composite_implicit_decomp,
+        _verify_nn_module_stack,
+        _verify_placeholder_names,
+        _verify_stack_trace,
     )
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    # TODO Merge this path with inference IR decomp, but it will require some additional work
+    # so I will leave it for now. T200307782
+    if ep.verifier.dialect == "TRAINING":
+        mod = ep.module()
+
+        fake_args = []
+        for node in mod.graph.nodes:
+            if node.op == "placeholder":
+                fake_args.append(node.meta["val"])
+
+        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        fake_mode = _detect_fake_mode_from_gm(mod)
+        if fake_mode is None:
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+
+        # Fix the graph output signature to be tuple if scalar
+        out_spec = mod._out_spec
+
+        orig_arg_names = mod.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+
+        # aot_export expect the return type to always be a tuple.
+        if out_spec.type not in (list, tuple):
+            out_spec = pytree.TreeSpec(tuple, None, [out_spec])
+
+        mod.graph._codegen = _PyTreeCodeGen(
+            _PyTreeInfo(
+                orig_arg_names,
+                mod._in_spec,
+                out_spec,
+            )
+        )
+
+        mod.recompile()
+
+        # the exported module will store constants & non-persistent buffers such that
+        # retracing treats them as persistent buffers, so we inform the constants lifting pass
+        # and overwrite the new graph signature using the previous program.
+        constant_attrs = _collect_and_set_constant_attrs(
+            ep.graph_signature, ep.constants, mod
+        )
+
+        # get params & buffers after excluding constants
+        fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
+
+        params_buffers_to_node_meta = _collect_param_buffer_metadata(mod)
+
+        with _ignore_backend_decomps(), fake_mode, _override_decomp_aten_to_variants():
+            aten_export_artifact = _export_to_aten_ir(
+                mod,
+                # this requires empty kwargs, but not in pytree.flattened format
+                (
+                    *fake_args_unwrapped[0],
+                    *fake_args_unwrapped[1].values(),
+                ),
+                {},
+                fake_params_buffers,
+                constant_attrs,
+                preserve_ops=_preserve_ops,
+                decomp_table=decomp_table,
+                _check_autograd_state=False,
+            )
+
+        gm = aten_export_artifact.gm
+        new_graph_signature = aten_export_artifact.sig
+
+        _populate_param_buffer_metadata_to_new_gm(
+            params_buffers_to_node_meta, gm, new_graph_signature
+        )
+
+        # overwrite signature for non-persistent buffers
+        new_graph_signature = _overwrite_signature_for_non_persistent_buffers(
+            ep.graph_signature, new_graph_signature
+        )
+
+        _verify_nn_module_stack(gm)
+        _verify_stack_trace(gm)
+        _verify_placeholder_names(gm, new_graph_signature)
+
+        return _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -228,7 +314,7 @@ def _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index):
             'File "torch/fx/passes/runtime_assert.py", line 24, '
             "in insert_deferred_runtime_asserts"
         )
-        shape_env = _get_shape_env_from_gm(gm)
+        shape_env = _get_shape_env(gm)
         if shape_env is not None:
             with _set_node_metadata_hook(
                 gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
@@ -263,29 +349,17 @@ def _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index):
         )
         for i, spec in enumerate(ep.graph_signature.input_specs)
     ]
-
-    if joint_loss_index is None:
-        output_specs = [
-            OutputSpec(
-                spec.kind,
-                update_arg(spec.arg, new_outputs[i]),
-                old_new_placeholder_map.get(spec.target, spec.target),
-            )
-            for i, spec in enumerate(ep.graph_signature.output_specs)
-        ]
-    else:
-        output_specs = [
-            OutputSpec(
-                OutputKind.LOSS_OUTPUT,
-                update_arg(spec.arg, new_outputs[i]),
-                old_new_placeholder_map.get(spec.target, spec.target),
-            )
-            for i, spec in enumerate(ep.graph_signature.output_specs)
-        ]
+    output_specs = [
+        OutputSpec(
+            spec.kind,
+            update_arg(spec.arg, new_outputs[i]),
+            old_new_placeholder_map.get(spec.target, spec.target),
+        )
+        for i, spec in enumerate(ep.graph_signature.output_specs)
+    ]
 
     if joint_loss_index is not None:
         assert graph_signature.backward_signature is not None
-
         gradients = graph_signature.backward_signature.gradients_to_user_inputs
         assert len(graph_signature.user_inputs) == len(ep.graph_signature.input_specs)
         specs = {
@@ -334,6 +408,31 @@ def _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index):
     return gm, new_graph_signature
 
 
+def _remove_unneccessary_copy_op_pass(
+    gm: torch.fx.GraphModule, new_graph_signature: ExportGraphSignature
+) -> Tuple[torch.fx.GraphModule, ExportGraphSignature]:
+    """
+    Removes redundant copy_ node that was introduced due to mutated buffer.
+    """
+    with gm._set_replace_hook(new_graph_signature.get_replace_hook()):
+        for node in gm.graph.nodes:
+            if node.op == "output":
+                args, _ = pytree.tree_flatten(node.args)
+                for out in args:
+                    if (
+                        isinstance(out, torch.fx.Node)
+                        and out.name in new_graph_signature.buffers_to_mutate
+                    ):
+                        if (
+                            out.op == "call_function"
+                            and out.target == torch.ops.aten.copy.default
+                        ):
+                            out.replace_all_uses_with(out.args[1])  # type: ignore[arg-type]
+                            gm.graph.erase_node(out)
+        gm.recompile()
+    return gm, new_graph_signature
+
+
 def _common_getitem_elimination_pass(gm: torch.fx.GraphModule, graph_signature):
     with gm._set_replace_hook(graph_signature.get_replace_hook()):
         for module in gm.modules():
@@ -354,117 +453,6 @@ def _common_getitem_elimination_pass(gm: torch.fx.GraphModule, graph_signature):
                         node_id[node] = new_id
                 else:
                     node_id[node] = node.name
-
-
-def _decompose_and_get_gm_with_new_signature_constants(
-    ep,
-    *,
-    decomp_table: Dict[torch._ops.OperatorBase, Callable],
-    _preserve_ops: Tuple[torch._ops.OpOverload],
-    joint_loss_index: Optional[int],
-):
-    from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.export._trace import (
-        _export_to_aten_ir,
-        _fakify_params_buffers,
-        _ignore_backend_decomps,
-        _verify_nn_module_stack,
-        _verify_placeholder_names,
-        _verify_stack_trace,
-    )
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-    # Directly call aot_export_module if we are tracing joint graph or
-    # lowering joint graph to inference graph
-    if (
-        joint_loss_index is not None
-        or ep.graph_signature.backward_signature is not None
-    ):
-        return _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index)
-
-    mod = ep.module()
-
-    fake_args = []
-    for node in mod.graph.nodes:
-        if node.op == "placeholder":
-            fake_args.append(node.meta["val"])
-
-    fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
-    fake_mode = _detect_fake_mode_from_gm(mod)
-    if fake_mode is None:
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
-
-    # Fix the graph output signature to be tuple if scalar
-    out_spec = mod._out_spec
-
-    orig_arg_names = mod.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
-
-    # aot_export expect the return type to always be a tuple.
-    if out_spec.type not in (list, tuple):
-        out_spec = pytree.TreeSpec(tuple, None, [out_spec])
-
-    mod.graph._codegen = _PyTreeCodeGen(
-        _PyTreeInfo(
-            orig_arg_names,
-            mod._in_spec,
-            out_spec,
-        )
-    )
-
-    mod.recompile()
-
-    # the exported module will store constants & non-persistent buffers such that
-    # retracing treats them as persistent buffers, so we inform the constants lifting pass
-    # and overwrite the new graph signature using the previous program.
-    constant_attrs = _collect_and_set_constant_attrs(
-        ep.graph_signature, ep.constants, mod
-    )
-
-    # get params & buffers after excluding constants
-    fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
-
-    params_buffers_to_node_meta = _collect_param_buffer_metadata(mod)
-
-    with _ignore_backend_decomps(), _override_decomp_aten_to_variants(), fake_mode:
-        aten_export_artifact = _export_to_aten_ir(
-            mod,
-            # this requires empty kwargs, but not in pytree.flattened format
-            (
-                *fake_args_unwrapped[0],
-                *fake_args_unwrapped[1].values(),
-            ),
-            {},
-            fake_params_buffers,
-            constant_attrs,
-            decomp_table=decomp_table,
-            preserve_ops=_preserve_ops,
-            _check_autograd_state=False,
-        )
-
-    gm = aten_export_artifact.gm
-    new_graph_signature = aten_export_artifact.sig
-
-    _populate_param_buffer_metadata_to_new_gm(
-        params_buffers_to_node_meta, gm, new_graph_signature
-    )
-
-    # overwrite signature for non-persistent buffers
-    new_graph_signature = _overwrite_signature_for_non_persistent_buffers(
-        ep.graph_signature, new_graph_signature
-    )
-
-    _verify_nn_module_stack(gm)
-    _verify_stack_trace(gm)
-    _verify_placeholder_names(gm, new_graph_signature)
-
-    gm, new_graph_signature = _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
-
-    return _reorder_placeholder_same_as_original_ep_pass(
-        gm,
-        new_graph_signature,
-        ep.graph_module,
-        ep.graph_signature,
-    )
 
 
 def _decompose_exported_program(
@@ -1000,13 +988,29 @@ class ExportedProgram:
         )
 
 
+def _get_shape_env(gm):
+    vals = [
+        node.meta["val"]
+        for node in gm.graph.nodes
+        if node.meta.get("val", None) is not None
+    ]
+    from torch._guards import detect_fake_mode
+
+    fake_mode = detect_fake_mode(vals)
+    if fake_mode is not None:
+        return fake_mode.shape_env
+    for v in vals:
+        if isinstance(v, torch.SymInt):
+            return v.node.shape_env
+
+
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
     old_range_constraints: "Optional[Dict[sympy.Symbol, Any]]" = None,
 ) -> "Dict[sympy.Symbol, Any]":
     assert old_range_constraints is not None
 
-    shape_env = _get_shape_env_from_gm(gm)
+    shape_env = _get_shape_env(gm)
     if shape_env is None:
         return {}
 

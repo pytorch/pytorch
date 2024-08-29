@@ -397,7 +397,6 @@ def run_ort(
         k: torch.Tensor.numpy(v, force=True)
         for k, v in zip(input_names, pytorch_inputs)
     }
-
     return session.run(None, ort_input)
 
 

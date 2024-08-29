@@ -948,7 +948,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "nn.functional.group_norm",
-        dtypes=(torch.float16, torch.float32),
+        dtypes=(torch.float16,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("GroupNormalization", "float16"),
     ),
     xfail(
@@ -1271,10 +1271,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         dtypes=(torch.int8, torch.uint8, torch.int16),
     ),
     xfail(
-        "linalg.matrix_rank",
-        reason=onnx_test_common.reason_dynamo_does_not_support("linalg_matrix_rank"),
-    ),
-    xfail(
         "where",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),
@@ -1385,11 +1381,6 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         "_batch_norm_with_update",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
-    ),
-    skip(
-        "masked.logaddexp",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason="https://github.com/pytorch/pytorch/issues/133693",
     ),
     # TODO: This test currently fails only for certain inputs, e.g. shape([3, 1]).
     # Numerically the ONNX program is correct, but the output shapes for `save_mean`
@@ -1904,7 +1895,6 @@ def _run_test_output_match(
                         from torch.export import _trace
 
                         model = _trace._export(model, inputs, pre_dispatch=False)
-                        print("GRAPH", model.module().graph)
 
                     except AssertionError as e:
                         # NOTE: avoid fake_mode detection bug in torch.export.export
