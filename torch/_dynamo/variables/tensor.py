@@ -219,7 +219,6 @@ class TensorVariable(VariableTracker):
 
     def dynamic_getattr(self, tx: "InstructionTranslator", name):
         fake_val = self.proxy.node.meta["example_value"]
-        example_value = getattr(fake_val, name)
 
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
@@ -229,6 +228,7 @@ class TensorVariable(VariableTracker):
         if not self.source and is_traceable_wrapper_subclass(fake_val):
             attrs, ctx = fake_val.__tensor_flatten__()
             proxy = getattr(self.as_proxy(), name)
+            example_value = getattr(fake_val, name)
             if name in attrs:
                 # attrs returned from tensor_flatten are always tensors
                 assert isinstance(example_value, torch.Tensor)
@@ -445,10 +445,10 @@ class TensorVariable(VariableTracker):
         if result is None:
             result = self.dynamic_getattr(tx, name)
 
-        if result is not None:
-            return result
+        if result is None:
+            raise NotImplementedError
 
-        raise NotImplementedError
+        return result
 
     def call_id(self, tx):
         if not self.source:

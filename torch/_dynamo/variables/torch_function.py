@@ -188,7 +188,7 @@ def _get_subclass_type_var(tx: "InstructionTranslator", var):
             return SourcelessBuilder.create(tx, var.python_type())
 
 
-def _is_attr_overridden(var, name):
+def _is_attr_overidden(tx: "InstructionTranslator", var, name):
     import torch
 
     overridden = False
@@ -276,10 +276,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
         import torch
 
         kwargs = dict(tensor_var.__dict__)
-        ct = kwargs.pop("class_type", "(no type)")
         assert (
-            ct is torch.Tensor
-        ), f"invalid class type {ct} in TensorWithTFOverrideVariable.from_tensor_var"
+            kwargs.pop("class_type") is torch.Tensor
+        ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
         var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
         var.install_global(tx)
         return var
@@ -319,7 +318,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
             )
 
-        if _is_attr_overridden(self, name):
+        if _is_attr_overidden(tx, self, name):
             unimplemented(
                 f"Accessing overridden method/attribute {name} on a tensor"
                 " subclass with a __torch_function__ override is not supported"
@@ -369,7 +368,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
             from .builder import SourcelessBuilder, VariableBuilder
 
-            if _is_attr_overridden(self, name):
+            if _is_attr_overidden(tx, self, name):
                 unimplemented(
                     f"Calling overridden method {name} on a tensor"
                     " subclass with a __torch_function__ override is not supported"

@@ -168,7 +168,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__qualname__":
             return ConstantVariable.create(self.value.__qualname__)
         elif name == "__dict__":
-            return variables.GetAttrVariable(self, name, source=source)
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
