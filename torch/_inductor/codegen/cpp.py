@@ -3798,13 +3798,7 @@ class CppKernelProxy(CppKernel):
                 )
                 main_loop.set_kernel(vec_kernel)
                 main_loop.simd_vec = True
-                if could_masked_vec and (
-                    (
-                        isinstance(tail_loop.size - tail_loop.offset, sympy.Expr)
-                        and not (tail_loop.size - tail_loop.offset).is_number
-                    )
-                    or (tail_loop.size - tail_loop.offset >= 4)
-                ):
+                if could_masked_vec:
                     tail_loop.steps = tail_loop.size - tail_loop.offset
                     masked_vec_kernel = codegen_kernel(
                         CppVecKernel,
@@ -4819,8 +4813,8 @@ class LoopLevel:
             steps_str = f"{self.var}+={cexpr_index(self.steps)}"
         else:
             steps_str = (
-                f"{self.var}+={cexpr_index(self.steps)}==0?"
-                f"1:{cexpr_index(self.steps)}"
+                f"{self.var}+=({cexpr_index(self.steps)} == 0 ? "
+                f"1 : {cexpr_index(self.steps)})"
             )
         line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:

@@ -1372,7 +1372,7 @@ inline void transpose_mxn<BFloat16>(const BFloat16* src, int64_t ld_src, BFloat1
   // store to dst
   if (M == 32) {
     for (i = 0; i < N; ++i) {
-      _mm512_storeu_si512(dst + i* ld_dst, d[i]);
+      _mm512_storeu_si512(&dst[i * ld_dst], d[i]);
     }
   } else {
     __mmask32 dst_mask = (1 << M) - 1;
@@ -1413,7 +1413,7 @@ inline void transpose_mxn<Half>(const Half* src, int64_t ld_src, Half* dst, int6
   // store to dst
   if (M == 32) {
     for (i = 0; i < N; ++i) {
-      _mm512_storeu_si512(dst + i* ld_dst, d[i]);
+      _mm512_storeu_si512(&dst[i * ld_dst], d[i]);
     }
   } else {
     __mmask32 dst_mask = (1 << M) - 1;
