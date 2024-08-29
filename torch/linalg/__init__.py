@@ -1,5 +1,3 @@
-import sys
-
 import torch
 from torch._C import _add_docstr, _linalg  # type: ignore[attr-defined]
 
