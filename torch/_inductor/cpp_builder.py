@@ -197,6 +197,21 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
 
 @functools.lru_cache(None)
+def _is_intel_compiler(cpp_compiler: str) -> bool:
+    try:    
+        output_msg = (
+            subprocess.check_output([cpp_compiler, "--version"], stderr=subprocess.STDOUT)
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )    
+        return "Intel" in output_msg.splitlines()[0]
+    except FileNotFoundError as exc:
+        return False
+
+    return False
+
+
+@functools.lru_cache(None)
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
@@ -204,6 +219,11 @@ def is_gcc() -> bool:
 @functools.lru_cache(None)
 def is_clang() -> bool:
     return _is_clang(get_cpp_compiler())
+
+
+@functools.lru_cache(None)
+def is_intel_compiler() -> bool:
+    return _is_intel_compiler(get_cpp_compiler())
 
 
 @functools.lru_cache(None)
@@ -846,6 +866,9 @@ def _get_openmp_args(
             cflags.append("openmp")
             libs.append("libomp")
             perload_clang_libomp_win(cpp_compiler, "libomp.dll")
+        elif _is_intel_compiler(cpp_compiler):
+            cflags.append("Qiopenmp")
+            libs.append("libiomp5md")
         else:
             # /openmp, /openmp:llvm
             # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
