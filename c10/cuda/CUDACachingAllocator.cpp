@@ -2674,7 +2674,12 @@ class DeviceCachingAllocator {
         // any potential exceptions in the cudaMallocMaybeCapturing function.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
         lock.unlock();
-        p.err = cudaMallocMaybeCapturing(&ptr, size);
+      }
+      auto active_pool = MemPoolContext::getActiveMemPool();
+      if (active_pool && active_pool->allocator() &&
+          p.pool->owner_PrivatePool) {
+        ptr = active_pool->allocator()->raw_alloc(size);
+        p.err = ptr ? cudaSuccess : cudaErrorMemoryAllocation;
       } else {
         p.err = cudaMallocMaybeCapturing(&ptr, size);
       }

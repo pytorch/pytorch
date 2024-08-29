@@ -267,6 +267,29 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4)
         self.assertEqual(mod(x), opt_mod(x))
 
+    def test_attribute_error_from_getattr(self):
+        class Mock:
+            def __init__(self):
+                self.a = 5
+
+            def __getattr__(self, name):
+                if name != "a":
+                    raise AttributeError("missing")
+                return self.__dict__["a"]
+
+        mock = Mock()
+
+        def fn(x):
+            if hasattr(mock, "b"):
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_stop_iteration(self):
         def zip_longest(*iterables, fillvalue=None):
             # Get the iterators for each iterable
