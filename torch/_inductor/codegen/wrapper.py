@@ -534,7 +534,7 @@ class WrapperCodeGen(CodeGen):
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
-            enable_debug_printer=config.aot_inductor.debug_intermediate_value_printer
+            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
 
     def write_constant(self, name: str, hashed: str) -> None:
@@ -788,7 +788,13 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, raw_args, grid, configs, triton_meta, constexprs
+        self,
+        kernel_name: str,
+        raw_args: List[Any],
+        grid: List[Any],
+        configs,
+        triton_meta,
+        constexprs,
     ):
         grid_fn, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
@@ -1541,7 +1547,7 @@ class WrapperCodeGen(CodeGen):
 
     def generate_default_grid(
         self,
-        name: str,
+        kernel_name: str,
         grid: List[Any],
         cuda: bool = True,
         grid_callable: Optional[Callable[..., Any]] = None,
@@ -1632,6 +1638,7 @@ class WrapperCodeGen(CodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        autotune_configs=None,
         grid_extra_kwargs="",
     ):
         """
@@ -2007,6 +2014,8 @@ class WrapperCodeGen(CodeGen):
                 # _maybe_evaluate_static will return (s0 // (2 // s0)) as 2, but
                 # the actual codegen will still generate the full expression here.
                 return None
+            if isinstance(x, int):
+                return x
             val = V.graph._shape_env._maybe_evaluate_static(x)
             return int(val)
         except Exception:

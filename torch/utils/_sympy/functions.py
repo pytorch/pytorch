@@ -53,13 +53,20 @@ from .numbers import int_oo
 __all__ = [
     "FloorDiv",
     "ModularIndexing",
+    "Where",
+    "PythonMod",
+    "Mod",
     "CleanDiv",
+    "CeilToInt",
+    "FloorToInt",
     "CeilDiv",
     "IntTrueDiv",
     "FloatTrueDiv",
     "LShift",
     "RShift",
     "IsNonOverlappingAndDenseIndicator",
+    "TruncToFloat",
+    "TruncToInt",
     "RoundToInt",
     "RoundDecimal",
     "ToFloat",
@@ -186,8 +193,7 @@ class FloorDiv(sympy.Function):
 
         # Expands (x + y) // b into x // b + y // b.
         # This only works if floor is an identity, i.e. x / b is an integer.
-        base_args = sympy.Add.make_args(base)
-        for term in base_args:
+        for term in sympy.Add.make_args(base):
             quotient = term / divisor
             if quotient.is_integer and isinstance(divisor, sympy.Integer):
                 # NB: this is correct even if the divisor is not an integer, but it
@@ -196,11 +202,8 @@ class FloorDiv(sympy.Function):
                 return FloorDiv(base - term, divisor) + quotient
 
         try:
-            # sympy.gcd tends to blow up on large sums, so use it on each summand instead
-            gcd, *gcds_ = (sympy.gcd(term, divisor) for term in base_args)
-            if not equal_valued(gcd, 1) and all(
-                equal_valued(gcd, gcd_) for gcd_ in gcds_
-            ):
+            gcd = sympy.gcd(base, divisor)
+            if not equal_valued(gcd, 1):
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
