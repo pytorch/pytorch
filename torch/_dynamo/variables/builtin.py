@@ -51,6 +51,7 @@ from .dicts import (
     DictView,
     is_hashable,
     SetVariable,
+    FrozensetVariable,
 )
 from .lists import (
     BaseListVariable,
@@ -1431,14 +1432,14 @@ class BuiltinVariable(VariableTracker):
     def call_frozenset(self, tx: "InstructionTranslator", *args, **kwargs):
         assert not kwargs
         if not args:
-            return SetVariable([])
+            return FrozensetVariable([])
         assert len(args) == 1
         arg = args[0]
-        if isinstance(arg, variables.SetVariable):
+        if isinstance(arg, variables.FrozensetVariable):
             return arg.clone()
         elif arg.has_unpack_var_sequence(tx):
             items = arg.unpack_var_sequence(tx)
-            return SetVariable(items)
+            return FrozensetVariable(items)
         else:
             unimplemented(f"frozenset(): {args} {kwargs}")
 
