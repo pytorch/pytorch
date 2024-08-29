@@ -384,15 +384,19 @@ class TestGradCollectives(MultiThreadedTestCase):
         self.assertIsNone(x.grad)
 
 
-class TestMakeFx(MultiThreadedTestCase):
-    @property
-    def world_size(self):
-        # make_fx is not thread-safe due to patching nd mutating global states.
-        return 1
-
+class TestMakeFx(TestCase):
     def setUp(self):
-        super().setUp()
-        self._spawn_threads()
+        # make_fx is not thread-safe due to patching nd mutating global states
+        # so create a fake_pg.
+        self.rank = 0
+        self.world_size = 2
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
 
     def tearDown(self):
         super().tearDown()
