@@ -258,9 +258,7 @@ def dispatch_torch_function(tx: "InstructionTranslator", fn, args, kwargs):
         _get_subclass_type,
     )
 
-    types = (
-        TupleVariable([_get_subclass_type_var(tx, arg) for arg in overloaded_args]),
-    )
+    types = TupleVariable([_get_subclass_type_var(tx, arg) for arg in overloaded_args])
 
     if tx.in_torch_function_mode():
         res = tx.call_torch_function_mode(fn, types, args, kwargs)
