@@ -132,6 +132,7 @@ def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):
     return getattr(bw_state, hook_name)(*args, **kwargs)
 
 
+# TODO: rename this to call_module_backward_hooks_from_backward_state ?
 def call_module_hooks_from_backward_state(
     _, result, *args, bw_state, hooks_name: str, module_name: str
 ):
@@ -139,6 +140,18 @@ def call_module_hooks_from_backward_state(
     hooks = getattr(bw_state, hooks_name)
     for hook in hooks:
         new_result = hook(module, result, *args)
+        if new_result is not None:
+            result = new_result
+    return result
+
+
+def call_module_forward_hooks_from_backward_state(
+    _, *args, bw_state, hooks_name: str, module_name: str
+):
+    module = getattr(bw_state, module_name)
+    hooks = getattr(bw_state, hooks_name)
+    for hook in hooks:
+        new_result = hook(module, *args)
         if new_result is not None:
             result = new_result
     return result

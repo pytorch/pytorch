@@ -328,7 +328,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 *torch.nn.modules.module._global_forward_pre_hooks.values(),
                 *mod._forward_pre_hooks.values(),
             ):
-                return variables.ForwardPreHookUnderCheckpoint.create(tx, mod, self.fn).call_function(
+                return variables.ForwardPreHookUnderCheckpoint(mod, self.fn).call_function(
                     tx, args, kwargs
                 )
             # elif fn in (
