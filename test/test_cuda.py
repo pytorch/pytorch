@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import ctypes
 import gc
 import json
 import os
@@ -4806,10 +4807,25 @@ class TestMemPool(TestCase):
 
         dummy_allocator_source = """
         #include <torch/extension.h>
+        #include <ATen/cuda/Exceptions.h>
+        #include <cuda_runtime_api.h>
+
         extern "C" {
+          C10_EXPORT int called_dummy_alloc = 0;
+          C10_EXPORT int called_dummy_free = 0;
+
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
-          C10_EXPORT void dummy_free(void* ptr) { }
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
+            called_dummy_alloc = 123;
+            void* ptr;
+            C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
+            return ptr;
+          }
+
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
+            called_dummy_free = 321;
+            C10_CUDA_CHECK(cudaFree(ptr));
+          }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
@@ -4819,6 +4835,7 @@ class TestMemPool(TestCase):
             is_python_module=False,
             keep_intermediates=False,
             verbose=True,
+            with_cuda=True,
         )
         allocator = torch.cuda.memory.CUDAPluggableAllocator(
             dummy_allocator,
@@ -4829,6 +4846,18 @@ class TestMemPool(TestCase):
 
         # pool should point to the same allocator as the one passed into it
         self.assertEqual(allocator.allocator(), pool.allocator)
+
+        # no allocations happened yet, so called_dummy_alloc should be 0
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        self.assertEqual(called_dummy_alloc.value, 0)
+
+        with torch.cuda.use_mem_pool(pool):
+            out = torch.randn(1, device="cuda")
+
+        # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
+        # out tensor
+        self.assertEqual(called_dummy_alloc.value, 123)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()

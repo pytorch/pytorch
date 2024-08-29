@@ -19,7 +19,6 @@ from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
     reduction_ops,
     unary_ufuncs,
-    ops_and_refs,
 )
 
 from torch.masked import as_masked_tensor, masked_tensor, _combine_input_and_mask
@@ -27,7 +26,6 @@ from torch.masked.maskedtensor.core import _masks_match, _tensors_match
 from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS, UNARY_NAMES
 from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS, BINARY_NAMES
 from torch.masked.maskedtensor.reductions import REDUCE_NAMES
-from torch.masked.maskedtensor.like import LIKE_NAMES
 
 
 def _compare_mt_t(mt_result, t_result, rtol=1e-05, atol=1e-05):
@@ -67,18 +65,6 @@ def _compare_mts(mt1, mt2, rtol=1e-05, atol=1e-08):
 
     if not _tensors_match(a, b, exact=False, rtol=rtol, atol=atol):
         raise ValueError("The data in MaskedTensor mt1 and MaskedTensor mt2 do not match")
-
-def _compare_forward_backward(data, mask, fn):
-    mt = masked_tensor(data, mask, requires_grad=True)
-    masked_res = fn(mt)
-    masked_res.sum().backward()
-
-    t = data.masked_fill(~mask, float("-inf")).detach().clone().requires_grad_()
-    tensor_res = fn(t)
-    tensor_res.sum().backward()
-
-    _compare_mt_t(masked_res, tensor_res)
-    _compare_mt_t(mt.grad, t.grad, atol=1e-06)
 
 
 def _create_random_mask(shape, device):
@@ -178,8 +164,15 @@ class TestBasics(TestCase):
             ],
             device=device
         )
+        mt = masked_tensor(data, mask, requires_grad=True)
+        masked_res = torch.softmax(mt, -1)
+        masked_res.sum().backward()
+        xinf = data.masked_fill(~mask, float("-inf")).detach().clone().requires_grad_()
+        tensor_res = torch.softmax(xinf, -1)
+        tensor_res.sum().backward()
 
-        _compare_forward_backward(data, mask, lambda t: torch.softmax(t, -1))
+        _compare_mt_t(masked_res, tensor_res)
+        _compare_mt_t(mt.grad, xinf.grad, atol=1e-06)
 
     def test_where(self, device):
         data = torch.tensor([-10.0, -5, 0, 5, 10, 50, 60, 70, 80, 90, 100], device=device)
@@ -198,35 +191,6 @@ class TestBasics(TestCase):
         _compare_mt_t(masked_res, tensor_res)
         _compare_mt_t(mx.grad, x.grad)
         _compare_mt_t(my.grad, y.grad)
-
-    def test_unfold(self, device):
-        data = torch.rand(5, 5, device=device)
-        mask = torch.rand(5, 5, device=device) > 0.5
-        _compare_forward_backward(data, mask, lambda t: t.unfold(1, 2, 2))
-
-    def test_nn_unfold(self, device):
-        data = torch.rand(2, 5, 3, 4, device=device)
-        mask = torch.rand(2, 5, 3, 4, device=device) > 0.5
-        _compare_forward_backward(data, mask, lambda t: torch.nn.functional.unfold(t, kernel_size=(2, 3)))
-
-    def test_stack(self, device):
-        masked_tensors = [
-            masked_tensor(
-                torch.rand(2, 5, 3, 4, device=device),
-                torch.rand(2, 5, 3, 4, device=device) > 0.5,
-                requires_grad=True,
-            ) for _ in range(3)
-        ]
-
-        data_tensors = [mt.get_data().detach().clone().requires_grad_() for mt in masked_tensors]
-        masked_res = torch.stack(masked_tensors)
-        tensor_res = torch.stack(data_tensors)
-
-        masked_res.sum().backward()
-        tensor_res.sum().backward()
-        _compare_mt_t(masked_res, tensor_res)
-        for mt, t in zip(masked_tensors, data_tensors):
-            _compare_mt_t(mt.grad, t.grad, atol=1e-06)
 
     def test_to_sparse(self, device):
         for sample in _generate_sample_data(device=device):
@@ -848,29 +812,15 @@ def is_binary(op):
 def is_reduction(op):
     return op.name in REDUCE_NAMES and op.name not in {"all", "mean", "std", "var"}
 
-def is_like(op):
-    return op.name in LIKE_NAMES
-
 mt_unary_ufuncs = [op for op in unary_ufuncs if is_unary(op)]
 mt_binary_ufuncs = [op for op in binary_ufuncs if is_binary(op)]
 mt_reduction_ufuncs = [op for op in reduction_ops if is_reduction(op)]
-mt_like_funcs = [op for op in ops_and_refs if is_like(op)]
 
 MASKEDTENSOR_FLOAT_TYPES = {
     torch.float16,
     torch.float32,
     torch.float64,
 }
-
-MASKEDTENSOR_SUPPORTED_TYPES = [
-    *MASKEDTENSOR_FLOAT_TYPES,
-    torch.bool,
-    torch.int8,
-    torch.int16,
-    torch.int32,
-    torch.int64,
-]
-
 
 class TestOperators(TestCase):
     def _convert_mt_args(self, args, mask, layout):
@@ -1016,43 +966,6 @@ class TestOperators(TestCase):
             return
 
         self._test_reduction_equality(device, dtype, op, layout)
-
-    @ops(mt_like_funcs, allowed_dtypes=MASKEDTENSOR_SUPPORTED_TYPES)  # type: ignore[arg-type]
-    @parametrize("layout", [torch.strided, torch.sparse_coo, torch.sparse_csr])
-    def test_like(self, device, dtype, op, layout):
-        samples = op.sample_inputs(device, dtype, requires_grad=dtype in MASKEDTENSOR_FLOAT_TYPES)
-
-        for sample in samples:
-            input = sample.input
-            sample_args, sample_kwargs = sample.args, sample.kwargs
-            mask = _create_random_mask(input.shape, device)
-
-            if layout == torch.sparse_coo:
-                mask = mask.to_sparse_coo().coalesce()
-                input = input.sparse_mask(mask)
-            elif layout == torch.sparse_csr:
-                if input.ndim != 2 or mask.ndim != 2:
-                    continue
-                mask = mask.to_sparse_csr()
-                input = input.sparse_mask(mask)
-
-            mt = masked_tensor(input, mask)
-
-            try:
-                t_result = op(input, *sample_args, **sample_kwargs)
-            except NotImplementedError:
-                self.skipTest(f"{op.name} is not supported for {layout}")
-
-            mt_result = op(mt, *sample_args, **sample_kwargs)
-
-            if 'rand' not in op.name and op.name != 'empty_like':
-                _compare_mt_t(mt_result, t_result.to_dense())
-
-            self.assertEqual(mt_result.shape, t_result.shape)
-            self.assertEqual(mt_result.dtype, t_result.dtype)
-            self.assertEqual(mt_result.layout, t_result.layout)
-            self.assertEqual(mt_result.device, t_result.device)
-            self.assertEqual(mt_result.requires_grad, t_result.requires_grad)
 
 
 only_for = ("cpu", "cuda")
