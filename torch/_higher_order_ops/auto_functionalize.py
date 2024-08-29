@@ -131,14 +131,19 @@ class ViewInfo:
     storage_offset: Any = None
     is_alias_to_base: bool = False
 
-
+def get_base(tensor):
+    if torch.is_inference_mode_enabled():
+        return tensor._inference_mode_base
+    else:
+        return tensor._base
+    return base
 def serialize_views_meta(
     arg_names, arg_types, input_kwargs, output_kwargs, arg_to_base_index
 ):
     def serialize_single_view(prefix, tensor, base_index):
         if tensor is None:
             output_kwargs[f"{prefix}_base_index"] = None
-        elif tensor._base is None:
+        elif get_base(tensor) is None:
             # if the tensor is an alias of base (not view), for simplicity we do not serialize view meta.
             output_kwargs[f"{prefix}_base_index"] = base_index
             return
@@ -378,7 +383,8 @@ def do_auto_functionalize(
     arg_to_base_index: Dict[str, Any] = {}
 
     def update_dict(tensor, arg_name, index=None):
-        base = tensor if tensor._base is None else tensor._base
+
+        base = tensor if get_base(tensor) is None else get_base(tensor)
 
         def set_result(base_index):
             if index is None:

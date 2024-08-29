@@ -54,7 +54,8 @@ class FunctionalTensor(torch.Tensor):
     FunctionalTensormode active, because it relies
     on using the mode for dispatch (which can properly handle factory functions).
     """
-
+    _inference_mode_base = None
+    
     elem: torch.Tensor
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -492,6 +493,12 @@ class FunctionalTensorMode(TorchDispatchMode):
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )
+
+                    if torch.is_inference_mode_enabled():
+                        if func in (
+                            torch.ops.aten.select.int,
+                        ):
+                          outs_wrapped._inference_mode_base = args[0]
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
