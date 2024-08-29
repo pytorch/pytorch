@@ -80,15 +80,6 @@ def dynamo_within_forward_hook_under_checkpoint(tx: "InstructionTranslator"):
         tx.output.current_tracer.within_forward_hook_under_checkpoint = False
 
 
-@contextlib.contextmanager
-def dynamo_under_checkpoint(tx: "InstructionTranslator"):
-    try:
-        tx.output.current_tracer.under_checkpoint = True
-        yield
-    finally:
-        tx.output.current_tracer.under_checkpoint = False
-
-
 def only_consist_of(var, types, allow_none=False):
     if isinstance(var, types):
         return True
@@ -1666,17 +1657,16 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
-        with torch._dynamo.variables.higher_order_ops.dynamo_under_checkpoint(tx):
-            (
-                p_args,
-                _,
-                example_value,
-                body_r,
-                treespec,
-                checkpointed_gmod,
-            ) = self.create_wrapped_node(
-                tx, args, gmod_kwargs, "torch.utils.checkpoint.checkpoint", under_checkpoint=True
-            )
+        (
+            p_args,
+            _,
+            example_value,
+            body_r,
+            treespec,
+            checkpointed_gmod,
+        ) = self.create_wrapped_node(
+            tx, args, gmod_kwargs, "torch.utils.checkpoint.checkpoint", under_checkpoint=True
+        )
         if context_fn is not None:
             checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
 
