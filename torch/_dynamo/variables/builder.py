@@ -1324,9 +1324,7 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")) or getattr(
-                value.__class__, "_dynamo_marked_static", False
-            ):
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
                 result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
             else:
                 result = UnspecializedNNModuleVariable(value, source=self.source)
@@ -1678,15 +1676,6 @@ class VariableBuilder:
                             value,
                             frame_state_entry.scalar,
                         )
-                        if self.source.guard_source().is_unspecialized_nn_module():
-                            log.info(
-                                "%s",
-                                (
-                                    f"{name} is converted to a symbolic integer. It is an attribute of a "
-                                    "user defined nn module class. If you wish to keep it static, you can "
-                                    "mark the nn module class as `torch._dynamo.mark_static_nn_module`."
-                                ),
-                            )
                         frame_state_entry.scalar = None
                 self.tx.output.frame_state[name] = frame_state_entry
 

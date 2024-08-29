@@ -458,25 +458,6 @@ def maybe_mark_dynamic(t, index):
         maybe_mark_dynamic(t, i)
 
 
-def mark_static_nn_module(mod_class):
-    """
-    Marks a nn.Module class static.
-
-    For static nn.Module classes, TorchDynamo assumes that the module instance attributes will not be modified after
-    compilation. This will ensure that TorchDynamo keeps integer attributes CONSTANT and not symints.
-
-    From TorchDynamo implementation side, the instances of static-marked nn.Module class will be converted to
-    UnspecializedBuiltinNNModuleVariable, which have the same properties.
-
-    Note that we still have to guard on the attributes, because different instances of the nn.Module can have different
-    values of the attributes. The key point here is that the attributes are static.
-    """
-
-    mod_class._dynamo_marked_static = True
-
-    return mod_class
-
-
 def mark_static(t, index=None):
     """
     Mark a tensor as having a static dim.
