@@ -59,7 +59,6 @@ from ..source import (
     is_constant_source,
     is_from_defaults,
     is_from_optimizer_source,
-    is_tuple_getitem,
     LocalSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -1150,12 +1149,21 @@ class VariableBuilder:
             if item is value:
                 unimplemented("list elements are pointing to the list itself")
 
+        # Tuples are immutable objects, so we should mark its items static. This
+        # avoids wrapping of tuple items as symints. This helps for nn module
+        # attributes like conv2d strides, dilations.
+        if (
+            istype(value, tuple)
+            and all(ConstantVariable.is_literal(item) for item in value)
+            and self.source.guard_source().is_unspecialized_nn_module()
+        ):
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return TupleVariable([ConstantVariable.create(item) for item in value])
+
         output = [
             LazyVariableTracker.create(
                 item,
-                source=GetItemSource(
-                    self.get_source(), i, is_tuple=istype(value, tuple)
-                ),
+                source=GetItemSource(self.get_source(), i),
             )
             for i, item in enumerate(value)
         ]
@@ -1368,11 +1376,6 @@ class VariableBuilder:
                 or self.source.guard_source().is_unspecialized_builtin_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
-                # tuples are immutable, so consider tuple elements static
-                or (
-                    self.source.guard_source().is_unspecialized_nn_module()
-                    and is_tuple_getitem(self.source)
-                )
                 # TODO: Delete this condition when rollout is done.  NB: this
                 # condition never evaluates True in open source
                 or (
