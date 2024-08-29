@@ -17,13 +17,12 @@ from torch.distributed._composable.replicate import replicate
 from torch.distributed._tensor import Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import (
-    pipeline,
     PipelineStage,
     Schedule1F1B,
     ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
-    SplitPoint,
+    ScheduleInterleavedZeroBubble,
 )
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -244,9 +243,8 @@ class Test3DComposability(FSDPTest):
                     2,
                 ],
                 "float8": [False],
-                "async_tp": [False],
-                "schedule_class": ["1f1b"],
-            },
+                "async_tp": [True, False],
+                "schedule_class": ["1f1b", "gpipe", "interleaved_1f1b", "flexible_interleaved_1f1b", "interleaved_zerobubble_1f1b"],
             self._test_3d_composability,
         )
         self.logger.info("Finished job: 3D composability test")
@@ -254,8 +252,6 @@ class Test3DComposability(FSDPTest):
     def _test_3d_composability(
         self, name, dp_degree, tp_degree, pp_degree, float8, async_tp, schedule_class
     ):
-        TRACE_BUFFER_SIZE = "TORCH_NCCL_TRACE_BUFFER_SIZE"
-        TRACE_FILE = "TORCH_NCCL_DEBUG_INFO_TEMP_FILE"
         DUMP_ON_TIMEOUT = "TORCH_NCCL_DUMP_ON_TIMEOUT"
         ASYNC_ERROR_HANDLING = "TORCH_NCCL_ASYNC_ERROR_HANDLING"
         SKIP_CLEANUP = "3"
@@ -281,8 +277,6 @@ class Test3DComposability(FSDPTest):
             os.environ[env] = val
 
         _warn_overwrite_env(ASYNC_ERROR_HANDLING, SKIP_CLEANUP)
-        _warn_overwrite_env(TRACE_BUFFER_SIZE, str(0))
-
         os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
         torch.manual_seed(0)
         model_args = ModelArgs(dropout_p=0.0)
@@ -356,7 +350,7 @@ class Test3DComposability(FSDPTest):
                 enable_async_tp=parallel_dims.async_tp,
             )
 
-        self._apply_compile(model)
+        # self._apply_compile(model)
 
         if parallel_dims.dp_enabled:
             if parallel_dims.dp_type == "fsdp":
@@ -454,13 +448,13 @@ class Test3DComposability(FSDPTest):
                 "feed_forward.w2": rowwise_parallel(output_layouts=Shard(1)),
                 "feed_forward.w3": colwise_parallel(),
             }
-            """
+
             parallelize_module(
                 module=transformer_block,
                 device_mesh=tp_mesh,
                 parallelize_plan=layer_plan,
             )
-            """
+
         if enable_async_tp:
             from torch.distributed._symmetric_memory import enable_symm_mem_for_group
 
@@ -546,23 +540,13 @@ class Test3DComposability(FSDPTest):
         model_config: ModelArgs,
         loss_fn: Callable[..., torch.Tensor],
     ):
-        split_mode = "manual"
-        valid_split_modes = ("manual", "tracer")
-        if split_mode == "manual":
-            stages, models = self._pipeline_llama_manual(
-                model, pp_mesh, parallel_dims, device, model_config
-            )
-        """ TODO: enable tracer
-        elif split_mode == "tracer":
-            stages, models = self._pipeline_llama_tracer(
-                model, pp_mesh, parallel_dims, device, model_config
-            )
-        """
+        stages, models = self._pipeline_llama_manual(
+            model, pp_mesh, parallel_dims, device, model_config
+        )
 
         pp_schedule = self._build_pipeline_schedule(
             parallel_dims.pp, parallel_dims.schedule_class, stages, loss_fn
         )
-
         return pp_schedule, models
 
     def _pipeline_llama_manual(
@@ -614,9 +598,6 @@ class Test3DComposability(FSDPTest):
                 model.norm = None
                 model.output = None
 
-            # TODO(whc) once ManualPipelineStage supports lazy shape inference, we can leave model on meta device longer and
-            # get rid of the input shape hardcoded here. For now, it should not be a big deal since we only materialize the
-            # layers of the model that map to this stage, not the whole model.
             if parallel_dims.dp_enabled:
                 mp_dtype = torch.float32
             else:
@@ -706,48 +687,6 @@ class Test3DComposability(FSDPTest):
             )
             return stage_v_pairs[pp_rank]
 
-    def _pipeline_llama_tracer(
-        self,
-        model: nn.Module,
-        pp_mesh: DeviceMesh,
-        parallel_dims: ParallelDims,
-        device: DeviceType,
-        model_config: ModelArgs,
-    ):
-        pp_rank = pp_mesh.get_local_rank()
-        pp_size = pp_mesh.size()
-        microbatches = parallel_dims.pp
-        tokens_shape = (8, 128)
-        input = torch.randint(
-            model_config.vocab_size,
-            tokens_shape,
-            dtype=torch.int64,
-            device=device,
-        )
-        stage_idx = pp_rank
-        split_spec = {layer_name: SplitPoint.BEGINNING for layer_name in ["layers.1"]}
-        num_stages = len(split_spec) + 1
-        pipe = pipeline(
-            model,
-            mb_args=(input.chunk(microbatches)[0],),
-            split_spec=split_spec,
-        )
-
-        stages = []
-        models = []
-        for stage_idx in self._stage_ids_this_rank(
-            pp_rank, pp_size, num_stages, style="loop"
-        ):
-            models.append(pipe.get_stage_module(stage_idx))
-            stages.append(
-                pipe.build_stage(
-                    stage_idx,
-                    device=device,
-                    group=pp_mesh.get_group(),
-                )
-            )
-        return stages, models
-
     def _build_pipeline_schedule(
         self, pp_dim, pipeline_parallel_schedule, stages, loss_fn
     ):
@@ -759,6 +698,9 @@ class Test3DComposability(FSDPTest):
             schedule_class = ScheduleGPipe
         elif pipeline_parallel_schedule == "interleaved_1f1b":
             schedule_class = ScheduleInterleaved1F1B
+            looped_schedule = True
+        elif pipeline_parallel_schedule == "interleaved_zerobubble_1f1b":
+            schedule_class = ScheduleInterleavedZeroBubble
             looped_schedule = True
         elif pipeline_parallel_schedule == "flexible_interleaved_1f1b":
             schedule_class = ScheduleFlexibleInterleaved1F1B
