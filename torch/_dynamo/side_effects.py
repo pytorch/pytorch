@@ -78,6 +78,7 @@ class SideEffects:
 
     def __init__(
         self,
+        # output_graph,
         id_to_variable=None,
         store_attr_mutations=None,
         keepalive=None,
@@ -85,6 +86,7 @@ class SideEffects:
         tensor_hooks=None,
     ):
         super().__init__()
+        # self.output_graph = output_graph  # TODO(yf225): TODO: use weakref?
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
         self.keepalive = keepalive or []
@@ -151,10 +153,13 @@ class SideEffects:
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
             return True
-        if not is_side_effect_safe(item.mutable_local):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
-            )
+        # if self.output_graph.current_tx.output.current_tracer.within_forward_hook_under_checkpoint:
+        #     # TODO(yf225): how do we detect and allow forward hook and forward pre-hook only?
+        #     return True
+        # if not is_side_effect_safe(item.mutable_local):
+        #     unimplemented(
+        #         "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+        #     )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)

@@ -32,6 +32,7 @@ from torch.utils.checkpoint import (
 )
 
 
+
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
@@ -125,6 +126,11 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
             return CheckpointPolicy.PREFER_RECOMPUTE
 
     return _custom_policy
+
+class MyState:
+    def __init__(self) -> None:
+        self.fwd_pre_hook_call_count: int = 0
+        self.fwd_hook_call_count: int = 0
 
 
 class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
@@ -1301,17 +1307,19 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cnt = CompileCounterWithBackend(backend)
         cnt_ca = CompileCounterWithBackend(backend)
 
-        fwd_pre_hook_call_count = 0
-        # fwd_hook_call_count = 0
+        state = MyState()
+        state.fwd_pre_hook_call_count = 0
+        state.fwd_hook_call_count = 0
 
         def fwd_pre_hook(m, i):
-            nonlocal fwd_pre_hook_call_count
-            fwd_pre_hook_call_count += 1
+            # TODO(yf225): explore how to support kwargs in forward hooks
+            nonlocal state
+            state.fwd_pre_hook_call_count += 1
             return i
 
         # def fwd_hook(m, i, o):
-        #     nonlocal fwd_hook_call_count
-        #     fwd_hook_call_count += 1
+        #     nonlocal state
+        #     state.fwd_hook_call_count += 1
         #     return o
 
         lin = torch.nn.Linear(1, 1)
@@ -1335,11 +1343,13 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         mod = torch.compile(mod, backend=cnt, fullgraph=True)
         inp = torch.randn(1, 1)
         ref_out, ref_loss = fn(ref_mod, inp, compiled=False)
+        self.assertEqual(state.fwd_pre_hook_call_count, 2)
+        # self.assertEqual(state.fwd_hook_call_count, 2)
         out, loss = fn(mod, inp, compiled=True)
         self.assertEqual(out, ref_out)
         self.assertEqual(loss, ref_loss)
-        self.assertEqual(fwd_pre_hook_call_count, 4)
-        # self.assertEqual(fwd_hook_call_count, 4)
+        self.assertEqual(state.fwd_pre_hook_call_count, 4)
+        # self.assertEqual(state.fwd_hook_call_count, 4)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt_ca.frame_count, 1)
 

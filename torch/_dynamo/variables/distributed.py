@@ -300,7 +300,7 @@ class ProcessGroupVariable(DistributedVariable):
         return istype(value, (ProcessGroup, FakeProcessGroup))
 
 
-class ForwardPreHookUnderCheckpoint(VariableTracker):
+class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
     """
     Handles module-level forward pre-hooks.
     """
@@ -309,33 +309,33 @@ class ForwardPreHookUnderCheckpoint(VariableTracker):
         self,
         module: VariableTracker,
         # user_hooks: VariableTracker,
-        user_pre_hook: VariableTracker,
+        user_pre_hooks: VariableTracker,
         **options,
     ) -> None:
-        super().__init__(**options)
+        super().__init__(fn=user_pre_hooks.fn, **options)
         self.module = module
         # self.user_hooks = user_hooks
-        self.user_pre_hook = user_pre_hook
+        self.user_pre_hooks = user_pre_hooks
 
     def as_proxy(self):
         return self.proxy
 
-    def call_method(
-        self,
-        tx,
-        name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # if name in ("setup_input_hook", "setup_output_hook"):
-        #     return self._setup_hook(tx, name, *args, **kwargs)
-        return super().call_method(tx, name, args, kwargs)
+    # def call_method(
+    #     self,
+    #     tx,
+    #     name,
+    #     args: List[VariableTracker],
+    #     kwargs: Dict[str, VariableTracker],
+    # ) -> VariableTracker:
+    #     # if name in ("setup_input_hook", "setup_output_hook"):
+    #     #     return self._setup_hook(tx, name, *args, **kwargs)
+    #     return super().call_method(tx, name, args, kwargs)
 
     def call_function(self, tx: "InstructionTranslator", args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]") -> "VariableTracker":
         if not compiled_autograd.compiled_autograd_enabled:
             unimplemented("module-level forward pre-hooks require compiled autograd")
 
-        def _in_graph_fw_pre_hook(bw_state: BackwardState):
+        def _in_graph_fw_pre_hooks(bw_state: BackwardState):
             """
             Rather than installing the user hooks in the graph (which
             don't survive AotAutograd), we install hooks that will call
@@ -346,21 +346,23 @@ class ForwardPreHookUnderCheckpoint(VariableTracker):
                 trace_wrapped,
                 fn=call_module_forward_hooks_from_backward_state,
                 bw_state=bw_state,
-                hooks_name=user_pre_hook_name,
+                hooks_name=user_pre_hooks_name,
                 module_name=module_name,
             )
 
-        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module, "mod")
-        user_pre_hook_name, _ = tx.output.add_backward_state_hook(self.user_pre_hook)
+        module_name, bw_state_proxy = tx.output.add_backward_state_hook(self.module, "mod")
+        user_pre_hooks_name, _ = tx.output.add_backward_state_hook(self.user_pre_hooks)
         # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
         proxy = tx.output.create_proxy(
             "call_function",
-            _in_graph_fw_pre_hook,
+            _in_graph_fw_pre_hooks,
             (bw_state_proxy,),
             {},
         )
         proxy.node.meta["example_value"] = None
-        return super().call_function(tx, args, kwargs)
+        ret = super().call_function_inner(tx, args, kwargs)
+        print(f"ret: {ret}, type(ret): {type(ret)}")
+        return ret
 
     # def _setup_hook(self, tx: "InstructionTranslator", hook_method_name, args):
     #     from .builder import wrap_fx_proxy

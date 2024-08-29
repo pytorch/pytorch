@@ -3038,7 +3038,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented("inline with functions in skip files")
         assert isinstance(
             func,
-            (UserFunctionVariable, NestedUserFunctionVariable),
+            (UserFunctionVariable, NestedUserFunctionVariable, variables.ForwardPreHookUnderCheckpoint),
         )
         result = InliningInstructionTranslator.check_inlineable(func)
         assert result.skipped is False

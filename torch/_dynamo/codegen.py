@@ -120,7 +120,7 @@ class PyCodegen:
             self.clear_tos()
             return
 
-        assert isinstance(value, VariableTracker)
+        assert isinstance(value, VariableTracker), f"not a VariableTracker: {value}, type(value): {type(value)}"
         output = self._output
         graph_outputs = self.graph_outputs
 

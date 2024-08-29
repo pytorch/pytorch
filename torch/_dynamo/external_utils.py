@@ -148,6 +148,7 @@ def call_module_hooks_from_backward_state(
 def call_module_forward_hooks_from_backward_state(
     _, *args, bw_state, hooks_name: str, module_name: str
 ):
+    raise Exception()
     module = getattr(bw_state, module_name)
     hooks = getattr(bw_state, hooks_name)
     for hook in hooks:
