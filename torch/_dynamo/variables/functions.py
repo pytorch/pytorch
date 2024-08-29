@@ -970,7 +970,7 @@ class PolyfilledFunctionVariable(VariableTracker):
                 handler, "__torch_dynamo_can_constant_fold_through__", False
             ) and check_unspec_or_constant_args(args, kwargs):
                 return ConstantVariable.create(
-                    handler(
+                    self.fn(  # use the original function which is faster than the polyfill
                         *[x.as_python_constant() for x in args],
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
                     )
