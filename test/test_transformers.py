@@ -2077,7 +2077,7 @@ class TestSDPACpuOnly(NNTestCase):
                 self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
                 self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
-    def test_scaled_dot_product_fused_attention_with_inf(self, device):
+    def test_sdpa_with_inf(self, device):
         # https://github.com/pytorch/pytorch/issues/127055.
         full = torch.full((600, 600), float("-inf"), device=device)
         mask = torch.triu(full, diagonal=1) + torch.tril(full, diagonal=-10)
@@ -2091,6 +2091,43 @@ class TestSDPACpuOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
             actual = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
         self.assertEqual(math_ref, actual)
+
+    def test_sdpa_backward_with_gradient(self, device):
+        # https://github.com/pytorch/pytorch/issues/133671.
+        def sdpa_helper():
+            torch.manual_seed(777)
+            query = (
+                torch.empty(size=[2, 2, 49, 32], dtype=torch.float32, device=device)
+                .uniform_(-1, 1)
+                .requires_grad_(True)
+            )
+            key = (
+                torch.empty(size=[2, 2, 49, 32], dtype=torch.float32, device=device)
+                .uniform_(-1, 1)
+                .requires_grad_(True)
+            )
+            value = (
+                torch.empty(size=[2, 2, 49, 32], dtype=torch.float32, device=device)
+                .uniform_(-1, 1)
+                .requires_grad_(True)
+            )
+            res = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, None, 0.0, False
+            )
+            res_grad = (
+                torch.empty_like(res, device=device)
+                .uniform_(-1, 1)
+            )
+            res.backward(res_grad, retain_graph=True)
+            return res, query.grad, key.grad, value.grad
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            res_ref, query_grad_ref, key_grad_ref, value_grad_ref = sdpa_helper()
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            res_actual, query_grad_actual, key_grad_actual, value_grad_actual = sdpa_helper()
+        self.assertEqual(res_ref, res_actual)
+        self.assertEqual(query_grad_ref, query_grad_actual)
+        self.assertEqual(key_grad_ref, key_grad_actual)
+        self.assertEqual(value_grad_ref, value_grad_actual)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("backend", [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION])
