@@ -602,7 +602,7 @@ uint64_t ProcessGroupGloo::RecvWork::getSequencenumber() const {
 }
 
 int ProcessGroupGloo::RecvWork::sourceRank() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::timed_mutex> lock(mutex_);
   return srcRank_;
 }
 
