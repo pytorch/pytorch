@@ -10613,8 +10613,8 @@ class CommonTemplate:
             with torch.no_grad():
                 self.common(fn, (inp,), check_lowp=False)
 
-            # Dynamic shapes invalidate this test case
-            if torch._dynamo.config.assume_static_by_default:
+            # Dynamic shapes and rocm invalidate this test case
+            if torch._dynamo.config.assume_static_by_default and not TEST_WITH_ROCM:
                 # For this test to be valid, Inductor must have changed the conv
                 # to be channels-last. If this assertion ever fails then we need
                 # a new test case.
