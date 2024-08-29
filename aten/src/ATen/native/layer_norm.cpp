@@ -303,9 +303,8 @@ Tensor rms_norm(
       upcasted_input = input;
     }
 
-    upcasted_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
-
-    Tensor result = upcasted_input.mul(upcasted_input).type_as(input);
+    Tensor rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
+    Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
 
     if (weight_opt.has_value()) {
       result = result.mul(weight_opt.value());
