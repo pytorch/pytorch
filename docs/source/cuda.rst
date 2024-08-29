@@ -120,9 +120,9 @@ Memory management
      get_allocator_backend
      CUDAPluggableAllocator
      change_current_allocator
-     MemPool
-     MemPoolContext
 
+.. autoclass:: torch.cuda.MemPool
+.. autoclass:: torch.cuda.MemPoolContext
 .. autoclass:: torch.cuda.use_mem_pool
 
 .. FIXME The following doesn't seem to exist. Is it supposed to?
