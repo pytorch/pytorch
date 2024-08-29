@@ -108,7 +108,6 @@ def build_triton(
         else:
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
-
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
                 print(
