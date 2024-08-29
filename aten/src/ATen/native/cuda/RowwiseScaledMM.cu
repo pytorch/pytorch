@@ -117,6 +117,7 @@ struct Schedule</*PingPong=*/true, /*FastAccum=*/true> {
 
 // Cutlass rowwise kernel
 template <
+    typename Transposed,
     typename TileShape,
     typename ClusterShape,
     typename PingPong,
@@ -150,7 +151,10 @@ void f8f8bf16_rowwise_impl(
   using LayoutInputB = cutlass::layout::ColumnMajor;
   constexpr int AlignmentInputB = 16 / sizeof(DtypeB);
 
-  using LayoutOutput = cutlass::layout::RowMajor;
+  using LayoutOutput = std::conditional_t<
+      Transposed::value,
+      cutlass::layout::ColumnMajor,
+      cutlass::layout::RowMajor>;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
 
   // Tag indicating the minimum SM that supports the intended feature
@@ -167,8 +171,12 @@ void f8f8bf16_rowwise_impl(
   using WScale = cutlass::epilogue::fusion::
       Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeScale>;
 
-  using Bias = cutlass::epilogue::fusion::
-      Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeBias>;
+  using Bias = std::conditional_t<
+      Transposed::value,
+      cutlass::epilogue::fusion::
+          Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeBias>,
+      cutlass::epilogue::fusion::
+          Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeBias>>;
 
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
@@ -284,6 +292,31 @@ void f8f8bf16_rowwise_impl(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <
+    typename Transposed,
+    typename TileShape,
+    typename ClusterShape,
+    typename PingPong,
+    typename FastAccum,
+    typename DtypeA,
+    typename DtypeB,
+    typename DtypeBias>
+void handle_transposition(
+    at::Tensor XQ,
+    at::Tensor WQ,
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    at::Tensor out) {
+  if constexpr (!Transposed::value) {
+    f8f8bf16_rowwise_impl<Transposed, TileShape, ClusterShape, PingPong, FastAccum, DtypeA, DtypeB, DtypeBias>(
+        XQ, WQ, x_scale, w_scale, bias, out);
+  } else {
+    f8f8bf16_rowwise_impl<Transposed, TileShape, ClusterShape, PingPong, FastAccum, DtypeB, DtypeA, DtypeBias>(
+        WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t());
+  }
+}
+
 // FP8 Rowwise Cutlass kernel dispatch.
 enum class KernelMode { Small, Large, Default };
 
@@ -314,19 +347,22 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
     at::Tensor out) {
   KernelMode kernel = get_kernel_mode(XQ, WQ);
   if (kernel == KernelMode::Small) {
-    return f8f8bf16_rowwise_impl<
+    return handle_transposition<
+        /*Transposed=*/std::false_type,
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
         /*PingPong=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else if (kernel == KernelMode::Large) {
-    return f8f8bf16_rowwise_impl<
+    return handle_transposition<
+        /*Transposed=*/std::false_type,
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
         /*PingPong=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
-    return f8f8bf16_rowwise_impl<
+    return handle_transposition<
+        /*Transposed=*/std::false_type,
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
         /*PingPong=*/std::false_type,
