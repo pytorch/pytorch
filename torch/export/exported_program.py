@@ -157,7 +157,7 @@ _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE = [
 
 
 @contextmanager
-def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
+def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -165,6 +165,14 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
     # Hence we can only do it for functional ops. One caveat is that
     # there are some composite ops that lie about their schema (claimed to be
     # functional but not really aka dropout), for these cases, we just decompose.
+
+    # When safe=False, we will assume that ops_to_preserve can be mutating/aliasing
+    # and their usual decompositions need to be shadowed rather than overridden.
+    # Thus we will avoid asserting that they are valid to preserve, and will not
+    # replace their CompositeImplicitAutograd kernels with NotImplemented.
+    # The only current users of this mode are variants of aten::to that we will
+    # replace with aten::_to_copy in FunctionalTensorMode.__torch_dispatch__.
+
     saved_tables = {}
     patched_ops = set()
     removed_decomps = {}
@@ -205,8 +213,9 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
 
             return True
 
-        # If we didn't error, it means we can go ahead
-        assert_valid_to_preserve(op_overload)
+        if safe:
+            # If we didn't error, it means we can go ahead
+            assert_valid_to_preserve(op_overload)
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -220,10 +229,12 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
         if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
             del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
 
-        def _(*args, **kwargs):
-            return NotImplemented
+        if safe:
 
-        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
+            def _(*args, **kwargs):
+                return NotImplemented
+
+            op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
 
         # For fake tensor prop, we do want to register meta kernel directly
         if torch._C.DispatchKey.Meta not in op_overload.py_kernels:
@@ -245,6 +256,19 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
 
         for op, decomp in removed_decomps.items():
             decomp_table[op] = decomp
+
+
+@contextmanager
+def _override_decomp_aten_to_variants():
+    # Preserve variants of aten::to understanding that they are mutating/aliasing
+    # and their CompositeImplicitAutograd kernels will not become NotImplemented.
+    # We will later replace them with aten._to_copy when functionalizing.
+    with _override_composite_implicit_decomp(
+        (torch.ops.aten.to.dtype_layout, torch.ops.aten.to.dtype),
+        {},
+        safe=False,
+    ):
+        yield
 
 
 def _rename_without_collisions(
@@ -413,7 +437,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                                     entry
                                 ]
 
-        with fake_mode:
+        with fake_mode, _override_decomp_aten_to_variants():
             fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
             aten_export_artifact = _export_to_aten_ir(
                 mod,
