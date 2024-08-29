@@ -1429,7 +1429,8 @@ class VariableBuilder:
                 or (source and source.guard_source().is_unspecialized_nn_module())
             )
         ):
-            self.mark_static_input(value, guard=False)
+            self.mark_static_input(value, guard=is_parameter_freezing())
+            is_static_input = True
 
         make_graph_attribute = is_static_input and (
             not config.inline_inbuilt_nn_modules or is_parameter_freezing()
