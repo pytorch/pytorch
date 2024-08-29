@@ -748,14 +748,13 @@ py::object toPyObject(IValue ivalue) {
 
 std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
   if (operations.size() == 1) {
     std::shared_ptr<Operator> op = operations.at(0);
     // Create a stack full of the arguments and keyword arguments.
-    stack = createStackForSchema(
-        op->schema(), std::move(args), kwargs, std::nullopt);
+    stack = createStackForSchema(op->schema(), args, kwargs, std::nullopt);
 
     return std::make_pair(std::move(op), std::move(stack));
   } else {
@@ -802,10 +801,10 @@ bool checkSchemaAllowFakeScriptObject(
 
 py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
-  auto [found_op, stack] = getOpWithStack(operations, std::move(args), kwargs);
+  auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
     if (dk) {

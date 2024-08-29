@@ -29,8 +29,7 @@
 #endif
 #endif
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 enum class can_mutate_inplace_result {
   success,
   non_default_backward_view,
@@ -438,5 +437,4 @@ Return run_jit_decomposition_with_args_for_jvp(
 
 } // namespace impl
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
