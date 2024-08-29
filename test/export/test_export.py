@@ -2496,9 +2496,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-        auto = torch.export.dynamic_shapes.DIM.AUTO
-        auto_shapes = ((auto, auto),)
-
     def test_mark_and_auto_dynamic(self):
         # for this use case, mark_dynamic() and AUTO should have same effect.
         # check that same symbol gets allocated to both dims without raising constraint violation.
@@ -7101,8 +7098,8 @@ def forward(self, x, y):
         )
 
     def test_dynamic_shapes_serdes_generic(self):
-        from torch.export.dynamic_shapes import DIM, _dumps, _extracts, _loads
-        
+        from torch.export.dynamic_shapes import Dim, _dumps, _extracts, _loads
+
         class Foo(torch.nn.Module):
             def forward(self, a, b, c, d):
                 if d == "hello":
@@ -7159,10 +7156,10 @@ def forward(self, x, y):
         self.assertEqual(dy.root, dz)
 
     def test_dynamic_shapes_serdes_various(self):
-        # serialization for dataclass inputs, DIM.AUTO/STATIC, and kwargs
-        from torch.export.dynamic_shapes import DIM, _dumps, _extracts, _loads
+        # serialization for dataclass inputs, Dim.AUTO/STATIC, and kwargs
+        from torch.export.dynamic_shapes import Dim, _dumps, _extracts, _loads
 
-        auto, static = DIM.AUTO, DIM.STATIC
+        auto, static = Dim.AUTO, Dim.STATIC
 
         @dataclass
         class Input:
@@ -7188,19 +7185,24 @@ def forward(self, x, y):
             "y": [(auto, auto), (auto, auto)],
             "z": (auto, 8),
         }
-        
+
         # dump dynamic_shapes
         dumped = _dumps(dynamic_shapes, args, kwargs)
         self.assertExpectedInline(
             dumped,
-            """{'dynamic_shapes': (['DIM.AUTO', 'DIM.STATIC'], [['DIM.AUTO', 'DIM.AUTO'], ['DIM.AUTO', 'DIM.AUTO']], ['DIM.AUTO', 8]), 'dims': {}}""",
+            """{'dynamic_shapes': (['_DimHint.AUTO', '_DimHint.STATIC'], [['_DimHint.AUTO', '_DimHint.AUTO'], ['_DimHint.AUTO', '_DimHint.AUTO']], ['_DimHint.AUTO', 8]), 'dims': {}}""",
         )
         # export & extract dynamic shapes
         extracted = _extracts(export(Foo(), args, kwargs, dynamic_shapes=dynamic_shapes))
         self.assertExpectedInline(
             extracted,
-            """{'dynamic_shapes': (['s0', 4], [[8, 8], [8, 8]], [9, 8]), 'dims': {'s0': {'min': 2, 'max': None, 'derived': []}}}""",
+            """{'dynamic_shapes': (['s0', 4], [['s2', 8], ['s2', 8]], ['s2 + 1', 8]), 'dims': {'s0': {'min': 2, 'max': None, 'derived': []}, 's2': {'min': 2, 'max': None, 'derived': ['s2 + 1']}}}""",
         )
+        # deserialize & export with both specs, and check that the extracted specs match up, with some roundtrippability
+        extracted_from_dumped = _extracts(export(Foo(), args, kwargs, dynamic_shapes=_loads(dumped)))
+        extracted_from_extracted = _extracts(export(Foo(), args, kwargs, dynamic_shapes=_loads(extracted)))
+        self.assertEqual(extracted, extracted_from_dumped)
+        self.assertEqual(extracted, extracted_from_extracted)
 
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?

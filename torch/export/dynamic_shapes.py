@@ -1220,7 +1220,7 @@ def _dumps(dynamic_shapes, args, kwargs={}):
 
     dynamic_shapes: A pytree structure mirroring the dynamic_shapes input to export():
         - Each tensor input is represented with a list of values, non-tensor inputs with None.
-        - dynamic dimensions (i.e. symbols) in tensors and DIM enums are represented with strings.
+        - dynamic dimensions (i.e. symbols) in tensors and Dim enums are represented with strings.
         - static dimensions are represented with ints.
 
     dims: A dictionary mapping each symbol name to the min/max range and derived dim names.
@@ -1244,7 +1244,7 @@ def _dumps(dynamic_shapes, args, kwargs={}):
             (dx, 4),
             (dy, 4),
         ],
-        "b": (DIM.AUTO,),
+        "b": (Dim.AUTO,),
         "c": None,
         "d": None,
     }
@@ -1258,7 +1258,7 @@ def _dumps(dynamic_shapes, args, kwargs={}):
                 ['dx', 4],
                 ['dx + 1', 4],
             ],
-            ['DIM.AUTO'],
+            ['Dim.AUTO'],
             [None, None],
             None,
         ),
@@ -1299,13 +1299,13 @@ def _dumps(dynamic_shapes, args, kwargs={}):
                 out.append(s if shape[i] is None else shape[i])
         return out
 
-    def _track_dim_from_dims(val: Union[None, int, DIM, _Dim]) -> Union[None, int, str]:
+    def _track_dim_from_dims(val: Union[None, int, _DimHint, _Dim]) -> Union[None, int, str]:
         """
         Tracks dims, ranges, derived dims from the standardized dynamic_shapes spec.
         """
         if val is None or isinstance(val, int):  # non-tensor input or static
             return val
-        if isinstance(val, DIM):  # store enum as string
+        if isinstance(val, _DimHint):  # store enum as string
             return val.__class__.__name__ + '.' + val.name
 
         assert isinstance(val, _Dim)
@@ -1368,10 +1368,10 @@ def _loads(spec):
     def deserialize_shape(val):
         if val is None or isinstance(val, int):
             return val
-        elif val == "DIM.AUTO":
-            return DIM.AUTO
-        elif val == "DIM.STATIC":
-            return DIM.STATIC
+        elif val == "_DimHint.AUTO":
+            return _DimHint.AUTO
+        elif val == "_DimHint.STATIC":
+            return _DimHint.STATIC
         assert isinstance(val, str)
         return dim_cache[val]
 
