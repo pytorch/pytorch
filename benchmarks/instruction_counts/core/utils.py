@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import atexit
 import re
 import shutil

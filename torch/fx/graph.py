@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
@@ -489,6 +488,10 @@ class CodeGen:
                 return f"{clsname}.{arg.name}"
             elif isinstance(arg, Node):
                 return repr(arg)
+            elif isinstance(arg, torch.Tensor):
+                size = list(arg.size())
+                dtype = str(arg.dtype).split(".")[-1]
+                return f"torch.Tensor(size={size}, dtype={dtype})"
             else:
                 return blue(repr(arg))
 
