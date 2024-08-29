@@ -509,8 +509,8 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   return output;
 }
 
-#if defined(__MAC_15_0)
 static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
+#if defined(__MAC_15_0)
   using namespace mps;
 
   id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
@@ -608,8 +608,10 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
     }
   });
   return result;
-}
+#else
+  TORCH_CHECK(false, "Tiling of batch matmul for larger than 2**32 entries only available from MacOS15 onwards");
 #endif
+}
 
 static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   using namespace mps;
@@ -658,12 +660,8 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   // Check if we need to split the batch to do the computation
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
   if (resultSize > pow(2, 32)) {
-#if defined(__MAC_15_0)
     result = tiled_bmm_out_mps_impl(batch1, batch2, result);
     return result;
-#else
-    TORCH_CHECK(false, "Tiling of batch matmul for larger than 2**32 entries only available from MacOS15 onwards");
-#endif
   }
 
   MPSStream* stream = getCurrentMPSStream();
