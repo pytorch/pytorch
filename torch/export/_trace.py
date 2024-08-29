@@ -38,7 +38,13 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
+from torch._export.utils import (
+    _collect_param_buffer_metadata,
+    _get_shape_env_from_gm,
+    _populate_param_buffer_metadata_to_new_gm,
+    placeholder_naming_pass,
+    placeholder_prefixes,
+)
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch._aot_autograd.input_output_analysis import (
@@ -365,7 +371,11 @@ def _preserve_requires_grad_pass(
             assert spec.target is not None
             constant = constants[spec.target]
             if isinstance(constant, torch.Tensor):
-                node.meta["val"].requires_grad = constant.requires_grad
+                # If the tensor is not leaf, it should already have a correct requires grad field
+                if node.meta["val"].is_leaf:
+                    node.meta["val"].requires_grad = constant.requires_grad
+                else:
+                    assert node.meta["val"].requires_grad == constant.requires_grad
         elif spec.kind in (InputKind.CUSTOM_OBJ, InputKind.TOKEN):
             continue
         else:
@@ -589,6 +599,7 @@ def _export_to_aten_ir(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
+    decomp_table=None,
     _check_autograd_state=True,
     _is_torch_jit_trace=False,
 ) -> ATenExportArtifact:
@@ -628,6 +639,7 @@ def _export_to_aten_ir(
             fake_args,
             trace_joint=False,
             pre_dispatch=pre_dispatch,
+            decompositions=decomp_table,
             kwargs=fake_kwargs,
         )
 
@@ -662,9 +674,6 @@ def _export_to_aten_ir(
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    fake_mode = torch._export.utils._detect_fake_mode_from_gm(gm)
-    assert fake_mode is not None, "Cannot detect fake mode from graph"
-
     if not torch._dynamo.config.do_not_emit_runtime_asserts:
         stack_trace = (
             'File "torch/fx/passes/runtime_assert.py", line 24, '
@@ -673,10 +682,11 @@ def _export_to_aten_ir(
         with _set_node_metadata_hook(
             gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
         ):
-            if fake_mode:
+            shape_env = _get_shape_env_from_gm(gm)
+            if shape_env:
                 insert_deferred_runtime_asserts(
                     gm,
-                    fake_mode.shape_env,  # type: ignore[arg-type]
+                    shape_env,
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
                 )
@@ -1275,43 +1285,6 @@ def _strict_export_lower_to_aten_ir(
                     attr, static_shapes=True
                 )
 
-    # When aot_export lifts the params, we lose metadata (e.g. source_fn_stack, stack_trace)
-    # from the param nodes as they are treated as fresh inputs
-    # Therefore, we manually extract them before calling into aot_export
-    params_buffers_to_node_meta = {}
-    for node in gm_torch_level.graph.nodes:
-        target = node.target
-        meta = node.meta
-        if node.op == "call_module":
-            submodule = getattr(gm_torch_level, target)
-            if isinstance(submodule, torch.nn.Module):
-                for name, _ in submodule.named_parameters(
-                    recurse=True, remove_duplicate=False
-                ):
-                    params_buffers_to_node_meta[target + "." + name] = meta
-
-                for name, _ in submodule.named_buffers(
-                    recurse=True, remove_duplicate=False
-                ):
-                    params_buffers_to_node_meta[target + "." + name] = meta
-
-        if node.op == "get_attr":
-            submodule = getattr(gm_torch_level, target)
-            if not isinstance(submodule, torch.fx.GraphModule):
-                params_buffers_to_node_meta[target] = meta
-
-        # If the call_function uses param as input, we also need to update params' meta
-        # with this call_function node's meta.
-        # This is basically the same flow as torch.fx.traceback.preserve_meta()
-        if node.op == "call_function" and not isinstance(
-            node.target, torch._ops.HigherOrderOperator
-        ):
-            for arg in node._input_nodes:
-                if arg.op == "get_attr":
-                    for entry in torch.fx.proxy._COPY_META_FIELDS:
-                        if entry in meta:
-                            params_buffers_to_node_meta[arg.target][entry] = meta[entry]
-
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
 
@@ -1335,6 +1308,13 @@ def _strict_export_lower_to_aten_ir(
     gm_torch_level.recompile()
 
     _normalize_nn_module_stack(gm_torch_level, type(mod))
+
+    params_buffers_to_node_meta = _collect_param_buffer_metadata(gm_torch_level)
+
+    # When aot_export lifts the params, we lose metadata (e.g. source_fn_stack, stack_trace)
+    # from the param nodes as they are treated as fresh inputs
+    # Therefore, we manually extract them before calling into aot_export
+    # params_buffers_to_node_meta = _collect_param_buffer_metadata(gm_torch_level)
 
     constant_attrs = _gather_constant_attrs(mod)
     param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
@@ -1364,26 +1344,9 @@ def _strict_export_lower_to_aten_ir(
     export_graph_signature = aten_export_artifact.sig
     constants = aten_export_artifact.constants
 
-    # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
-    for metadata in params_buffers_to_node_meta.values():
-        metadata.pop("nn_module_stack", None)
-        metadata.pop("stack_trace", None)
-
-    # After aot_export, set the param/buffer metadata back into placeholders
-    # Technically, users can still construct this data from param names
-    # without relying on this metadata
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if node.target in export_graph_signature.inputs_to_parameters:
-                param_name = export_graph_signature.inputs_to_parameters[node.target]
-                if param_name in params_buffers_to_node_meta:
-                    for k, v in params_buffers_to_node_meta[param_name].items():
-                        node.meta[k] = v
-            if node.target in export_graph_signature.inputs_to_buffers:
-                buffer_name = export_graph_signature.inputs_to_buffers[node.target]
-                if buffer_name in params_buffers_to_node_meta:
-                    for k, v in params_buffers_to_node_meta[buffer_name].items():
-                        node.meta[k] = v
+    _populate_param_buffer_metadata_to_new_gm(
+        params_buffers_to_node_meta, gm, export_graph_signature
+    )
 
     # Do some cleanups on the graph module to restore the state dict to the
     # expected form. Each of these steps should probably get fixed upstream.
@@ -1736,6 +1699,7 @@ def _non_strict_export(
     )
 
     assert out_spec is not None
+
     return ExportArtifact(
         aten=aten_export_artifact,
         out_spec=out_spec,
