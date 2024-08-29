@@ -3372,13 +3372,10 @@ class TilingSelect:
                         for _node in sub_block.graph.nodes:
                             if _node.target in ["index_expr", "load", "store"]:
                                 # get the index and replace prefix from z to x
+                                arg_idx = 1 if _node.target == "index_expr" else 2
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
-                                )[
-                                    _node.args[
-                                        1 if _node.target == "index_expr" else 2
-                                    ].args[0]
-                                ]
+                                )[_node.args[arg_idx].args[0]]
                                 if _is_valid_indices(itervars, tiling_indices):
                                     stride = _try_get_stride(
                                         index, itervars, tiling_factor, tiling_indices
