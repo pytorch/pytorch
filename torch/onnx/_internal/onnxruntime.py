@@ -354,7 +354,7 @@ def _get_onnx_devices(
 
 def _get_ortvalues_from_torch_tensors(
     tensors: Tuple[torch.Tensor, ...], devices: Tuple["ORTC.OrtDevice", ...]
-) -> Tuple[torch.Tensor, ...]:    
+) -> Tuple[torch.Tensor, ...]:
     from onnxruntime.capi import _pybind_state as ORTC
 
     ortvalues = ORTC.OrtValueVector()
