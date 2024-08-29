@@ -192,6 +192,18 @@ scaled_mm_bias_template = TritonTemplate(
 aten__fp8_mm = ExternKernelChoice(torch._scaled_mm, "at::_scaled_mm")
 
 
+def are_compatible_scales(size_a, size_b):
+    # Same sized scales are compatable
+    if len(size_a) == len(size_b):
+        return True
+
+    # Both need to be scalars or len(1) tensors
+    if len(size_a) <= 1 and len(size_b) <= 1:
+        return True
+
+    return False
+
+
 def scaled_mm_options(  # type: ignore[no-untyped-def]
     config,  # triton.Config
     sym_m: sympy.core.numbers.Integer,
@@ -207,9 +219,10 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
 
-    assert len(scale_a.get_size()) == len(
-        scale_b.get_size()
-    ), "Expect inverse scale_a and scale_b to be both scalars (tensor-wise scaling) or tensors (rowwise scaling)."
+    size_a, size_b = scale_a.get_size(), scale_b.get_size()
+    assert are_compatible_scales(
+        size_a, size_b
+    ), f"Expect scale_a and scale_b to be either both scalars (including single-element tensors) or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
 
     return dict(
         GROUP_M=8,
