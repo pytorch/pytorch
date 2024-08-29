@@ -1037,7 +1037,7 @@ class MemPool(_MemPool):
 
     def release(self, device: Union[Device, int] = None):
         r"""Convenience function that attempts to release a pool, and mark its memory
-        to be free'd based.
+        to be free'd.
 
         Note that the memory in a pool can only be free'd when its use count is 0.
         When the use count is 0, :func:`~torch.cuda.empty_cache` will restore memory
