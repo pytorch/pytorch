@@ -300,6 +300,7 @@ class skip_data:
         materialize_fake_tensors: Whether to materialize FakeTensors.
 
     Example:
+        >>> # xdoctest: +SKIP("NamedTemporaryFile on Windows")
         >>> import tempfile
         >>> t = torch.randn(2, 3)
         >>> with tempfile.NamedTemporaryFile() as f:
