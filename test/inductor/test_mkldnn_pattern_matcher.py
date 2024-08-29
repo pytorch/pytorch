@@ -1800,8 +1800,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                         mod,
                         (v,),
                         [
-                            "op_qlinear_pointwise.call",
-                            "op_qlinear_pointwise_binary.call",
+                            "op_onednn_qlinear_pointwise_tensor.call",
+                            "op_onednn_qlinear_pointwise_binary_tensor.call",
                         ],
                         [],
                         check_quantization=True,

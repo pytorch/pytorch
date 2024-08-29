@@ -227,7 +227,7 @@ static bool check_has_torch_dispatch(PyObject* obj) {
       attr.ptr() != torch::disabled_torch_dispatch_impl());
 }
 
-// NOLINTNEXTLINE
+// NOLINTNEXTLINE(*-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyObject* device_to_py_class_[static_cast<size_t>(
     c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 
@@ -887,8 +887,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
   END_HANDLE_TH_ERRORS
 }
 
-typedef PyObject* (*getter)(PyObject*, void*);
-typedef int (*setter)(PyObject*, PyObject*, void*);
+using getter = PyObject* (*)(PyObject*, void*);
+using setter = int (*)(PyObject*, PyObject*, void*);
 
 PyObject* THPVariable_get_python_dispatch(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
@@ -2159,14 +2159,9 @@ static int traverse_slots(
     PyObject* self,
     visitproc visit,
     void* arg) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t i, n;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyMemberDef* mp;
-
-  n = Py_SIZE(type);
-  mp = type->tp_members;
-  for (i = 0; i < n; i++, mp++) {
+  auto n = Py_SIZE(type);
+  auto mp = type->tp_members;
+  for (Py_ssize_t i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;

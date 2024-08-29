@@ -297,8 +297,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
   } else {
     auto& fn = *cdata;
     auto it = cpp_function_types_map.find(std::type_index(typeid(fn)));
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyTypeObject* type;
+    PyTypeObject* type = nullptr;
     if (it == cpp_function_types_map.end()) {
       type = get_default_type();
     } else {

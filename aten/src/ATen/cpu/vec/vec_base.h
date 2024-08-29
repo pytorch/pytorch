@@ -848,22 +848,22 @@ static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vect
   return Vectorized<T>::loadu(buffer);
 }
 
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_and<intmax_t>());
 }
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_or<intmax_t>());
 }
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_xor<intmax_t>());
 }
 
 #endif // defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
 
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
   using int_t = int_same_size_t<T>;
   Vectorized<T> ones(c10::bit_cast<T>((int_t)(~(int_t)0)));  // All bits are 1
@@ -945,6 +945,17 @@ inline Vectorized<T> fmadd(const Vectorized<T>& a, const Vectorized<T>& b, const
 template <typename T>
 inline Vectorized<T> fmsub(const Vectorized<T>& a, const Vectorized<T>& b, const Vectorized<T>& c) {
   return a * b - c;
+}
+
+template <typename T>
+Vectorized<T> inline operator&&(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b) {
+  Vectorized<T> ret;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    ret[i] = a[i] && b[i];
+  }
+  return ret;
 }
 
 template <int64_t scale = 1, typename T = void>
