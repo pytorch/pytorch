@@ -1350,7 +1350,7 @@ template <typename scalar_t>
 void index_select_out_cuda_impl(
     Tensor& out,
     const Tensor& self,
-    long dim,
+    uint64_t dim,
     const Tensor& index) {
   uint64_t numIndices = index.numel();
   uint64_t selfDims = self.dim() == 0 ? 1 : self.dim();
