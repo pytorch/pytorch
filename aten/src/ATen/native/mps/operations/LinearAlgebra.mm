@@ -544,7 +544,7 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
 
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
 
-      MPSNDArrayMatrixMultiplication* matmul = [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device
+      auto matmul = [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device
                                                                                           sourceCount:2];
 
       MPSShape* aShape = @[ @(batchSize), @(aRows), @(aCols) ];
