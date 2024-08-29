@@ -14,8 +14,6 @@ import traceback
 import typing
 from typing import Any, Callable, Literal, Sequence
 
-import onnx
-
 import onnxscript
 import onnxscript.evaluator
 import onnxscript.function_libs
@@ -27,6 +25,7 @@ from onnxscript.ir import convenience as ir_convenience
 import torch
 import torch.fx
 from torch.export import graph_signature
+from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import (
     _analysis,
     _building,
@@ -34,7 +33,6 @@ from torch.onnx._internal.exporter import (
     _dispatching,
     _fx_passes,
     _ir_passes,
-    _isolated,
     _onnx_program,
     _registration,
     _reporting,
@@ -768,7 +766,7 @@ def _exported_program_to_onnx_program(
             },
         ),
         ir_version=9,
-        producer_name="torch",
+        producer_name="pytorch",
         producer_version=torch.__version__,
     )
 
@@ -1214,28 +1212,13 @@ def export(
 
     # Step 3: (verify=True) Check the ONNX model with ONNX checker
     try:
-        verbose_print("Run `onnx.checker` on the ONNX model...")
-
-        # TODO: Handle when model is >2GB
-
-        model_proto = onnx_program.model_proto
-        byte_size = model_proto.ByteSize()
-        if byte_size < 2 * 1024 * 1024 * 1024:
-            # The checker may segfault so we need to run it in a separate process
-            _isolated.safe_call(
-                onnx.checker.check_model,  # type:ignore[attr-defined]
-                onnx_program.model_proto,
-                full_check=True,
-            )
-            export_status.onnx_checker = True
-            verbose_print("Run `onnx.checker` on the ONNX model... ✅")
-        else:
-            verbose_print(
-                f"Run `onnx.checker` on the ONNX model... ⚠️  Skipped because model is too large ({byte_size})."
-            )
+        verbose_print("Check the ONNX model...")
+        onnxscript_apis.check_model(onnx_program.model)
+        export_status.onnx_checker = True
+        verbose_print("Check the ONNX model... ✅")
     except Exception as e:
         export_status.onnx_checker = False
-        verbose_print("Run `onnx.checker` on the ONNX model... ❌")
+        verbose_print("Check the ONNX model... ❌")
         if report:
             try:
                 assert pre_decomp_unique_ops is not None
