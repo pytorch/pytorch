@@ -117,16 +117,23 @@ def _check_input_constraints_for_graph(
                             # such checks can affect the shape env.
                             pass
                         else:
-                            solution = try_solve(
-                                sympy.Eq(node_dim.node.expr, arg_dim), symbol
-                            )
-                            if solution is None:
-                                raise RuntimeError(  # noqa: B904
-                                    f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
-                                    f"of the form {node_dim.node.expr}, where {symbol} is an integer"
-                                )
+                            if isinstance(node_dim.node.expr, sympy.Symbol):
+                                # Short cut for try_solve below. Also useful in cases where
+                                # sympy.Eq(node_dim.node.expr, arg_dim) would evaluate to False
+                                # purely because symbol is constrained to be size-like,
+                                # e.g., when node_dim.node.expr = symbol and arg_dim = 0.
+                                unification_map[symbol] = int(arg_dim)
                             else:
-                                unification_map[symbol] = int(solution[1])
+                                solution = try_solve(
+                                    sympy.Eq(node_dim.node.expr, arg_dim), symbol
+                                )
+                                if solution is None:
+                                    raise RuntimeError(  # noqa: B904
+                                        f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
+                                        f"of the form {node_dim.node.expr}, where {symbol} is an integer"
+                                    )
+                                else:
+                                    unification_map[symbol] = int(solution[1])
 
                     if node_dim.node.expr in range_constraints:
                         min_val, max_val = _convert_range_to_int(
@@ -147,7 +154,10 @@ def _check_input_constraints_for_graph(
                                 )
                 else:
                     if arg_dim != node_dim:
-                        if isinstance(node_dim, torch.SymInt):
+                        if (
+                            isinstance(node_dim, torch.SymInt)
+                            and not node_dim.node.expr.is_number
+                        ):
                             # this means we deferred a guard from export analysis to runtime, let this pass
                             # we'll add a runtime assert checking equality to this replacement expression
                             continue
@@ -403,10 +413,9 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
                 new_output.users.clear()
                 node_replace_(call_mod_node, new_output)
             elif isinstance(new_output, (list, tuple)):
-                # Clear the users of the output node and set
-                # the users to be the users of original call_module node.
+                # Pop subgraph output node from users.
                 for node in new_output:
-                    node.users.clear()
+                    node.users.pop(output[0])
 
                 # Inline the get_item calls for the output node.
                 get_item_users = nodes_filter(
@@ -612,3 +621,55 @@ def placeholder_naming_pass(
             ):
                 constants[new_name] = constant
                 del constants[name]
+
+
+def remove_proxy_from_state_dict(state_dict: Dict, in_place: bool) -> Dict:
+    """
+    If `in_place` is false, return a new copy of `state_dict` with "proxy" removed from `v.__dict__`.
+    `v` is the values in the dictionary.
+    If `in_place` is true, modify `state_dict` in place.
+    """
+    if in_place:
+        for k, v in state_dict.items():
+            if hasattr(v, "proxy"):
+                delattr(state_dict[k], "proxy")
+        return state_dict
+    else:
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if hasattr(v, "proxy"):
+                new_state_dict[k] = v.clone().detach()
+            else:
+                new_state_dict[k] = v
+        return new_state_dict
+
+
+def _detect_fake_mode_from_gm(
+    gm: torch.fx.GraphModule,
+) -> torch._subclasses.fake_tensor.FakeTensorMode:
+    """
+    For a given graph module, we look at the "val" of placeholder nodes to find the fake inputs.
+    Additionally, if gm doesn't have placeholders, we further look at the "example_value" or "val" of other nodes.
+    If no fake mode is found, we return None for fake_mode.
+    """
+    from torch._guards import detect_fake_mode
+
+    fake_inps: List[torch.Tensor] = []
+    fake_vals: List[torch.Tensor] = []
+    for node in gm.graph.nodes:
+        if node.op == "placeholder" and "val" in node.meta:
+            fake_val = node.meta["val"]
+            if fake_val is not None and isinstance(fake_val, torch.Tensor):
+                fake_inps.append(fake_val)
+        elif len(fake_inps) == 0 and (
+            "example_value" in node.meta or "val" in node.meta
+        ):
+            fake_val = None
+            if "example_value" in node.meta:
+                fake_val = node.meta["example_value"]
+            elif "val" in node.meta:
+                fake_val = node.meta["val"]
+            if fake_val is not None and isinstance(fake_val, torch.Tensor):
+                fake_vals.append(fake_val)
+
+    return detect_fake_mode(fake_inps + fake_vals)

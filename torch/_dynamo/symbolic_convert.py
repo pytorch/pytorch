@@ -19,7 +19,20 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Deque,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -59,12 +72,14 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
     Source,
+    TorchFunctionModeStackSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
     get_instruction_source_311,
+    get_torch_function_mode_stack,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -87,6 +102,7 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -104,6 +120,11 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+
+
+if TYPE_CHECKING:
+    from .variables.torch_function import TorchFunctionModeVariable
+
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -128,6 +149,9 @@ compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
 compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
+
+
+PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 
 @dataclasses.dataclass
@@ -471,13 +495,14 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, UserDefinedObjectVariable):
             try:
                 x = value.var_getattr(self, "__bool__")  # type: ignore[arg-type]
-            except exc.ObservedException:
+            except exc.ObservedAttributeError:
+                exc.handle_observed_exception(self)
                 # if __bool__ is missing, trying __len__ to infer a truth value.
-                x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
-            else:
-                if isinstance(x, GetAttrVariable):
-                    # if __bool__ is missing, trying __len__ to infer a truth value.
+                try:
                     x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
+                except exc.ObservedAttributeError:
+                    exc.handle_observed_exception(self)
+                    x = None
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
@@ -703,6 +728,7 @@ class InstructionTranslatorBase(
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
     symbolic_globals: Dict[str, VariableTracker]
+    symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"]
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
@@ -2121,7 +2147,7 @@ class InstructionTranslatorBase(
         assert isinstance(tos1, ConstDictVariable)
 
         if all(k in tos1 for k in tos):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(k) for k in tos]))  # type: ignore[attr-defined]
+            self.push(TupleVariable([tos1.getitem_const(self, k) for k in tos]))  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
@@ -2510,6 +2536,7 @@ class InstructionTranslatorBase(
         code_options: Dict[str, Any],
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
+        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
@@ -2524,6 +2551,7 @@ class InstructionTranslatorBase(
         self.output = output
         self.symbolic_locals = symbolic_locals
         self.symbolic_globals = symbolic_globals
+        self.symbolic_torch_function_mode_stack = symbolic_torch_function_mode_stack
         self.stack = []
         # stack of variable names for tracking 3.13 closures
         self.name_stack: list[Any] = []
@@ -2646,6 +2674,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_locals={},  # set below
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals={},
+            symbolic_torch_function_mode_stack=collections.deque(),
             f_code=f_code,
             export=export,
             inline_depth=0,
@@ -2680,6 +2709,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             }
 
+            self._init_torch_function_mode_stack()
+
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
@@ -2705,11 +2736,42 @@ class InstructionTranslator(InstructionTranslatorBase):
             torch._C._functorch.TransformType.Grad,
             torch._C._functorch.TransformType.Jvp,
         )
+
         if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
-            # if it reaches here, it means Dynamo failed to inline a functorch function
             name = ci.key().name.lower()
-            msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
+            msg = (
+                "If you are reaching here, it means dynamo failed for one of the following reasons:\n"
+                # Calling a torch.compiled function
+                f"- Calling torch.func.{name}(compiled_fn) function from eager mode is not supported. "
+                f"Ensure that torch.func.{name} is also wrapped within a torch.compile function. "
+                "For more information, see PyTorch issue #128711.\n"
+                # if it reaches here, it means Dynamo failed to inline a functorch function
+                f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
+            )
             unimplemented(msg)
+
+    def _init_torch_function_mode_stack(self):
+        from .variables.torch_function import TorchFunctionModeStackVariable
+
+        TorchFunctionModeStackVariable.reset()
+
+        self.symbolic_torch_function_mode_stack: Deque[
+            TorchFunctionModeVariable
+        ] = collections.deque()
+        # We want to retrieve all modes to properly reconstruct the stack if needed
+        py_stack = get_torch_function_mode_stack(filter_ignored=False)
+
+        if py_stack:
+            has_device_context = isinstance(
+                py_stack[0], torch.utils._device.DeviceContext
+            )
+
+        for i, val in enumerate(py_stack):
+            self.symbolic_torch_function_mode_stack.append(
+                variables.LazyVariableTracker.create(
+                    val, source=TorchFunctionModeStackSource(i)
+                )
+            )
 
     def get_example_value(self, source: Source):
         if isinstance(source, LocalSource):
@@ -3038,11 +3100,23 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
+                parent,
+                code,
+                sub_locals,
+                parent.symbolic_globals,
+                parent.symbolic_torch_function_mode_stack,
+                closure_cells,
+                func,
             )
         else:
             tracer = InliningInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
+                parent,
+                code,
+                sub_locals,
+                parent.symbolic_globals,
+                parent.symbolic_torch_function_mode_stack,
+                closure_cells,
+                func,
             )
 
         strict_ctx: Any = contextlib.nullcontext()
@@ -3093,6 +3167,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         code: types.CodeType,
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
+        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
     ) -> None:
@@ -3109,6 +3184,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
+            symbolic_torch_function_mode_stack=symbolic_torch_function_mode_stack,
             instructions=instructions,
             code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,
@@ -3270,6 +3346,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_VALUE(self, inst: Instruction):
         self.generated_items.append(self.pop())
+        if len(self.generated_items) > MAX_ITERATOR_LIMIT:
+            unimplemented(
+                "Too many yield values in generator. Maybe you are inlining an infinite generator. "
+                f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
+            )
         self.push(ConstantVariable.create(None))
 
     def GET_YIELD_FROM_ITER(self, inst):

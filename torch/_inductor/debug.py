@@ -16,7 +16,7 @@ from unittest.mock import patch
 import torch
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 from torch import fx as fx
-from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
+from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
@@ -144,7 +144,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         kwargs = {}
         if hasattr(snode, "get_device"):
             kwargs = {"device": snode.get_device()}
-        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
+        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
         def in_output(snode: Union[BaseSchedulerNode, FusedSchedulerNode]) -> bool:
             if isinstance(snode, FusedSchedulerNode):
@@ -304,15 +304,6 @@ def enable_aot_logging() -> Iterator[None]:
 
 class DebugContext:
     _counter = itertools.count()
-
-    @staticmethod
-    def wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(fn)
-        def inner(*args: Any, **kwargs: Any) -> Any:
-            with DebugContext():
-                return fn(*args, **kwargs)
-
-        return wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:

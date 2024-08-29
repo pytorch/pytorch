@@ -297,7 +297,7 @@ def _full_pre_state_dict_hook(
     ``nn.Module``.
     """
     if getattr(fsdp_state, "_device_mesh", False):
-        parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+        root_mesh = _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
 
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
@@ -665,9 +665,9 @@ def _sharded_pre_load_state_dict_hook(
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
 
-            parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+            root_mesh = _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
             local_tensor = _ext_all_gather_dtensor(
-                param, parent_mesh, fsdp_state._fsdp_extension
+                param, root_mesh, fsdp_state._fsdp_extension
             )
 
             if fqn_to_param_ext.get(fqn) is not None:
