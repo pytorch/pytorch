@@ -685,6 +685,24 @@ CacheNode* _compiled_autograd_impl(
   return cache;
 }
 
+struct LockGuardWithErrorLogs {
+  LockGuardWithErrorLogs(std::mutex& mtx) : mtx_(mtx) {
+    // Note: the standard allows try_lock to fail spuriously during races for
+    // performance reasons, but it shouldn't happen here since we:
+    // 1. disable multithreaded autograd
+    // 2. plenty of latency between backward calls
+    TORCH_INTERNAL_ASSERT(
+        mtx_.try_lock(),
+        "Trying to run compiled autograd within another compiled autograd call (e.g. reentrant checkpointing), this is not supported yet.");
+  }
+
+  ~LockGuardWithErrorLogs() {
+    mtx_.unlock();
+  }
+
+  std::mutex& mtx_;
+};
+
 variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
@@ -693,8 +711,8 @@ variable_list compiled_autograd(
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
-  static std::mutex lock;
-  std::lock_guard<std::mutex> lock_guard(lock);
+  static std::mutex mtx;
+  LockGuardWithErrorLogs lock_guard(mtx);
   pybind11::gil_scoped_acquire gil;
   at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
 
