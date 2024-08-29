@@ -202,6 +202,9 @@ class JustKnobsConfig:
         v = bool(self)
         return f"JustknobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
 
+    def __bool__(self):
+        return self.get()
+
 
 def justknobs_feature(
     name: Optional[str], config_value=None, env_name=None, default: bool = True
