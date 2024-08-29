@@ -20,7 +20,7 @@ class _INITIAL_MISSING:
 
 
 # Reference: https://docs.python.org/3/library/functools.html#functools.reduce
-@substitute_in_graph(functools.reduce)
+@substitute_in_graph(functools.reduce, can_constant_fold_through=True)
 def reduce(
     function: Callable[[_U, _T], _U],
     iterable: Iterable[_T],
