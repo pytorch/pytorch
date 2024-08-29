@@ -1942,28 +1942,120 @@ TORCH_IMPL_FUNC(bmm_out_cpu)
     }
 }
 
-TORCH_IMPL_FUNC(dot_out_cpu)(const Tensor& self, const Tensor& other, const Tensor& result) {
-  result.fill_(self.dot(other));
+void vdot_out_impl(
+    const Tensor& self,
+    const Tensor& other,
+    const Tensor& result);
+
+template <typename scalar_t>
+scalar_t dot_impl(
+    int64_t n,
+    scalar_t* x,
+    int64_t incx,
+    scalar_t* y,
+    int64_t incy);
+
+template <typename scalar_t>
+scalar_t vdot_impl(
+    int64_t n,
+    scalar_t* x,
+    int64_t incx,
+    scalar_t* y,
+    int64_t incy);
+
+void dot_out_impl(
+    const Tensor& self,
+    const Tensor& other,
+    const Tensor& result) {
+    if (self.is_complex()) {
+    if (self.is_conj()) {
+      if (other.is_conj()) {
+        Tensor temp_result = at::empty({}, result.options());
+        dot_out_impl(self.conj(), other.conj(), temp_result);
+        result.copy_(temp_result.conj());
+      } else {
+        vdot_out_impl(other.conj(), self, result);
+      }
+      return;
+    } else if (other.is_conj()) {
+      vdot_out_impl(other.conj(), self, result);
+      return;
+    }
+    }
+
+    if (self._is_zerotensor() || other._is_zerotensor()) {
+    result.fill_(0);
+    }
+
+    if (use_mkldnn_matmul(self, other, /*result=*/Tensor())) {
+    // mkldnn matmul expect result have sizes info to create ideep tensor
+    auto r = at::empty({1, 1}, self.options());
+    mkldnn_matmul(self, other, r, /*beta=*/0);
+    result.fill_(r);
+    return;
+    }
+
+    return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+        at::ScalarType::BFloat16,
+        at::ScalarType::Half,
+        self.scalar_type(),
+        "dot",
+        [&] {
+          result.fill_(at::native::dot_impl<scalar_t>(
+              self.numel(),
+              const_cast<scalar_t*>(self.const_data_ptr<scalar_t>()),
+              self.stride(0),
+              const_cast<scalar_t*>(other.const_data_ptr<scalar_t>()),
+              other.stride(0)));
+        });
 }
 
-TORCH_IMPL_FUNC(vdot_out_cpu)(const Tensor& self, const Tensor& other, const Tensor& result) {
- result.fill_(self.vdot(other));
+void vdot_out_impl(
+    const Tensor& self,
+    const Tensor& other,
+    const Tensor& result) {
+  // Dispatch to `dot` for real dtypes.
+  if (!self.is_complex()) {
+    dot_out_impl(self, other, result);
+    return;
+  }
+
+  if (self.is_conj()) {
+    if (other.is_conj()) {
+       vdot_out_impl(other.conj(), self.conj(), result);
+    } else {
+       dot_out_impl(self.conj(), other, result);
+    }
+    return;
+  } else if (other.is_conj()) {
+    Tensor temp_result = at::empty({}, result.options());
+    dot_out_impl(self, other.conj(), result);
+    result.copy_(temp_result.conj());
+    return;
+  }
+
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    result.fill_(0);
+  }
+
+  AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
+    result.fill_(vdot_impl<scalar_t>(
+        self.numel(),
+        const_cast<scalar_t*>(self.const_data_ptr<scalar_t>()),
+        self.stride(0),
+        const_cast<scalar_t*>(other.const_data_ptr<scalar_t>()),
+        other.stride(0)));
+  });
 }
 
-Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto output_device = result.device();
-  auto input1_device = self.device();
-  auto input2_device = other.device();
-  // check if the input & output tensors are on the same device.
-  TORCH_CHECK(
-    (output_device == input1_device) && (input1_device == input2_device),
-    "vdot: Expected the output and input tensors to be on the "
-    "same device, but got the output tensor on ", output_device,
-    ", the 'input' tensor on ", input1_device, ", and the 'other' tensor on ", input2_device);
-  at::native::resize_output(result, {});
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
-  return result.fill_(self.vdot(other));
+TORCH_IMPL_FUNC(dot_out_cpu)
+(const Tensor& self, const Tensor& other, const Tensor& result) {
+  dot_out_impl(self, other, result);
+}
+
+TORCH_IMPL_FUNC(vdot_out_cpu)
+(const Tensor& self, const Tensor& other, const Tensor& result) {
+  vdot_out_impl(self, other, result);
 }
 
 static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_out) {
