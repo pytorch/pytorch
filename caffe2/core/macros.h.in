@@ -45,6 +45,7 @@
   {"USE_CUDNN", "${USE_CUDNN}"}, \
   {"CUDNN_VERSION", "${CUDNN_VERSION}"}, \
   {"USE_NCCL", "${USE_NCCL}"}, \
+  {"USE_XCCL", "${USE_XCCL}"}, \
   {"USE_MPI", "${USE_MPI}"}, \
   {"USE_GFLAGS", "${USE_GFLAGS}"}, \
   {"USE_GLOG", "${USE_GLOG}"}, \

@@ -21,6 +21,8 @@ static ProcessGroup::BackendType strToBackendType(std::string_view backend) {
     return ProcessGroup::BackendType::GLOO;
   } else if (backend == "nccl") {
     return ProcessGroup::BackendType::NCCL;
+  } else if (backend == "xccl") {
+    return ProcessGroup::BackendType::XCCL;
   } else if (backend == "ucc") {
     return ProcessGroup::BackendType::UCC;
   } else if (backend == "mpi") {
