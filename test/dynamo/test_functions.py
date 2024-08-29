@@ -3602,6 +3602,22 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         dynamo_class_name = dynamo_default_str[1].split(" object at")[0]
         self.assertEqual(eager_class_name, dynamo_class_name)
 
+    def test_pybind_object(self):
+        def fn(x, pybind_obj):
+            if pybind_obj.result:
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        pybind_obj = torch._C._dynamo.guards.GuardDebugInfo(True, ["a==1"], 0)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x, pybind_obj), fn(x, pybind_obj))
+
+        pybind_obj = torch._C._dynamo.guards.GuardDebugInfo(False, ["a==1"], 1)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x, pybind_obj), fn(x, pybind_obj))
+
 
 instantiate_parametrized_tests(FunctionTests)
 

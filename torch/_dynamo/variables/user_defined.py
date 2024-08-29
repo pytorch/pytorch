@@ -899,6 +899,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def _check_for_getattr(self):
         return get_custom_getattr(self.value)
 
+    def _is_c_defined_property(self, subobj):
+        if not isinstance(subobj, property):
+            return False
+
+        # pybind def_readwrite is implemented via PyCFunction. At the python level, it is visible as a property whose
+        # fget is an instancemethod wrapper - https://docs.python.org/3/c-api/method.html#c.PyInstanceMethod_Check
+
+        # If we have a PyCFunction, we make an assumption that there is no side effect.
+        return isinstance(
+            subobj.fget, types.BuiltinFunctionType
+        ) or torch._C._dynamo.utils.is_instancemethod(subobj.fget)
+
     def _getattr_static(self, name):
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
         import _collections
@@ -913,12 +925,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or (
                 inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
             )  # handle memberdecriptor and slots
-            or (
-                isinstance(subobj, property)
-                and isinstance(
-                    subobj.fget, types.BuiltinFunctionType
-                )  # property with C-defined fget
-            )
+            or self._is_c_defined_property(subobj)
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
