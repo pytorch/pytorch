@@ -622,8 +622,8 @@ class SwapSavedVariables {
 
   void before(SavedVariable& sv) {
     TensorArg& arg = compiler.tensor_args.lookup(sv);
-    bool disable_hooks =
-        !sv.has_hooks(); // See Note: SavedVariable missing hooks
+    // See Note: SavedVariable missing hooks
+    bool disable_hooks = !sv.has_hooks();
     stashed_variables.save(&sv, std::move(sv));
     if (arg.defined()) {
       TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());

@@ -280,7 +280,6 @@ void SavedVariable::register_hooks(
 
 void SavedVariable::compiled_args(
     torch::dynamo::autograd::CompiledNodeArgs& args) const {
-  // args.collect_hooks_from(hooks_.get(), this);
   hooks_->compiled_args(args, *this);
 }
 
