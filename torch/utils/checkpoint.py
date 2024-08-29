@@ -433,7 +433,7 @@ def checkpoint(
         use_reentrant(bool):
             specify whether to use the activation checkpoint variant that
             requires reentrant autograd. This parameter should be passed
-            explicitly. In version 2.4 we will raise an exception if
+            explicitly. In version 2.5 we will raise an exception if
             ``use_reentrant`` is not passed. If ``use_reentrant=False``,
             ``checkpoint`` will use an implementation that does not require
             reentrant autograd. This allows ``checkpoint`` to support additional
@@ -464,7 +464,7 @@ def checkpoint(
     if use_reentrant is None:
         warnings.warn(
             "torch.utils.checkpoint: the use_reentrant parameter should be "
-            "passed explicitly. In version 2.4 we will raise an exception "
+            "passed explicitly. In version 2.5 we will raise an exception "
             "if use_reentrant is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -533,7 +533,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         use_reentrant(bool):
             specify whether to use the activation checkpoint variant that
             requires reentrant autograd. This parameter should be passed
-            explicitly. In version 2.4 we will raise an exception if
+            explicitly. In version 2.5 we will raise an exception if
             ``use_reentrant`` is not passed. If ``use_reentrant=False``,
             ``checkpoint`` will use an implementation that does not require
             reentrant autograd. This allows ``checkpoint`` to support additional
@@ -553,7 +553,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         warnings.warn(
             "torch.utils.checkpoint.checkpoint_sequential: the use_reentrant "
             "parameter should be passed explicitly. "
-            "In version 2.4 we will raise an exception if use_reentrant "
+            "In version 2.5 we will raise an exception if use_reentrant "
             "is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
