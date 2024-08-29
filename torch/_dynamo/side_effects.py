@@ -97,8 +97,8 @@ class SideEffects:
         self.ca_final_callbacks_var = None
         import traceback
         # traceback.print_stack()
-        print("Creation stack: " + "\n".join(traceback.format_stack()))
-        print(f"new SideEffects: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}")
+        # print("Creation stack: " + "\n".join(traceback.format_stack()))
+        # print(f"new SideEffects: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}")
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -169,11 +169,11 @@ class SideEffects:
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
-        if "fwd_pre_hook_call_count" in name:
-            print(f"id(item): {id(item)}, id(item.mutable_local): {id(item.mutable_local)}, id(item.value): {id(item.value)}, name: {name}, value: {value}")
+        # if "fwd_pre_hook_call_count" in name:
+        #     print(f"id(item): {id(item)}, id(item.mutable_local): {id(item.mutable_local)}, id(item.value): {id(item.value)}, name: {name}, value: {value}")
         # self.track_object_existing(item.value, item)
-        for k, v in self.id_to_variable.items():
-            print(f"store_attr: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}, k: {k}, v: {v}")
+        # for k, v in self.id_to_variable.items():
+        #     print(f"store_attr: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}, k: {k}, v: {v}")
         if item.mutable_local not in self.store_attr_mutations:
             self.store_attr_mutations[item.mutable_local] = {}
         self.store_attr_mutations[item.mutable_local][name] = value
