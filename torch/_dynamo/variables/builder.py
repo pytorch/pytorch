@@ -15,8 +15,19 @@ import random
 import re
 import sys
 import types
+import warnings
 import weakref
-from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    FrozenSet,
+    List,
+    MutableMapping,
+    NamedTuple,
+    Optional,
+    Set,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 from torch import SymInt
@@ -25,7 +36,7 @@ from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
-from torch._subclasses.meta_utils import is_sparse_any
+from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -220,6 +231,12 @@ static_inputs_log = torch._logging.getArtifactLogger(
 DimList = List
 
 
+def safe_has_grad(t):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+        return hasattr(t, "grad")
+
+
 class _missing:
     pass
 
@@ -310,6 +327,17 @@ class FrameStateSizeEntry:
     scalar: Optional[int]
     size: Optional[List[int]]
     stride: Optional[List[int]]
+
+
+# All class-based iterators in itertools
+# NOTE: use id() because some objects are not hashable, it will raise error during lookup
+ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
+    id(member)
+    for name, member in vars(itertools).items()
+    if not name.startswith("_") and inspect.isclass(member)
+)
+# Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
+ITERTOOLS_POLYFILLED_TYPE_IDS: Set[int] = set()
 
 
 class VariableBuilder:
@@ -867,7 +895,10 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif istype(value, type) and value in itertools.__dict__.values():
+        elif (
+            id(value) in ITERTOOLS_TYPE_IDS
+            and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS
+        ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
@@ -1408,7 +1439,8 @@ class VariableBuilder:
                 or (source and source.guard_source().is_unspecialized_nn_module())
             )
         ):
-            self.mark_static_input(value, guard=False)
+            self.mark_static_input(value, guard=is_parameter_freezing())
+            is_static_input = True
 
         make_graph_attribute = is_static_input and (
             not config.inline_inbuilt_nn_modules or is_parameter_freezing()
@@ -1510,6 +1542,18 @@ class VariableBuilder:
             # export + sparsity is being added but we need to create
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
             unimplemented("torch.compile does not support sparse Tensors")
+
+        if (
+            safe_has_grad(value)
+            and safe_grad(value) is not None
+            and value.dtype != safe_grad(value).dtype
+        ):
+            unimplemented(
+                "Inconsistent dtype between tensor and its gradient. "
+                "This can happen in FSDP and crashes meta tensor creation. "
+                "This is potentially a workaround. Fixing it correctly "
+                "requires some design around FSDP + torch.compile."
+            )
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,

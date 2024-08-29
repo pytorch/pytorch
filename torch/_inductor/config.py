@@ -768,6 +768,9 @@ class cpp:
     # decomposed into 7x4x2 thread blocks along MxNxK of a GEMM.
     gemm_thread_factors = os.environ.get("TORCHINDUCTOR_CPP_GEMM_THREAD_FACTORS", None)
 
+    # Whether to enable masked vectorization for the tail_loop.
+    enable_loop_tail_vec = True
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -918,15 +921,17 @@ class aot_inductor:
         os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
     )
 
-    # enable debug mode for aot inductor and it will print out more information including the intermediate tensor values, etc
-    # for debugging purpose
-    debug_intermediate_value_printer = (
-        os.environ.get("AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0") == "1"
+    # option for debug printing/saving for intermediate tensor values for aot inductor
+    # 0: disable debug dumping
+    # 1: enable saving intermediate tensor values
+    # 2: enable printing intermediate tensor values
+    debug_intermediate_value_printer = os.environ.get(
+        "AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0"
     )
 
-    # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
+    # filtered nodes to be printed for debug values. Specify this option when debug_intermediate_value_printer is set to 2
     filtered_kernel_names = os.environ.get(
-        "AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "default"
+        "AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", None
     )
 
     # Serialized tree spec for flattening inputs
