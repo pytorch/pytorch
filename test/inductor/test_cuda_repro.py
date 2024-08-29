@@ -3,6 +3,7 @@ import gc
 import math
 import sys
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -13,7 +14,9 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch._inductor.codecache import CompiledFxGraph
 from torch._inductor.compile_fx import compile_fx_inner
+from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1261,6 +1264,34 @@ class CudaReproTests(TestCase):
             out = cm(input_tensor)
             out2 = m(input_tensor)
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
+
+    def test_cpu_index(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x[torch.arange(32)]
+
+        def fake_init(*args, **kwargs):
+            real_init(*args, **kwargs)
+            graph = args[2]
+            assert isinstance(graph, GraphLowering)
+            self.assertEqual(graph.disable_cudagraphs_reason, None)
+            self.assertEqual(graph.device_types, {"cuda"})
+            nonlocal count
+            count += 1
+
+        count = 0
+        real_init = CompiledFxGraph.__init__
+
+        with patch.object(CompiledFxGraph, "__init__", fake_init):
+            fn(torch.randn(64, device="cuda"))
+            self.assertEqual(count, 1)
+
+            inp = torch.randn(64, device="cuda", requires_grad=True)
+            result = fn(inp)
+            self.assertEqual(count, 2)
+
+            result.sum().backward()
+            self.assertEqual(count, 3)
 
     def test_reflection_pad_loop_order(self):
         def fn(x, y):
