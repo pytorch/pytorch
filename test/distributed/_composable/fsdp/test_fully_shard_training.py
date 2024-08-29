@@ -1049,6 +1049,79 @@ class TestFullyShardNDTraining(FSDPTest):
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
 
 
+class TestFullyShardHSDP3DTraining(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(8, torch.cuda.device_count())
+
+    def init_global_mesh(self) -> DeviceMesh:
+        return init_device_mesh(
+            "cuda",
+            (2, 2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard", "tp"),
+        )
+
+    @skip_if_lt_x_gpu(8)
+    def test_3d_mlp_with_nd_mesh(self):
+        global_mesh = self.init_global_mesh()
+        self.run_subtests(
+            {
+                "reshard_after_forward": [False, True],
+                "use_activation_checkpointing": [False, True],
+                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
+                # is supported for FSDP+TP
+                "mlp_dim": [4, 16, 20],
+                "foreach": [False],
+            },
+            functools.partial(self._test_3d_mlp_with_nd_mesh, global_mesh),
+        )
+
+    def _test_3d_mlp_with_nd_mesh(
+        self,
+        global_mesh: DeviceMesh,
+        reshard_after_forward: bool,
+        use_activation_checkpointing: bool,
+        mlp_dim: int,
+        foreach: bool,
+    ):
+        global_mesh = self.init_global_mesh()
+        dp_mesh, tp_mesh = global_mesh["dp_replicate", "dp_shard"], global_mesh["tp"]
+        dp_pg = dp_mesh._flatten().get_group()  # used for `replicate()`
+
+        torch.manual_seed(42)
+        model = MLPStack(mlp_dim)
+        ref_model = copy.deepcopy(model).cuda()
+        replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
+        model.parallelize(
+            tp_mesh,
+            dp_mesh,
+            use_activation_checkpointing,
+            reshard_after_forward=reshard_after_forward,
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
+
+        torch.manual_seed(42 + dp_pg.rank() + 1)
+        device = torch.device("cuda")
+        for iter_idx in range(10):
+            inp = torch.randn((8, mlp_dim), device=device)
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                _optim.step()
+            self.assertEqual(losses[0], losses[1])
+
+        for n, p in model.named_parameters():
+            self.assertIsInstance(p, DTensor)
+            self.assertEqual(p.device_mesh.ndim, 3)
+            self.assertEqual(len(p.placements), 3)
+            self.assertEqual(
+                p.device_mesh.mesh_dim_names, ("dp_replicate", "dp_shard", "tp")
+            )
+
+
 class TestFullyShardHSDPTraining(FSDPTest):
     @property
     def world_size(self) -> int:

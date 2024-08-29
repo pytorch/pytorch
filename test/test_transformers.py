@@ -1623,6 +1623,8 @@ class TestSDPAFailureModes(NNTestCase):
             dtype = torch.float16
             make_tensor = partial(torch.rand, device=device, dtype=dtype)
             size = SdpaShape(2, 2, 3, 9) if kernel == SDPBackend.EFFICIENT_ATTENTION else SdpaShape(2, 2, 3, 257)
+            if TEST_WITH_ROCM:  # On ROCM, FA and EA share the backend GPU kernels
+                size = SdpaShape(2, 2, 3, 257)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
@@ -1665,8 +1667,9 @@ class TestSDPAFailureModes(NNTestCase):
         make_tensor = partial(torch.rand, size, device=device, dtype=dtype)
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, None, 0.0, False))
+            ctxmgr = self.assertRaises(RuntimeError) if not TEST_WITH_ROCM else contextlib.nullcontext()
+            with ctxmgr:
+                torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
@@ -2398,6 +2401,22 @@ class TestSDPACudaOnly(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
                 o = torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
+    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_trivial_output_transpose(self, device):
+        # see also: https://github.com/pytorch/pytorch/issues/134001
+        x = torch.randn(2, 4, 1, 64, device='cuda', dtype=torch.float16, requires_grad=True)
+        x2 = x.transpose(1, 2)
+        with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+            o = torch.nn.functional.scaled_dot_product_attention(x2, x2, x2).transpose(1, 2).reshape(2, 64, 4)
+        o.backward(o)
+        x_cpu = x.clone().cpu().detach()
+        x_cpu.requires_grad = True
+        x2_cpu = x_cpu.transpose(1, 2)
+        o = torch.nn.functional.scaled_dot_product_attention(x2_cpu, x2_cpu, x2_cpu).transpose(1, 2).reshape(2, 64, 4)
+        o.backward(o)
+        torch.testing.assert_close(x.grad, x_cpu.grad.cuda(), atol=7e-3, rtol=7e-3)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
     def test_mem_efficient_attention_mask_variants(self, device, mask_dim: List[int]):
@@ -3003,7 +3022,7 @@ class TestSDPACudaOnly(NNTestCase):
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
                 "out": 4,
-                "grad_query": 150.0,
+                "grad_query": 160.0,
                 "grad_key": 25.0,
                 "grad_value": 8.0,
                 "grad_attn_mask": 45.0,

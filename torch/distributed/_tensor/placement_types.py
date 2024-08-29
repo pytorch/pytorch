@@ -17,6 +17,9 @@ from torch.distributed._tensor._collective_utils import (
 from torch.distributed.device_mesh import DeviceMesh
 
 
+__all__ = ["Placement", "Shard", "Replicate", "Partial", "DTensorSpec", "TensorMeta"]
+
+
 class Placement:
     # base class Placement type
 
@@ -42,15 +45,16 @@ class Shard(Placement):
     ``dim`` over a corresponding ``DeviceMesh`` dimension, where each rank on the
     DeviceMesh dimension only holds a shard/piece of the global Tensor. The
     ``Shard(dim)`` placement follows the ``torch.chunk(dim)`` semantic, where the
-    last few shards on the DeviceMesh dimension might be empty. The ``Shard``
-    placement can be used by all DTensor APIs (i.e. distribute_tensor, from_local, etc.)
+    last few shards on the DeviceMesh dimension might be empty when the tensor dimension
+    is not evenly divisble on the DeviceMesh dimension. The ``Shard`` placement can be
+    used by all DTensor APIs (i.e. distribute_tensor, from_local, etc.)
 
     Args:
         dim (int): The tensor dimension that describes the DTensor is sharded over its
             corresponding DeviceMesh dimension.
 
-    ::note:: sharding on a tensor dimension that is not evenly
-        divisible on a DeviceMesh dimension is currently experimental.
+    .. warning:: sharding on a tensor dimension where the tensor dimension size is not
+        evenly divisible on a DeviceMesh dimension is currently experimental and subject to change.
     """
 
     dim: int
@@ -571,10 +575,10 @@ class Partial(Placement):
 
     Args:
         reduce_op (str, optional): The reduction op to be used for the partial DTensor
-        to produce Replicated/Sharded DTensor. Only element-wise reduction operations
-        are supportd, including: "sum", "avg", "prod", "max", "min", default: "sum".
+            to produce Replicated/Sharded DTensor. Only element-wise reduction operations
+            are supported, including: "sum", "avg", "product", "max", "min", default: "sum".
 
-    ::note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
+    .. note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
         and can only be used by the ``DTensor.from_local`` API.
     """
 

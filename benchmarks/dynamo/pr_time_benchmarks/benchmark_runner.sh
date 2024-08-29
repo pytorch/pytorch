@@ -21,5 +21,5 @@ python_programs_dir=$2
 for file in $python_programs_dir/*.py
 do
     # Execute the Python program and append the output to the output file
-   sudo env PATH="$PATH" python $file $output_file
+   python $file $output_file
 done

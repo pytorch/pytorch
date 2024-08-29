@@ -39,6 +39,7 @@ if(USE_CUDA)
   set(CAFFE2_USE_CUDA ${USE_CUDA})
   set(CAFFE2_USE_CUDNN ${USE_CUDNN})
   set(CAFFE2_USE_CUSPARSELT ${USE_CUSPARSELT})
+  set(CAFFE2_USE_CUFILE ${USE_CUFILE})
   set(CAFFE2_USE_NVRTC ${USE_NVRTC})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
@@ -60,6 +61,9 @@ if(USE_CUDA)
     else()
       caffe2_update_option(USE_CUSPARSELT OFF)
     endif()
+    if(CAFFE2_USE_CUFILE)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cufile)
+    endif()
     find_program(SCCACHE_EXECUTABLE sccache)
     if(SCCACHE_EXECUTABLE)
       # Using RSP/--options-file renders output noncacheable by sccache
@@ -79,6 +83,7 @@ if(USE_CUDA)
     set(CAFFE2_USE_CUDA OFF)
     set(CAFFE2_USE_CUDNN OFF)
     set(CAFFE2_USE_CUSPARSELT OFF)
+    set(CAFFE2_USE_CUFILE OFF)
     set(CAFFE2_USE_NVRTC OFF)
   endif()
 endif()
@@ -538,6 +543,11 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
 
     # Disable I8MM For CI since clang 9 does not support neon i8mm.
     set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
+
+    # Older MSVC versions don't support AVX512FP. TODO Minimum version support?
+    IF(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+      set(XNNPACK_ENABLE_AVX512FP16  OFF CACHE BOOL "")
+    ENDIF()
 
     # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
     # XNNPACK does conditionally compile this based on GCC version. Once it also does
@@ -1039,7 +1049,6 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
-
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
@@ -1099,10 +1108,6 @@ if(USE_ROCM)
       message(STATUS "Disabling Kernel Assert for ROCm")
     endif()
 
-    include(${CMAKE_CURRENT_LIST_DIR}/External/aotriton.cmake)
-    if(USE_CUDA)
-      caffe2_update_option(USE_MEM_EFF_ATTENTION OFF)
-    endif()
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()

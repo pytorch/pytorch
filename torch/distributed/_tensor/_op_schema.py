@@ -123,8 +123,6 @@ class StrategyType:
         OpStrategy and TupleStrategy
     """
 
-    pass
-
 
 class OpStrategy(StrategyType):
     """
