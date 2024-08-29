@@ -2818,14 +2818,15 @@ class TritonKernel(SIMDKernel):
         # Compute rnumel and RBLOCK. These are products over all reduction dimensions.
         if self.inside_reduction:
             # rnumel = r0_numel * ... * r(n-1)_numel
+            reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
             rnumel = int(V.graph.sizevars.simplify(
-                sympy_product(tree.numel for tree in self.range_trees if tree.is_reduction)
+                sympy_product(tree.numel for tree in reduction_trees
             )
             if is_static_integer(rnumel):
                 code.writeline(f"rnumel = {int(rnumel)}")
 
             # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
-            reduction_block_sizes = [block_sizes[symt] for symt in reduction_types]
+            reduction_block_sizes = [block_sizes[tree.prefix] for tree in reduction_trees]
             rblock = functools.reduce(string_product, reduction_block_sizes)
             code.writeline(f"RBLOCK: tl.constexpr = {rblock}")
 
