@@ -1493,19 +1493,6 @@ def init_process_group(
     they provide as it not exposed in a public way.
     """
     group_name = _process_group_name([], use_hashed_name=False)
-
-    # backward compatible API
-    if store is None:
-        rendezvous_iterator = rendezvous(
-            not_none(init_method), rank, world_size, timeout=timeout
-        )
-        store, rank, world_size = next(rendezvous_iterator)
-        store.set_timeout(timeout)
-
-        # Use a PrefixStore to avoid accidental overrides of keys used by
-        # different systems (e.g. RPC) in case the store is multi-tenant.
-        store = PrefixStore("default_pg", store)
-
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
             warnings.warn(
@@ -1519,13 +1506,25 @@ def init_process_group(
             -1,
             [],
             backend,
-            store,
+            None,
             group_name,
             timeout=timeout,
             group_desc="default_pg",
         )
         _update_default_pg(default_pg)
     else:
+        # backward compatible API
+        if store is None:
+            rendezvous_iterator = rendezvous(
+                not_none(init_method), rank, world_size, timeout=timeout
+            )
+            store, rank, world_size = next(rendezvous_iterator)
+            store.set_timeout(timeout)
+
+            # Use a PrefixStore to avoid accidental overrides of keys used by
+            # different systems (e.g. RPC) in case the store is multi-tenant.
+            store = PrefixStore("default_pg", store)
+
         default_pg, _ = _new_process_group_helper(
             world_size,
             rank,
