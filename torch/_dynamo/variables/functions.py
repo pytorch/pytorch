@@ -16,6 +16,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
+    check_unspec_or_constant_args,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -966,6 +967,15 @@ class PolyfilledFunctionVariable(VariableTracker):
         handler = self._get_polyfill_handlers().get(self.fn)
         if handler:
             assert callable(handler)
+            if getattr(
+                handler, "__torch_dynamo_can_constant_fold_through__", False
+            ) and check_unspec_or_constant_args(args, kwargs):
+                return ConstantVariable.create(
+                    handler(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    )
+                )
             return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
 
         for candidate in ("__torch_dynamo_polyfill__", "__python_implementation__"):
