@@ -1,12 +1,13 @@
 name: Validate Runner Determinator Script is in Sync
 
 on:
-  # Run on PRs when the runner-determinator.yml file is updated to ensure the two files are kept in sync
+  # Run on PRs when the runner-determinator script is updated to ensure it's copies are kept in sync
   pull_request:
     paths:
       - .github/workflows/_runner-determinator.yml
-      - .github/workflows/runner_determinator_workflow.py
+      - .github/workflows/runner-determinator-validator.yml
       - .github/scripts/runner_determinator.py
+  workflow_dispatch:
 
 jobs:
   check-runner-determinator:
