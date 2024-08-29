@@ -334,7 +334,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             ):
                 assert self.source
                 with torch._dynamo.variables.higher_order_ops.dynamo_within_forward_hook_under_checkpoint(tx):
-                    return variables.ForwardPreHookUnderCheckpoint(mod_var, self, source=self.source).call_function(
+                    return variables.ForwardPreHookUnderCheckpoint.create(tx, mod_var, self, source=self.source).call_function(
                         tx, args, kwargs
                     )
             # elif fn in (

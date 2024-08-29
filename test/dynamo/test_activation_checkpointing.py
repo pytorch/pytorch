@@ -1307,9 +1307,13 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cnt = CompileCounterWithBackend(backend)
         cnt_ca = CompileCounterWithBackend(backend)
 
-        state = MyState()
-        state.fwd_pre_hook_call_count = 0
-        state.fwd_hook_call_count = 0
+        state = None
+
+        def reset_state():
+            nonlocal state
+            state = MyState()
+            state.fwd_pre_hook_call_count = 0
+            state.fwd_hook_call_count = 0
 
         def fwd_pre_hook(m, i):
             # TODO(yf225): explore how to support kwargs in forward hooks
@@ -1336,20 +1340,22 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 ctx = contextlib.nullcontext()
             with ctx:
                 out = model(inp)
+                self.assertEqual(state.fwd_pre_hook_call_count, 1)
+                # self.assertEqual(state.fwd_hook_call_count, 1)
                 loss = out.sum()
                 loss.backward()
+                self.assertEqual(state.fwd_pre_hook_call_count, 2)
+                # self.assertEqual(state.fwd_hook_call_count, 2)
                 return out, loss
 
-        mod = torch.compile(mod, backend=cnt, fullgraph=True)
+        compiled_mod = torch.compile(mod, backend=cnt, fullgraph=True)
         inp = torch.randn(1, 1)
+        reset_state()
         ref_out, ref_loss = fn(ref_mod, inp, compiled=False)
-        self.assertEqual(state.fwd_pre_hook_call_count, 2)
-        # self.assertEqual(state.fwd_hook_call_count, 2)
-        out, loss = fn(mod, inp, compiled=True)
+        reset_state()
+        out, loss = fn(compiled_mod, inp, compiled=True)
         self.assertEqual(out, ref_out)
         self.assertEqual(loss, ref_loss)
-        self.assertEqual(state.fwd_pre_hook_call_count, 4)
-        # self.assertEqual(state.fwd_hook_call_count, 4)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt_ca.frame_count, 1)
 

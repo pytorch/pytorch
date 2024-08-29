@@ -305,14 +305,54 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
     Handles module-level forward pre-hooks.
     """
 
+    @staticmethod
+    def create(
+        tx,
+        module: VariableTracker,
+        # user_hooks: VariableTracker,
+        user_pre_hooks: VariableTracker,
+        source: AttrSource,
+    ):
+        if not compiled_autograd.compiled_autograd_enabled:
+            unimplemented("module-level forward pre-hooks require compiled autograd")
+
+        def _in_graph_fw_pre_hooks(bw_state: BackwardState):
+            """
+            Rather than installing the user hooks in the graph (which
+            don't survive AotAutograd), we install hooks that will call
+            trace_wrapped in the backward pass that CompiledAutograd
+            can turn into actual hook calls.
+            """
+            return functools.partial(
+                trace_wrapped,
+                fn=call_module_forward_hooks_from_backward_state,
+                bw_state=bw_state,
+                hooks_name=user_pre_hooks_name,
+                module_name=module_name,
+            )
+
+        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module, "mod")
+        user_pre_hooks_name, _ = tx.output.add_backward_state_hook(user_pre_hooks)
+        # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
+        proxy = tx.output.create_proxy(
+            "call_function",
+            _in_graph_fw_pre_hooks,
+            (bw_state_proxy,),
+            {},
+        )
+        proxy.node.meta["example_value"] = user_pre_hooks
+        return ForwardPreHookUnderCheckpoint(proxy, module, user_pre_hooks, source=source)
+
     def __init__(
         self,
+        proxy: torch.fx.Proxy,
         module: VariableTracker,
         # user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
         **options,
     ) -> None:
         super().__init__(fn=user_pre_hooks.fn, **options)
+        self.proxy = proxy
         self.module = module
         # self.user_hooks = user_hooks
         self.user_pre_hooks = user_pre_hooks
@@ -332,35 +372,23 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
     #     return super().call_method(tx, name, args, kwargs)
 
     def call_function(self, tx: "InstructionTranslator", args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]") -> "VariableTracker":
-        if not compiled_autograd.compiled_autograd_enabled:
-            unimplemented("module-level forward pre-hooks require compiled autograd")
+        from .builder import wrap_fx_proxy
 
-        def _in_graph_fw_pre_hooks(bw_state: BackwardState):
-            """
-            Rather than installing the user hooks in the graph (which
-            don't survive AotAutograd), we install hooks that will call
-            trace_wrapped in the backward pass that CompiledAutograd
-            can turn into actual hook calls.
-            """
-            return functools.partial(
-                trace_wrapped,
-                fn=call_module_forward_hooks_from_backward_state,
-                bw_state=bw_state,
-                hooks_name=user_pre_hooks_name,
-                module_name=module_name,
-            )
+        def _partial_hook_call(*args, **kwargs):
+            return functools.partial(self.user_pre_hooks.fn, self.module.value)(*args, **kwargs)
 
-        module_name, bw_state_proxy = tx.output.add_backward_state_hook(self.module, "mod")
-        user_pre_hooks_name, _ = tx.output.add_backward_state_hook(self.user_pre_hooks)
-        # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
-        proxy = tx.output.create_proxy(
-            "call_function",
-            _in_graph_fw_pre_hooks,
-            (bw_state_proxy,),
-            {},
+        new_args = wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                _partial_hook_call,
+                tuple(arg.as_proxy() for arg in args[1:]),
+                {},
+            ),
         )
-        proxy.node.meta["example_value"] = None
-        return super().call_function_inner(tx, args, kwargs)
+        print(f"args: {args}")
+        print(f"new_args: {new_args}")
+        return super().call_function_inner(tx, [self.module, new_args], kwargs)
 
     # def _setup_hook(self, tx: "InstructionTranslator", hook_method_name, args):
     #     from .builder import wrap_fx_proxy
