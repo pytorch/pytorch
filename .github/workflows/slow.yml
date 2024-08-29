@@ -102,30 +102,30 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
 
-  linux-focal-py3_8-clang10-build:
-    name: linux-focal-py3.8-clang10
+  linux-focal-py3_9-clang10-build:
+    name: linux-focal-py3.9-clang10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-py3.8-clang10
-      docker-image-name: pytorch-linux-focal-py3.8-clang10
+      build-environment: linux-focal-py3.9-clang10
+      docker-image-name: pytorch-linux-focal-py3.9-clang10
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "slow", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
 
-  linux-focal-py3_8-clang10-test:
-    name: linux-focal-py3.8-clang10
+  linux-focal-py3_9-clang10-test:
+    name: linux-focal-py3.9-clang10
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-py3_8-clang10-build
+      - linux-focal-py3_9-clang10-build
       - target-determination
     with:
-      build-environment: linux-focal-py3.8-clang10
-      docker-image: ${{ needs.linux-focal-py3_8-clang10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_8-clang10-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3.9-clang10
+      docker-image: ${{ needs.linux-focal-py3_9-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_9-clang10-build.outputs.test-matrix }}
 
   linux-focal-rocm6_1-py3_8-build:
     name: linux-focal-rocm6.1-py3.8
