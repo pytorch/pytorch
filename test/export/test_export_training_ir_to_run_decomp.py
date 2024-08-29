@@ -1,19 +1,20 @@
 # Owner(s): ["oncall: export"]
+import torch
+
 
 try:
     from . import test_export, testing
 except ImportError:
     import test_export
-    import testing
 
-from torch.export._trace import _export_for_training
+    import testing
 
 
 test_classes = {}
 
 
 def mocked_training_ir_to_run_decomp_export_strict(*args, **kwargs):
-    ep = _export_for_training(*args, **kwargs)
+    ep = torch.export.export_for_training(*args, **kwargs)
     return ep.run_decompositions(
         {}, _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY
     )
@@ -21,9 +22,9 @@ def mocked_training_ir_to_run_decomp_export_strict(*args, **kwargs):
 
 def mocked_training_ir_to_run_decomp_export_non_strict(*args, **kwargs):
     if "strict" in kwargs:
-        ep = _export_for_training(*args, **kwargs)
+        ep = torch.export.export_for_training(*args, **kwargs)
     else:
-        ep = _export_for_training(*args, **kwargs, strict=False)
+        ep = torch.export.export_for_training(*args, **kwargs, strict=False)
     return ep.run_decompositions(
         {}, _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY
     )

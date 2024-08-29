@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import inspect
 import itertools
+import os
 import random
 import re
 import sys
@@ -14,7 +15,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, variables
+from .. import config, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
@@ -29,18 +30,28 @@ from ..source import (
 )
 from ..utils import (
     check_unspec_or_constant_args,
+    hashable,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
     set_example_value,
 )
 from .base import VariableTracker
-from .functions import NestedUserFunctionVariable, UserFunctionVariable, wrap_bound_arg
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+    wrap_bound_arg,
+)
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS = {
+    os.fspath: polyfills.fspath,
+}
 
 
 class NO_SUCH_SUBOBJ:
@@ -366,6 +377,7 @@ class InspectSignatureVariable(VariableTracker):
 
     _nonvar_fields = {
         "signature",
+        "parameters",
         *VariableTracker._nonvar_fields,
     }
 
@@ -381,18 +393,27 @@ class InspectSignatureVariable(VariableTracker):
         super().__init__(**kwargs)
         self.inspected = inspected
 
-        if isinstance(self.inspected, UserFunctionVariable):
+        if isinstance(self.inspected, UserMethodVariable):
             self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())[1:]
+        elif isinstance(self.inspected, UserFunctionVariable):
+            self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
         else:
             self.fn = self.inspected.as_python_constant()
-        self.signature = inspect.signature(self.fn)
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    variables.ConstantVariable.create(name): InspectParameterVariable()
-                    for name in self.inspected.inspect_parameter_names()
+                    variables.ConstantVariable.create(
+                        param[0]
+                    ): InspectParameterVariable(param[1])
+                    for param in self.parameters
                 },
                 user_cls=dict,
             )
@@ -448,7 +469,24 @@ class InspectSignatureVariable(VariableTracker):
 
 
 class InspectParameterVariable(VariableTracker):
-    """This is not implemented, if used will graph break."""
+    """represents inspect.Parameter(...)"""
+
+    def __init__(self, value, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        try:
+            attr_value = getattr(self.value, name)
+            if self.source:
+                attr_source = AttrSource(self.source, name)
+                return VariableBuilder(tx, attr_source)(attr_value)
+            else:
+                return SourcelessBuilder.create(tx, attr_value)
+        except AttributeError:
+            unimplemented(f"getattr({self.value}, {name})")
 
 
 class InspectBoundArgumentsVariable(VariableTracker):
@@ -791,6 +829,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         proxy=None,
         saved_tensors=None,
         needs_input_grad=None,
+        non_differentiable=None,
         **kwargs,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -798,6 +837,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.proxy = proxy
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
+        self.non_differentiable = non_differentiable
 
     @staticmethod
     def create(tx: "InstructionTranslator", args=None, kwargs=None):
@@ -840,6 +880,11 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
+        elif name == "mark_non_differentiable":
+            assert len(kwargs) == 0
+            self.non_differentiable = proxy_args_kwargs(args, {})[0]
+            return variables.ConstantVariable.create(None)
+
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:
@@ -859,7 +904,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        if name == "save_for_backward":
+        if name in ["save_for_backward", "mark_non_differentiable"]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             )
@@ -1121,6 +1166,12 @@ class PythonModuleVariable(VariableTracker):
             attr_value = getattr(self.value, name)
         else:
             attr_value = self.value.__dict__[name]
+
+        if hashable(attr_value):
+            if polyfill_fn := POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS.get(
+                attr_value, None
+            ):
+                return variables.UserFunctionVariable(polyfill_fn)
 
         if self.source:
             new_source = AttrSource(self.source, name)
