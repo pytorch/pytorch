@@ -9,6 +9,10 @@
 #include <cstdint>
 #include <memory>
 
+namespace torch::dynamo::autograd {
+class CompiledNodeArgs;
+}
+
 namespace torch::autograd {
 
 using Variable = at::Tensor;
@@ -49,6 +53,12 @@ class TORCH_API SavedVariable {
 
   bool has_hooks() const {
     return (bool)hooks_;
+  }
+
+  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) const;
+
+  SavedVariableHooks* get_hooks() const {
+    return hooks_.get();
   }
 
  private:

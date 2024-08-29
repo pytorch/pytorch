@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <ATen/Tensor.h>
 
@@ -60,6 +61,12 @@ SavedVariable::SavedVariable(
       save_metadata(variable);
       set_hooks_and_pack_data(std::move(maybe_hooks), variable);
       return;
+    } else {
+      if (maybe_hooks) {
+        std::cout << "found wrapped number, skipping hooks" << std::endl;
+      } else {
+        TORCH_INTERNAL_ASSERT(false);
+      }
     }
 
     // If the variable is a leaf or is not an output, we can safely save the
@@ -275,6 +282,11 @@ void SavedVariable::register_hooks(
   }
   set_hooks_and_pack_data(std::move(hooks), data_);
   data_.reset();
+}
+
+void SavedVariable::compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) const {
+  // args.collect_hooks_from(hooks_.get(), this);
+  hooks_->compiled_args(args, *this);
 }
 
 const char* ERR_BACKWARD_TWICE =

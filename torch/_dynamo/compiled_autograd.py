@@ -145,6 +145,19 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(preserve_node_meta())
+        def pack(x):
+            print("fake pack: ", x)
+            return x
+
+        def unpack(x):
+            if x.dim() == 0:
+                # skip hook on wrapped numbers per eager semantics
+                return x
+
+            print("fake unpack: ", x)
+            return self.proxy_call_unpack_hook(x, 0)
+
+        self.stack.enter_context(torch.autograd.graph.saved_tensors_hooks(pack, unpack))
         return inputs, sizes, scalars
 
     def proxy_call_backward(
@@ -181,6 +194,19 @@ class AutogradCompilerInstance:
                 )
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
+
+    def proxy_call_unpack_hook(self, hook_input, hook_id):
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
+        proxies = self.proxy_call_hook(
+            hook,
+            hook_input,
+            hook_type="unpack_hook",
+        )
+        with disable_proxy_modes_tracing():
+            outs = [hook_input.clone().detach()]
+            self.bind_tensors_to_proxies(outs, proxies)
+
+        return outs[0]
 
     def proxy_call_hook(self, hook, *args, **kwargs):
         return self.fx_tracer.create_proxy(

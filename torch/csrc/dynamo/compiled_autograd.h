@@ -112,6 +112,9 @@ struct TensorArg {
   }
   uint32_t id;
   at::Tensor proxy_tensor;
+
+  // remove me
+  size_t hook_id = -1;
 };
 
 struct TensorArgs {
@@ -142,6 +145,8 @@ struct TensorArgs {
   TensorArg& add(const at::Tensor& tensor) {
     return lookup(tensor, true);
   }
+
+  TensorArg& add(const SavedVariable& sv, PyObject* hook_input, size_t hook_id);
 
   TensorArg& add(const SavedVariable& sv, const std::shared_ptr<Node>& node) {
     // TODO(jansel): Here we unpack the SavedVariable exactly once.  This might
@@ -186,6 +191,26 @@ struct LiftedIValueArgs {
   size_t next = 0;
 };
 
+struct LiftedPySavedVariableHooks;
+// namespace torch::autograd {
+// struct PySavedVariableHooks;
+// struct TypeAndSize;
+// }
+// struct LiftedPySavedVariableHooks : public SavedVariableHooks {
+//   LiftedPySavedVariableHooks() = delete;
+//   // explicit LiftedPySavedVariableHooks(CompiledNodeArgs& args, torch::autograd::PySavedVariableHooks* hooks);
+
+//   void call_pack_hook(const at::Tensor& tensor) override;
+
+//   // already has gil
+//   at::Tensor call_unpack_hook() override;
+
+// private:
+//   int hook_id_;
+//   PyObject* hook_input_; // lifetime is longer than self
+//   PyObject* compiler_; // lifetime is longer than self
+// };
+
 struct AutogradCompilerCall {
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
@@ -197,11 +222,15 @@ struct AutogradCompilerCall {
     return hooks.size() - 1;
   }
 
+  size_t emplace_hook_with_dedup(PyObject* fn);
+
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
   LiftedIValueArgs lifted_ivalue_args;
   std::vector<int64_t> dyn_size_inputs;
   std::vector<c10::SafePyObject> hooks;
+  std::vector<c10::SafePyObject> dedup_hooks;
+  std::unordered_map<PyObject*, int> dedup_hook_lookup;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
 };
@@ -229,9 +258,20 @@ class CompiledNodeArgs {
   void collect(const at::Tensor& t) {
     collect(_compiler.tensor_args.add(t));
   }
+  // void collect_hooks_from(SavedVariableHooks* hooks, const SavedVariable* sv);
+  void collect(const SavedVariable& sv, PyObject* unpack_hook, PyObject* hook_input);
   void collect(const SavedVariable& sv, bool is_output) {
-    collect(
-        _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
+    // bool prior = at::SavedTensorDefaultHooks::set_tracing(true);
+    // at::SavedTensorDefaultHooks::set_tracing(prior);
+    std::cout << "collect sv: has_hooks=" << sv.has_hooks() << std::endl;
+    if (!sv.has_hooks()) {
+      // TORCH_INTERNAL_ASSERT(false);
+      collect(
+          _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
+      return;
+    }
+
+    sv.compiled_args(*this);
   }
   void collect(const c10::SymInt& t) {
     _compiler.add_size_input(t);
@@ -470,6 +510,10 @@ class CompiledNodeArgs {
     return _compiler.emplace_hook(std::move(obj));
   }
 
+  size_t add_unpack_hook(PyObject* obj) {
+    return _compiler.emplace_hook_with_dedup(std::move(obj));
+  }
+
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
@@ -596,13 +640,25 @@ class SwapSavedVariables {
   }
 
   void before(SavedVariable& t) {
+    // graph needs to look like
+    // def graph(inputs=[data_], hooks=[pyunpack]):
+    //   out = pyunpack(data_)
+    //   ... apply on out
+
+
+    // push the fake hooks, noop pack hook
+    // create the savedvariable, using the proxy of the data_
+    // it will fire the fake unpack hook
+    // which will add the proxy to the graph
+    // (how to pass the lifted hook id?) - maybe grab the next id?
+    std::cout << "before sv: has_hooks=" << t.has_hooks() << std::endl;
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_variables.save(&t, std::move(t));
     if (arg.defined()) {
-      bool prior = at::SavedTensorDefaultHooks::set_tracing(true);
+      // bool prior = at::SavedTensorDefaultHooks::set_tracing(true);
       TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
       t = SavedVariable(arg.proxy_tensor, false);
-      at::SavedTensorDefaultHooks::set_tracing(prior);
+      // at::SavedTensorDefaultHooks::set_tracing(prior);
     }
   }
   void after(SavedVariable& t) {
