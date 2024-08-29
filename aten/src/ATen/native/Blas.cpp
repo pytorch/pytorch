@@ -127,33 +127,5 @@ Tensor mv(const Tensor &self, const Tensor &vec) {
   return at::addmv_(result, self, vec, 0, 1);
 }
 
-inline void dot_check(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(
-      self.dim() == 1 && other.dim() == 1,
-      "1D tensors expected, but got ",
-      self.dim(),
-      "D and ",
-      other.dim(),
-      "D tensors");
-
-  TORCH_CHECK(
-      self.scalar_type() == other.scalar_type(),
-      "dot : expected both vectors to have same dtype, but found ",
-      self.scalar_type(),
-      " and ",
-      other.scalar_type());
-
-  TORCH_CHECK(
-      self.numel() == other.numel(),
-      "inconsistent tensor size, expected tensor [",
-      self.numel(),
-      "] and src [",
-      other.numel(),
-      "] to have the same number of elements, but got ",
-      self.numel(),
-      " and ",
-      other.numel(),
-      " elements respectively");
-}
 
 }  // namespace at::native

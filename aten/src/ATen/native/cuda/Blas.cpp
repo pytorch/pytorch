@@ -636,7 +636,7 @@ void dot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& re
     }
   }
 
-  // Most checks are performed in the META_FUNC
+  // Most checks are performed in the META_FUNC, this is CUDA specific
   TORCH_CHECK(
     (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
         (other.stride(0) <= INT_MAX),
@@ -697,7 +697,7 @@ void vdot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& r
     return;
   }
 
-  // Most checks are performed in the META_FUNC
+  // Most checks are performed in the META_FUNC, this is CUDA specific
   TORCH_CHECK(
     (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
         (other.stride(0) <= INT_MAX),
