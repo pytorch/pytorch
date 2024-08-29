@@ -267,7 +267,7 @@ char* tensor_repr(at::Tensor tensor) {
   const char* buf = nullptr;
   char* result = nullptr;
 
-  pytensor = THPVariable_Wrap(std::move(tensor));
+  pytensor = THPVariable_Wrap(tensor);
   if (!pytensor)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
