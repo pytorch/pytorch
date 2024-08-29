@@ -5761,12 +5761,14 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         expect = fn(x)
         self.assertNotEqual(
-            expect[0].storage().data_ptr(), expect[1].storage().data_ptr()
+            expect[0].untyped_storage().data_ptr(),
+            expect[1].untyped_storage().data_ptr(),
         )
 
         actual = torch.compile(fn)(x)
         self.assertNotEqual(
-            actual[0].storage().data_ptr(), actual[1].storage().data_ptr()
+            actual[0].untyped_storage().data_ptr(),
+            actual[1].untyped_storage().data_ptr(),
         )
 
     # https://github.com/pytorch/pytorch/issues/114344
@@ -5782,14 +5784,16 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with torch.enable_grad():
             expect = fn(x)
             self.assertNotEqual(
-                expect[0].storage().data_ptr(), expect[1].storage().data_ptr()
+                expect[0].untyped_storage().data_ptr(),
+                expect[1].untyped_storage().data_ptr(),
             )
             self.assertFalse(expect[0].requires_grad)
             self.assertTrue(expect[1].requires_grad)
 
             actual = torch.compile(fn)(x)
             self.assertNotEqual(
-                actual[0].storage().data_ptr(), actual[1].storage().data_ptr()
+                actual[0].untyped_storage().data_ptr(),
+                actual[1].untyped_storage().data_ptr(),
             )
             self.assertFalse(actual[0].requires_grad)
             self.assertTrue(actual[1].requires_grad)
