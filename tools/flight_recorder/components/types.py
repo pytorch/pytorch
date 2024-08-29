@@ -241,8 +241,8 @@ class Op:
 
     def __repr__(self) -> str:
         if self.type in P2P:
-            return f"{self.type}(s={self._src_g} d={self._dst_g}, sz={self.input_sizes}, {self.state})"
-        return f"{self.type}(input_sizes={self.input_sizes}, {self.state})"
+            return f"{self.type}(s={self._src_g} d={self._dst_g}, sz={self.input_sizes}, state={self.state})"
+        return f"{self.type}(input_sizes={self.input_sizes}, state={self.state})"
 
     def match(self, other: "Op") -> MatchState:
         # TODO: I think this can validly not match,
