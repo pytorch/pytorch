@@ -72,9 +72,8 @@ class FakeTensorProp(torch.fx.Interpreter):
             return super().run(*args)
 
     def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
-        custom = torch._C._get_privateuse1_backend_name()
         devices = [getattr(arg, "device", None) for arg in args if hasattr(arg, "device")]
-        if devices and devices[0] and devices[0].type != custom:
+        if devices and devices[0] and torch.is_autocast_enabled(devices[0].type):
             with torch.amp.autocast(devices[0].type, enabled=False):
                 return super().call_function(target, args, kwargs)
         else:
