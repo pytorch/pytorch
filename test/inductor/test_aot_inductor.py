@@ -51,6 +51,7 @@ if HAS_CUDA:
         add_kernel,
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
+        add_kernel_autotuned_weird_param_order,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
         mul2_inplace_kernel,
@@ -1744,7 +1745,7 @@ class AOTInductorTestsTemplate:
             torch._export.aot_compile(Model(), example_inputs)
 
         supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
-            torch.float32, self.device == "cuda"
+            torch.float32, self.device
         )
 
     def test_consecutive_compiles(self):
@@ -2235,6 +2236,27 @@ class AOTInductorTestsTemplate:
             example_inputs,
             dynamic_shapes=dynamic_shapes,
         )
+
+    def test_triton_kernel_weird_param_order(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                out = torch.empty_like(x)
+                add_kernel_autotuned_weird_param_order[16,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    n_elements=x.numel(),
+                    out_ptr=out,
+                )
+                return out
+
+        x = torch.randn(16, 16, device=self.device)
+        self.check_model(Model(), (x,))
 
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
@@ -3302,8 +3324,8 @@ class AOTInductorTestsTemplate:
             ]
         )
 
-        # test the default debug printing codegen
-        with config.patch({"aot_inductor.debug_intermediate_value_printer": 1}):
+        # test default debug printing all tensor values codegen
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
@@ -3323,11 +3345,11 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
-        # test the filtered kernel names printing codegen
+        # test printing selected kernel's tensor values codegen
         filtered_kernel_name = f"aoti_torch_{self.device}_addmm_out"
         with config.patch(
             {
-                "aot_inductor.debug_intermediate_value_printer": 1,
+                "aot_inductor.debug_intermediate_value_printer": "2",
                 "aot_inductor.filtered_kernel_names": filtered_kernel_name,
             }
         ):

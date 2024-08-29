@@ -3,7 +3,8 @@
 #include <future>
 #include <thread>
 
-#include <torch/csrc/distributed/c10d/logging.h>
+#include <c10/util/Logging.h>
+#include <torch/csrc/distributed/c10d/LockGuard.hpp>
 
 TEST(LockGuard, basic) {
   std::timed_mutex mutex;
@@ -20,6 +21,9 @@ TEST(LockGuard, basic) {
 }
 
 TEST(LockGuard, logging) {
+  // set log level to INFO
+  FLAGS_caffe2_log_level = 0;
+
   std::timed_mutex mutex;
 
   mutex.lock();

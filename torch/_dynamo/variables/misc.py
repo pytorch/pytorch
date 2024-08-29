@@ -35,12 +35,21 @@ from ..utils import (
     set_example_value,
 )
 from .base import VariableTracker
-from .functions import NestedUserFunctionVariable, UserFunctionVariable, wrap_bound_arg
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+    wrap_bound_arg,
+)
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+class NO_SUCH_SUBOBJ:
+    pass
 
 
 class SuperVariable(VariableTracker):
@@ -93,22 +102,28 @@ class SuperVariable(VariableTracker):
             type_to_use_source = self.objvar.source
 
         source = None
-        if self.objvar.source is not None:
-            # Walk the mro tuple to find out the actual class where the
-            # attribute resides.
-            search_mro = type_to_use.__mro__
-            start_index = search_mro.index(search_type) + 1
-            for index in range(start_index, len(search_mro)):
-                if hasattr(search_mro[index], name):
+        resolved_class = None
+        resolved_attr = None
+        search_mro = type_to_use.__mro__
+        start_index = search_mro.index(search_type) + 1
+        # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
+        # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
+        # attribute in the class __dict__
+        for index in range(start_index, len(search_mro)):
+            # Dont call getattr, just check the __dict__ of the class
+            if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
+                if resolved_getattr is not NO_SUCH_SUBOBJ:
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
-                    source = AttrSource(
-                        GetItemSource(AttrSource(type_to_use_source, "__mro__"), index),
-                        name,
-                    )
-                    break
+                    if type_to_use_source:
+                        source = AttrSource(
+                            GetItemSource(
+                                AttrSource(type_to_use_source, "__mro__"), index
+                            ),
+                            name,
+                        )
+                    return resolved_getattr, source
 
-        # TODO(jansel): there is a small chance this could trigger user code, prevent that
-        return getattr(super(search_type, type_to_use), name), source
+        unimplemented("Unable to resolve super getattr")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # Check if getattr is a constant. If not, delay the actual work by
@@ -156,12 +171,17 @@ class SuperVariable(VariableTracker):
             return tx.output.side_effects.track_object_new_from_user_defined_class(
                 self.objvar
             )
-        elif name == "__new__" and isinstance(inner_fn, types.FunctionType):
-            # __new__ is a staticmethod object, but accessing __new__ from the super object, as done in
-            # _resolved_getattr_and_source, results in a function object. If not specialized here, it will try to add
-            # the `self` arg and fail bind arg matching later.
+        elif isinstance(inner_fn, staticmethod) and isinstance(
+            inner_fn.__func__, types.FunctionType
+        ):
             return variables.UserFunctionVariable(
-                inner_fn, source=source
+                inner_fn.__func__, source=source
+            ).call_function(tx, args, kwargs)
+        elif isinstance(inner_fn, classmethod) and isinstance(
+            inner_fn.__func__, types.FunctionType
+        ):
+            return variables.UserMethodVariable(
+                inner_fn.__func__, self.objvar, source=source
             ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
@@ -351,6 +371,7 @@ class InspectSignatureVariable(VariableTracker):
 
     _nonvar_fields = {
         "signature",
+        "parameters",
         *VariableTracker._nonvar_fields,
     }
 
@@ -366,18 +387,27 @@ class InspectSignatureVariable(VariableTracker):
         super().__init__(**kwargs)
         self.inspected = inspected
 
-        if isinstance(self.inspected, UserFunctionVariable):
+        if isinstance(self.inspected, UserMethodVariable):
             self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())[1:]
+        elif isinstance(self.inspected, UserFunctionVariable):
+            self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
         else:
             self.fn = self.inspected.as_python_constant()
-        self.signature = inspect.signature(self.fn)
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    variables.ConstantVariable.create(name): InspectParameterVariable()
-                    for name in self.inspected.inspect_parameter_names()
+                    variables.ConstantVariable.create(
+                        param[0]
+                    ): InspectParameterVariable(param[1])
+                    for param in self.parameters
                 },
                 user_cls=dict,
             )
@@ -433,7 +463,24 @@ class InspectSignatureVariable(VariableTracker):
 
 
 class InspectParameterVariable(VariableTracker):
-    """This is not implemented, if used will graph break."""
+    """represents inspect.Parameter(...)"""
+
+    def __init__(self, value, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        try:
+            attr_value = getattr(self.value, name)
+            if self.source:
+                attr_source = AttrSource(self.source, name)
+                return VariableBuilder(tx, attr_source)(attr_value)
+            else:
+                return SourcelessBuilder.create(tx, attr_value)
+        except AttributeError:
+            unimplemented(f"getattr({self.value}, {name})")
 
 
 class InspectBoundArgumentsVariable(VariableTracker):
@@ -776,6 +823,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         proxy=None,
         saved_tensors=None,
         needs_input_grad=None,
+        non_differentiable=None,
         **kwargs,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -783,6 +831,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.proxy = proxy
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
+        self.non_differentiable = non_differentiable
 
     @staticmethod
     def create(tx: "InstructionTranslator", args=None, kwargs=None):
@@ -825,6 +874,11 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
+        elif name == "mark_non_differentiable":
+            assert len(kwargs) == 0
+            self.non_differentiable = proxy_args_kwargs(args, {})[0]
+            return variables.ConstantVariable.create(None)
+
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:
@@ -844,7 +898,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        if name == "save_for_backward":
+        if name in ["save_for_backward", "mark_non_differentiable"]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             )

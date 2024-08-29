@@ -2999,6 +2999,7 @@ def _builtin_function_ids() -> Dict[int, str]:
     rv.update(
         {
             id(cast): "typing.cast",
+            id(functools.reduce): "functools.reduce",
             id(copy.deepcopy): "copy.deepcopy",
         }
     )
@@ -3211,26 +3212,31 @@ if torch.distributed.is_available():
         # we have to add replicate to LEGACY_MOD_INLINELIST to ensure
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
-        "torch.distributed._composable.fsdp",
     }
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        LEGACY_MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
 # Please keep this sorted alphabetically.
-MOD_INLINELIST = {
-    "torch.utils._python_dispatch",
-    "torch._refs",
-    "torch._prims",
+MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
-    "torch._functorch.vmap",
     "torch._functorch.autograd_function",
-    "torch._library.custom_ops",
     "torch._functorch.eager_transforms",
+    "torch._functorch.functional_call",
+    "torch._functorch.vmap",
+    "torch._higher_order_ops.associative_scan",
+    "torch._higher_order_ops.strict_mode",
+    "torch._higher_order_ops.while_loop",
     "torch._inductor.test_operators",
+    "torch._library.custom_ops",
+    "torch._prims",
+    "torch._refs",
+    "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
     "torch.autograd.function",
@@ -3245,25 +3251,21 @@ MOD_INLINELIST = {
     "torch.random",
     "torch.sparse",
     "torch.testing",
-    "torch.testing._internal.hypothesis_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
+    "torch.utils._python_dispatch",
     "torch.utils._pytree",
     "torch.utils.hooks",
-    "torch._tensor",
-    "torch._higher_order_ops.strict_mode",
-    "torch._higher_order_ops.while_loop",
-    "torch._higher_order_ops.associative_scan",
-    "torch._functorch.functional_call",
-}
+]
+assert sorted(set(MOD_INLINELIST)) == MOD_INLINELIST
+MOD_INLINELIST = set(MOD_INLINELIST)
 
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
-    MOD_INLINELIST.add("torch.distributed._functional_collectives")
-    MOD_INLINELIST.add("torch.distributed._composable.replicate")
-    MOD_INLINELIST.add("torch.distributed._composable.fsdp")
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)
