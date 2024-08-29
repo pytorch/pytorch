@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -23,7 +23,7 @@ aten = torch.ops.aten
 
 
 const = torch.tensor(0.0)
-device = "cuda"
+device = GPU_TYPE
 
 
 def num_reinplacing_failures():
@@ -259,5 +259,5 @@ instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_GPU:
         run_tests(needs="filelock")
