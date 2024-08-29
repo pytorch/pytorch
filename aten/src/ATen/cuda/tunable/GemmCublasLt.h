@@ -424,6 +424,10 @@ class CublasltGemmOp : public Callable<ParamsT> {
             at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, lda, opa == CUBLAS_OP_T);
             at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, ldb, opb == CUBLAS_OP_T);
             at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, ldc);
+            if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<T>>) {
+                Cdesc = at::cuda::blas::CuBlasLtMatrixLayout(bias_datatype, params->m, params->n, ldc);
+            }
+            at::cuda::blas::CuBlasLtMatrixLayout Ddesc(c_dtype, params->m, params->n, ldc);
 
             int batch_size = GetBatchFromParams<T>(params);
             if (batch_size > 1) {
@@ -462,7 +466,7 @@ class CublasltGemmOp : public Callable<ParamsT> {
                 Adesc.descriptor(),
                 Bdesc.descriptor(),
                 Cdesc.descriptor(),
-                Cdesc.descriptor(),
+                std::is_same_v<ParamsT, ScaledGemmParams<T>> ? Ddesc.descriptor() : Cdesc.descriptor(),
                 &algo_,
                 &heuristic_results
             );
@@ -483,7 +487,7 @@ class CublasltGemmOp : public Callable<ParamsT> {
                 params->c,
                 Cdesc.descriptor(),
                 params->c,
-                Cdesc.descriptor(),
+                std::is_same_v<ParamsT, ScaledGemmParams<T>> ? Ddesc.descriptor() : Cdesc.descriptor(),
                 &algo_,
                 workspace.mutable_get(),
                 workspaceSize,
