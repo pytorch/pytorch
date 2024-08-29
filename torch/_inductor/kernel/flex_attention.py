@@ -1020,6 +1020,7 @@ flex_attention_backward_template = TritonTemplate(
         else:
             Di = tl.load(DELTA2 + offs_m2, mask=offs_m2 < Q_LEN)
             lse = tl.load(LSE2 + offs_m2, mask=offs_m2 < Q_LEN)
+        lse = tl.where(lse == -float("inf"), 0.0, lse)
         lse = lse[:, None]
 
         # ~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1452,6 +1453,7 @@ def bwd_dkdv_block_mn(
     else:
         qT = tl.load(qT_ptrs, mask=offs_m1[None, :] < Q_LEN)
         lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
+    lse = tl.where(lse == -float("inf"), 0.0, lse)
     qkT = tl.dot(k, qT)
     if not PRESCALE_QK:
         qkT *= SM_SCALE

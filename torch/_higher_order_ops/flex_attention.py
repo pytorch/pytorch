@@ -705,7 +705,9 @@ def sdpa_dense_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    masked_out_rows = logsumexp == -float("inf")
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
+    softmax_scores = torch.where(masked_out_rows.unsqueeze(-1), 0, softmax_scores)
 
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 

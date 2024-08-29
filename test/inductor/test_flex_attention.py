@@ -1661,7 +1661,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (2, 2, N_CTX, 64),
             device="cuda",
             dtype=torch.float32,
-            requires_grad=False,
+            requires_grad=True,
         )
 
         def sliding_window_causal(b, h, q_idx, kv_idx):
@@ -1694,6 +1694,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             kernel_options=kernel_options,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
+        gradOut = make_tensor(requires_grad=False)
 
         x_local, lse_local = local_attn(q, k, v)
         x_global, lse_global = global_attn(q, k, v)
@@ -1706,9 +1707,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         x = ((x_local * lse_local[..., None]) + (x_global * lse_global[..., None])) / (
             lse_global[..., None] + lse_local[..., None]
         )
+        x.backward(gradOut)
+        flex_q_grad, flex_k_grad, flex_v_grad = q.grad, k.grad, v.grad
+        q.grad = None
+        k.grad = None
+        v.grad = None
 
-        out2 = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True)
-        torch.testing.assert_close(x, out2, atol=3e-3, rtol=2e-3)
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True)
+        out.backward(gradOut)
+
+        torch.testing.assert_close(x, out, atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(flex_q_grad, q.grad, atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(flex_k_grad, k.grad, atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(flex_v_grad, v.grad, atol=3e-3, rtol=2e-3)
 
     @supported_platform
     def test_small_q_kv_len(self):
