@@ -1359,46 +1359,33 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
-    def _raise_exception_variable(self, inst):
-        val = self.pop()
-        # User can raise exception in 2 ways
-        #   1) raise exception type - raise NotImplementedError
-        #   2) raise execption instance - raise NotImplemetedError("foo")
-
-        # 1) when user raises exception type
-        if isinstance(val, variables.BuiltinVariable):
-            # Create the instance of the exception type
-            # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
-            val = val.call_function(self, [], {})  # type: ignore[arg-type]
-
-        # Save the exception in a global data structure
-        self.exn_vt_stack.append(val)
-
-        # 2) when user raises exception instance
-        if isinstance(val, variables.ExceptionVariable):
-            if observed_exception_type := exc.observed_exception_map.get(val.exc_type):
-                raise observed_exception_type(f"raised exception {val}")
-            raise exc.ObservedException(f"raised exception {val}")
-        unimplemented(f"raise {exc}")
-
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
             unimplemented("re-raise")
         elif inst.arg == 1:
-            self._raise_exception_variable(inst)
-        else:
-            # Support raise .. from None ... Dynamo does not track __cause__ and other attributes of exception. So we
-            # ignore `from None` part.
-            from_vt = self.pop()
-            if isinstance(from_vt, ConstantVariable) and from_vt.value is None:
-                self._raise_exception_variable(inst)
-            unimplemented("raise ... from ...")
+            val = self.pop()
+            # User can raise exception in 2 ways
+            #   1) raise exception type - raise NotImplementedError
+            #   2) raise execption instance - raise NotImplemetedError("foo")
 
-    def RERAISE(self, inst):
-        if sys.version_info >= (3, 11):
-            # RERAISE is currently supported in a narrow case of `raise ... from None`
-            self._raise_exception_variable(inst)
-        unimplemented("RERAISE")
+            # 1) when user raises exception type
+            if isinstance(val, variables.BuiltinVariable):
+                # Create the instance of the exception type
+                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
+                val = val.call_function(self, [], {})  # type: ignore[arg-type]
+
+            # Save the exception in a global data structure
+            self.exn_vt_stack.append(val)
+
+            # 2) when user raises exception instance
+            if isinstance(val, variables.ExceptionVariable):
+                if val.exc_type is StopIteration:
+                    # StopIteration is used to find the end of iteration while tracing __next__
+                    raise exc.ObservedUserStopIteration(f"raised exception {val}")
+                raise exc.ObservedException(f"raised exception {val}")
+            unimplemented(f"raise {exc}")
+        else:
+            unimplemented("raise ... from ...")
 
     def exception_handler(self, raised_exception):
         if sys.version_info >= (3, 11):
@@ -1413,6 +1400,10 @@ class InstructionTranslatorBase(
 
                 # 2) if 'lasti' is true, then push the offset that the exception was raised at
                 if exn_tab_entry.lasti:
+                    # This is untested. Any test that tests this end-to-end
+                    # requires supporting more bytecodes. Therefore graph
+                    # breaking for now.
+                    unimplemented("lasti=True while exception handling")
                     self.push(
                         variables.ConstantVariable(self.current_instruction.offset)
                     )
@@ -1444,12 +1435,9 @@ class InstructionTranslatorBase(
                     # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                     self.popn(3)
                     if len(self.block_stack) == 0:
-                        # No handler found in this frame. Bubble the exception to the parent
-                        # instruction translater.
-                        self.stack.clear()
-                        if type(self) is InstructionTranslator:
-                            raise Unsupported("Observed exception")
-                        raise raised_exception
+                        unimplemented(
+                            "exception is raised when block stack " "is empty"
+                        )
                     block_stack_entry = self.block_stack.pop()
 
                 if block_stack_entry.inst.opname != "SETUP_FINALLY":
