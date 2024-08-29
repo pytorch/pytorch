@@ -1411,6 +1411,54 @@ main()
                 f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
             )
 
+    def test_non_traceable_autograd_cpp_node(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = false;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    return grad_output;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_non_traceable_autograd_cpp_node",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            x = torch.ones(10, 10, requires_grad=True)
+            out = torch.ops.test_non_traceable_autograd_cpp_node.custom_op_backed_by_autograd_fn(
+                x
+            )
+            loss = out.sum()
+            loss.backward()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/",
+        ), compiled_autograd.enable(compiler_fn):
+            fn()
+
     def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2469,6 +2517,20 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             loss.backward()
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 1)
+
+    def test_reentrant_checkpointing(self):
+        def fn(x):
+            y = x.sin()
+            z = y.cos()
+            return (y * z).sum()
+
+        inp = torch.rand(10, 10, requires_grad=True)
+        out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"\(e.g. reentrant checkpointing\), this is not supported yet\.",
+        ), torch._dynamo.compiled_autograd.enable(torch.compile):
+            out.backward()
 
 
 def load_test_module(name):
