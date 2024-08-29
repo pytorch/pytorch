@@ -21,6 +21,8 @@ from torch.utils import _pytree as pytree
 if TYPE_CHECKING:
     import onnxruntime as ort
 
+_LARGE_MODEL_THRESHOLD = 512 * 1024 * 1024  # 512MB
+
 logger = logging.getLogger(__name__)
 
 
@@ -143,7 +145,10 @@ ONNXProgram(
             self.model.graph.inputs.extend(self.model.graph.initializers.values())  # type: ignore[arg-type]
 
         # Save the model to disk
-        if external_data:
+        if (
+            external_data
+            or _count_initializer_size(self.model.graph) > _LARGE_MODEL_THRESHOLD
+        ):
             onnxscript_apis.save_model_with_external_data(self.model, destination)
         else:
             ir.save(self.model, destination)
@@ -169,9 +174,8 @@ ONNXProgram(
                 :func:`_ort_session_initializer` function.
         """
         # TODO(justinchuby): Allow different inference options
-        threshold = 1 << 29  # 512MB
         logger.debug("Initializing the inference session.")
-        if _count_initializer_size(self.model.graph) > threshold:
+        if _count_initializer_size(self.model.graph) > _LARGE_MODEL_THRESHOLD:
             logger.debug(
                 "The serialized ONNX model has more than 512MB of initializers."
             )
