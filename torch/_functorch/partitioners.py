@@ -823,12 +823,24 @@ def solve_min_cut(
                     return True
         return False
 
+    def can_fuse_into_triton_kernel_wrapper_functional(a, b):
+        if b.target != torch.ops.higher_order.triton_kernel_wrapper_functional:
+            return False
+        mutable_arg_names = b.kwargs["tensors_to_clone"]
+        for name in mutable_arg_names:
+            arg = b.kwargs["kwargs"][name]
+            if a is arg:
+                return True
+        return False
+
     def is_fusible(a, b):
         # We can perform "memory fusion" into a cat, but cat cannot be a
         # producer to a fusion
         if get_aten_target(b) == aten.cat:
             return True
         if can_fuse_into_auto_functionalized(a, b):
+            return True
+        if can_fuse_into_triton_kernel_wrapper_functional(a, b):
             return True
         return op_types.is_fusible(a) and op_types.is_fusible(b)
 
