@@ -349,9 +349,9 @@ class TestAutocastGPU(TestCase):
     #   (1) double precision is ignored,
     #   (2) if any argument is float, then all arguments are promoted to float,
     #   (3) if all arguments are of lower precision dtype, then all dtypes must be equal to the same amp autocast dtype.
-    # Since AMP autocast dtype is thread-local, it is not preserved across thread boundaries during autograd.
-    # Due to the multi-threaded nature of the autograd, the forward is being run in bfloat16, while the
-    # backward pass defaults to float16. The dtype mismatch leads to the error in the policy, as the criteria (3) is not satisfied.
+    # Since AMP autocast dtype is thread-local, it is not preserved across thread boundaries during autograd execution,
+    # and due to the multi-threaded nature of the autograd, the forward pass is being run in bfloat16, while the backward
+    # pass defaults to float16. The dtype mismatch leads to the error in the policy, as the criteria (3) is not satisfied.
     # For more info see https://github.com/pytorch/pytorch/issues/132715.
     def test_autocast_prioritize(self):
         device = "cuda"
