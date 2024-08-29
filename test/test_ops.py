@@ -1066,7 +1066,7 @@ class TestCommon(TestCase):
             # Skip ops without any floating point outputs, e.g. isnan
             return (), {}
         else:
-            return (sample.input, *sample.args), {'out': out, **sample.kwargs}
+            return (sample.input, *sample.args), {"out": out, **sample.kwargs}
 
     @ops(
         [
