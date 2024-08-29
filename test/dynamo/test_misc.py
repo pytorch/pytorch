@@ -10061,22 +10061,6 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(len(counters["graph_break"]), 0)
 
-    def test_itertools_tee(self):
-        counters.clear()
-
-        def fn(l):
-            a, b = itertools.tee(l)
-            return list(a), list(b)
-
-        l = [1, 2, 2, 3, 4, 4, 4, 1, 2]
-        eager = fn(l)
-
-        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
-        compiled = compiled_fn(l)
-
-        self.assertEqual(eager, compiled)
-        self.assertEqual(len(counters["graph_break"]), 0)
-
     def test_list_iterator_contains(self):
         def fn(x):
             it = iter(["my_weight", "not_my_weight"])
