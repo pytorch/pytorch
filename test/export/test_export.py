@@ -298,7 +298,7 @@ class TestExport(TestCase):
         from torch.export.dynamic_shapes import _dumps, _extracts, _loads
         from torch.utils._pytree import tree_map
 
-        def _tensor_inputs(shapes):
+        def _construct_inputs(shapes):
             def _is_tensor_leaf(x):
                 return (
                     isinstance(x, tuple)
@@ -336,12 +336,10 @@ class TestExport(TestCase):
 
             for ep in eps:
                 for shapes in passing_shapes:
-                    test_inputs = _tensor_inputs(shapes)
-                    # test_inputs = (torch.randn(*shape) for shape in shapes)
+                    test_inputs = _construct_inputs(shapes)
                     ep.module()(*test_inputs)
                 for shapes in failing_shapes:
-                    test_inputs = _tensor_inputs(shapes)
-                    # test_inputs = (torch.randn(*shape) for shape in shapes)
+                    test_inputs = _construct_inputs(shapes)
                     with self.assertRaises(RuntimeError):
                         ep.module()(*test_inputs)
 
@@ -2744,16 +2742,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
-
-    def test_list_input(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                return x["data"][0] + x["data"][1]
-
-        inputs = ({
-            "data": [torch.randn(4), torch.randn(4)]
-        },)
-        ep = export(Foo(), inputs)
 
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):

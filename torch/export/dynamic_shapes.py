@@ -1196,9 +1196,11 @@ def refine_dynamic_shapes_from_suggested_fixes(
 
 
 def _postprocess_serialized_shapes(dynamic_shapes, dims):
+    """
+    Sorts dims and returns dictionary format
+    """
     from torch.utils._sympy.numbers import int_oo
 
-    # sorts dims and returns dictionary
     dims = {
         k: {
             "min": v["min"],
@@ -1213,10 +1215,11 @@ def _postprocess_serialized_shapes(dynamic_shapes, dims):
     }
 
 
-def _dumps(dynamic_shapes, args, kwargs={}):
+def _dumps(dynamic_shapes, args, kwargs=None):
     """
     Utility function for dynamic shapes serialization, serializing a dynamic_shapes spec.
     The serialized format is a dictionary containing 2 fields, "dynamic_shapes" and "dims".
+    Uses args & kwargs to distinguish between tensor-level and dim-level specs (only for Nones).
 
     dynamic_shapes: A pytree structure mirroring the dynamic_shapes input to export():
         - Each tensor input is represented with a list of values, non-tensor inputs with None.
@@ -1311,7 +1314,7 @@ def _dumps(dynamic_shapes, args, kwargs={}):
         assert isinstance(val, _Dim)
 
         # track root dim
-        root = val.root if isinstance(val, _DerivedDim) else val
+        root = val.root if isinstance(val, _DerivedDim) else val  # type: ignore[attr-defined]
         if root.__name__ not in dims:
             dims[root.__name__] = {
                 "min": root.min,
@@ -1329,6 +1332,7 @@ def _dumps(dynamic_shapes, args, kwargs={}):
         return {"dynamic_shapes": None, "dims": {}}
 
     # convert to tuple of specs, for each arg/kwarg
+    kwargs = kwargs or {}
     if isinstance(dynamic_shapes, dict):
         dynamic_shapes = dynamic_shapes.values()
     dynamic_shapes = tuple(dynamic_shapes)
@@ -1418,11 +1422,11 @@ def _extracts(ep: ExportedProgram):
         Extracts placeholder shapes from the ExportedProgram to match the dynamic_shapes input structure.
         Returns tuple of dynamic_shapes spec for each original model (arg/kwarg) input.
         """
-        user_inputs = set(
+        user_inputs = {
             spec.arg.name
             for spec in ep.graph_signature.input_specs
             if spec.kind == InputKind.USER_INPUT
-        )
+        }
         placeholders = [
             node for node in ep.graph.nodes
             if node.op == "placeholder"
