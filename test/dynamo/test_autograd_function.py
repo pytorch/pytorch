@@ -1123,7 +1123,7 @@ class GraphModule(torch.nn.Module):
         function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, args_tensor_mask = [True, True], non_differentiable_idx = [1]);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, args_tensor_mask = [True, True], non_differentiable_idx = [1], is_setup_ctx_defined = False, generate_vmap_rule = False);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
         getitem: "f32[]" = autograd_function_apply[0]
         getitem_1: "f32[]" = autograd_function_apply[1];  autograd_function_apply = None
         return (getitem, getitem_1)

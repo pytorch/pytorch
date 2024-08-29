@@ -4,7 +4,6 @@ import dataclasses
 import functools
 import inspect
 import itertools
-import os
 import random
 import re
 import sys
@@ -15,7 +14,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, polyfills, variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
@@ -30,23 +29,23 @@ from ..source import (
 )
 from ..utils import (
     check_unspec_or_constant_args,
-    hashable,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
     set_example_value,
 )
 from .base import VariableTracker
-from .functions import NestedUserFunctionVariable, UserFunctionVariable, wrap_bound_arg
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+    wrap_bound_arg,
+)
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-
-POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS = {
-    os.fspath: polyfills.fspath,
-}
 
 
 class NO_SUCH_SUBOBJ:
@@ -107,10 +106,12 @@ class SuperVariable(VariableTracker):
         resolved_attr = None
         search_mro = type_to_use.__mro__
         start_index = search_mro.index(search_type) + 1
+        # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
+        # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
+        # attribute in the class __dict__
         for index in range(start_index, len(search_mro)):
-            if resolved_getattr := inspect.getattr_static(
-                search_mro[index], name, NO_SUCH_SUBOBJ
-            ):
+            # Dont call getattr, just check the __dict__ of the class
+            if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
                 if resolved_getattr is not NO_SUCH_SUBOBJ:
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
                     if type_to_use_source:
@@ -370,6 +371,7 @@ class InspectSignatureVariable(VariableTracker):
 
     _nonvar_fields = {
         "signature",
+        "parameters",
         *VariableTracker._nonvar_fields,
     }
 
@@ -385,18 +387,27 @@ class InspectSignatureVariable(VariableTracker):
         super().__init__(**kwargs)
         self.inspected = inspected
 
-        if isinstance(self.inspected, UserFunctionVariable):
+        if isinstance(self.inspected, UserMethodVariable):
             self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())[1:]
+        elif isinstance(self.inspected, UserFunctionVariable):
+            self.fn = self.inspected.get_function()
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
         else:
             self.fn = self.inspected.as_python_constant()
-        self.signature = inspect.signature(self.fn)
+            self.signature = inspect.signature(self.fn)
+            self.parameters = list(self.signature.parameters.items())
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    variables.ConstantVariable.create(name): InspectParameterVariable()
-                    for name in self.inspected.inspect_parameter_names()
+                    variables.ConstantVariable.create(
+                        param[0]
+                    ): InspectParameterVariable(param[1])
+                    for param in self.parameters
                 },
                 user_cls=dict,
             )
@@ -452,7 +463,24 @@ class InspectSignatureVariable(VariableTracker):
 
 
 class InspectParameterVariable(VariableTracker):
-    """This is not implemented, if used will graph break."""
+    """represents inspect.Parameter(...)"""
+
+    def __init__(self, value, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        try:
+            attr_value = getattr(self.value, name)
+            if self.source:
+                attr_source = AttrSource(self.source, name)
+                return VariableBuilder(tx, attr_source)(attr_value)
+            else:
+                return SourcelessBuilder.create(tx, attr_value)
+        except AttributeError:
+            unimplemented(f"getattr({self.value}, {name})")
 
 
 class InspectBoundArgumentsVariable(VariableTracker):
@@ -635,6 +663,14 @@ class AutogradFunctionVariable(VariableTracker):
             forward_fn = autograd_function_forward_rewritten(
                 self.fn_cls.forward, self.fn_cls.setup_context
             )
+        else:
+            if torch._C._are_functorch_transforms_active():
+                raise RuntimeError(
+                    "In order to use an autograd.Function with functorch transforms "
+                    "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
+                    "staticmethod. For more details, please see "
+                    "https://pytorch.org/docs/main/notes/extending.func.html"
+                )
 
         if (
             requires_grad
@@ -1139,12 +1175,6 @@ class PythonModuleVariable(VariableTracker):
             attr_value = getattr(self.value, name)
         else:
             attr_value = self.value.__dict__[name]
-
-        if hashable(attr_value):
-            if polyfill_fn := POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS.get(
-                attr_value, None
-            ):
-                return variables.UserFunctionVariable(polyfill_fn)
 
         if self.source:
             new_source = AttrSource(self.source, name)
