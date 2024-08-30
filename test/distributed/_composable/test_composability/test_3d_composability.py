@@ -1,12 +1,14 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import copy
 import functools
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Callable, List, Optional, Tuple, Union
+from io import BytesIO
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -16,6 +18,7 @@ from torch.distributed import DeviceMesh
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed._composable.replicate import replicate
 from torch.distributed._tensor import Replicate, Shard
+from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import (
     PipelineStage,
@@ -97,6 +100,43 @@ class ParallelDims:
     @cached_property
     def model_parallel_size(self):
         return self.tp * self.pp
+
+
+@dataclass
+class TrainState(Stateful):
+    step: int = 0
+    global_avg_losses: List[float] = field(default_factory=list)
+    global_max_losses: List[float] = field(default_factory=list)
+    log_steps: List[int] = field(default_factory=list)
+
+    def state_dict(self) -> Dict[str, Any]:
+        # Only checkpoint global_avg_losses and global_max_losses per log frequency
+        # to avoid sync overhead in every iteration.
+        global_avg_losses_bytes = BytesIO()
+        torch.save(self.global_avg_losses, global_avg_losses_bytes)
+        global_max_losses_bytes = BytesIO()
+        torch.save(self.global_max_losses, global_max_losses_bytes)
+        log_steps_bytes = BytesIO()
+        torch.save(self.log_steps, log_steps_bytes)
+        return {
+            "step": torch.tensor(self.step, dtype=torch.int32),
+            "global_avg_losses": global_avg_losses_bytes,
+            "global_max_losses": global_max_losses_bytes,
+            "log_steps": log_steps_bytes,
+        }
+
+    def load_state_dict(self, state_dict) -> None:
+        self.step = state_dict["step"].item()
+        state_dict["global_avg_losses"].seek(0)
+        self.global_avg_losses = torch.load(
+            state_dict["global_avg_losses"], weights_only=False
+        )
+        state_dict["global_max_losses"].seek(0)
+        self.global_max_losses = torch.load(
+            state_dict["global_max_losses"], weights_only=False
+        )
+        state_dict["log_steps"].seek(0)
+        self.log_steps = torch.load(state_dict["log_steps"], weights_only=False)
 
 
 @dataclass
@@ -354,6 +394,7 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
+        torch.distributed.breakpoint()
         h = x + self.attention(self.attention_norm(x), freqs_cis)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
@@ -462,9 +503,9 @@ class Transformer(nn.Module):
         """
         # passthrough for nonexistent layers, allows easy configuration of pipeline parallel stages
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
-
         for layer in self.layers.values():
             h = layer(h, self.freqs_cis)
+            torch.distributed.breakpoint()
 
         h = self.norm(h) if self.norm else h
         output = self.output(h).float() if self.output else h
@@ -659,13 +700,13 @@ class Test3DComposability(FSDPTest):
 
         os.environ["KINETO_LOG_LEVEL"] = "5"
 
-    @skip_if_lt_x_gpu(8)
+    @skip_if_lt_x_gpu(4)
     def test_3d_composability(self):
         self.run_subtests(
             {
                 "name": ["pp_dp_tp"],
                 "dp_degree": [
-                    2,
+                    1,
                 ],
                 "tp_degree": [
                     2,
@@ -714,6 +755,8 @@ class Test3DComposability(FSDPTest):
                 self.logger.warning("ENV will be overridden based on job config")
             os.environ[env] = val
 
+        # build dataloader
+
         _warn_overwrite_env(ASYNC_ERROR_HANDLING, SKIP_CLEANUP)
         os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
         torch.manual_seed(0)
@@ -760,10 +803,52 @@ class Test3DComposability(FSDPTest):
 
         optimizers = self._build_optimizers(model_parts)
         lr_schedulers = self._build_lr_schedulers(optimizers.optimizers)
-        train_state_step = 0
+        train_state = TrainState()
 
-        while train_state_step < 10000:
-            train_state_step += 1
+        train_context = self._get_train_context(
+            parallel_dims.loss_parallel_enabled,
+            True,
+        )
+
+        while train_state.step < 10000:
+            train_state.step += 1
+
+            input_ids = torch.randint(0, 2048, (8, 128))
+            labels = torch.randint(0, 2048, (8, 128))
+
+            input_ids = input_ids.cuda()
+            labels = labels.cuda()
+            optimizers.zero_grad()
+
+            if parallel_dims.pp_enabled:
+                # Pipeline Parallel forward / backward inside step() call
+                is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
+
+                with train_context():
+                    if pp_mesh.get_local_rank() == 0:
+                        torch.distributed.breakpoint()
+                        pp_schedule.step(input_ids)
+                    elif is_last_stage:
+                        losses = []
+                        pp_schedule.step(target=labels, losses=losses)
+                    else:
+                        pp_schedule.step()
+
+                # accumulate losses across pipeline microbatches
+                loss = (
+                    torch.mean(torch.stack(losses))
+                    if is_last_stage
+                    else torch.Tensor([-1.0])
+                )
+            else:
+                # Non-PP forward / backward
+                with train_context():
+                    pred = model(input_ids)
+                    loss = loss_fn(pred, labels)
+                    # pred.shape=(bs, seq_len, vocab_size)
+                    # need to free to before bwd to avoid peaking memory
+                    del pred
+                    loss.backward()
 
             # clip gradients
             for m in model_parts:
@@ -1247,6 +1332,24 @@ class Test3DComposability(FSDPTest):
         return SchedulersContainer(
             [_build_lr_scheduler(optimizer) for optimizer in optimizers]
         )
+
+    def _get_train_context(
+        self, enable_loss_parallel: bool, enable_compiled_autograd: bool
+    ):
+        @contextlib.contextmanager
+        def context():
+            with contextlib.ExitStack() as stack:
+                if enable_loss_parallel:
+                    stack.enter_context(
+                        torch.distributed.tensor.parallel.loss_parallel()
+                    )
+                if enable_compiled_autograd:
+                    stack.enter_context(
+                        torch._dynamo.utils.maybe_enable_compiled_autograd(True)
+                    )
+                yield
+
+        return context
 
 
 if __name__ == "__main__":
