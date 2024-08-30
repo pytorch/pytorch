@@ -465,6 +465,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     if field.name in kwargs:
                         var_tracker = kwargs[field.name]
                     else:
+                        if not field.init:
+                            continue
                         assert field.default is not dataclasses.MISSING
                         var_tracker = SourcelessBuilder.create(tx, field.default)
 
