@@ -1368,7 +1368,7 @@ void nnc_aten_addmm(
   int64_t alpha = extra_args[0], beta = extra_args[1];
 
   try {
-    at::addmm_out(r, x, y, z, alpha, beta);
+    at::addmm_out(r, x, y, z, beta, alpha);
   } catch (...) {
   }
 }
