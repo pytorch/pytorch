@@ -5,7 +5,7 @@ Python polyfills for builtins
 from __future__ import annotations
 
 import builtins
-from typing import Iterable
+from typing import Iterable, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -15,6 +15,9 @@ __all__ = [
     "any",
     "enumerate",
 ]
+
+
+_T = TypeVar("_T")
 
 
 @substitute_in_graph(builtins.all, can_constant_fold_through=True)
