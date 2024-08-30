@@ -3,21 +3,33 @@
 """
 This runner determinator is used to determine which set of runners to run a
 GitHub job on. It uses the first comment of a GitHub issue (by default
-https://github.com/pytorch/test-infra/issues/5132) as a user list to determine
-which users will get their jobs to run on experimental runners. This user list
-is also a comma separated list of additional features or experiments which the
-user could be opted in to.
+https://github.com/pytorch/test-infra/issues/5132) to define the configuration
+of which runners should be used to run which job.
+
+The configuration has two parts, the rollout settings and a user list,
+separated by a line containing "---".  If the line is not present, the
+configuration is considered to be empty with only the second part, the user
+list, defined.
+
+The first part is a YAML block that defines the rollout settings. This can be
+used to define any settings that are needed to determine which runners to use.
+It's fields are defined by the RolloutSettings class below.
+
+The second part is a list of users who are explicitly opted in to the LF fleet.
+The user list is also a comma separated list of additional features or
+experiments which the user could be opted in to.
 
 The user list has the following rules:
 
 - Users are GitHub usernames with the @ prefix
-- If the first line is a "*" then all users will use the new runners
-- If the first line is a "!" then all users will use the old runners
 - Each user is also a comma-separated list of features/experiments to enable
 - A "#" prefix indicates the user is opted out of the new runners but is opting
   into features/experiments.
 
-Example user list:
+Example config:
+    lf_fleet_rollout_percentage = 25
+
+    ---
 
     @User1
     @User2,amz2023
@@ -26,10 +38,12 @@ Example user list:
 
 import logging
 import os
+import random
 from argparse import ArgumentParser
 from logging import LogRecord
-from typing import Any, Iterable
+from typing import Any, Iterable, NamedTuple
 
+import yaml
 from github import Auth, Github
 from github.Issue import Issue
 
@@ -44,6 +58,14 @@ RUNNER_AMI_AMZ2023 = "amz2023"
 GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
+
+
+class RolloutSettings(NamedTuple):
+    # Percentage of jobs to run on the LF fleet.
+    # For users not opted in, this is the percentage of jobs that will run on the LF fleet.
+    lf_fleet_rollout_percentage: int = 0
+
+    # Add more fields as needed
 
 
 class ColorFormatter(logging.Formatter):
@@ -172,6 +194,68 @@ def is_exception_branch(branch: str) -> bool:
     return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
 
+def load_yaml(yaml_text: str) -> Any:
+    try:
+        data = yaml.safe_load(yaml_text)
+        return data
+    except yaml.YAMLError as exc:
+        log.exception("Error loading YAML")
+        raise
+
+
+def extract_user_opt_in_text(rollout_state: str) -> str:
+    """
+    Returns just the portion of the rollout_state that defines the opted in users
+    """
+    rollout_state_parts = rollout_state.split("---")
+    if len(rollout_state_parts) == 2:
+        return rollout_state_parts[1]
+    else:
+        return rollout_state
+
+
+def parse_rollout_settings_text(rollout_state: str) -> str:
+    """
+    Returns just the portion of the rollout_state that defines the settings
+    """
+    rollout_state_parts = rollout_state.split("---")
+    if len(rollout_state_parts) == 2:
+        return rollout_state_parts[0]
+    else:
+        return ""
+
+
+def parse_settings(rollout_state: str) -> RolloutSettings:
+    """
+    Parse settings, if any, from the rollout state.
+
+    If the issue body contains "---" then the text above that is the settings
+    and the text below is the list of opted in users.
+
+    If it doesn't contain "---" then the settings are empty and the default values are used.
+    """
+    try:
+        raw_settings = load_yaml(parse_rollout_settings_text(rollout_state))
+        if raw_settings:
+            # Filter out any unexpected fields and log a warning for each one
+            settings = {}
+            for setting in raw_settings:
+                if setting in RolloutSettings._fields:
+                    settings[setting] = raw_settings[setting]
+                else:
+                    log.warning(
+                        f"Unexpected setting in rollout state: {setting} = {raw_settings[setting]}"
+                    )
+        else:
+            user_list = rollout_state
+
+        return RolloutSettings(**settings)
+
+    except Exception as e:
+        log.error(f"Failed to parse rollout state. Exception: {e}")
+        raise
+
+
 def get_fleet(rollout_state: str, workflow_requestors: Iterable[str]) -> str:
     """
     Determines if the job should run on the LF fleet or the Meta fleet
@@ -182,30 +266,33 @@ def get_fleet(rollout_state: str, workflow_requestors: Iterable[str]) -> str:
     """
 
     try:
-        if rollout_state[0] == "!":
-            log.info("LF Workflows are disabled for everyone. Using meta runners.")
-            return WORKFLOW_LABEL_META
-        elif rollout_state[0] == "*":
-            log.info("LF Workflows are enabled for everyone. Using LF runners.")
+        user_optin = extract_user_opt_in_text(rollout_state)
+        settings = parse_settings(rollout_state)
+
+        all_opted_in_users = {
+            usr_raw.strip("\n\t@ ").split(",")[0] for usr_raw in user_optin.split()
+        }
+        opted_in_requestors = {
+            usr for usr in workflow_requestors if usr in all_opted_in_users
+        }
+
+        if opted_in_requestors:
+            log.info(
+                f"LF Workflows are enabled for {', '.join(opted_in_requestors)}. Using LF runners."
+            )
             return WORKFLOW_LABEL_LF
-        else:
-            all_opted_in_users = {
-                usr_raw.strip("\n\t@ ").split(",")[0]
-                for usr_raw in rollout_state.split()
-            }
-            opted_in_requestors = {
-                usr for usr in workflow_requestors if usr in all_opted_in_users
-            }
-            if opted_in_requestors:
+
+        log.info(f"{', '.join(workflow_requestors)} have not opted into LF Workflows.")
+
+        if settings.lf_fleet_rollout_percentage > 0:
+            r = random.randint(1, 100)
+            if r <= settings.lf_fleet_rollout_percentage:
                 log.info(
-                    f"LF Workflows are enabled for {', '.join(opted_in_requestors)}. Using LF runners."
+                    f"Based on fleet rollout percentage of {settings.lf_fleet_rollout_percentage}%, using LF runners for this workflow."
                 )
                 return WORKFLOW_LABEL_LF
-            else:
-                log.info(
-                    f"LF Workflows are disabled for {', '.join(workflow_requestors)}. Using meta runners."
-                )
-                return WORKFLOW_LABEL_META
+
+        return WORKFLOW_LABEL_META
 
     except Exception as e:
         log.error(
