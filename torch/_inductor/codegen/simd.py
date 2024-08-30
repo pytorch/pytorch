@@ -1401,19 +1401,12 @@ class SIMDScheduling(BaseScheduling):
 
         self.codegen_comment(node_schedule)
 
-        # debug printing values of intermediate tensors
-        # Note: MultiKernel debug printing is not supported for now
-        enable_debug_printer = (
-            config.aot_inductor.debug_intermediate_value_printer
-            and not isinstance(final_kernel, MultiKernel)
-        )
         _, call_args, arg_signatures, _ = (
             final_kernel.args.python_argdefs()
             if not isinstance(final_kernel, MultiKernel)
             else [None, [], None, None]
         )
         debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.enable_debug_printer = enable_debug_printer
         debug_printer_manager.set_printer_args(
             call_args, kernel_name, arg_signatures, final_kernel
         )
