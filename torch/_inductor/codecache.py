@@ -51,6 +51,42 @@ import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.codegen.rocm.compile_command import (
+    rocm_compile_command,
+    rocm_compiler,
+)
+
+
+T = TypeVar("T")
+
+
+if TYPE_CHECKING:
+    from collections.abc import KeysView
+
+    from .remote_cache import JsonDataTy, RemoteCache
+
+
+"""
+codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
+https://github.com/pytorch/pytorch/issues/124245#issuecomment-2197778902
+"""
+from torch._inductor.cpp_builder import (
+    _set_gpu_runtime_env,
+    _transform_cuda_paths,
+    CppBuilder,
+    CppOptions,
+    CppTorchCudaOptions,
+    get_compiler_version_info,
+    get_cpp_compiler,
+    get_name_and_dir_from_output_file_path,
+    normalize_path_separator,
+)
+from torch._inductor.cpu_vec_isa import pick_vec_isa
+from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
+    CudagraphCachedInfo,
+    log_cudagraph_skip_and_bump_counter,
+)
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -93,16 +129,16 @@ if config.is_fbcode():
     )
 else:
 
-    def log_global_cache_errors(*args, **kwargs):
+    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def log_global_cache_stats(*args, **kwargs):
+    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def log_global_cache_vals(*args, **kwargs):
+    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def use_global_cache() -> bool:
+    def use_global_cache() -> bool:  # type: ignore[misc]
         return False
 
 
@@ -387,14 +423,17 @@ def write_text(text: str) -> str:
 
 
 def write_atomic(
-    path: str, content: Union[str, bytes], make_dirs: bool = False
+    path_: str,
+    content: Union[str, bytes],
+    make_dirs: bool = False,
+    encode_utf_8: bool = False,
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
     assert isinstance(
         content, (str, bytes)
     ), "Only strings and byte arrays can be saved in the cache"
-    path = Path(path)
+    path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
@@ -604,7 +643,7 @@ def torch_key():
 
     from libfb.py import parutil
 
-    return parutil.get_file_contents("torch/src_hash.txt").rstrip()
+    return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
 def get_inductor_root():
@@ -705,15 +744,143 @@ def compiled_fx_graph_hash(
     key = "f" + FxGraphCachePickler.get_hash(details)
     debug_str = details.debug_str()
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "fx_graph_cache_hash",
-            "encoding": "json",
-        },
-        payload_fn=lambda: json.dumps(
-            {"key": key, "components": debug_str.split("\n")}
-        ),
+    return key, debug_lines
+
+
+def cudagraph_post_compile(
+    example_inputs: List[Any],
+    compiled_graph: CompiledFxGraph,
+    cudagraphs: BoxedBool,
+) -> None:
+    """
+    Checks for any reasons not to run cudagraphs and then
+    runs it on compiled_graph.
+    Mutates the `compiled_graph.current_callable` and `cudagraphs`
+    """
+    assert compiled_graph.current_callable is not None
+    assert compiled_graph.cudagraph_info is not None
+    cached_info = compiled_graph.cudagraph_info
+    cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
+    inputs_to_check = compiled_graph.inputs_to_check
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
+    is_inference = compiled_graph.fx_kwargs["is_inference"]
+    is_backward = compiled_graph.fx_kwargs["is_backward"]
+
+    if not cudagraph_fail_reasons:
+        fx_kwargs = compiled_graph.fx_kwargs
+        static_input_idxs = fx_kwargs["static_input_idxs"]
+
+        placeholders = cached_info.placeholders
+        stack_traces = cached_info.stack_traces
+        if not config.triton.cudagraph_trees:
+            # Force specialize all inputs so that CUDA graphs will work
+            for t in example_inputs:
+                if isinstance(t, torch.SymInt):
+                    int(t)  # guard
+
+        if (
+            boxed_forward_device_index is not None
+            and not is_inference
+            and not is_backward
+        ):
+            boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+
+        from .compile_fx import cudagraphify
+
+        current_callable = compiled_graph.current_callable
+        assert current_callable is not None
+        compiled_graph.current_callable = cudagraphify(
+            current_callable,
+            static_input_idxs=static_input_idxs,
+            device_index=next(iter(compiled_graph.device_idxs)),
+            stack_traces=stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=tuple(compiled_graph.constants.values()),
+            placeholders=placeholders,
+            mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
+        )
+
+    else:
+        BoxedBool.disable(cudagraphs)
+
+        # See [Backward Generation Handling]
+        # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+        # know we are we running the backward even if we will not run it in cudagraphs
+        if is_backward and config.triton.cudagraph_trees:
+            assert boxed_forward_device_index is not None
+            assert boxed_forward_device_index.value is not None
+            compiled_graph_callable = compiled_graph.current_callable
+
+            manager = torch._inductor.cudagraph_trees.get_manager(
+                boxed_forward_device_index.value, create_if_none_exists=False
+            )
+            # should already exist from forward
+            assert manager is not None
+
+            def compiled_artifact(new_inputs: List[Any]) -> Callable[..., Any]:
+                manager.set_to_running_backward()  # type: ignore[union-attr]
+                return compiled_graph_callable(new_inputs)
+
+            compiled_graph.current_callable = compiled_artifact
+
+        if "cuda" in compiled_graph.device_types:
+            # prefer better disable_cudagraphs_reason bc stack trace
+            # TODO: migrate all disable reasons to stack trace, refactor
+            if compiled_graph.disabled_cudagraphs_reason:
+                log_cudagraph_skip_and_bump_counter(
+                    compiled_graph.disabled_cudagraphs_reason
+                )
+            else:
+                log_cudagraph_skip_and_bump_counter(
+                    f"skipping cudagraphs due to {cudagraph_fail_reasons}"
+                )
+
+
+def maybe_realign_inputs(
+    ran_cudagraphs: BoxedBool,
+    compiled_graph: CompiledFxGraph,
+    inputs_to_check: Sequence[int],
+) -> None:
+    """
+    Realigns input strides from inputs_to_check if
+    we didn't end up running cudagraphs. Mutates
+    `compiled_graph.current_callable` if cudagraphs
+    was run. Otherwise, does nothing.
+    """
+    if not ran_cudagraphs:
+        assert compiled_graph.current_callable is not None
+        new_callable = align_inputs_from_check_idxs(
+            compiled_graph.current_callable, inputs_to_check
+        )
+        if new_callable is not compiled_graph.current_callable:
+            compiled_graph.current_callable = new_callable
+
+
+def add_ephemeral_timeout_increase_for_distributed(time_saved_ns: int) -> int:
+    """
+    Ephemerally increases the NCCL timeout when compiling for a distributed job
+    Returns amount of seconds increased
+    """
+    if not torch.distributed.is_available() or not torch.distributed.is_initialized():
+        return 0
+
+    increased_timeout_sec = int(time_saved_ns // 1e9)  # convert to seconds
+
+    if config.is_fbcode():
+        fudge_factor = torch._utils_internal.justknobs_getval_int(
+            "pytorch/remote_cache:ephemeral_timeout_fudge_factor_percentage"
+        )
+        log.info(
+            "Ephemeral NCCL timeout increase fudge factor %d and original increase value %d",
+            fudge_factor,
+            increased_timeout_sec,
+        )
+        increased_timeout_sec += int(increased_timeout_sec * fudge_factor / 100)
+
+    log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
+    dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+        timedelta(seconds=increased_timeout_sec)
     )
 
     return key
@@ -785,8 +952,8 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
-        local,
-        remote_cache,
+        local: bool,
+        remote_cache: Optional[RemoteCache[JsonDataTy]],
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -814,8 +981,12 @@ class FxGraphCache:
 
             if remote_cache:
                 try:
-                    if (data := remote_cache.get(key)) is not None:
-                        yield pickle.loads(data)
+                    if (cache_data := remote_cache.get(key)) is not None:
+                        assert isinstance(cache_data, dict)
+                        data = cache_data["data"]
+                        assert isinstance(data, (str, bytes))
+                        content = base64.b64decode(data)
+                        yield pickle.loads(content)
                 except Exception:
                     log.warning(
                         "fx graph cache unable to load compiled graph", exc_info=True
@@ -906,10 +1077,9 @@ class FxGraphCache:
         key: str,
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
-        time_taken_ns,
-        local,
-        remote_cache,
-    ):
+        local: bool,
+        remote_cache: Optional[RemoteCache[JsonDataTy]],
+    ) -> None:
         """
         Store a serialized CompiledFxGraph on disk.
         """
@@ -955,15 +1125,11 @@ class FxGraphCache:
                 write_atomic(path, content, make_dirs=True)
 
             if remote_cache:
-                cache_data = (
-                    {
-                        "data": content,
-                        "time_taken_ms": time_taken_ns
-                        // 1000000,  # Convert from NS to MS
-                    }
-                    if config.is_fbcode()
-                    else content
-                )
+                time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
+                cache_data: JsonDataTy = {
+                    "data": base64.b64encode(content).decode("ascii"),
+                    "time_taken_ms": time_taken_ms,
+                }
                 remote_cache.put(key, cache_data)
         except Exception:
             log.warning("fx graph unable to write to cache", exc_info=True)
@@ -1016,20 +1182,22 @@ class FxGraphCache:
             FxGraphCache._check_can_cache(gm)
             key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs, inputs_to_check)
 
-            remote_cache = None
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = None
             if remote:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.runtime.fb_memcache import (
-                            FbMemcacheRemoteFxGraphCacheBackend,
-                        )
+                        from torch._inductor.fb.remote_cache import FbRemoteFxGraphCache
 
-                        remote_cache = FbMemcacheRemoteFxGraphCacheBackend(cache_id)
+                        remote_cache = FbRemoteFxGraphCache(cache_id)
                     else:
-                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
+                        from torch._inductor.remote_cache import RemoteFxGraphCache
 
-                        remote_cache = RedisRemoteCacheBackend(cache_id)
+                        remote_cache = RemoteFxGraphCache(cache_id)
+                except ModuleNotFoundError as e:
+                    # No need for a stack trace on this error
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache: %s", e)
                 except Exception:
                     remote_cache = None
                     log.warning("Unable to create a remote cache", exc_info=True)
@@ -1125,816 +1293,18 @@ class CompiledFxGraph:
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.metrics_deltas = metrics_deltas
         self.guards_expr = None
+        self.cudagraph_info = None
+        self.fx_kwargs = {}
+        self.inputs_to_check = ()
+        self.boxed_forward_device_index = None
 
     def __call__(self, inputs: List[Any]) -> Any:
         assert self.current_callable is not None
         return self.current_callable(inputs)
 
 
-def cpp_compiler() -> str:
-    if config.is_fbcode():
-        return build_paths.cc() if torch.version.hip is None else build_paths.clang()
-    if isinstance(config.cpp.cxx, (list, tuple)):
-        search = tuple(config.cpp.cxx)
-    else:
-        search = (config.cpp.cxx,)
-    return cpp_compiler_search(search)
-
-
-@functools.lru_cache(1)
-def cpp_compiler_search(search: str) -> str:
-    for cxx in search:
-        try:
-            if cxx is None:
-                # gxx package is only available for Linux
-                # according to https://anaconda.org/conda-forge/gxx/
-                if sys.platform != "linux":
-                    continue
-                # Do not install GXX by default
-                if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
-                    continue
-                from filelock import FileLock
-
-                lock_dir = get_lock_dir()
-                lock = FileLock(
-                    os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT
-                )
-                with lock:
-                    cxx = install_gcc_via_conda()
-            subprocess.check_output([cxx, "--version"])
-            return cxx
-        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
-            continue
-    raise exc.InvalidCxxCompiler
-
-
-def install_gcc_via_conda() -> str:
-    """On older systems, this is a quick way to get a modern compiler"""
-    prefix = os.path.join(cache_dir(), "gcc")
-    cxx_path = os.path.join(prefix, "bin", "g++")
-    if not os.path.exists(cxx_path):
-        log.info("Downloading GCC via conda")
-        conda = os.environ.get("CONDA_EXE", "conda")
-        if conda is None:
-            conda = shutil.which("conda")
-        if conda is not None:
-            subprocess.check_call(
-                [
-                    conda,
-                    "create",
-                    f"--prefix={prefix}",
-                    "--channel=conda-forge",
-                    "--quiet",
-                    "-y",
-                    "python=3.8",
-                    "gxx",
-                ],
-                stdout=subprocess.PIPE,
-            )
-    return cxx_path
-
-
-def is_gcc() -> bool:
-    if sys.platform == "darwin" and is_apple_clang():
-        return False
-    return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
-
-
-@functools.lru_cache(None)
-def is_apple_clang() -> bool:
-    cxx = cpp_compiler()
-    version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
-    return "Apple" in version_string.splitlines()[0]
-
-
-def is_clang() -> bool:
-    # Mac OS apple clang maybe named as gcc, need check compiler info.
-    if sys.platform == "darwin":
-        return is_apple_clang()
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
-
-
-def get_compiler_version_info(compiler):
-    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
-    env = os.environ.copy()
-    env["LC_ALL"] = "C"  # Don't localize output
-    try:
-        version_string = subprocess.check_output(
-            [compiler, "-v"], stderr=subprocess.STDOUT, env=env
-        ).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception as e:
-        try:
-            version_string = subprocess.check_output(
-                [compiler, "--version"], stderr=subprocess.STDOUT, env=env
-            ).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception as e:
-            return ""
-    # Mutiple lines to one line string.
-    version_string = version_string.replace("\r", "_")
-    version_string = version_string.replace("\n", "_")
-    return version_string
-
-
-def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
-    # ISA dry compile will cost about 1 sec time each startup time.
-    # Please check the issue: https://github.com/pytorch/pytorch/issues/100378
-    # Actually, dry compile is checking compile capability for ISA.
-    # We just record the compiler version, isa options and pytorch version info,
-    # and generated them to output binary hash path.
-    # It would optimize and skip compile existing binary.
-    compiler_info = get_compiler_version_info(cpp_compiler())
-    torch_version = torch.__version__
-    fingerprint = f"{compiler_info}={isa_flags}={torch_version}"
-    return fingerprint
-
-
-class VecISA:
-    _bit_width: int
-    _macro: List[str]
-    _arch_flags: str
-    _dtype_nelements: Dict[torch.dtype, int]
-
-    # Note [Checking for Vectorized Support in Inductor]
-    # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
-    # Hence, TorchInductor would depend on Sleef* to accelerate mathematical functions
-    # like exp, pow, sin, cos and etc.
-    # But PyTorch and TorchInductor might use different compilers to build code. If
-    # PyTorch uses gcc-7/g++-7 to build the release package, the libtorch_cpu.so
-    # will not expose the Sleef* AVX512 symbols since gcc-7/g++-7 cannot pass
-    # avx512 check in CMake - FindAVX.cmake. But TorchInductor install the latest
-    # gcc/g++ compiler by default while it could support the AVX512 compilation.
-    # Therefore, there would be a conflict sleef version between PyTorch and
-    # TorchInductor. Hence, we dry-compile the following code to check whether current
-    # HW platform and PyTorch both could support AVX512 or AVX2. And suppose ARM
-    # also needs the logic
-    # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
-    # making the runtime check unnecessary.
-    _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
-#include <ATen/cpu/vec/functional.h>
-#include <ATen/cpu/vec/vec.h>
-#endif
-
-alignas(64) float in_out_ptr0[16] = {0.0};
-
-extern "C" void __avx_chk_kernel() {
-    auto tmp0 = at::vec::Vectorized<float>(1);
-    auto tmp1 = tmp0.exp();
-    tmp1.store(in_out_ptr0);
-}
-"""  # noqa: B950
-
-    _avx_py_load = """
-import torch
-from ctypes import cdll
-cdll.LoadLibrary("__lib_path__")
-"""
-
-    def bit_width(self) -> int:
-        return self._bit_width
-
-    def nelements(self, dtype: torch.dtype = torch.float) -> int:
-        return self._dtype_nelements[dtype]
-
-    def build_macro(self) -> List[str]:
-        return self._macro
-
-    def build_arch_flags(self) -> str:
-        return self._arch_flags
-
-    def __hash__(self) -> int:
-        return hash(str(self))
-
-    @functools.lru_cache(None)  # noqa: B019
-    def __bool__(self) -> bool:
-        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
-
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
-
-        if config.is_fbcode():
-            return True
-
-        key, input_path = write(
-            VecISA._avx_code,
-            "cpp",
-            extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
-        )
-        from filelock import FileLock
-
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            output_dir = os.path.dirname(input_path)
-            buid_options = CppTorchOptions(vec_isa=self, warning_all=False)
-            x86_isa_help_builder = CppBuilder(
-                key,
-                [input_path],
-                buid_options,
-                output_dir,
-            )
-            try:
-                # Check if the output file exist, and compile when not.
-                output_path = x86_isa_help_builder.get_target_file_path()
-                if not os.path.isfile(output_path):
-                    status, target_file = x86_isa_help_builder.build()
-                    if status:
-                        return False
-
-                # Check build result
-                subprocess.check_call(
-                    [
-                        sys.executable,
-                        "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
-                    ],
-                    stderr=subprocess.DEVNULL,
-                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
-                )
-            except Exception as e:
-                return False
-
-            return True
-
-
-@dataclasses.dataclass
-class VecNEON(VecISA):
-    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
-    _macro = ["CPU_CAPABILITY_NEON"]
-    if sys.platform == "darwin" and platform.processor() == "arm":
-        _macro.append("AT_BUILD_ARM_VEC256_WITH_SLEEF")
-    _arch_flags = ""  # Unused
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
-
-    def __str__(self) -> str:
-        return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
-
-
-@dataclasses.dataclass
-class VecAVX512(VecISA):
-    _bit_width = 512
-    _macro = ["CPU_CAPABILITY_AVX512"]
-    _arch_flags = (
-        "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
-        if not _IS_WINDOWS
-        else "/arch:AVX512"
-    )  # TODO: use cflags
-    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
-
-    def __str__(self) -> str:
-        return "avx512"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
-
-
-@dataclasses.dataclass
-class VecAVX2(VecISA):
-    _bit_width = 256
-    _macro = ["CPU_CAPABILITY_AVX2"]
-    _arch_flags = (
-        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
-    )  # TODO: use cflags
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
-
-    def __str__(self) -> str:
-        return "avx2"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
-
-
-@dataclasses.dataclass
-class VecZVECTOR(VecISA):
-    _bit_width = 256
-    _macro = [
-        "CPU_CAPABILITY_ZVECTOR",
-        "CPU_CAPABILITY=ZVECTOR",
-        "HAVE_ZVECTOR_CPU_DEFINITION",
-    ]
-    _arch_flags = "-mvx -mzvector"
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
-
-    def __str__(self) -> str:
-        return "zvector"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
-
-
-class InvalidVecISA(VecISA):
-    _bit_width = 0
-    _macro = [""]
-    _arch_flags = ""
-    _dtype_nelements = {}
-
-    def __str__(self) -> str:
-        return "INVALID_VEC_ISA"
-
-    def __bool__(self) -> bool:  # type: ignore[override]
-        return False
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
-
-
-def x86_isa_checker() -> List[str]:
-    supported_isa: List[str] = []
-
-    def _check_and_append_supported_isa(
-        dest: List[str], isa_supported: bool, isa_name: str
-    ):
-        if isa_supported:
-            dest.append(isa_name)
-
-    Arch = platform.machine()
-    """
-    Arch value is x86_64 on Linux, and the value is AMD64 on Windows.
-    """
-    if Arch != "x86_64" and Arch != "AMD64":
-        return supported_isa
-
-    avx2 = torch.cpu._is_cpu_support_avx2()
-    avx512 = torch.cpu._is_cpu_support_avx512()
-
-    _check_and_append_supported_isa(supported_isa, avx2, "avx2")
-    _check_and_append_supported_isa(supported_isa, avx512, "avx512")
-
-    return supported_isa
-
-
-invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
-
-
-# Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
-# might have too much redundant content that is useless for ISA check. Hence,
-# we only cache some key isa information.
-@functools.lru_cache(None)
-def valid_vec_isa_list() -> List[VecISA]:
-    isa_list: List[VecISA] = []
-    if sys.platform == "darwin" and platform.processor() == "arm":
-        isa_list.append(VecNEON())
-
-    if sys.platform not in ["linux", "win32"]:
-        return isa_list
-
-    if platform.machine() == "s390x":
-        with open("/proc/cpuinfo") as _cpu_info:
-            while True:
-                line = _cpu_info.readline()
-                if not line:
-                    break
-                # process line
-                featuresmatch = re.match(r"^features\s*:\s*(.*)$", line)
-                if featuresmatch:
-                    for group in featuresmatch.groups():
-                        if re.search(r"[\^ ]+vxe[\$ ]+", group):
-                            isa_list.append(VecZVECTOR())
-                            break
-    elif platform.machine() == "aarch64":
-        isa_list.append(VecNEON())
-    elif platform.machine() in ["x86_64", "AMD64"]:
-        """
-        platform.machine() value is x86_64 on Linux, and the value is AMD64 on Windows.
-        """
-        _cpu_supported_x86_isa = x86_isa_checker()
-        for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_supported_x86_isa and isa:
-                isa_list.append(isa)
-
-    return isa_list
-
-
-def pick_vec_isa() -> VecISA:
-    if config.is_fbcode():
-        return VecAVX2()
-
-    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
-    if not _valid_vec_isa_list:
-        return invalid_vec_isa
-
-    # If the simdlen is None, it indicates determine the vectorization length automatically
-    if config.cpp.simdlen is None:
-        assert _valid_vec_isa_list
-        return _valid_vec_isa_list[0]
-
-    for isa in _valid_vec_isa_list:
-        if config.cpp.simdlen == isa.bit_width():
-            return isa
-
-    return invalid_vec_isa
-
-
-def get_compile_only(compile_only: bool = True) -> str:
-    return "-c" if compile_only else ""
-
-
-def get_shared(shared: bool = True, compile_only: bool = False) -> str:
-    if not shared:
-        return ""
-    if compile_only:
-        return "-fPIC"
-    if platform.system() == "Darwin" and "clang" in cpp_compiler():
-        # This causes undefined symbols to behave the same as linux
-        return "-shared -fPIC -undefined dynamic_lookup"
-    else:
-        return "-shared -fPIC"
-
-
-def get_warning_all_flag(warning_all: bool = True) -> str:
-    return "-Wall" if warning_all else ""
-
-
-def get_glibcxx_abi_build_flags() -> str:
-    return "-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))
-
-
-def cpp_flags() -> str:
-    flags = ["-std=c++17", "-Wno-unused-variable", "-Wno-unknown-pragmas"]
-    if is_clang():
-        flags.append("-Werror=ignored-optimization-argument")
-    return " ".join(flags)
-
-
-def cpp_wrapper_flags() -> str:
-    return "-D TORCH_INDUCTOR_CPP_WRAPPER"
-
-
-def optimization_flags() -> str:
-    base_flags = "-O0 -g" if config.aot_inductor.debug_compile else "-O3 -DNDEBUG"
-    base_flags += " -ffast-math -fno-finite-math-only"
-    if not config.cpp.enable_unsafe_math_opt_flag:
-        base_flags += " -fno-unsafe-math-optimizations"
-    if not config.cpp.enable_floating_point_contract_flag:
-        base_flags += " -ffp-contract=off"
-
-    if config.is_fbcode():
-        # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
-        # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
-        # We will fix it later by exposing the lib path.
-        return base_flags
-
-    if sys.platform == "darwin":
-        # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
-        # Also, `-march=native` is unrecognized option on M1
-        base_flags += " -Xclang"
-    else:
-        if platform.machine() == "ppc64le":
-            base_flags += " -mcpu=native"
-        else:
-            base_flags += " -march=native"
-
-    # Internal cannot find libgomp.so
-    if not config.is_fbcode():
-        base_flags += " -fopenmp"
-    return base_flags
-
-
-def use_custom_generated_macros() -> str:
-    return "-D C10_USING_CUSTOM_GENERATED_MACROS"
-
-
-def use_fb_internal_macros() -> str:
-    if config.is_fbcode():
-        # TODO: this is to avoid FC breakage for fbcode. When using newly
-        # generated model.so on an older verion of PyTorch, need to use
-        # the v1 version for aoti_torch_create_tensor_from_blob
-        create_tensor_from_blob_v1 = "-D AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
-        openmp_lib = build_paths.openmp_lib()
-        preprocessor_flags = " ".join(
-            (
-                "-D C10_USE_GLOG",
-                "-D C10_USE_MINIMAL_GLOG",
-                "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
-            )
-        )
-        return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags} {create_tensor_from_blob_v1}"
-    else:
-        return ""
-
-
-def use_standard_sys_dir_headers() -> str:
-    if config.is_fbcode():
-        return "-nostdinc"
-    else:
-        return ""
-
-
-@functools.lru_cache(None)
-def is_conda_llvm_openmp_installed() -> bool:
-    try:
-        command = "conda list llvm-openmp --json"
-        output = subprocess.check_output(command.split()).decode("utf8")
-        return len(json.loads(output)) > 0
-    except subprocess.SubprocessError:
-        return False
-
-
-@functools.lru_cache(None)
-def homebrew_libomp() -> Tuple[bool, str]:
-    try:
-        # check if `brew` is installed
-        subprocess.check_output(["which", "brew"])
-        # get the location of `libomp` if it is installed
-        # this is the location that `libomp` **would** be installed
-        # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
-        libomp_path = (
-            subprocess.check_output(["brew", "--prefix", "libomp"])
-            .decode("utf8")
-            .strip()
-        )
-        # check if `libomp` is installed
-        omp_available = os.path.exists(libomp_path)
-        return omp_available, libomp_path
-    except subprocess.SubprocessError:
-        return False, ""
-
-
-def _set_gpu_runtime_env() -> None:
-    if (
-        config.is_fbcode()
-        and torch.version.hip is None
-        and "CUDA_HOME" not in os.environ
-        and "CUDA_PATH" not in os.environ
-    ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
-
-
-def _get_python_include_dirs():
-    include_dir = Path(sysconfig.get_path("include"))
-    # On Darwin Python executable from a framework can return
-    # non-existing /Library/Python/... include path, in which case
-    # one should use Headers folder from the framework
-    if not include_dir.exists() and platform.system() == "Darwin":
-        std_lib = Path(sysconfig.get_path("stdlib"))
-        include_dir = (std_lib.parent.parent / "Headers").absolute()
-    if not (include_dir / "Python.h").exists():
-        warnings.warn(f"Can't find Python.h in {str(include_dir)}")
-    return [str(include_dir)]
-
-
-def _transform_cuda_paths(lpaths):
-    # This handles two cases:
-    # 1. Meta internal cuda-12 where libs are in lib/cuda-12 and lib/cuda-12/stubs
-    # 2. Linux machines may have CUDA installed under either lib64/ or lib/
-    for i, path in enumerate(lpaths):
-        if (
-            "CUDA_HOME" in os.environ
-            and path.startswith(os.environ["CUDA_HOME"])
-            and not os.path.exists(f"{path}/libcudart_static.a")
-        ):
-            for root, dirs, files in os.walk(path):
-                if "libcudart_static.a" in files:
-                    lpaths[i] = os.path.join(path, root)
-                    lpaths.append(os.path.join(lpaths[i], "stubs"))
-                    break
-
-
-def get_include_and_linking_paths(
-    include_pytorch: bool = False,
-    vec_isa: VecISA = invalid_vec_isa,
-    cuda: bool = False,
-    aot_mode: bool = False,
-) -> Tuple[List[str], str, str, str, str]:
-    _set_gpu_runtime_env()
-    from torch.utils import cpp_extension
-
-    # Remove below in the further
-    # macros = "-D {}".format(vec_isa.build_macro()) if vec_isa != invalid_vec_isa else ""
-    macros = ""
-    if vec_isa != invalid_vec_isa:
-        for x in vec_isa.build_macro():
-            macros_def = f"-D {x} "
-            macros += macros_def
-
-    build_arch_flags = ""
-    if sys.platform == "linux" and (
-        include_pytorch
-        or vec_isa != invalid_vec_isa
-        or cuda
-        or config.cpp.enable_kernel_profile
-    ):
-        # Note - We include pytorch only on linux right now. There is more work
-        # to do to enable OMP build on darwin where PyTorch is built with IOMP
-        # and we need a way to link to what PyTorch links.
-        ipaths = cpp_extension.include_paths(cuda) + _get_python_include_dirs()
-        lpaths = cpp_extension.library_paths(cuda) + [
-            sysconfig.get_config_var("LIBDIR")
-        ]
-
-        libs = []
-
-        # No need to manually specify libraries in fbcode.
-        if not config.is_fbcode():
-            libs += ["torch", "torch_cpu"]
-            libs += ["gomp"]
-            if not aot_mode:
-                libs += ["torch_python"]
-        else:
-            # internal remote execution is able to find omp, but not gomp
-            libs += ["omp"]
-            if aot_mode:
-                ipaths += [os.path.dirname(cpp_prefix_path())]
-                if cuda and torch.version.hip is None:
-                    _transform_cuda_paths(lpaths)
-        if macros:
-            if config.is_fbcode() and vec_isa != invalid_vec_isa:
-                cap = str(vec_isa).upper()
-                macros = " ".join(
-                    [
-                        vec_isa.build_arch_flags(),
-                        f"-D CPU_CAPABILITY={cap}",
-                        f"-D CPU_CAPABILITY_{cap}",
-                        f"-D HAVE_{cap}_CPU_DEFINITION",
-                    ]
-                )
-
-        if cuda:
-            if macros is None:
-                macros = ""
-            macros += " -D USE_ROCM" if torch.version.hip else " -D USE_CUDA"
-
-        if cuda:
-            if torch.version.hip is not None:
-                if config.is_fbcode():
-                    libs += ["amdhip64"]
-                else:
-                    libs += ["c10_hip", "torch_hip"]
-                macros += " -D __HIP_PLATFORM_AMD__"
-            else:
-                if config.is_fbcode():
-                    libs += ["cuda"]
-                else:
-                    libs += ["c10_cuda", "cuda", "torch_cuda"]
-        build_arch_flags = vec_isa.build_arch_flags()
-    else:
-        # Note - this is effectively a header only inclusion. Usage of some header files may result in
-        # symbol not found, if those header files require a library.
-        # For those cases, include the lpath and libs command as we do for pytorch above.
-        # This approach allows us to only pay for what we use.
-        ipaths = cpp_extension.include_paths(cuda) + _get_python_include_dirs()
-        if aot_mode:
-            ipaths += [os.path.dirname(cpp_prefix_path())]
-        lpaths = []
-        if sys.platform == "darwin":
-            # only Apple builtin compilers (Apple Clang++) require openmp
-            omp_available = not is_apple_clang()
-
-            # check the `OMP_PREFIX` environment first
-            if os.getenv("OMP_PREFIX") is not None:
-                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")  # type: ignore[arg-type]
-                valid_env = os.path.exists(header_path)
-                if valid_env:
-                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))  # type: ignore[arg-type]
-                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))  # type: ignore[arg-type]
-                else:
-                    warnings.warn("environment variable `OMP_PREFIX` is invalid.")
-                omp_available = omp_available or valid_env
-
-            libs = [] if omp_available else ["omp"]
-
-            # prefer to use openmp from `conda install llvm-openmp`
-            if not omp_available and os.getenv("CONDA_PREFIX") is not None:
-                omp_available = is_conda_llvm_openmp_installed()
-                if omp_available:
-                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")  # type: ignore[arg-type]
-                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))  # type: ignore[arg-type]
-                    lpaths.append(conda_lib_path)
-                    # Prefer Intel OpenMP on x86 machine
-                    if os.uname().machine == "x86_64" and os.path.exists(
-                        os.path.join(conda_lib_path, "libiomp5.dylib")
-                    ):
-                        libs = ["iomp5"]
-
-            # next, try to use openmp from `brew install libomp`
-            if not omp_available:
-                omp_available, libomp_path = homebrew_libomp()
-                if omp_available:
-                    ipaths.append(os.path.join(libomp_path, "include"))
-                    lpaths.append(os.path.join(libomp_path, "lib"))
-
-            # if openmp is still not available, we let the compiler to have a try,
-            # and raise error together with instructions at compilation error later
-        else:
-            libs = ["omp"] if config.is_fbcode() else ["gomp"]
-
-        # For AOT mode, the produced library relies on torch cpu to set grad mode
-        # like aoti_torch_grad_mode_set_enabled
-        if aot_mode and sys.platform == "linux" and not config.is_fbcode():
-            libs += ["torch", "torch_cpu"]
-
-    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
-    if not config.abi_compatible:
-        libs += ["c10"]
-        lpaths += [cpp_extension.TORCH_LIB_PATH]
-
-    # third party libs
-    if config.is_fbcode():
-        # Note that the order of include paths do matter, as a result
-        # we need to have several branches interleaved here
-        if torch.version.hip is None:
-            ipaths.append(build_paths.sleef())
-        ipaths.append(build_paths.openmp())
-        ipaths.append(build_paths.python())
-        if torch.version.hip is not None:
-            ipaths.append(build_paths.clang_include())
-            ipaths.append(build_paths.gcc_include())
-            ipaths.append(build_paths.gcc_install_tools_include())
-        else:
-            ipaths.append(build_paths.cc_include())
-            ipaths.append(build_paths.libgcc())
-            ipaths.append(build_paths.libgcc_arch())
-        ipaths.append(build_paths.libgcc_backward())
-        ipaths.append(build_paths.glibc())
-        ipaths.append(build_paths.linux_kernel())
-        if torch.version.hip is not None:
-            ipaths.append(build_paths.rocm())
-        else:
-            ipaths.append(os.path.join(build_paths.cuda(), "include"))
-        # We also need to bundle includes with absolute paths into a remote directory
-        # (later on, we copy the include paths from cpp_extensions into our remote dir)
-        ipaths.append("include")
-
-    static_link_libs = []
-    if aot_mode and cuda and config.is_fbcode():
-        # For Meta internal cuda-12, it is recommended to static link cudart
-        if torch.version.hip is None:
-            static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
-
-    lpaths_str = " ".join(["-L" + p for p in lpaths])
-    libs_str = " ".join(static_link_libs + ["-l" + p for p in libs])
-    return ipaths, lpaths_str, libs_str, macros, build_arch_flags
-
-
-def cpp_compile_command(
-    input: Union[str, List[str]],
-    output: str,
-    warning_all: bool = True,
-    shared: bool = True,
-    include_pytorch: bool = False,
-    vec_isa: VecISA = invalid_vec_isa,
-    cuda: bool = False,
-    aot_mode: bool = False,
-    compile_only: bool = False,
-    use_absolute_path: bool = False,
-    use_mmap_weights: bool = False,
-    extra_flags: Sequence[str] = (),
-) -> str:
-    ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
-        include_pytorch, vec_isa, cuda, aot_mode
-    )
-    if isinstance(input, str):
-        input = [input]
-    ipaths_str = " ".join(["-I" + p for p in ipaths])
-    clang_flags = ""
-    if config.is_fbcode():
-        if aot_mode and not use_absolute_path:
-            inp_name = input
-            out_name = output
-            linker_script = _LINKER_SCRIPT
-        else:
-            # We need to copy any absolute-path torch includes
-            inp_name = [os.path.basename(i) for i in input]
-            out_name = os.path.basename(output)
-            linker_script = os.path.basename(_LINKER_SCRIPT)
-        assert is_clang()
-        # Use clang runtime instead of libgcc
-        clang_flags += " --rtlib=compiler-rt"
-        clang_flags += " -fuse-ld=lld"
-        clang_flags += f" -Wl,--script={linker_script}"
-        linker_paths = "-B" + build_paths.glibc_lib()
-        linker_paths += " -L" + build_paths.glibc_lib()
-    else:
-        inp_name = input
-        out_name = output
-        linker_paths = ""  # let the compiler pick
-    if compile_only:
-        libs, lpaths = "", ""
-    inp_name_str = " ".join(inp_name)
-    if use_mmap_weights:
-        macros += " -D USE_MMAP_SELF"
-
-    return re.sub(
-        r"[ \n]+",
-        " ",
-        f"""
-            {cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
-            {get_warning_all_flag(warning_all)} {cpp_flags()}
-            {get_glibcxx_abi_build_flags()}
-            {ipaths_str} {lpaths} {libs} {build_arch_flags}
-            {macros} {linker_paths} {clang_flags}
-            {optimization_flags()} {cpp_wrapper_flags()}
-            {use_custom_generated_macros()}
-            {use_fb_internal_macros()}
-            {use_standard_sys_dir_headers()}
-            {get_compile_only(compile_only)}
-            {' '.join(extra_flags)}
-            -o {out_name}
-        """,
-    ).strip()
-
-
-def run_command_and_check(cmd: str):
-    cmd = shlex.split(cmd)
+def run_command_and_check(cmd_: str) -> None:
+    cmd = shlex.split(cmd_)
     try:
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:

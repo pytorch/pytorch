@@ -40,6 +40,13 @@ from torch.testing._internal.inductor_utils import (
 )
 from torch.utils._triton import has_triton
 
+
+try:
+    from .mock_cache import global_stats, patch_fbcode, PatchCaches
+except ImportError:
+    from mock_cache import global_stats, patch_fbcode, PatchCaches  # @manual
+
+
 HAS_TRITON = has_triton()
 
 if HAS_TRITON:
@@ -147,6 +154,7 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
     @requires_triton()
+    @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
@@ -202,7 +210,6 @@ class TestFxGraphCache(TestCase):
 
         with config.patch(
             {
-                "fx_graph_cache": False,
                 "fx_graph_remote_cache": True,
             }
         ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
@@ -212,8 +219,11 @@ class TestFxGraphCache(TestCase):
                     compiled_fn = torch.compile(fn, dynamic=dynamic)
                     self.assertEqual(fn(a, b), compiled_fn(a, b))
                 reset()
-            self.assertEqual(num_get, 3)
-            self.assertEqual(num_put, 1)
+
+        global_stats.report()
+        self.assertEqual(global_stats.fx_graph.num_get_hit, 3)
+        self.assertEqual(global_stats.fx_graph.num_get_miss, 1)
+        self.assertEqual(global_stats.fx_graph.num_put, 1)
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -742,6 +752,61 @@ class TestFxGraphCacheHashing(TestCase):
             assert cmd_parts[0] == "nvcc", cmd_parts
             assert "-Wsomething" in cmd_parts, cmd_parts
             assert "-DNDEBUG" in cmd_parts, cmd_parts
+
+
+@instantiate_parametrized_tests
+class TestAutotuneCache(TestCase):
+    device_type = GPU_TYPE
+
+    def setUp(self):
+        super().setUp()
+        counters.clear()
+        PatchCaches.setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        PatchCaches.tearDown()
+
+    def reset(self):
+        torch._dynamo.reset()
+        clear_inductor_caches()
+
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @config.patch({"fx_graph_cache": False})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"autotune_local_cache": False})
+    @config.patch({"autotune_remote_cache": True})
+    @config.patch({"max_autotune": True})
+    @parametrize("fbcode", (False,) + (True,) * config.is_fbcode())
+    def test_autotune_cache(self, fbcode: bool):
+        class Model(torch.nn.Module):
+            def forward(self, x, y, a, b):
+                return x + y, a + b
+
+        def f(x, y, a, b):
+            return Model()(x, y, a, b)
+
+        x = torch.randn(100, 100).cuda()
+        y = torch.randn(100, 100).cuda()
+        a = torch.randn(1000, 100).cuda()
+        b = torch.randn(1000, 100).cuda()
+        f_compiled = torch.compile(f, fullgraph=True)
+
+        with PatchCaches(), patch_fbcode(fbcode):
+            f_compiled(x, y, a, b)
+
+            self.assertEqual(global_stats.autotune.num_get_hit, 0)
+            self.assertEqual(global_stats.autotune.num_get_miss, 2)
+            self.assertEqual(global_stats.autotune.num_put, 2)
+
+            self.reset()
+            f_compiled(x, y, a, b)
+
+        global_stats.report()
+        self.assertEqual(global_stats.autotune.num_get_hit, 2)
+        self.assertEqual(global_stats.autotune.num_get_miss, 2)
+        self.assertEqual(global_stats.autotune.num_put, 2)
 
 
 class TestUtils(TestCase):

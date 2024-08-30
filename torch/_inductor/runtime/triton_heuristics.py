@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import builtins
 import copy
 import functools
@@ -14,7 +16,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 
@@ -42,6 +44,11 @@ from .runtime_utils import (
     next_power_of_2,
     triton_config_to_hashable,
 )
+
+
+if TYPE_CHECKING:
+    from ..remote_cache import JsonDataTy, RemoteCache
+
 
 try:
     import triton
@@ -1023,9 +1030,9 @@ def load_cached_autotuning(
     return matching_configs[0]
 
 
-def should_use_remote_autotune_cache(inductor_meta):
-    if inductor_meta.get("autotune_remote_cache"):
-        return True
+def _should_use_remote_autotune_cache(inductor_meta):
+    if inductor_meta.get("autotune_remote_cache") is not None:
+        return inductor_meta.get("autotune_remote_cache")
     if not inductor_meta.get("is_fbcode"):
         return False
     if inductor_meta.get("is_hip"):
@@ -1063,7 +1070,9 @@ def cached_autotune(
         configs_hash = hash_configs(configs)
 
         cache_filename = None
-        remote_cache = None
+        remote_cache: Optional[
+            Union[RemoteCache[JsonDataTy], RemoteCache[object]]
+        ] = None
         remote_cache_key = None
         if inductor_meta.get("autotune_local_cache", True):
             cache_filename = os.path.splitext(filename)[0] + ".best_config"
@@ -1094,10 +1103,44 @@ def cached_autotune(
 
         best_config = None
         if not inductor_meta.get("force_disable_caches", False):
-            if cache_filename is not None and os.path.exists(cache_filename):
-                with open(cache_filename) as fd:
-                    best_config = json.loads(fd.read())
-            elif remote_cache is not None and remote_cache_key is not None:
+            if inductor_meta.get("autotune_local_cache", True):
+                local_cache = LocalAutotuneCache()
+                cache_filename = os.path.splitext(filename)[0] + ".best_config"
+            if _should_use_remote_autotune_cache(inductor_meta):
+                backend_hash = inductor_meta.get("backend_hash", None)
+                if backend_hash is not None:
+                    key = backend_hash + configs_hash + "autotune-best-config-v2"
+                    key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+                    try:
+                        if inductor_meta.get("is_fbcode"):
+                            from torch._inductor.fb.remote_cache import (
+                                FbRemoteAutotuneCache,
+                            )
+
+                            remote_cache = FbRemoteAutotuneCache(key)
+                        else:
+                            from torch._inductor.remote_cache import RemoteAutotuneCache
+
+                            remote_cache = RemoteAutotuneCache(key)
+                    except Exception:
+                        remote_cache = None
+                        log.warning("Unable to create a remote cache", exc_info=True)
+                    # we already sha256 hash the source contents
+                    remote_cache_key = os.path.basename(filename)
+                else:
+                    log.debug(
+                        "backend_hash is not passed on the inductor_meta, unable to use autotune remote cache"
+                    )
+
+            best_config = None
+            if local_cache is not None and cache_filename is not None:
+                best_config = local_cache.get(cache_filename)
+            if (
+                remote_cache is not None
+                and remote_cache_key is not None
+                and best_config is None
+            ):
                 best_config = remote_cache.get(remote_cache_key)
 
             best_config = load_cached_autotuning(

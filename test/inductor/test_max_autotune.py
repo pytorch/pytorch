@@ -37,6 +37,13 @@ from torch.testing._internal.common_utils import (
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
+
+try:
+    from .mock_cache import global_stats, PatchCaches
+except ImportError:
+    from mock_cache import global_stats, PatchCaches  # @manual
+
+
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
@@ -329,7 +336,7 @@ class TestMaxAutotune(TestCase):
             op: str,
             inputs: str,
             benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
-        ) -> Dict[ChoiceCaller, float]:
+        ) -> Optional[Dict[ChoiceCaller, float]]:
             if benchmark is not None:
                 return benchmark(choices)
 
@@ -770,6 +777,67 @@ class TestMaxAutotune(TestCase):
             self.assertIn("NoValidChoicesError", str(context.exception))
 
 
+@instantiate_parametrized_tests
+class TestMaxAutotuneRemoteCache(TestCase):
+    def setUp(self):
+        super().setUp()
+        PatchCaches.setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        PatchCaches.tearDown()
+
+    @skipIfRocm
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_remote_caching(self, dynamic: bool):
+        from unittest.mock import patch
+
+        def mm(a, b):
+            a = torch.sin(a)
+            return a @ b
+
+        a = torch.randn(100, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        def f(x, y):
+            return Model()(x, y)
+
+        x = torch.randn(100, 100).cuda()
+        y = torch.randn(100, 100).cuda()
+
+        with config.patch(
+            {
+                "autotune_local_cache": False,
+                "autotune_remote_cache": True,
+            }
+        ), patch.dict(os.environ), PatchCaches():
+            os.environ.pop("TRITON_CACHE_MANAGER", None)
+            with config.patch({"max_autotune": True}):
+                for _ in range(4):
+                    with fresh_inductor_cache():
+                        torch.compile(mm, dynamic=dynamic)(a, b)
+                    reset()
+
+                global_stats.report()
+                self.assertEqual(global_stats.autotune.num_get_hit, 3)
+                self.assertEqual(global_stats.autotune.num_get_miss, 1)
+                self.assertEqual(global_stats.autotune.num_put, 1)
+
+            global_stats.reset()
+            for _ in range(4):
+                with fresh_inductor_cache():
+                    torch.compile(f, dynamic=dynamic)(x, y)
+                reset()
+            global_stats.report()
+            self.assertEqual(global_stats.autotune.num_get_hit, 3)
+            self.assertEqual(global_stats.autotune.num_get_miss, 1)
+            self.assertEqual(global_stats.autotune.num_put, 1)
+
+
 class TestBenchmarkRequest(BenchmarkRequest):
     def __init__(
         self, value: float, multi_device: bool, parent_visible_devices: Optional[str]
@@ -792,6 +860,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         if not self.multi_device:
             assert visible_devices == self.parent_visible_devices
         else:
+            assert self.parent_visible_devices is not None
             valid_devices = self.parent_visible_devices.split(",")
             assert visible_devices in valid_devices
 
