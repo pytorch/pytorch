@@ -59,6 +59,8 @@ from .common import (
     OptimizationContext,
 )
 from .cpp_utils import (
+    _get_dtype_from_loopbodies,
+    _get_loop_body,
     cexpr,
     cexpr_index,
     codegen_rand,
@@ -3184,8 +3186,8 @@ class TilingSelect:
         var_sizes_list,
     ) -> Tuple[List[int], List[int]]:
         # TODO(jgong5): support alternative tiling factors and data types
-        loop_bodies = self._get_loop_body(fn_list)
-        all_dtypes = self._get_dtype_from_loopbodies(loop_bodies)
+        loop_bodies = _get_loop_body(fn_list)
+        all_dtypes = _get_dtype_from_loopbodies(loop_bodies)
         assert all_dtypes
         if any(dtype not in VECTORIZABLE_DTYPES for dtype in all_dtypes):
             return [], []
@@ -3373,41 +3375,6 @@ class TilingSelect:
         ):
             return contig_vars_sorted
         return sorted(contig_vars_sorted, key=contig_vars_list.count)[-1:]
-
-    @staticmethod
-    def _get_dtype_from_loopbodies(loop_bodies):
-        dtypes = set()
-        for loop_body in loop_bodies:
-            graphs = [loop_body.root_block.graph] + [
-                body.graph for body in list(loop_body.subblocks.values())
-            ]
-            for graph in graphs:
-                for node in graph.nodes:
-                    if node.op != "call_method":
-                        continue
-                    dtypes.add(node.meta[OptimizationContext.key].dtype)
-        return dtypes
-
-    @staticmethod
-    def _get_loop_body(fn_list):
-        loop_bodies = None
-        if all(isinstance(fn, ir.LoopBody) for fn in fn_list):
-            loop_bodies = fn_list
-        else:
-            if hasattr(fn_list[0], "original_fn"):
-                # For the case of local buffer, we wrap the fn with localize_function
-                assert all(hasattr(fn, "original_fn") for fn in fn_list)
-                assert all(
-                    isinstance(fn.original_fn.args[0]._body, ir.LoopBody)
-                    for fn in fn_list
-                )
-                loop_bodies = [fn.original_fn.args[0]._body for fn in fn_list]
-            else:
-                assert all(isinstance(fn, functools.partial) for fn in fn_list)
-                assert all(isinstance(fn.args[0]._body, ir.LoopBody) for fn in fn_list)
-                loop_bodies = [fn.args[0]._body for fn in fn_list]
-        assert loop_bodies is not None
-        return loop_bodies
 
 
 class CppKernelProxy(CppKernel):
@@ -3672,9 +3639,7 @@ class CppKernelProxy(CppKernel):
             assert len(tiling_factors) == len(tiling_indices)
             # <TODO> This should be removed after full support for vectorization is implemented.
             could_masked_vec = True
-            all_dtypes = TilingSelect._get_dtype_from_loopbodies(
-                TilingSelect._get_loop_body(fn_list)
-            )
+            all_dtypes = _get_dtype_from_loopbodies(_get_loop_body(fn_list))
             if any(dtype not in MASKED_VECTORIZABLE_DTYPES for dtype in all_dtypes):
                 # can be removed after masked vectorizable dtype are same with vectorizable dtype
                 could_masked_vec = False
