@@ -4,13 +4,26 @@ Python polyfills for common builtins.
 
 # NOTE: 1. Please do not import any submodule in the directory here to avoid circular imports.
 #       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
+#          Add it in the TYPE_CHECKING block below as well.
 
 # mypy: allow-untyped-defs
 
-import math
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Sequence, TYPE_CHECKING
 
 import torch
+
+
+if TYPE_CHECKING:
+    # Load by torch._dynamo.polyfills.loader
+    # See also the POLYFILLED_MODULE_NAMES in torch/_dynamo/polyfills/loader.py
+    # Put the submodules here to avoid circular imports
+    from . import (
+        builtins as builtins,
+        functools as functools,
+        itertools as itertools,
+        os as os,
+        sys as sys,
+    )
 
 
 def index(iterator, item, start=0, end=None):
@@ -50,6 +63,8 @@ def repeat(item, count):
 
 
 def radians(x):
+    import math
+
     return math.pi / 180.0 * x
 
 
