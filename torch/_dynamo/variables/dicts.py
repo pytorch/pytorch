@@ -556,7 +556,7 @@ class FrozensetVariable(SetVariable):
 
     @property
     def set_items(self):
-        return frozenset(self.items.keys())
+        return self.items.keys()
 
     def python_type(self):
         return frozenset

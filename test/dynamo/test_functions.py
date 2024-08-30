@@ -3406,6 +3406,22 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_frozenset_reconstruction(self):
+        d = {}
+        f = frozenset()
+        d[f] = torch.randn(4)
+
+        def fn(x):
+            k = frozenset()
+            torch._dynamo.graph_break()
+            return d[k] * x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_is_tensor_tensor(self):
         def fn(x, y):
             if x is y:
