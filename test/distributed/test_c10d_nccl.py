@@ -350,6 +350,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @parametrize("type", [torch.float16, torch.float32, torch.float64, torch.bfloat16])
     @skip_if_rocm
     def test_nan_assert(self, type):
+        # Expecting a device-side error when NaN is detected
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
@@ -363,6 +364,51 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         with self.assertRaises(RuntimeError):
             pg.allreduce(nan_tensor)
         dist.destroy_process_group()
+        # reset env
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nan_rank_filter(self):
+        # Putting NaN at recv buffer, program should not fail as NaN checker
+        # should not check on receive buffer
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
+        if self.rank != 0:
+            # Putting NaN at recv buffer
+            t[1, 1] = float("nan")
+        # Against broadcast
+        c10d.broadcast(t, 0)
+        # Against P2P
+        if self.rank == 0:
+            c10d.send(t, 1)
+        elif self.rank == 1:
+            c10d.recv(t, 0)
+        c10d.destroy_process_group()
+        # reset env
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nan_check(self):
+        # Not expecting an error, NaN check should not make legit code fail
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        x = torch.ones((10,), dtype=torch.bfloat16, device=device) * self.rank
+        t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
+        c10d.broadcast(x, src=0)
+        c10d.all_reduce(t)
+        c10d.barrier()
+        c10d.destroy_process_group()
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
