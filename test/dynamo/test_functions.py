@@ -2369,7 +2369,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_partials_graph_break_reconstruct(self):
         def fn(udf_mul_0, udf_mul_1, x):
-            print(udf_mul_0, "func")
             lambda0 = functools.partial(udf_mul_0, y=x)
             lambda1 = functools.partial(udf_mul_1, y=x)
 
