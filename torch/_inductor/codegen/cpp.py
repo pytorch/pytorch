@@ -3778,7 +3778,11 @@ class CppKernelProxy(CppKernel):
                 )
                 main_loop.set_kernel(vec_kernel)
                 main_loop.simd_vec = True
-                if could_masked_vec and (tail_loop.size - tail_loop.offset) >= 4:
+                if (
+                    config.cpp.enable_loop_tail_vec
+                    and could_masked_vec
+                    and (tail_loop.size - tail_loop.offset) >= 4
+                ):
                     tail_loop.steps = tail_loop.size - tail_loop.offset
                     masked_vec_kernel = codegen_kernel(
                         CppVecKernel,
@@ -3818,7 +3822,7 @@ class CppKernelProxy(CppKernel):
                 )
                 inner_main_loop.set_kernel(tile2d_kernel)
 
-                if could_masked_vec:
+                if config.cpp.enable_loop_tail_vec and could_masked_vec:
                     (
                         inner_main_loop_of_outer_tail_loop,
                         inner_tail_loop_of_outer_tail_loop,
