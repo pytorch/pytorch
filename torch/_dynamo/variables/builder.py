@@ -287,11 +287,9 @@ class GraphArg:
 
 class BackwardStateGraphArg(GraphArg):
     def __init__(self) -> None:
-        bw_state = BackwardState.get_singleton()
-        print(f"BackwardStateGraphArg.__init__: id(bw_state): {id(bw_state)}")
         super().__init__(
             source=None,
-            _example=bw_state,
+            _example=BackwardState.get_singleton(),
             pass_arg_as_tensor=False,
             fake_tensor=None,
             is_tensor=False,
@@ -299,14 +297,6 @@ class BackwardStateGraphArg(GraphArg):
 
     def reconstruct(self, codegen):
         assert codegen.tx.output.backward_state_var
-        # codegen.add_push_null(
-        #     lambda: codegen.load_import_from(BackwardState.__module__, "BackwardState")
-        # )
-        # # NOTE(yf225): this is probably where we construct the real BackwardState object
-        # # TODO: can we load from an old global object (stashed before) instead of creating a new BackwardState object?
-        # codegen.call_function(0, False)
-        # codegen.dup_top()
-        # codegen.store(codegen.tx.output.backward_state_var)
         varname = codegen.tx.output.new_var()
         codegen.append_output(codegen.create_load_global(codegen.tx.output.backward_state_var, add=True))
         codegen.dup_top()

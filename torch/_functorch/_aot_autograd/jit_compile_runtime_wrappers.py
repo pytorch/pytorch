@@ -312,7 +312,7 @@ def collect_bw_donated_buffer_idxs(
     return [fw_metadata.num_symints_saved_for_bw + i for i in fw_donated_buffer]
 
 
-def remove_module_fw_hook_trace_wrapped_in_fw_module(fw_module):
+def remove_trace_wrapped_fwd_hook_in_fw_module(fw_module):
     """
     trace_wrapped_fwd_hook = torch__dynamo__trace_wrapped_fwd_hook_higher_order_op_self_invoke(None, primals_1, primals_2, bw_state = primals_3);  primals_1 = primals_2 = primals_3 = None
     getitem: "f32[8, 8][8, 1]cpu" = trace_wrapped_fwd_hook[0]
@@ -550,7 +550,7 @@ def aot_dispatch_autograd(
                 if bw_out is None and not metadata_mutation_in_graph:
                     _indices_of_inps_to_detach.append(i)
 
-        remove_module_fw_hook_trace_wrapped_in_fw_module(fw_module)
+        remove_trace_wrapped_fwd_hook_in_fw_module(fw_module)
 
         if aot_config.enable_log:
             aot_graphs_log.info(

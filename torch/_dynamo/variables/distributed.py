@@ -347,8 +347,6 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
         user_pre_hooks_name, _ = tx.output.add_backward_state_hook(self.user_pre_hooks)
         # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
 
-        print(f"id(bw_state_proxy): {id(bw_state_proxy)}")
-
         def _in_graph_fw_pre_hooks(bw_state):
             """
             Rather than installing the user hooks in the graph (which
@@ -412,35 +410,6 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
         )
 
         return super().call_function_inner(tx, [self.module, new_args], kwargs)
-        # return super().call_function_inner(tx, args, kwargs)
-
-    # def _setup_hook(self, tx: "InstructionTranslator", hook_method_name, args):
-    #     from .builder import wrap_fx_proxy
-
-    #     return wrap_fx_proxy(
-    #         tx,
-    #         tx.output.create_proxy(
-    #             "call_method",
-    #             hook_method_name,
-    #             (self.as_proxy(), args.as_proxy()),
-    #             {},
-    #         ),
-    #     )
-
-    # def _partial_hook_call(*args, **kwargs):
-    #     return functools.partial(self.user_pre_hooks.fn, self.module.value)(*args, **kwargs)
-
-    # new_args = wrap_fx_proxy(
-    #     tx,
-    #     tx.output.create_proxy(
-    #         "call_function",
-    #         _partial_hook_call,
-    #         tuple(arg.as_proxy() for arg in args[1:]),
-    #         {},
-    #     ),
-    # )
-    # print(f"args: {args}")
-    # print(f"new_args: {new_args}")
 
 
 # class ForwardHookUnderCheckpoint  # should we just merge this into ForwardPreHookUnderCheckpoint and rename that class?

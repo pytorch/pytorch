@@ -95,10 +95,6 @@ class SideEffects:
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
-        import traceback
-        # traceback.print_stack()
-        # print("Creation stack: " + "\n".join(traceback.format_stack()))
-        # print(f"new SideEffects: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}")
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -169,11 +165,6 @@ class SideEffects:
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
-        if "fwd_pre_hook_call_count" in name:
-            print(f"id(item): {id(item)}, id(item.mutable_local): {id(item.mutable_local)}, id(item.value): {id(item.value)}, name: {name}, value: {value}, cur_value: {item.value.fwd_pre_hook_call_count}")
-        # self.track_object_existing(item.value, item)
-        # for k, v in self.id_to_variable.items():
-        #     print(f"store_attr: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}, k: {k}, v: {v}")
         if item.mutable_local not in self.store_attr_mutations:
             self.store_attr_mutations[item.mutable_local] = {}
         self.store_attr_mutations[item.mutable_local][name] = value
@@ -250,7 +241,6 @@ class SideEffects:
 
         variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
-        # print(f"here5: self.id_to_variable: {self.id_to_variable}, id(self.id_to_variable): {id(self.id_to_variable)}")
         self.keepalive.append(item)
         return variable
 
@@ -420,9 +410,6 @@ class SideEffects:
         # are live. "visit"-ing the NestedUserFunctionVariable visits
         # the .closures field, from which we will see if we need to keep
         # any mutations to cell variables alive.
-
-        # for k, v in self.id_to_variable.items():
-        #     print(f"prune: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}, k: {k}, v: {v}, is_live: {is_live(v)}")
             
         self.id_to_variable = {
             k: v for k, v in self.id_to_variable.items() if is_live(v)
@@ -564,7 +551,6 @@ class SideEffects:
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
         for var in self._get_modified_vars():
-            # print(f"here1: var: {var}")
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)
@@ -733,6 +719,5 @@ class SideEffects:
         )
 
     def clear(self):
-        print(f"clear: id(self.id_to_variable): {id(self.id_to_variable)}")
         self.keepalive.clear()
         self.id_to_variable.clear()
