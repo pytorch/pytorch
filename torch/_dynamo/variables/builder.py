@@ -1136,8 +1136,8 @@ class VariableBuilder:
             return MutableMappingVariable(value, source=self.source)
         elif is_frozen_dataclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            # NB: don't support mutation
-            return FrozenDataClassVariable.create(self.tx, value, source=self.source)
+            result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         else:
             return self.wrap_user_defined(value)
 

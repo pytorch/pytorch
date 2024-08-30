@@ -10141,13 +10141,12 @@ def ___make_guard_fn():
             "L__self___foo_bar_test_buf": "foo_bar.test_buf",
         }
         self.assertEqual(expected_fqn, gm.meta["dynamo_flat_name_to_original_fqn"])
-    
+
     def test_proxy_frozen_dataclass(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
             x: torch.Tensor
             y: torch.Tensor
-
 
         @allow_in_graph
         def inner_fn(dc):
@@ -10156,14 +10155,14 @@ def ___make_guard_fn():
         def fn(x, y):
             dc = TestDataClass(x, y)
             return inner_fn(dc)
-        
-        fn_opt= torch.compile(fullgraph=True)(fn)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
         inps = (torch.ones(2, 2), torch.ones(2, 2))
         actual = fn_opt(*inps)
         expected = fn(*inps)
 
         self.assertEqual(actual, expected)
-    
+
     def test_reconstruct_frozen_dataclass(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:

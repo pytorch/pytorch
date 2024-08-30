@@ -465,9 +465,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     if field.name in kwargs:
                         var_tracker = kwargs[field.name]
                     else:
-                        if not field.init:
+                        if not field.init or field.default is dataclasses.MISSING:
                             continue
-                        assert field.default is not dataclasses.MISSING
                         var_tracker = SourcelessBuilder.create(tx, field.default)
 
                     var_tracker_kwargs[field.name] = var_tracker
@@ -1209,9 +1208,10 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         field_map = {}
         for field in fields(value):
-            field_map[field.name] = VariableBuilder(tx, AttrSource(source, field.name))(
-                getattr(value, field.name)
-            )
+            if hasattr(value, field.name):
+                field_map[field.name] = VariableBuilder(tx, AttrSource(source, field.name))(
+                    getattr(value, field.name)
+                )
 
         return FrozenDataClassVariable(value, fields=field_map, source=source)
 
