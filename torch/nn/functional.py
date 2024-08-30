@@ -4870,6 +4870,7 @@ def grid_sample(
     mode: str = "bilinear",
     padding_mode: str = "zeros",
     align_corners: Optional[bool] = None,
+    value: Optional[float] = None,
 ) -> Tensor:
     r"""Compute grid sample.
 
@@ -4981,6 +4982,7 @@ def grid_sample(
             mode=mode,
             padding_mode=padding_mode,
             align_corners=align_corners,
+            value=value,
         )
     if mode != "bilinear" and mode != "nearest" and mode != "bicubic":
         raise ValueError(
@@ -4990,10 +4992,11 @@ def grid_sample(
         padding_mode != "zeros"
         and padding_mode != "border"
         and padding_mode != "reflection"
+        and padding_mode != "constant"
     ):
         raise ValueError(
             "nn.functional.grid_sample(): expected padding_mode "
-            "to be 'zeros', 'border', or 'reflection', "
+            "to be 'zeros', 'border', 'reflection', or 'constant'"
             f"but got: '{padding_mode}'"
         )
 
@@ -5008,8 +5011,10 @@ def grid_sample(
         padding_mode_enum = 0
     elif padding_mode == "border":
         padding_mode_enum = 1
-    else:  # padding_mode == 'reflection'
+    elif padding_mode == "reflection":
         padding_mode_enum = 2
+    else:  # padding_mode == 'constant'
+        padding_mode_enum = 3
 
     if align_corners is None:
         warnings.warn(
@@ -5020,7 +5025,7 @@ def grid_sample(
         )
         align_corners = False
 
-    return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners)
+    return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners, value)
 
 
 def affine_grid(

@@ -11,7 +11,7 @@ namespace at::native {
 namespace detail {
 
 enum class GridSamplerInterpolation {Bilinear, Nearest, Bicubic};
-enum class GridSamplerPadding {Zeros, Border, Reflection};
+enum class GridSamplerPadding {Zeros, Border, Reflection, Constant};
 
 } // namespace detail
 

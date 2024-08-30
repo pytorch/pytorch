@@ -17,7 +17,8 @@ using forward_2d_fn = void (*) (
     const TensorBase &grid,
     int64_t interpolation_mode,
     int64_t padding_mode,
-    bool align_corners);
+    bool align_corners,
+    std::optional<double> value);
 using backward_2d_fn = void (*) (
     const TensorBase &grad_input,
     const TensorBase &grad_grid,

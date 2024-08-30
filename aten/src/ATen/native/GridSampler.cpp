@@ -41,7 +41,8 @@ namespace {
   Tensor grid_sampler_3d_cpu_impl(const Tensor& input, const Tensor& grid,
                                   GridSamplerInterpolation interpolation_mode,
                                   GridSamplerPadding padding_mode,
-                                  bool align_corners) {
+                                  bool align_corners,
+                                  std::optional<double> value) {
     // See NOTE [ grid_sampler Native Functions ].
     // Add checks here in case this is called instead of grid_sampler.
     check_grid_sampler_common(input, grid);
@@ -448,7 +449,8 @@ static Tensor _grid_sampler_2d_cpu_quantized(
     const Tensor& grid,
     int64_t interpolation_mode_,
     int64_t padding_mode_,
-    bool align_corners) {
+    bool align_corners,
+    std::optional<double> value) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
@@ -557,7 +559,8 @@ static Tensor _grid_sampler_2d_cpu_quantized(
 Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
                                      int64_t interpolation_mode_,
                                      int64_t padding_mode_,
-                                     bool align_corners) {
+                                     bool align_corners,
+                                     std::optional<double> value) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
@@ -918,7 +921,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
 
 Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode,
-                           bool align_corners) {
+                           bool align_corners, std::optional<double> value) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
@@ -926,7 +929,7 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
 
   if (input.scalar_type() == kQUInt8) {
     return native::_grid_sampler_2d_cpu_quantized(
-        input, grid, interpolation_mode, padding_mode, align_corners);
+        input, grid, interpolation_mode, padding_mode, align_corners, value);
   }
   // AVX gather instructions use signed 32-bit offsets to gather float values.
   // Check for possible overflow and fallback to scalar implementation
@@ -951,7 +954,7 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
   auto output = at::empty(
       {in_size[0], in_size[1], grid_size[1], grid_size[2]}, input.options());
   grid_sampler_2d_cpu_kernel(
-      kCPU, output, input, grid, interpolation_mode, padding_mode, align_corners);
+      kCPU, output, input, grid, interpolation_mode, padding_mode, align_corners, value);
   return output;
 }
 
@@ -960,7 +963,7 @@ DEFINE_DISPATCH(grid_sampler_2d_cpu_kernel);
 
 Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode,
-                           bool align_corners) {
+                           bool align_corners, std::optional<double> value) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
@@ -969,7 +972,7 @@ Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "grid_sampler3d_cpu", [&] {
     return grid_sampler_3d_cpu_impl<scalar_t>(
       input, grid, static_cast<GridSamplerInterpolation>(interpolation_mode),
-      static_cast<GridSamplerPadding>(padding_mode), align_corners);
+      static_cast<GridSamplerPadding>(padding_mode), align_corners, value);
   });
 }
 
@@ -1044,7 +1047,8 @@ Tensor grid_sampler(
   const Tensor& grid,
   int64_t interpolation_mode,
   int64_t padding_mode,
-  bool align_corners
+  bool align_corners,
+  std::optional<double> value
 ) {
   if (cond_cudnn_grid_sampler(input, grid) &&
       static_cast<GridSamplerInterpolation>(interpolation_mode) ==
@@ -1057,10 +1061,10 @@ Tensor grid_sampler(
 
   if (input.dim() == 4) {
     return at::grid_sampler_2d(
-      input, grid, interpolation_mode, padding_mode, align_corners);
+      input, grid, interpolation_mode, padding_mode, align_corners, value);
   } else {
     return at::grid_sampler_3d(
-      input, grid, interpolation_mode, padding_mode, align_corners);
+      input, grid, interpolation_mode, padding_mode, align_corners, value);
   }
 }
 

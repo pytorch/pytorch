@@ -18,7 +18,7 @@ namespace at::native {
 
 Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
                             int64_t interpolation_mode, int64_t padding_mode,
-                            bool align_corners) {
+                            bool align_corners, std::optional<double> value) {
   auto in_size = input.sizes();
   auto grid_size = grid.sizes();
   auto output = at::empty(
@@ -30,7 +30,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
 
 Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
                             int64_t interpolation_mode, int64_t padding_mode,
-                            bool align_corners) {
+                            bool align_corners, std::optional<double> value) {
   auto in_size = input.sizes();
   auto grid_size = grid.sizes();
   auto output = at::empty(

@@ -861,7 +861,8 @@ std::vector<Shape> compute_shape_grid_sampler_2d(
     const at::Tensor& grid,
     int64_t interpolation_mode,
     int64_t padding_mode,
-    bool align_corners) {
+    bool align_corners,
+    ::std::optional<double> value) {
   // from `aten/src/ATen/native/cpu/GridSamplerKernel.cpp
   int64_t N = input.size(0);
   int64_t C = input.size(1);
