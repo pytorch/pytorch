@@ -237,15 +237,8 @@ class TestForeach(TestCase):
                         **sample.kwargs,
                     )
             except Exception as e:
-                # FIXME(crcrpar): Werid error I'm seeing for global_norm and dtype of complex
-                #   RuntimeError: linalg.vector_norm: dtype should be real for real inputs, but got ComplexDouble
-                if not (
-                    op.name == "_foreach_global_norm"
-                    and dtype.is_complex
-                    and (not inplace)
-                ):
-                    with self.assertRaises(type(e)):
-                        ref([ref_input, *sample.ref_args], **ref_kwargs)
+                with self.assertRaises(type(e)):
+                    ref([ref_input, *sample.ref_args], **ref_kwargs)
             else:
                 expected = ref([ref_input, *sample.ref_args], **ref_kwargs)
                 self.assertEqual(expected, actual)

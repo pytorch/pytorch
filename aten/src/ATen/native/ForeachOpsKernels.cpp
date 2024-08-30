@@ -457,11 +457,6 @@ Tensor foreach_tensor_global_norm_slow(
     const Scalar& ord,
     std::optional<ScalarType> dtype) {
   check_foreach_api_restrictions(tensors);
-  std::vector<Tensor> result;
-  for (const auto& t : tensors) {
-    result.emplace_back(
-        at::linalg_vector_norm(t, ord, {}, true, dtype).view({-1}));
-  }
   const double p = [](const Scalar& lp) -> double {
     if (lp.isIntegral(false)) {
       return lp.to<int64_t>();
@@ -471,10 +466,21 @@ Tensor foreach_tensor_global_norm_slow(
       TORCH_CHECK(false, "foreach_ expects ord to be integer or float");
     }
   }(ord);
+  // note(crcrpar): This implementation prioritizes memory consumption over
+  // the number of cuda kernel launches. This can be implemented as
+  // `linalg_vector_norm(cat(flatten_tensors), ord, dtype)` but
+  // it should be memory hungry.
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    result.emplace_back(
+        at::linalg_vector_norm(t, ord, {}, false, dtype).unsqueeze(0));
+  }
+  const auto global_tensor = at::cat(result, 0);
   if (p == 0.0) {
-    return at::cat(result, 0).sum();
+    return global_tensor.sum();
   } else {
-    return at::linalg_vector_norm(at::cat(result, 0), ord, {}, false, dtype);
+    return at::linalg_vector_norm(global_tensor, ord, {}, false);
   }
 }
 
