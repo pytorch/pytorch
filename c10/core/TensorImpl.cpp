@@ -596,8 +596,8 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->refresh_device_policy();
 }
 
-// This functions returns true when lhs and rhs tensor generic metadata equal
-// one another. In particular this is checking equality for the generic properties when
+// This function returns true when lhs and rhs tensor generic metadata equal
+// one another. In particular, this is checking equality for the generic properties when
 // calling TensorImpl::copy_generic_tensor_metadata.
 bool TensorImpl::is_generic_tensor_metadata_equal(
     const TensorImpl* lhs,

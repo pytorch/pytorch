@@ -581,7 +581,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
     env_stack.back()[v] = value;
 
     // Hold tensor reference for the duration of tracing so that
-    // temporary Variables (i.e. created by SavedVariable::unpackSaved via make_variable)
+    // temporary Variables (i.e. created in SavedVariable::unpack when calling make_variable)
     // are not released too early
     backup_.push_back(var);
     
