@@ -1915,33 +1915,18 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(output_cpu.size(), output_mps.size())
 
     @xfailIf(product_version < 15.0)
-    def test_large_bmm_bf16(self):
-        dtype = torch.bfloat16
-        batch1_cpu = torch.randn(11, 20064, 128, dtype=dtype, device='cpu')
-        batch2_cpu = torch.randn(11, 128, 20064, dtype=dtype, device='cpu')
-        batch1_mps = batch1_cpu.detach().clone().to("mps")
-        batch2_mps = batch2_cpu.detach().clone().to("mps")
-
-        output_cpu = torch.bmm(batch1_cpu, batch2_cpu)
-        output_mps = torch.bmm(batch1_mps, batch2_mps)
-
-        self.assertEqual(output_cpu, output_mps)
-        self.assertEqual(output_cpu.size(), output_mps.size())
-
-    @xfailIf(product_version < 15.0)
-    def test_large_bmm_fp16(self):
-        dtype = torch.float16
-        batch1_cpu = torch.randn(11, 20064, 128, dtype=dtype, device='cpu')
-        batch2_cpu = torch.randn(11, 128, 20064, dtype=dtype, device='cpu')
-        batch1_mps = batch1_cpu.detach().clone().to("mps")
-        batch2_mps = batch2_cpu.detach().clone().to("mps")
-
-        output_cpu = torch.bmm(batch1_cpu, batch2_cpu)
-        output_mps = torch.bmm(batch1_mps, batch2_mps)
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_large_bmm(self, dtype):
+        batch1 = torch.randn(11, 20064, 128, dtype=dtype, device='mps')
+        batch2 = torch.randn(11, 128, 20064, dtype=dtype, device='mps')
+        output_cpu = torch.bmm(batch1.cpu(), batch2.cpu())
+        output_mps = torch.bmm(batch1, batch2)
 
         # Using the low precision comparison for FP16
-        self.assertEqual(output_cpu, output_mps, atol=1e-2, rtol=1e-2)
+        tol = 1e-2 if dtype == torch.float16 else None
+        self.assertEqual(output_cpu, output_mps, atol=tol, rtol=tol)
         self.assertEqual(output_cpu.size(), output_mps.size())
+
 
     def test_addr(self):
         A = torch.ones(5, 10).to("mps")
