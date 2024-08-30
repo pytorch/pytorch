@@ -1511,7 +1511,7 @@ Tensor& index_select_out_cuda(
       self.qscheme() == kPerTensorAffine,
       "Only per_tensor quantized quantized tensors are supported by index_select.")
     AT_DISPATCH_QINT_TYPES(out.scalar_type(), "index_select_quant_cuda", [&] {
-      index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
+      index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index);
     });
   } else {
     AT_DISPATCH_V2(
