@@ -707,7 +707,7 @@ inline void {{kernel_name}}_kernel(
 }
 """
 
-    def codegen_call(
+    def codegen_call(  # type: ignore[override]
         self,
         kernel: CppTemplateKernel,
         X: ir.Buffer,

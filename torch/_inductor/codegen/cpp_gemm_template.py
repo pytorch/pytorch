@@ -555,7 +555,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 new_inputs[1] = W.to_dense() if W.is_mkldnn else W
             return new_inputs, layout_or_out
 
-        def normalize_shapes(inputs, layout_or_out, is_int4_woq_gemm=False):
+        def normalize_shapes(inputs, layout_or_out):
             if not trans_w or is_int4_woq_gemm:
                 return inputs, layout_or_out
             new_inputs = list(inputs)
@@ -588,7 +588,6 @@ class CppPackedGemmTemplate(CppTemplate):
         num_threads = parallel_num_threads()
         new_inputs, _ = normalize_shapes(
             *maybe_to_dense(*reorder_and_filter(input_nodes, layout)),
-            is_int4_woq_gemm=is_int4_woq_gemm,
         )
         m, n, k, *_ = mm_args(
             new_inputs[0], new_inputs[1], packed_int4_weights=is_int4_woq_gemm
@@ -682,36 +681,26 @@ class CppPackedGemmTemplate(CppTemplate):
                     assert (
                         k % vnni_size == 0
                     ), f"k should be divisible by vnni_size for {layout_str} layout"
-                    if is_int4_woq_gemm:
-                        blocked_w = blocked_w.view(
-                            n // block_n, k // vnni_size, vnni_size, block_n // 8
+                    blocked_w = (
+                        blocked_w.view(  # type: ignore[union-attr]
+                            padded_n // block_n, k // vnni_size, vnni_size, block_n
                         )
-                        blocked_zp_scales = zp_scales.view(k // block_k, 2 * n)
-                    else:
-                        blocked_w = (
-                            blocked_w.view(
-                                padded_n // block_n, k // vnni_size, vnni_size, block_n
-                            )
-                            .transpose(-1, -2)
-                            .contiguous()
-                            .view(padded_n // block_n, k, block_n)
-                        )
+                        .transpose(-1, -2)
+                        .contiguous()
+                        .view(padded_n // block_n, k, block_n)
+                    )
                 # normalize stride to be "contiguous_strides" per size
                 # this avoids the problems in L.view during template codegen
                 new_stride = [1]
                 for sz in reversed(blocked_w.shape[1:]):
                     new_stride.insert(0, new_stride[0] * sz)
-                blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
-                if is_int4_woq_gemm:
-                    new_stride = [1]
-                    for sz in reversed(blocked_zp_scales.shape[1:]):
-                        new_stride.insert(0, new_stride[0] * sz)
-                    blocked_zp_scales = blocked_zp_scales.as_strided(
-                        blocked_zp_scales.shape, new_stride
-                    )
+                blocked_w = blocked_w.as_strided(  # type: ignore[union-attr]
+                    blocked_w.shape, new_stride
+                )
+
             new_inputs[1] = blocked_w
             if is_int4_woq_gemm:
-                new_inputs[2] = blocked_zp_scales
+                new_inputs[2] = blocked_zp_scales  # type: ignore[possibly-undefined]
 
             def _is_int8_gemm(inputs):
                 return (
@@ -738,7 +727,6 @@ class CppPackedGemmTemplate(CppTemplate):
             return pack_weight(
                 *normalize_shapes(
                     *maybe_to_dense(*reorder_and_filter(inputs, layout)),
-                    is_int4_woq_gemm=is_int4_woq_gemm,
                 )
             )
 

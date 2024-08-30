@@ -1242,9 +1242,7 @@ def use_cpp_packed_gemm_template(
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 
-    output_dtype, _ = get_gemm_template_output_and_compute_dtype(
-        mat1.get_dtype()
-    )
+    output_dtype, _ = get_gemm_template_output_and_compute_dtype(mat1.get_dtype())
     micro_gemm = create_micro_gemm(
         "micro_gemm",
         m,
