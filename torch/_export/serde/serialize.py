@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import operator
+import re
 import typing
 import traceback
 
@@ -578,23 +579,21 @@ class GraphModuleSerializer(metaclass=Final):
             ret["stack_trace"] = stack_trace
 
         if nn_module_stack := node.meta.get("nn_module_stack"):
-            keys, paths, tys = [], [], []
-            for k, v in nn_module_stack.items():
-                keys.append(k)
-                assert isinstance(v, tuple) and len(v) == 2
-                path, ty = v
+
+            def export_nn_module_stack(val):
+                assert isinstance(val, tuple) and len(val) == 2
+                path, ty = val
+
                 assert isinstance(path, str)
                 assert isinstance(ty, str)
-                paths.append(path)
-                tys.append(ty)
 
-            nn_module_stack_dict = {
-                "key_list": keys,
-                "path_list": paths,
-                "type_list": tys
-            }
+                return path + "," + ty
 
-            ret["nn_module_stack"] = json.dumps(nn_module_stack_dict)
+            # Serialize to "key,orig_path,type_str"
+            nn_module_list = [
+                f"{k},{export_nn_module_stack(v)}" for k, v in nn_module_stack.items()
+            ]
+            ret["nn_module_stack"] = ST_DELIMITER.join(nn_module_list)
 
         if source_fn_st := node.meta.get("source_fn_stack"):
             source_fn_list = [
@@ -2189,13 +2188,25 @@ class GraphModuleDeserializer(metaclass=Final):
 
         if nn_module_stack_str := metadata.get("nn_module_stack"):
             # Originally serialized to "key,orig_path,type_str"
-            nn_module_stack_dict = json.loads(nn_module_stack_str)
-            nn_module_stack = {
-                key: (path, ty)
-                for key, path, ty in zip(
-                    nn_module_stack_dict["key_list"],
-                    nn_module_stack_dict["path_list"],
-                    nn_module_stack_dict["type_list"])}
+            def import_nn_module_stack(key, path, ty):
+                return key, (path, ty)
+
+            # Helper function that splits strings by commas except for those
+            # encapsulated by parens, which are valid traces.
+            # TODO: Currently this is needed due to indexing Sequential
+            # layers introducing names in the form "layer.slice(1, None, None)".
+            # If that naming is improved, this fancier splitting can probably be
+            # reverted to a simple split by comma.
+            def metadata_split(metadata):
+                # Remove the parentheses and commas inside them
+                metadata = re.sub(r'\(.*?\)', '', metadata)
+                # Split the string by comma, except for those inside parentheses
+                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+
+            nn_module_stack = dict(
+                import_nn_module_stack(*metadata_split(item))
+                for item in nn_module_stack_str.split(ST_DELIMITER)
+            )
             ret["nn_module_stack"] = nn_module_stack
 
         if source_fn_st_str := metadata.get("source_fn_stack"):

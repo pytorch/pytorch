@@ -312,18 +312,12 @@ def _get_param_buffer_mapping(
     of a traced module to what the original module contains.
     """
 
-    param_lookup: Dict[int, List[str]] = {}
-    buffer_lookup: Dict[int, List[str]] = {}
+    param_lookup: Dict[int, str] = {}
+    buffer_lookup: Dict[int, str] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup.setdefault(id(param), []).append(name)
+        param_lookup[id(param)] = name
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
-        buffer_lookup.setdefault(id(buffer), []).append(name)
-
-    # reverse lists so FQN assignment is FIFO wrt model structure
-    for name, fqns in param_lookup.items():
-        param_lookup[name] = fqns[::-1]
-    for name, fqns in buffer_lookup.items():
-        buffer_lookup[name] = fqns[::-1]
+        buffer_lookup[id(buffer)] = name
 
     param_buffer_table: Dict[str, str] = {}
     for dynamo_name, dynamo_param in traced_module.named_parameters(
@@ -331,14 +325,14 @@ def _get_param_buffer_mapping(
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_param) in param_lookup:
-            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)]
 
     for dynamo_name, dynamo_buffer in traced_module.named_buffers(
         remove_duplicate=False
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_buffer) in buffer_lookup:
-            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)]
 
     return param_buffer_table
 
@@ -916,7 +910,7 @@ def _verify_stack_trace(graph_module: torch.fx.GraphModule) -> None:
         - None or non-empty str for 'call_function', 'get_attr'
         - None for 'placeholder', 'output'
     """
-    for mod in [graph_module, *graph_module.modules()]:
+    for i, mod in enumerate([graph_module] + list(graph_module.modules())):
         if not isinstance(mod, torch.fx.GraphModule):
             continue
         for node in graph_module.graph.nodes:
@@ -1464,10 +1458,10 @@ def _export_to_aten_ir_make_fx(
         params_buffers_args.extend(params_and_buffers_flat)
         params_buffers_args.extend(args)
 
-        flat_fn, _ = create_tree_flattened_fn(
+        flat_fn, out_spec = create_tree_flattened_fn(
             functional_call, params_buffers_args, kwargs
         )
-        flat_args, _ = pytree.tree_flatten((params_buffers_args, kwargs))
+        flat_args, in_spec = pytree.tree_flatten((params_buffers_args, kwargs))
 
         @functools.wraps(flat_fn)
         def wrapped_fn(*args):

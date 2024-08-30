@@ -10,7 +10,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
-from .convert_frame import disabled_codes
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
@@ -56,21 +55,9 @@ def disable(fn=None, recursive=True):
     """
     if recursive:
         if fn is not None:
-            id_fn = id(fn)
-            if cached_fn := disabled_codes.get(id_fn):
-                return cached_fn
-
             fn = innermost_fn(fn)
             assert callable(fn)
-            out = DisableContext()(fn)
-
-            # Do not cache Fx graph methods. These come from Dynamo itself. Caching such graphs can increase lifetime of
-            # held objects. Since these are coming from Dynamo itself, there is no benefit of caching.
-            if not (
-                inspect.ismethod(fn) and isinstance(fn.__self__, torch.fx.GraphModule)
-            ):
-                disabled_codes[id_fn] = out
-            return out
+            return DisableContext()(fn)
         return DisableContext()
     else:
         return skip(fn)
@@ -181,7 +168,10 @@ def forbid_in_graph(fn):
 def substitute_in_graph(
     original_fn: _F,
     *,
+    can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
+    # type that is embedded in the Python interpreter
+    is_embedded_type: bool = False,  # internal use only
 ) -> Callable[[_F], _F]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
@@ -200,6 +190,10 @@ def substitute_in_graph(
     Args:
         original_fn (callable): The original function, usually a C function, to register a polyfill
             handler for.
+        can_constant_fold_through (bool, optional): Whether the polyfill handler can be constant
+            folded through. That is, if the polyfill handler is a pure function and its arguments
+            are constant, the result of the polyfill handler can be constant folded during the
+            compilation. Defaults to ``False``.
         skip_signature_check (bool, optional): Whether to skip the signature check between the
             original function and the polyfill handler. Defaults to ``False``.
 
@@ -227,10 +221,22 @@ def substitute_in_graph(
         >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
         2
     """
-    if not is_function(original_fn):
+    if not is_function(original_fn) and not (
+        is_embedded_type and inspect.isclass(original_fn)
+    ):
         raise TypeError(
             f"substitute_in_graph expects a function but got {type(original_fn)!r}"
         )
+    if is_embedded_type:
+        if not inspect.isclass(original_fn):
+            raise TypeError(
+                f"substitute_in_graph expects a class but got {type(original_fn)!r}"
+            )
+
+        from .variables.builder import ITERTOOLS_POLYFILLED_TYPE_IDS, ITERTOOLS_TYPE_IDS
+
+        if id(original_fn) in ITERTOOLS_TYPE_IDS:
+            ITERTOOLS_POLYFILLED_TYPE_IDS.add(id(original_fn))
 
     def wrapper(traceable_fn: _F) -> _F:
         if not is_function(traceable_fn):
@@ -332,6 +338,7 @@ def substitute_in_graph(
 
         wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
+        wrapped.__torch_dynamo_can_constant_fold_through__ = can_constant_fold_through  # type: ignore[attr-defined]
 
         return wrapped  # type: ignore[return-value]
 
