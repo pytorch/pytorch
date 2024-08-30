@@ -12,6 +12,7 @@ import torch._dynamo
 import torch.fx
 from torch.onnx._internal import _exporter_legacy, io_adapter
 from torch.onnx._internal.diagnostics import infra
+from torch.onnx._internal.fx import analysis, passes
 
 
 if TYPE_CHECKING:
@@ -106,9 +107,6 @@ class TorchExport(_exporter_legacy.FXGraphExtractor):
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):
-        # TODO: Import here to prevent circular dependency
-        from torch.onnx._internal.fx import analysis, passes
-
         diagnostic_context = options.diagnostic_context
 
         # ONNX does not support concept of (implicit) type promotion.
