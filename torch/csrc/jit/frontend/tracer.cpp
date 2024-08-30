@@ -153,8 +153,8 @@ Value* TracingState::getValue(const IValue& var) {
       auto& value_map = env_stack.at(env_stack.size() - 1 - i);
       auto it = value_map.find(var);
       if (it == value_map.end()) {
-        // If we can't find corresponding TensorImpl based on it's hashed ptr, perform search by
-        // try to find a tensor based on matching storage alias and metadata...
+        // If we can't find corresponding TensorImpl based on ptr hash, perform search by
+        // trying to find a tensor based on matching storage alias and metadata...
         it = value_map.begin();
         for (; it != value_map.end(); ++it) {
           if (it->first.is_alias_of(ten.unsafeGetTensorImpl())) {
