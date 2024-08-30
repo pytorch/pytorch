@@ -154,10 +154,7 @@ class BaseTorchVariable(VariableTracker):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
