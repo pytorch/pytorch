@@ -156,6 +156,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if a is not None and b is not None:
             return a + b
 
+    def test_foreach_lerp_(self):
+        def fn(x, y, s):
+            return torch._foreach_lerp_(x, y, s)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
+        expected = fn(
+            [torch.ones(2, 2) * 4.26, torch.ones(2, 2) * 3.14],
+            [torch.ones(2, 2), torch.ones(2, 2)],
+            torch.tensor(0.5),
+        )
+
+        actual = fn_opt(
+            [torch.ones(2, 2) * 4.26, torch.ones(2, 2) * 3.14],
+            [torch.ones(2, 2), torch.ones(2, 2)],
+            torch.tensor(0.5),
+        )
+        self.assertTrue(same(expected, actual))
+
     @make_test
     def test_functools_partial(a, b):
         return clip01(a + b)
