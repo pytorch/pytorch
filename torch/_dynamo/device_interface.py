@@ -3,7 +3,6 @@ import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
-from torch._streambase import _EventBase, _StreamBase
 
 
 get_cuda_stream: Optional[Callable[[int], int]]
@@ -24,12 +23,12 @@ class DeviceInterfaceMeta(type):
         class_member = args[2]
         if "Event" in class_member:
             assert inspect.isclass(class_member["Event"]) and issubclass(
-                class_member["Event"], _EventBase
-            ), "DeviceInterface member Event should be inherit from _EventBase"
+                class_member["Event"], torch.Event
+            ), "DeviceInterface member Event should be inherit from torch.Event"
         if "Stream" in class_member:
             assert inspect.isclass(class_member["Stream"]) and issubclass(
-                class_member["Stream"], _StreamBase
-            ), "DeviceInterface member Stream should be inherit from _StreamBase"
+                class_member["Stream"], torch.Stream
+            ), "DeviceInterface member Stream should be inherit from torch.Stream"
         return super().__new__(metacls, *args, **kwargs)
 
 
@@ -155,7 +154,7 @@ class CudaInterface(DeviceInterface):
     device = torch.cuda.device
 
     # register Event and Stream class into the backend interface
-    # make sure Event and Stream are implemented and inherited from the _EventBase and _StreamBase
+    # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
     Event = torch.cuda.Event
     Stream = torch.cuda.Stream
 

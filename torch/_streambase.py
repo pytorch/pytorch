@@ -1,46 +1,20 @@
-# mypy: allow-untyped-defs
-from abc import ABC, abstractmethod
+from typing_extensions import deprecated
+
+import torch
 
 
-class _StreamBase(ABC):
-    r"""Base stream class abstraction for multi backends Stream to herit from"""
-
-    @abstractmethod
-    def wait_event(self, event) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def wait_stream(self, stream) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def record_event(self, event=None) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def query(self) -> bool:
-        raise NotImplementedError
-
-    @abstractmethod
-    def synchronize(self) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def __eq__(self, stream) -> bool:
-        raise NotImplementedError
+# Preserved only for BC reasons
+@deprecated(
+    "`torch._streambase._StreamBase` is deprecated. Please use `torch.Stream` instead.",
+    category=FutureWarning,
+)
+class _StreamBase(torch.Stream):
+    pass
 
 
-class _EventBase(ABC):
-    r"""Base Event class abstraction for multi backends Event to herit from"""
-
-    @abstractmethod
-    def wait(self, stream=None) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def query(self) -> bool:
-        raise NotImplementedError
-
-    @abstractmethod
-    def synchronize(self) -> None:
-        raise NotImplementedError
+@deprecated(
+    "`torch._streambase._EventBase` is deprecated. Please use `torch.Event` instead.",
+    category=FutureWarning,
+)
+class _EventBase(torch.Event):
+    pass
