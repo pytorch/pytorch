@@ -48,6 +48,7 @@ from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
+    AttrProxySource,
     AttrSource,
     CallMethodItemSource,
     ConstantSource,
@@ -1316,6 +1317,13 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
+
+            # Note [Tracing a torch.compiled function]
+            # when make_fx tracing a compiled function, we need
+            if isinstance(value, torch.fx.experimental.proxy_tensor._AttrProxy):
+                value = value.get_base()
+                self.source = AttrProxySource(self.source)
+
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
@@ -1331,7 +1339,9 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")) or getattr(
+                value.__class__, "_dynamo_marked_static", False
+            ):
                 result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
             else:
                 result = UnspecializedNNModuleVariable(value, source=self.source)
@@ -1695,6 +1705,15 @@ class VariableBuilder:
                             value,
                             frame_state_entry.scalar,
                         )
+                        if self.source.guard_source().is_unspecialized_nn_module():
+                            log.info(
+                                "%s",
+                                (
+                                    f"{name} is converted to a symbolic integer. It is an attribute of a "
+                                    "user defined nn module class. If you wish to keep it static, you can "
+                                    "mark the nn module class as `torch._dynamo.mark_static`."
+                                ),
+                            )
                         frame_state_entry.scalar = None
                 self.tx.output.frame_state[name] = frame_state_entry
 

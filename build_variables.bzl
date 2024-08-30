@@ -835,6 +835,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/extra_state.cpp",
     "torch/csrc/dynamo/framelocals_mapping.cpp",
     "torch/csrc/dynamo/guards.cpp",
+    "torch/csrc/dynamo/utils.cpp",
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/fx/node.cpp",
