@@ -1517,7 +1517,7 @@ Tensor& index_select_out_cuda(
     AT_DISPATCH_V2(
         out.scalar_type(),
         "index_select_cuda",
-        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); }),
+        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index); }),
         AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
         kComplexHalf,
         kHalf,
