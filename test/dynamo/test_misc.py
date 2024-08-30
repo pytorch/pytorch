@@ -2369,6 +2369,17 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_data_access_in_inference_mode(self):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.data
+            return y
+
+        with torch.inference_mode():
+            x = torch.randn(3)
+            y = f(x)
+        self.assertEqual(y, x)
+
     def test_dataclass_fields(self):
         @dataclasses.dataclass
         class MyDataClass:

@@ -509,7 +509,9 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     r = (pyobj_slot_.load_pyobj_interpreter())->detach(this);
   }
   if (r) {
-    r->set_version_counter(std::forward<VariableVersion>(version_counter));
+    if (!r->is_inference()) {
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
+    }
     r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
     return r;
   }
