@@ -38,7 +38,14 @@ register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.f
 register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
 register_log(
-    "export", ["torch._dynamo", "torch.export", *DYNAMIC, "torch._export.converter"]
+    "export",
+    [
+        "torch._dynamo",
+        "torch.export",
+        *DYNAMIC,
+        "torch._export.converter",
+        "torch._export.non_strict_utils",
+    ],
 )
 
 register_artifact(
@@ -148,6 +155,11 @@ register_artifact("onnx_diagnostics", "", off_by_default=True)
 register_artifact(
     "fusion",
     "Detailed Inductor fusion decisions. More detailed than 'schedule'",
+    off_by_default=True,
+)
+register_artifact(
+    "loop_ordering",
+    "Logs related to loop ordering",
     off_by_default=True,
 )
 register_artifact(

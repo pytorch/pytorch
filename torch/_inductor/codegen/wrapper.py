@@ -463,6 +463,7 @@ class WrapperCodeGen(CodeGen):
     def __init__(self):
         super().__init__()
         self._names_iter: Iterator[int] = count()
+        self.imports = IndentedBuffer()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -522,7 +523,7 @@ class WrapperCodeGen(CodeGen):
 
         @functools.lru_cache(None)
         def add_import_once(line: str) -> None:
-            self.header.writeline(line)
+            self.imports.writeline(line)
             if config.triton.autotune_at_compile_time:
                 self.kernel_autotune_calls.writeline(line)
 
@@ -533,7 +534,7 @@ class WrapperCodeGen(CodeGen):
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
-            enable_debug_printer=config.aot_inductor.debug_intermediate_value_printer
+            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
 
     def write_constant(self, name: str, hashed: str) -> None:
@@ -544,7 +545,7 @@ class WrapperCodeGen(CodeGen):
         aot_config_comment = ""
         if context is not None and context.aot_graph_name is not None:
             aot_config_comment = f"# AOT ID: {context.aot_graph_name}"
-        self.header.splice(
+        self.imports.splice(
             f"""
                 {aot_config_comment}
                 from ctypes import c_void_p, c_long, c_int
@@ -557,12 +558,15 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
-
                 from torch import device, empty_strided
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
-
+            """,
+            strip=True,
+        )
+        self.header.splice(
+            """
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
                 _quantized = torch.ops._quantized
@@ -573,8 +577,8 @@ class WrapperCodeGen(CodeGen):
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 async_compile = AsyncCompile()
-
-            """
+            """,
+            strip=True,
         )
 
     def write_kernel_autotune_defs_header(self) -> None:
@@ -598,14 +602,14 @@ class WrapperCodeGen(CodeGen):
             import triton.language as tl
             from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
             """
-        self.header.splice(import_str)
+        self.imports.splice(import_str, strip=True)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
         self.write_get_raw_stream_header_once()
 
     @cache_on_self
     def write_get_raw_stream_header_once(self) -> None:
-        self.header.writeline(
+        self.imports.writeline(
             V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         )
         if config.triton.autotune_at_compile_time:
@@ -784,7 +788,13 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, raw_args, grid, configs, triton_meta, constexprs
+        self,
+        kernel_name: str,
+        raw_args: List[Any],
+        grid: List[Any],
+        configs,
+        triton_meta,
+        constexprs,
     ):
         grid_fn, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
@@ -850,6 +860,8 @@ class WrapperCodeGen(CodeGen):
         if config.profile_bandwidth:
             self.write_triton_header_once()
         result = IndentedBuffer()
+        result.splice(self.imports)
+        result.writeline("")
         result.splice(self.header)
         # We do not want the cpp header for intermediate const graph. Headers would be
         # rendered by the main module instead.
@@ -1535,7 +1547,7 @@ class WrapperCodeGen(CodeGen):
 
     def generate_default_grid(
         self,
-        name: str,
+        kernel_name: str,
         grid: List[Any],
         cuda: bool = True,
         grid_callable: Optional[Callable[..., Any]] = None,
@@ -1626,6 +1638,7 @@ class WrapperCodeGen(CodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        autotune_configs=None,
         grid_extra_kwargs="",
     ):
         """
@@ -2001,6 +2014,8 @@ class WrapperCodeGen(CodeGen):
                 # _maybe_evaluate_static will return (s0 // (2 // s0)) as 2, but
                 # the actual codegen will still generate the full expression here.
                 return None
+            if isinstance(x, int):
+                return x
             val = V.graph._shape_env._maybe_evaluate_static(x)
             return int(val)
         except Exception:

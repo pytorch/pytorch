@@ -51,6 +51,7 @@ if HAS_CUDA:
         add_kernel,
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
+        add_kernel_autotuned_weird_param_order,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
         mul2_inplace_kernel,
@@ -997,6 +998,39 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
                     x, self.weight, self.bias
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @skipIfNoFBGEMM
+    def test_quanatized_int8_linear(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+                self.bias = torch.randn(10, device=device)
+                self.input_scale = torch.tensor(0.1)
+                self.input_zero_point = torch.tensor(0)
+                self.weight_scale = torch.tensor(0.1)
+                self.weight_zero_point = torch.tensor(0)
+                self.output_scale = torch.tensor(0.1)
+                self.output_zero_point = torch.tensor(0)
+                self.out_channel = 10
+
+            def forward(self, x):
+                return torch.ops._quantized.wrapped_quantized_linear(
+                    x,
+                    self.input_scale,
+                    self.input_zero_point,
+                    self.weight,
+                    self.weight_scale,
+                    self.weight_zero_point,
+                    self.bias,
+                    self.output_scale,
+                    self.output_zero_point,
+                    self.out_channel,
                 )
 
         example_inputs = (torch.randn(10, 10, device=self.device),)
@@ -2203,6 +2237,27 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_triton_kernel_weird_param_order(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                out = torch.empty_like(x)
+                add_kernel_autotuned_weird_param_order[16,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    n_elements=x.numel(),
+                    out_ptr=out,
+                )
+                return out
+
+        x = torch.randn(16, 16, device=self.device)
+        self.check_model(Model(), (x,))
+
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3269,8 +3324,8 @@ class AOTInductorTestsTemplate:
             ]
         )
 
-        # test the default debug printing codegen
-        with config.patch({"aot_inductor.debug_intermediate_value_printer": 1}):
+        # test default debug printing all tensor values codegen
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
@@ -3290,11 +3345,11 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
-        # test the filtered kernel names printing codegen
+        # test printing selected kernel's tensor values codegen
         filtered_kernel_name = f"aoti_torch_{self.device}_addmm_out"
         with config.patch(
             {
-                "aot_inductor.debug_intermediate_value_printer": 1,
+                "aot_inductor.debug_intermediate_value_printer": "2",
                 "aot_inductor.filtered_kernel_names": filtered_kernel_name,
             }
         ):
@@ -3525,6 +3580,7 @@ CUDA_TEST_FAILURES = {
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
+    "test_quanatized_int8_linear": fail_cuda(is_skip=True),
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
     # fp8 to be re-enabled for AOTI
     "test_fp8": fail_cuda(is_skip=True),
@@ -3572,6 +3628,9 @@ if not IS_FBCODE:
             ),
             "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
             "test_quantized_linear": fail_minimal_arrayref_interface(is_skip=True),
+            "test_quanatized_int8_linear": fail_minimal_arrayref_interface(
+                is_skip=True
+            ),
             "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
             "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
             "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),
