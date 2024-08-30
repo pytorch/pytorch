@@ -69,6 +69,8 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 
 namespace {
 
+constexpr int kNumSMsForH100 = 132;
+
 using DtypeScale = float;
 using DtypeAccum = float;
 using DtypeEpilogue = float;
@@ -114,6 +116,14 @@ template <>
 struct Schedule</*PingPong=*/true, /*FastAccum=*/true> {
   using type = cutlass::gemm::KernelTmaWarpSpecializedPingpongFP8FastAccum;
 };
+
+int ceildiv(int a, int b) {
+  return (a + b - 1) / b;
+}
+
+int round_up_to_nearest_multiple(int a, int b) {
+  return ceildiv(a, b) * b;
+}
 
 // Cutlass rowwise kernel
 template <
@@ -292,10 +302,39 @@ void f8f8bf16_rowwise_impl(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <typename ClusterShape, typename... Types>
+void dispatch_fp8_rowwise_kernel_on_tile_size(
+    at::Tensor XQ,
+    at::Tensor WQ,
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    at::Tensor out) {
+  int M = XQ.size(0);
+  int N = WQ.size(1);
+
+  // We prefer to use smaller tiles (less wasted compute in case of padding),
+  // but if this causes us to have more CUDA blocks than there are SMs on the
+  // GPU then we'll hit wave quantization, hence we'll switch to larger tiles.
+  if (ceildiv(M, 64 * cute::get<0>(ClusterShape{})) *
+          ceildiv(N, 128 * cute::get<1>(ClusterShape{})) <=
+      kNumSMsForH100 / cute::size(ClusterShape{})) {
+    return f8f8bf16_rowwise_impl<
+        /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
+        ClusterShape,
+        /*PingPong=*/std::false_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else {
+    return f8f8bf16_rowwise_impl<
+        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
+        ClusterShape,
+        /*PingPong=*/std::true_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  }
+}
+
 template <
-    typename TileShape,
     typename ClusterShape,
-    typename PingPong,
     typename Transposed,
     typename FastAccum,
     typename DtypeA,
@@ -309,20 +348,16 @@ void handle_transposition(
     std::optional<at::Tensor> bias,
     at::Tensor out) {
   if constexpr (!Transposed::value) {
-    f8f8bf16_rowwise_impl<
-        TileShape,
+    dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
-        PingPong,
         Transposed,
         FastAccum,
         DtypeA,
         DtypeB,
         DtypeBias>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
-    f8f8bf16_rowwise_impl<
-        TileShape,
+    dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
-        PingPong,
         Transposed,
         FastAccum,
         DtypeB,
@@ -331,55 +366,87 @@ void handle_transposition(
   }
 }
 
-// FP8 Rowwise Cutlass kernel dispatch.
-enum class KernelMode { Small, Large, Default };
-
-KernelMode get_kernel_mode(at::Tensor XQ, at::Tensor WQ) {
-  auto M = XQ.size(0);
-  auto K = XQ.size(1);
-  auto N = WQ.size(0);
-  // Use a large kernel if at least two shapes are large....
-  bool use_large_kernel =
-      ((M >= 2048 && K >= 2048) || (M >= 2048 && N >= 2048) ||
-       (K >= 2048 && N >= 2048));
-  if (M <= 128 || N <= 128) {
-    return KernelMode::Small;
-  } else if (use_large_kernel) {
-    return KernelMode::Large;
-  } else {
-    return KernelMode::Default;
-  }
-}
-
 template <typename... Types>
-void dispatch_fp8_rowwise_kernel_on_tile_size(
+void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
     at::Tensor XQ,
     at::Tensor WQ,
     at::Tensor x_scale,
     at::Tensor w_scale,
     std::optional<at::Tensor> bias,
     at::Tensor out) {
-  KernelMode kernel = get_kernel_mode(XQ, WQ);
-  if (kernel == KernelMode::Small) {
+  int M = XQ.size(0);
+  int N = WQ.size(1);
+
+  // All the tiles we use have sizes which are multiples of 64, hence any
+  // non-multiple of 64 will get padded anyways. Let's round up to simplify.
+  M = round_up_to_nearest_multiple(M, 64);
+  N = round_up_to_nearest_multiple(N, 64);
+
+  // Small/skinny shapes with odd multiples of 64.
+  if (M == 64 && N >= 3072) {
     return handle_transposition<
-        /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
-        /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
-        /*PingPong=*/std::false_type,
+        /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
         /*Transposed=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
-  } else if (kernel == KernelMode::Large) {
+  }
+  if (N == 64 && M >= 3072) {
     return handle_transposition<
-        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
-        /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
-        /*PingPong=*/std::true_type,
+        /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
+        /*Transposed=*/std::true_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  }
+  if (M == 192 && N >= 4096) {
+    return handle_transposition<
+        /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
+        /*Transposed=*/std::true_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  }
+  if (N == 192 && M >= 4096) {
+    return handle_transposition<
+        /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
         /*Transposed=*/std::false_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  }
+
+  // Now to odd multiples of 128 (but only if not too large).
+  if (M * N <= 4096 * 4096) {
+    if (M % 256 > 0 && N % 256 == 0) {
+      return handle_transposition<
+          /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
+          /*Transposed=*/std::true_type,
+          Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
+    if (N % 256 > 0 && M % 256 == 0) {
+      return handle_transposition<
+          /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
+          /*Transposed=*/std::false_type,
+          Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
+  }
+  if (M % 256 > 0 && N % 256 > 0) {
+    if ((M <= N) ^ (M * N <= 1024 * 1024)) {
+      return handle_transposition<
+          /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
+          /*Transposed=*/std::true_type,
+          Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    } else {
+      return handle_transposition<
+          /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
+          /*Transposed=*/std::false_type,
+          Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+    }
+  }
+
+  // General case for large tensors.
+  if ((M <= N) ^ (M >= 2048 && N >= 2048)) {
+    return handle_transposition<
+        /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
+        /*Transposed=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     return handle_transposition<
-        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
-        /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
-        /*PingPong=*/std::false_type,
-        /*Transposed=*/std::false_type,
+        /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
+        /*Transposed=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
@@ -394,11 +461,13 @@ void dispatch_fp8_rowwise_kernel_on_fast_accum(
     bool use_fast_accum,
     at::Tensor out) {
   if (use_fast_accum) {
-    dispatch_fp8_rowwise_kernel_on_tile_size<std::true_type, Types...>(
-        XQ, WQ, x_scale, w_scale, bias, out);
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+        std::true_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
-    dispatch_fp8_rowwise_kernel_on_tile_size<std::false_type, Types...>(
-        XQ, WQ, x_scale, w_scale, bias, out);
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+        std::false_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
 
