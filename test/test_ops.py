@@ -2338,6 +2338,7 @@ fake_autocast_device_skips = defaultdict(dict)
 
 # TODO: investigate/fix
 fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
+fake_autocast_device_skips["cuda"] = {"linalg.pinv", "pinverse"}
 
 
 dynamic_output_op_tests = (
@@ -2475,9 +2476,16 @@ class TestFakeTensor(TestCase):
                         # if you see a shape exception here, you may need to add
                         # a `dynamic_output_shape` tag to an operator
 
-                        # prims/decomps must correctly model strides,
-                        # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                        prims.utils.compare_tensor_meta(fake_out, real_out, True)
+                        if op.op not in [
+                            torch.ops.aten._efficient_attention_forward,
+                            torch.ops.aten._flash_attention_forward,
+                        ]:
+                            # prims/decomps must correctly model strides,
+                            # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
+
+                            # note: the excluded ops have intentionally incorrect device;
+                            # see "Note [Seed and Offset]" (_meta_registrations.py)
+                            prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
                         if name not in aliasing_failures:
                             fake_aliasing = outputs_alias_inputs(
@@ -2575,12 +2583,14 @@ class TestFakeTensor(TestCase):
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
-        if op.name in fake_autocast_device_skips[device]:
+        device_type = torch.device(device).type
+        if op.name in fake_autocast_device_skips[device_type]:
             self.skipTest("Skip failing test")
-        context = (
-            torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
-        )
-        self._test_fake_helper(device, dtype, op, context)
+
+        def context_fn():
+            return torch.amp.autocast(device_type)
+
+        self._test_fake_helper(device, dtype, op, context_fn)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)

@@ -313,8 +313,9 @@ optimize_ddp_lazy_compile = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
-# Whether to apply torch._dynamo.disable() to per-param FSDP hooks
-skip_fsdp_hooks = False
+# Whether to apply torch._dynamo.disable() to FSDP2 hooks.
+# Defaults to True. If Traceable FSDP2 is used, set this to False.
+skip_fsdp_hooks = True
 
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
@@ -372,6 +373,10 @@ enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") 
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
+
+# When set, total compile time instruction count is recorded using
+# torch._dynamo.utilsCompileTimeInstructionCounter.
+record_compile_time_instruction_count = False
 
 
 def default_debug_dir_root():
@@ -467,7 +472,7 @@ compiled_autograd = False
 # reliably achieved by ensuring PT2 only is run on SPMD programs.  If this
 # invariant is inviolated, you will likely deadlock NCCL and encounter a
 # NCCL timeout.
-enable_compiler_collectives = False
+enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

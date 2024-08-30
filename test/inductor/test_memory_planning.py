@@ -69,11 +69,11 @@ class TestMemoryPlanning(TestCase):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = at::detail::empty_strided_cuda({(4L*s0*s1) + (align(4L*(static_cast<long>(s0*s0)))), }, {1L, }"
+            "pool1 = at::detail::empty_strided_cuda({(4L*s0*s1) + (align(4L*(static_cast<int64_t>(s0*s0)))), }, {1L, }"
         ).check_next(
             "auto buf0 = alloc_from_pool(pool1, 0, at::kFloat, {s0, s0}, {s0, 1L});"
         ).check(
-            "auto buf1 = alloc_from_pool(pool1, align(4L*(static_cast<long>(s0*s0))),"
+            "auto buf1 = alloc_from_pool(pool1, align(4L*(static_cast<int64_t>(s0*s0))),"
         ).run(
             code
         )

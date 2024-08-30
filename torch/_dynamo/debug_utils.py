@@ -361,7 +361,9 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")  # noqa: B904
+                raise RuntimeError(  # noqa: B904
+                    "Could not generate fp64 outputs, workaround with torch._dynamo.config.same_two_models_use_fp64 = False"
+                )
             log.warning("Could not generate fp64 outputs")
 
     try:
@@ -719,7 +721,6 @@ def aot_graph_input_parser(
 
     class TensorContainer:
         "Container for tensors as attributes"
-        pass
 
     # Dictionary for tensors from annotations
     kwargs: Dict[str, Any] = {}
@@ -744,7 +745,8 @@ def aot_graph_input_parser(
                 resolved_shape.append(s)
                 dynamic_dims.append(i)
             else:
-                resolved_shape.append(int(dim))
+                if dim:
+                    resolved_shape.append(int(dim))
 
         constructor = torch.randn if dtype.is_floating_point else torch.zeros
         out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]

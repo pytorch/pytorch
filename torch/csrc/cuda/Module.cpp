@@ -35,6 +35,7 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/cuda/python_comm.h>
@@ -1281,6 +1282,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
+      "_cuda_beginAllocateToPool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [](cudaStream_t) { return true; });
+      });
+
+  m.def(
       "_cuda_endAllocateCurrentStreamToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
@@ -1963,8 +1971,12 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
+void initGdsBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
+#endif
+#if defined(USE_CUSPARSELT)
+void initCusparseltBindings(PyObject* module);
 #endif
 
 } // namespace shared
@@ -1978,6 +1990,10 @@ void initModule(PyObject* module) {
 #if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
+#if defined(USE_CUSPARSELT)
+  shared::initCusparseltBindings(module);
+#endif
+  shared::initGdsBindings(module);
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
 }
