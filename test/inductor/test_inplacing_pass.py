@@ -157,9 +157,12 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
     def get_not_inplaced_count(self, graph):
         counter = 0
+        auto_functionalized_found = False
         for node in graph.nodes:
             if node.target == torch.ops.higher_order.auto_functionalized:
+                auto_functionalized_found = True
                 counter += len(node.meta["only_clone_these_bases"])
+        assert auto_functionalized_found
         return counter
 
     def test_view_inplaced(self):

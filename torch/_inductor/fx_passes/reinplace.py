@@ -468,18 +468,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
 
-        viewed_input = None
         if mutated_arg.op in ("placeholder", "get_attr"):
-            viewed_input = mutated_arg
-        else:
-            for view in shared_view_nodes:
-                if view.op in ("placeholder", "get_attr"):
-                    viewed_input = view
-                    break
-
-        if viewed_input:
             # Get the first copy_ node that mutates the mutated_arg.
-            copy_node = copy_nodes.get(viewed_input, None)
+            copy_node = copy_nodes.get(mutated_arg, None)
             if copy_node is None:
                 # There is no copy_ back to the candidate mutated_arg (which is a graph input).
                 # Therefore the semantics of the program are that it does not mutate
@@ -491,6 +482,14 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return False
 
             return True
+        elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
+            # This should never happens in auto_functionalize non-inference mode,
+            # since all mutated_arg are bases.
+
+            # If mutated arg is view of any of the inputs of the graph,
+            # do not allow for inplacing.
+            # This would require more sophisticated algorithm to handle
+            return False
         else:
             return not any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
@@ -556,9 +555,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     replace_dict[copy_node] = copy_node.args[0]
                 if not auto_functionalize:
                     for user in node.users:
-                        # For auto_functionalize arg the index of the base, where base at index i corresponds to output at
-                        # index size(out) +i.
-                        # This used to compare string with integers before for auto_functionalize. not sure
+                        # For auto_functionalize, arg is the index of the base, where base at index i corresponds to
+                        # output atindex size(out)+i.
+                        # This used to compare string with integers before for auto_functionalize. Not sure
                         # if it was needed for inplaceable_triton_ops?
                         if user.target == operator.getitem and user.args[1] == arg:
                             replace_dict[user] = mutated_arg
@@ -593,11 +592,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
         elif node.target == torch.ops.higher_order.auto_functionalized:
-            from torch._higher_order_ops.auto_functionalize import get_mutable_args
-
             _mutable_op = node.args[0]
-            arg_names, arg_types = get_mutable_args(_mutable_op)
-
             kwargs = node.kwargs
 
             all_bases = kwargs["_all_bases"]
