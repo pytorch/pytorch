@@ -143,7 +143,9 @@ def get_cpp_compiler() -> str:
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
-            return build_paths.cc()
+            return (
+                build_paths.cc() if torch.version.hip is None else build_paths.clang()
+            )
         if isinstance(config.cpp.cxx, (list, tuple)):
             search = tuple(config.cpp.cxx)
         else:
@@ -633,10 +635,20 @@ def _setup_standard_sys_libs(
 
     if config.is_fbcode():
         cflags.append("nostdinc")
-        include_dirs.append(build_paths.sleef())
-        include_dirs.append(build_paths.cc_include())
-        include_dirs.append(build_paths.libgcc())
-        include_dirs.append(build_paths.libgcc_arch())
+        # Note that the order of include paths do matter, as a result
+        # we need to have several branches interleaved here
+        if torch.version.hip is None:
+            include_dirs.append(build_paths.sleef())
+        include_dirs.append(build_paths.openmp())
+        include_dirs.append(build_paths.python())
+        if torch.version.hip is not None:
+            include_dirs.append(build_paths.clang_include())
+            include_dirs.append(build_paths.gcc_include())
+            include_dirs.append(build_paths.gcc_install_tools_include())
+        else:
+            include_dirs.append(build_paths.cc_include())
+            include_dirs.append(build_paths.libgcc())
+            include_dirs.append(build_paths.libgcc_arch())
         include_dirs.append(build_paths.libgcc_backward())
         include_dirs.append(build_paths.glibc())
         include_dirs.append(build_paths.linux_kernel())
@@ -1070,7 +1082,9 @@ def get_cpp_torch_cuda_options(
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
+        os.environ["CUDA_HOME"] = (
+            build_paths.rocm() if torch.version.hip else build_paths.cuda()
+        )
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
@@ -1086,7 +1100,7 @@ def get_cpp_torch_cuda_options(
                 libraries += ["amdhip64"]
             else:
                 libraries += ["c10_hip", "torch_hip"]
-                definations.append(" __HIP_PLATFORM_AMD__")
+            definations.append(" __HIP_PLATFORM_AMD__")
         else:
             if config.is_fbcode():
                 libraries += ["cuda"]
