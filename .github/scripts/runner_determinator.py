@@ -261,7 +261,7 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
     """
     gh = get_gh_client(github_token)
     issue = get_issue(gh, repo, issue_num)
-    return issue.get_comments()[0].body.strip("\n\t ")
+    return str(issue.get_comments()[0].body.strip("\n\t "))
 
 
 def main() -> None:
