@@ -484,8 +484,8 @@ def speculate_subgraph(
                 prev_side_effects.track_tensor_variables_from_runahead_side_effects(
                     new_side_effects
                 )
-                # if under_checkpoint:
-                #     prev_side_effects.merge(new_side_effects)
+                if under_checkpoint:
+                    prev_side_effects.merge(new_side_effects)
                 for k, v in prev_side_effects.store_attr_mutations.items():
                     print(f"after: prev_side_effects.store_attr_mutations: k: {k}")
                     for k1, v1 in v.items():
@@ -618,7 +618,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "_export_tracepoint":
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "trace_wrapped":
+        elif value.__name__ == "trace_wrapped" or value.__name__ == "trace_wrapped_fwd_hook":
             return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
         elif value.__name__ == "strict_mode":
             return StrictModeHigherOrderVariable(value, source, **kwargs)

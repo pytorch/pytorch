@@ -361,9 +361,11 @@ class SideEffects:
         for other_id, other_variable in other.id_to_variable.items():
             if other_id not in self.id_to_variable:
                 self.id_to_variable[other_id] = other_variable
-            for other_item_keepalive in other.keepalive:
-                if id(other_item_keepalive) == other_id and other_item_keepalive not in self.keepalive:
-                    self.keepalive.append(other_item_keepalive)
+            id_to_obj_in_self_keepalive = {id(item): item for item in self.keepalive}
+            id_to_obj_in_other_keepalive = {id(item): item for item in other.keepalive}
+            for id_in_other_keepalive in id_to_obj_in_other_keepalive.keys():
+                if id_in_other_keepalive == other_id and id_in_other_keepalive not in id_to_obj_in_self_keepalive:
+                    self.keepalive.append(id_to_obj_in_other_keepalive[id_in_other_keepalive])
 
         for other_id, other_attr_mutations in other.store_attr_mutations.items():
             if other_id not in self.store_attr_mutations:

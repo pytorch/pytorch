@@ -14,6 +14,9 @@ import logging
 import traceback
 from contextlib import nullcontext
 from typing import Any, Callable, List, Optional, Sequence, Tuple
+import copy
+import collections
+import operator
 
 import torch
 import torch.utils.dlpack
@@ -309,6 +312,38 @@ def collect_bw_donated_buffer_idxs(
     return [fw_metadata.num_symints_saved_for_bw + i for i in fw_donated_buffer]
 
 
+def remove_module_fw_hook_trace_wrapped_in_fw_module(fw_module):
+    """
+    trace_wrapped_fwd_hook = torch__dynamo__trace_wrapped_fwd_hook_higher_order_op_self_invoke(None, primals_1, primals_2, bw_state = primals_3);  primals_1 = primals_2 = primals_3 = None
+    getitem: "f32[8, 8][8, 1]cpu" = trace_wrapped_fwd_hook[0]
+    getitem_1: "f32[8, 8][8, 1]cpu" = trace_wrapped_fwd_hook[1];  trace_wrapped_fwd_hook = None
+    mul: "f32[8, 8][8, 1]cpu" = torch.ops.aten.mul.Tensor(getitem, 7);  getitem = None
+    mul_1: "f32[8, 8][8, 1]cpu" = torch.ops.aten.mul.Tensor(getitem_1, 13);  getitem_1 = None
+
+    -> 
+
+    mul: "f32[8, 8][8, 1]cpu" = torch.ops.aten.mul.Tensor(primals_1, 7);  getitem = None
+    mul_1: "f32[8, 8][8, 1]cpu" = torch.ops.aten.mul.Tensor(primals_2, 13);  getitem_1 = None
+    """
+    new_graph = copy.deepcopy(fw_module.graph)
+    trace_wrapped_fwd_hook_node_to_getitem_nodes = collections.defaultdict(dict)
+    arg_index_offset = 1  # First arg is always the module which is None in the graph
+    for node in new_graph.nodes:
+        # TODO: improve the string check here
+        if node.target is operator.getitem and "trace_wrapped_fwd_hook" in str(node.args[0]):
+            getitem_node = node
+            trace_wrapped_fwd_hook_node = getitem_node.args[0]
+            getitem_idx = getitem_node.args[1]
+            trace_wrapped_fwd_hook_node_to_getitem_nodes[trace_wrapped_fwd_hook_node][getitem_idx] = getitem_node
+    for trace_wrapped_fwd_hook_node, getitem_nodes_dict in trace_wrapped_fwd_hook_node_to_getitem_nodes.items():
+        for getitem_idx, getitem_node in getitem_nodes_dict.items():
+            arg_orig = trace_wrapped_fwd_hook_node.args[getitem_idx + arg_index_offset]
+            getitem_node.replace_all_uses_with(arg_orig)
+            new_graph.erase_node(getitem_node)
+        new_graph.erase_node(trace_wrapped_fwd_hook_node)
+    fw_module.graph = new_graph
+
+
 def aot_dispatch_autograd(
     flat_fn,
     flat_args: List[Any],
@@ -514,6 +549,8 @@ def aot_dispatch_autograd(
                 )
                 if bw_out is None and not metadata_mutation_in_graph:
                     _indices_of_inps_to_detach.append(i)
+
+        remove_module_fw_hook_trace_wrapped_in_fw_module(fw_module)
 
         if aot_config.enable_log:
             aot_graphs_log.info(

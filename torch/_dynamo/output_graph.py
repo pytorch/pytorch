@@ -410,8 +410,12 @@ class OutputGraph:
 
         # Use to pass values to backward hooks when using compiled autograd
         self.backward_state: Dict[str, VariableTracker] = {}
+        self.backward_state_obj = BackwardState.get_singleton()
+        print(f"OutputGraph ctor: id(self.backward_state_obj): {id(self.backward_state_obj)}")
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
-        self.backward_state_var: Optional[str] = None
+        self.backward_state_var: Optional[str] = self.install_global_by_id(
+            "bw_state", self.backward_state_obj
+        )
 
         self.name_of_builtins_dict_key_in_fglobals: str = (
             self.install_builtins_dict_in_fglobals()
@@ -452,8 +456,10 @@ class OutputGraph:
                 "dynamo_backward_state", BackwardState, source=BackwardStateSource()
             )
             self.backward_state_proxy.node.meta["grapharg"] = BackwardStateGraphArg()
-            set_example_value(self.backward_state_proxy.node, BackwardState())
-            self.backward_state_var = self.new_var()
+            assert self.backward_state_obj
+            set_example_value(self.backward_state_proxy.node, self.backward_state_obj)
+            print(f"get_backward_state_proxy: id(self.backward_state_obj): {id(self.backward_state_obj)}")
+            # self.backward_state_var = self.new_var()
         return self.backward_state_proxy
 
     # This gets its own helper function so guards DEBUG logs are more informative
@@ -1166,10 +1172,13 @@ class OutputGraph:
 
     def codegen_suffix(self, tx, stack_values, cg):
         if self.backward_state:
+            print("here93")
             assert not self.export
             for name, val in self.backward_state.items():
+                print(f"id(self.backward_state_proxy): {id(self.backward_state_proxy)}, self.backward_state_var: {self.backward_state_var}, name: {name}, val: {val}")
                 cg(val)
-                cg.append_output(cg.create_load(self.backward_state_var))
+                # cg.append_output(cg.create_load(self.backward_state_var))
+                cg.append_output(cg.create_load_global(self.backward_state_var, add=True))
                 cg.store_attr(name)
         self.side_effects.codegen_hooks(cg)
         self.side_effects.codegen_save_tempvars(cg)
@@ -1665,6 +1674,7 @@ class OutputGraph:
         if name in self.installed_globals:
             return name
         self.install_global_unsafe(name, value)
+        print(f"install_global_by_id: name: {name}")
         return name
 
     def install_global(self, prefix, value) -> str:

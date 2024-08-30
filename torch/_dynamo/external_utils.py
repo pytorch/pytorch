@@ -136,6 +136,7 @@ def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):
 def call_module_hooks_from_backward_state(
     _, result, *args, bw_state, hooks_name: str, module_name: str
 ):
+    torch._dynamo.comptime.comptime.print(f"in call_module_hooks_from_backward_state: id(bw_state): {id(bw_state)}, type(bw_state): {type(bw_state)}")
     module = getattr(bw_state, module_name)
     hooks = getattr(bw_state, hooks_name)
     for hook in hooks:
@@ -148,11 +149,7 @@ def call_module_hooks_from_backward_state(
 def call_module_forward_hooks_from_backward_state(
     _, *args, bw_state, hooks_name: str, module_name: str
 ):
-    raise Exception()
+    torch._dynamo.comptime.comptime.print(f"in call_module_forward_hooks_from_backward_state: id(bw_state): {id(bw_state)}, type(bw_state): {type(bw_state)}")
     module = getattr(bw_state, module_name)
     hooks = getattr(bw_state, hooks_name)
-    for hook in hooks:
-        new_result = hook(module, *args)
-        if new_result is not None:
-            result = new_result
-    return result
+    return hooks(module, args)  # TODO: just make it have singular hook, not "hooks"

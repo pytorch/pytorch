@@ -8,6 +8,7 @@ from torch.fx.experimental._backward_state import BackwardState
 
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
+from .._trace_wrapped_fwd_hook_higher_order_op import trace_wrapped_fwd_hook
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state, call_module_forward_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
@@ -336,12 +337,17 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
     def call_function(self, tx: "InstructionTranslator", args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]") -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            return super().call_function_inner(tx, args, kwargs)
+
         if not compiled_autograd.compiled_autograd_enabled:
             unimplemented("module-level forward pre-hooks require compiled autograd")
 
         module_name, bw_state_proxy = tx.output.add_backward_state_hook(self.module, "mod")
         user_pre_hooks_name, _ = tx.output.add_backward_state_hook(self.user_pre_hooks)
         # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
+
+        print(f"id(bw_state_proxy): {id(bw_state_proxy)}")
 
         def _in_graph_fw_pre_hooks(bw_state):
             """
@@ -351,7 +357,7 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
             can turn into actual hook calls.
             """
             return functools.partial(
-                trace_wrapped,
+                trace_wrapped_fwd_hook,
                 fn=call_module_forward_hooks_from_backward_state,
                 bw_state=bw_state,
                 hooks_name=user_pre_hooks_name,
@@ -367,7 +373,7 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
         # hook_proxy.node.meta["example_value"] = self.user_pre_hooks.fn
 
         def call_hook(hook_proxy, *args, **kwargs):
-            return hook_proxy(self.module, *args, **kwargs)
+            return hook_proxy(None, *args, **kwargs)
             # return tx.output.create_proxy(
             #     "call_function",
             #     functools.partial(hook_proxy, self.module),
@@ -375,7 +381,7 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
             #     kwargs,
             # ),
             # return functools.partial(
-            #     trace_wrapped,
+            #     trace_wrapped_fwd_hook,
             #     fn=call_module_forward_hooks_from_backward_state,
             #     bw_state=bw_state_proxy,
             #     hooks_name=user_pre_hooks_name,
@@ -383,15 +389,26 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
             # )(*args, **kwargs)
             # return functools.partial(self.user_pre_hooks.fn, self.module.value)(*args, **kwargs)
 
+        assert len(args) == 2
+        assert isinstance(args[1], variables.TupleVariable)
+        # TODO(yf225): is there prior art for how to handle this?
+        example_value = []
+        for arg in args[1].items:
+            if isinstance(arg, variables.TensorVariable):
+                example_value.append(arg.proxy.node.meta["example_value"])
+            else:
+                example_value.append(arg.as_python_constant())
         new_args = wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
                 "call_function",
                 call_hook,
-                tuple([hook_proxy] + [arg.as_proxy()[0] for arg in args[1:]]),
+                tuple([hook_proxy] + list(args[1].as_proxy())),
                 # tuple([arg.as_proxy()[0] for arg in args[1:]]),
                 {},
             ),
+            example_value=tuple(example_value),
+            source=self.source,
         )
 
         return super().call_function_inner(tx, [self.module, new_args], kwargs)

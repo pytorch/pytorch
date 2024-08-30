@@ -1307,16 +1307,17 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         cnt = CompileCounterWithBackend(backend)
         cnt_ca = CompileCounterWithBackend(backend)
 
-        def fwd_pre_hook(state, m, i):
+        def fwd_pre_hook(state, m, args):
             # TODO(yf225): explore how to support kwargs in forward hooks
+            # TODO(yf225): test multiple args input
             state.fwd_pre_hook_call_count += 1
-            return i
+            return (args[0] * 7, args[1] * 13)
 
         # def fwd_hook(state, m, i, o):
         #     state.fwd_hook_call_count += 1
         #     return o
 
-        def fn(model, inp, state, compiled=False):
+        def fn(model, args, state, compiled=False):
             if compiled:
                 ctx = compiled_autograd.enable(lambda gm: torch.compile(gm, backend=cnt_ca, fullgraph=True))
             else:
@@ -1324,19 +1325,26 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             with ctx:
                 self.assertEqual(state.fwd_pre_hook_call_count, 0)  # before forward
                 # self.assertEqual(state.fwd_hook_call_count, 0)
-                out = model(inp)
+                out = model(*args)
                 self.assertEqual(state.fwd_pre_hook_call_count, 1)  # after forward
                 # self.assertEqual(state.fwd_hook_call_count, 1)
                 loss = out.sum()
-                return None, loss
-                # loss.backward()
-                # self.assertEqual(state.fwd_pre_hook_call_count, 2)  # after backward
-                # # self.assertEqual(state.fwd_hook_call_count, 2)
-                # return out, loss
+                loss.backward()
+                self.assertEqual(state.fwd_pre_hook_call_count, 2)  # after backward
+                # self.assertEqual(state.fwd_hook_call_count, 2)
+                return out, loss
+
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(8, 8)
+
+            def forward(self, x, y):
+                return self.lin(x) + self.lin(y)
 
         def test_fn(compiled=False, hook_using_partial=False):
-            lin = torch.nn.Linear(1, 1)
-            mod = torch.nn.Sequential(lin, lin)
+            torch.manual_seed(0)
+            mod = TestModel()
             state = MyState()
             if hook_using_partial:
                 mod.register_forward_pre_hook(functools.partial(fwd_pre_hook, state))
@@ -1348,16 +1356,17 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             mod = CheckpointWrapper(mod)
             if compiled:
                 mod = torch.compile(mod, backend=cnt, fullgraph=True)
-            inp = torch.randn(1, 1)
-            out, loss = fn(mod, inp, state, compiled=compiled)
+            x = torch.randn(8, 8)
+            y = torch.randn(8, 8)
+            out, loss = fn(mod, (x, y), state, compiled=compiled)
             return out, loss
 
-        # ref_out, ref_loss = test_fn(compiled=False)
+        ref_out, ref_loss = test_fn(compiled=False)
         out, loss = test_fn(compiled=True, hook_using_partial=False)  # TODO(yf225): make hook_using_partial=True work
-        # self.assertEqual(out, ref_out)
-        # self.assertEqual(loss, ref_loss)
-        # self.assertEqual(cnt.frame_count, 1)
-        # self.assertEqual(cnt_ca.frame_count, 1)
+        self.assertEqual(out, ref_out)
+        self.assertEqual(loss, ref_loss)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt_ca.frame_count, 1)
 
 
 if __name__ == "__main__":

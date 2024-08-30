@@ -53,6 +53,7 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "run_with_rng_state",
     "out_dtype",
     "trace_wrapped",
+    "trace_wrapped_fwd_hook",
     "map",  # T183144629
     "map_impl",
     "with_effects",

@@ -3220,6 +3220,7 @@ if torch.distributed.is_available():
 # Please keep this sorted alphabetically.
 MOD_INLINELIST = [
     "torch._decomp",
+    "torch._dynamo._trace_wrapped_fwd_hook_higher_order_op",
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",

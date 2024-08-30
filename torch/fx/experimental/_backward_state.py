@@ -25,3 +25,15 @@ class BackwardState:
     """
 
     proxy: torch.fx.Proxy
+    singleton = None
+
+    def __init__(self):
+        print("here92")
+        # import traceback
+        # print("\n".join(traceback.format_stack()) + "\n" + "id(self) at BackwardState ctor: " + str(id(self)))
+
+    @classmethod
+    def get_singleton(cls):
+        if cls.singleton is None:
+            cls.singleton = BackwardState()
+        return cls.singleton
