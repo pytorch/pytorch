@@ -51,6 +51,9 @@
 #endif // _WIN32
 #endif // __GNUC__
 
+// The following files are implemented in a header-only way and are guarded by
+// test/cpp/aoti_abi_check
+#include <ATen/Config.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
@@ -612,7 +615,34 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
-#endif
+#endif // USE_CUDA
+
+#if AT_MKLDNN_ENABLED()
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
+    AtenTensorHandle input,
+    AtenTensorHandle weight0,
+    AtenTensorHandle weight1,
+    AtenTensorHandle weight2,
+    AtenTensorHandle weight3,
+    AtenTensorHandle hx_,
+    AtenTensorHandle cx_,
+    int32_t reverse,
+    const int64_t* batch_sizes,
+    int64_t batch_sizes_len_,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t num_layers,
+    int32_t has_biases,
+    int32_t bidirectional,
+    int32_t batch_first,
+    int32_t train,
+    AtenTensorHandle* ret0,
+    AtenTensorHandle* ret1,
+    AtenTensorHandle* ret2,
+    AtenTensorHandle* ret3);
+
+#endif // AT_MKLDNN_ENABLED()
 
 // See `ProxyExecutor Design Note` in ir.py for more details
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
