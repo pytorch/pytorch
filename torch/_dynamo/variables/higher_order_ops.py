@@ -1122,20 +1122,24 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, input, dim):
-            return combine_fn, input, dim
+        def arg_extractor(combine_fn, input, init, dim):
+            return combine_fn, input, init, dim
 
-        combine_fn, input, dim = arg_extractor(*args, **kwargs)
+        combine_fn, input, init, dim = arg_extractor(*args, **kwargs)
 
         if input.python_type() != list:
             unimplemented(
                 f"Expected input to be a list of tensors but got {input.python_type()}",
             )
         assert isinstance(input, torch._dynamo.variables.lists.BaseListVariable)
+        if init.python_type() != list:
+            unimplemented(
+                f"Expected input to be a list of tensors but got {input.python_type()}",
+            )
+        assert isinstance(init, torch._dynamo.variables.lists.BaseListVariable)
 
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
-        null_shape = SourcelessBuilder.create(tx, ())
         sub_args = [
             leaf.call_method(
                 tx,
@@ -1143,24 +1147,31 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=(
                     SourcelessBuilder.create(
                         tx,
-                        leaf.size
-                        # tuple([s if n != dim.as_proxy() else 1 for n, s in enumerate(leaf.size)])
-                        if leaf.size is not None
-                        else BuiltinVariable(getattr)
-                        .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
-                        .items,
-                        # else tuple([s if n != dim.as_proxy() else 1
-                        # for n, s in enumerate(BuiltinVariable(getattr)
-                        # .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
-                        # .items)]),
+                        leaf_init.size
+                        if leaf_init.size is not None
+                        else tuple(
+                            [
+                                it
+                                for it in BuiltinVariable(getattr)
+                                .call_function(
+                                    tx,
+                                    [leaf_init, ConstantVariable.create("shape")],
+                                    {},
+                                )
+                                .items
+                            ]
+                        ),
                     ),
                 ),
                 kwargs={
                     "dtype": SourcelessBuilder.create(tx, leaf.dtype),
+                    "device": SourcelessBuilder.create(tx, leaf.device),
                     "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
                 },
             )
-            for leaf in itertools.chain(input.items, input.items)
+            for leaf, leaf_init in itertools.chain(
+                zip(input.items, init.items), zip(input.items, init.items)
+            )
         ]
         (
             (combine_result, combine_treespec),
@@ -1187,11 +1198,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         input_proxy = input.as_proxy()
+        init_proxy = init.as_proxy()
         combine_result_proxy = combine_result.as_proxy()
-        for result, inp_proxy, s_args in zip(
-            combine_result_proxy, input_proxy, sub_args
+        for result, inp_proxy, ini_proxy, s_args in zip(
+            combine_result_proxy, input_proxy, init_proxy, sub_args
         ):
             inp_meta = inp_proxy.node.meta["example_value"]
+            ini_meta = ini_proxy.node.meta["example_value"]
             combine_result_meta = result.node.meta["example_value"]
             s_args = s_args.as_proxy().node.meta["example_value"]
             if combine_result_meta.device != inp_meta.device:
@@ -1209,6 +1222,15 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"Expected shape of input with {s_args.shape} to be the same as "
                     + f"combine_result with {combine_result_meta.shape}"
                 )
+            if (
+                combine_result_meta.device != ini_meta.device
+                or combine_result_meta.dtype != ini_meta.dtype
+                or combine_result_meta.shape != ini_meta.shape
+            ):
+                unimplemented(
+                    f"Expected metadata of the combine_fn result {combine_result_meta} to be the same as "
+                    + f"the metadata of init with {inp_meta}"
+                )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = add_subgraph(tx, "scan_combine", combine_gm)
@@ -1216,13 +1238,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             make_attr(tx, combine_fn_name),
             input_proxy,
+            init_proxy,
             dim.as_proxy(),
         )
 
         with tx.fake_mode:
             out_meta = tuple(
-                inp_proxy.node.meta["example_value"].clone()
-                for inp_proxy in input_proxy
+                ini_proxy.node.meta["example_value"].clone() for ini_proxy in init_proxy
             )
         return wrap_fx_proxy(
             tx=tx,

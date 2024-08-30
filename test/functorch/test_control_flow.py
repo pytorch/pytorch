@@ -1227,19 +1227,27 @@ def forward(self, pred_1, x_1):
         def mul(x: torch.Tensor, y: torch.Tensor):
             return x * y
 
+        def div(x: torch.Tensor, y: torch.Tensor):
+            return x / y
+
         x = torch.randn(3, 10, 2, device=device)
-        for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-            result = scan_op(op, x, 0, reverse=reverse)
-            result_exp = _fake_scan(op, x, 0, reverse=reverse)
-            self.assertEqual(result, result_exp)
-            if not reverse:
+        for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod), (div, None)]:
+            result = scan_op(op, x, dim=0, reverse=reverse)
+            result_exp = _fake_scan(op, x, dim=0, reverse=reverse)
+
+            if op == div and scan_op == associative_scan:
+                self.assertNotEqual(result, result_exp)
+            else:
+                self.assertEqual(result, result_exp)
+
+            if not reverse and op_pt is not None:
                 result_exp_PT = op_pt(x, 0)
                 self.assertEqual(result, result_exp_PT)
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        cumsum1 = scan_op(add, x, 0, reverse=reverse)
-        cumsum_exp = _fake_scan(add, x, 0, reverse=reverse)
+        cumsum1 = scan_op(add, x, dim=0, reverse=reverse)
+        cumsum_exp = _fake_scan(add, x, dim=0, reverse=reverse)
         if not reverse:
             self.assertEqual(
                 cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
@@ -1271,14 +1279,18 @@ def forward(self, pred_1, x_1):
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    x = torch.flip(l_x_, [0]);  l_x_ = None
-    out = x + x;  out = None
-    child = x.new_empty((3, 10, 2), dtype = torch.float32, requires_grad = False);  child = None
-    child_1 = x.new_empty((3, 10, 2), dtype = torch.float32, requires_grad = False);  child_1 = None
+    elem = torch.flip(l_x_, [0]);  l_x_ = None
+    in_l = torch.ops.aten.slice(elem, 0, 0, 1, 1)
+    x = torch.ops.aten.slice(elem, 0, 1, None, 1);  elem = None
+    slice_3 = torch.ops.aten.slice(x, 0, 0, 1, 1)
+    slice_4 = torch.ops.aten.slice(x, 0, 0, 1, 1)
+    out = slice_3 + slice_4;  slice_3 = slice_4 = out = None
+    child = x.new_empty((1, 10, 2), dtype = torch.float32, device = device(type='cpu'), requires_grad = False);  child = None
+    child_1 = x.new_empty((1, 10, 2), dtype = torch.float32, device = device(type='cpu'), requires_grad = False);  child_1 = None
     scan_combine_0 = self.scan_combine_0
-    scan = torch.ops.higher_order.scan(scan_combine_0, [x], 0);  scan_combine_0 = x = None
-    elem = scan[0];  scan = None
-    flip_1 = torch.flip(elem, [0]);  elem = None
+    scan = torch.ops.higher_order.scan(scan_combine_0, [x], [in_l], 0);  scan_combine_0 = x = in_l = None
+    elem_1 = scan[0];  scan = None
+    flip_1 = torch.flip(elem_1, [0]);  elem_1 = None
     return (flip_1,)""",
         )
 
@@ -1323,7 +1335,7 @@ def forward(self, L_x_ : torch.Tensor):
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -1357,8 +1369,10 @@ def forward(self, L_x_ : torch.Tensor):
             scan_fct = torch.compile(scan_op, fullgraph=True, dynamic=False)
         elif compile_mode == "compile_dynamic_shape":
             scan_fct = torch.compile(scan_op, fullgraph=True, dynamic=True)
-        else:
+        elif compile_mode == "eager":
             scan_fct = torch.compile(scan_op, fullgraph=True, backend="eager")
+        else:
+            scan_fct = scan
 
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
             result = scan_fct(op, x, 0, reverse=reverse)
@@ -1382,9 +1396,7 @@ def forward(self, L_x_ : torch.Tensor):
             )
         self.assertEqual(cumsum1, cumsum_exp)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_pointwise_scan_RNN(self):
+    def test_scan_RNN(self):
         dim = 1
         device = torch.device("cpu")
 
@@ -1418,20 +1430,131 @@ def forward(self, L_x_ : torch.Tensor):
             torch.concat([torch.clone(h[:, 0:1, :]), h], dim),
         )
 
+        # Without init
         result = scan(RNN, inp, dim)
         result_out = result[1][:, 1:, :]
         expected_result = rnn(
             torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
         )
         expected_result_out = torch.permute(expected_result[0], (1, 0, 2))
+        self.assertEqual(result_out, expected_result_out)
 
+        # With init
+        inp = (x, h)
+        init = (torch.zeros_like(x[:, 0:1, :]), torch.clone(h[:, 0:1, :]))
+        result = scan(RNN, inp, dim=dim, init=init)
+        result_out = result[1][:, 1:, :]
+        expected_result = rnn(
+            torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
+        )
+        expected_result_out = torch.permute(expected_result[0], (1, 0, 2))
         self.assertEqual(result_out, expected_result_out)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_pointwise_scan_compile_cnt(self, reverse, device):
+    # Skipping the scan tests, as scan currently does not support inductor
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["compile_mode"] != "eager"),
+    )
+    def test_scan_init(self, reverse, compile_mode, device):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        torch.compiler.reset()
+        if compile_mode == "compile":
+            scan_fct = torch.compile(scan, fullgraph=True, dynamic=False)
+        elif compile_mode == "compile_dynamic_shape":
+            scan_fct = torch.compile(scan, fullgraph=True, dynamic=True)
+        elif compile_mode == "eager":
+            scan_fct = torch.compile(scan, fullgraph=True, backend="eager")
+        else:
+            scan_fct = scan
+
+        # Only init and no input
+        x = torch.randn(3, 1, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
+        dim = 1
+        op, op_pt = (add, torch.cumsum)
+
+        result = scan_fct(op, input=x, dim=dim, reverse=reverse)
+        result_exp = _fake_scan(op, x, dim=dim, reverse=reverse)
+
+        # Scan dimension is 0
+        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
+        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        with self.assertRaisesRegex(Exception, ".*"):
+            result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
+
+        # Only init given
+        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
+        result_init = scan_fct(op, input=[], dim=dim, reverse=reverse, init=init)
+        self.assertEqual(result, result_exp)
+        self.assertEqual(result_init, result_exp)
+        self.assertEqual(result_init, init)
+
+        x = torch.randn(3, 1, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
+        dim = 1
+
+        op, op_pt = (add, torch.cumsum)
+        result = scan_fct(op, input=x, dim=dim, reverse=reverse)
+
+        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        # Init scalar
+        init = 1.0
+        with self.assertRaisesRegex(Exception, ".*"):
+            result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
+
+        # Init wrong shape (More than one time step)
+        init = torch._ops.ops.aten.slice(x, dim, 0, 2, 1)
+        with self.assertRaisesRegex(Exception, ".*"):
+            result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
+
+        # Init wrong shape (Other dim different)
+        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
+        init = torch.tile(init, (1, 2, 1))
+        with self.assertRaisesRegex(Exception, ".*"):
+            result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
+
+        # Init wrong pytree
+        init = (
+            torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
+            torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
+        )
+        with self.assertRaisesRegex(Exception, ".*"):
+            result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
+
+        # Correct case
+        op, op_pt = (add, torch.cumsum)
+        x = torch.randn(3, 2, 2, device=device)
+        dim = 1
+
+        result = scan_fct(op, input=x, dim=dim, reverse=reverse)
+        result_exp = _fake_scan(op, x, dim=dim, reverse=reverse)
+
+        if reverse:
+            x = torch.flip(x, [dim])
+
+        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
+        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
+
+        self.assertEqual(result, result_exp)
+        self.assertEqual(result_init, result_exp)
+        if not reverse:
+            result_exp_PT = op_pt(x, dim)
+            self.assertEqual(result, result_exp_PT)
+            self.assertEqual(result_init, result_exp_PT)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_compile_cnt(self, reverse, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1444,58 +1567,48 @@ def forward(self, L_x_ : torch.Tensor):
         with torch._dynamo.config.patch(automatic_dynamic_shapes=True):
             cnt = CompileCounter()
             x = torch.randn(3, 2, 5, device=device)
-            torch.compile(scan, backend=cnt)(add, x, dim, reverse=reverse)
+            torch.compile(scan, backend=cnt)(add, x, dim=dim, reverse=reverse)
             self.assertEqual(cnt.frame_count, 1)
 
             x = torch.randn(3, 20, 5, device=device)
             # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim, reverse=reverse)
+            torch.compile(scan, backend=cnt)(add, x, dim=dim, reverse=reverse)
             self.assertEqual(cnt.frame_count, 2)
 
             x = torch.randn(3, 40, 5, device=device)
             # No recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim, reverse=reverse)
+            torch.compile(scan, backend=cnt)(add, x, dim=dim, reverse=reverse)
             self.assertEqual(cnt.frame_count, 2)
 
             x = torch.randn(3, 40, 5, device=device)
             # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, 2, reverse=reverse)
+            torch.compile(scan, backend=cnt)(add, x, dim=2, reverse=reverse)
             self.assertEqual(cnt.frame_count, 3)
 
             x = torch.randn(3, 40, 20, device=device)
             # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, 2, reverse=reverse)
+            torch.compile(scan, backend=cnt)(add, x, dim=2, reverse=reverse)
             self.assertEqual(cnt.frame_count, 4)
 
             x = torch.randn(3, 40, 40, device=device)
             # No recompilation
-            torch.compile(scan, backend=cnt)(add, x, 2, reverse=reverse)
+            torch.compile(scan, backend=cnt)(add, x, dim=2, reverse=reverse)
             self.assertEqual(cnt.frame_count, 4)
 
             x = torch.randn(3, 60, 40, device=device)
-            # No recompilation for reverse = False
-            # Recompilation for reverse = True
-            torch.compile(scan, backend=cnt)(add, x, 1, reverse=reverse)
-            if not reverse:
-                self.assertEqual(cnt.frame_count, 4)
-            else:
-                self.assertEqual(cnt.frame_count, 5)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim=1, reverse=reverse)
+            self.assertEqual(cnt.frame_count, 5)
 
             x = torch.randn(3, 60, 40, device=device)
             # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, 1, reverse=not reverse)
-            if not reverse:
-                self.assertEqual(cnt.frame_count, 5)
-            else:
-                self.assertEqual(cnt.frame_count, 6)
+            torch.compile(scan, backend=cnt)(add, x, dim=1, reverse=not reverse)
+            self.assertEqual(cnt.frame_count, 6)
 
             x = torch.randn(3, 60, 40, device=device)
             # No recompilation
-            torch.compile(scan, backend=cnt)(add, x, 1, reverse=not reverse)
-            if not reverse:
-                self.assertEqual(cnt.frame_count, 5)
-            else:
-                self.assertEqual(cnt.frame_count, 6)
+            torch.compile(scan, backend=cnt)(add, x, dim=1, reverse=not reverse)
+            self.assertEqual(cnt.frame_count, 6)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
