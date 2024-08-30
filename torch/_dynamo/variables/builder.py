@@ -17,7 +17,17 @@ import sys
 import types
 import warnings
 import weakref
-from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    FrozenSet,
+    List,
+    MutableMapping,
+    NamedTuple,
+    Optional,
+    Set,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 from torch import SymInt
@@ -317,6 +327,17 @@ class FrameStateSizeEntry:
     scalar: Optional[int]
     size: Optional[List[int]]
     stride: Optional[List[int]]
+
+
+# All class-based iterators in itertools
+# NOTE: use id() because some objects are not hashable, it will raise error during lookup
+ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
+    id(member)
+    for name, member in vars(itertools).items()
+    if not name.startswith("_") and inspect.isclass(member)
+)
+# Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
+ITERTOOLS_POLYFILLED_TYPE_IDS: Set[int] = set()
 
 
 class VariableBuilder:
@@ -874,7 +895,10 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif istype(value, type) and value in itertools.__dict__.values():
+        elif (
+            id(value) in ITERTOOLS_TYPE_IDS
+            and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS
+        ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
@@ -1331,7 +1355,9 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")) or getattr(
+                value.__class__, "_dynamo_marked_static", False
+            ):
                 result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
             else:
                 result = UnspecializedNNModuleVariable(value, source=self.source)
@@ -1695,6 +1721,15 @@ class VariableBuilder:
                             value,
                             frame_state_entry.scalar,
                         )
+                        if self.source.guard_source().is_unspecialized_nn_module():
+                            log.info(
+                                "%s",
+                                (
+                                    f"{name} is converted to a symbolic integer. It is an attribute of a "
+                                    "user defined nn module class. If you wish to keep it static, you can "
+                                    "mark the nn module class as `torch._dynamo.mark_static`."
+                                ),
+                            )
                         frame_state_entry.scalar = None
                 self.tx.output.frame_state[name] = frame_state_entry
 
