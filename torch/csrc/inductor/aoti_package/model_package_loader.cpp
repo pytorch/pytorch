@@ -165,8 +165,14 @@ std::string AOTIModelPackageLoader::compile_so(
   std::string output_so = std::get<1>(link_result);
 
   // Run the commands to generate a .so file
-  system(compile_cmd.c_str());
-  system(link_cmd.c_str());
+  int status = system(compile_cmd.c_str());
+  if (status != 0) {
+    throw std::runtime_error("Failed to compile cpp file.");
+  }
+  status = system(link_cmd.c_str());
+  if (status != 0) {
+    throw std::runtime_error("Failed to link files.");
+  }
 
   // Move the mmapped weights onto the .so
   std::string serialized_weights_path = filename + "_serialized_weights.bin";
@@ -233,28 +239,33 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     }
     fs::path filepath(filename);
 
-    if (filepath.parent_path() !=
+    // Only compile files in the specified model directory
+    if (filepath.parent_path() ==
         fmt::format("data/aotinductor/{}", model_name)) {
-      continue;
-    }
-    found_filenames += filename;
-    found_filenames += "\n";
 
-    fs::path output_path = temp_dir / filename;
-    fs::create_directories(output_path.parent_path());
-    mz_zip_reader_extract_file_to_file(
-        &zip_archive, filename, output_path.c_str(), 0);
+      found_filenames += filename;
+      found_filenames += "\n";
 
-    if (output_path.extension() == ".cpp") {
-      cpp_filename = output_path;
-    }
-    if (output_path.extension() == ".o") {
-      consts_filename = output_path;
+      fs::path output_path = temp_dir / filename;
+      fs::create_directories(output_path.parent_path());
+      mz_zip_reader_extract_file_to_file(
+          &zip_archive, filename, output_path.c_str(), 0);
+
+      if (output_path.extension() == ".cpp") {
+        cpp_filename = output_path;
+      }
+      if (output_path.extension() == ".o") {
+        consts_filename = output_path;
+      }
     }
   }
 
   // Close the zip archive as we have extracted all files to the temp directory
-  mz_zip_reader_end(&zip_archive);
+  if (!mz_zip_reader_end(&zip_archive)) {
+    throw std::runtime_error(fmt::format(
+        "Failed to close zip archive: {}",
+        mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive))));
+  }
 
   if (cpp_filename.empty()) {
     throw std::runtime_error(fmt::format(
