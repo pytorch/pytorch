@@ -1149,22 +1149,8 @@ class VariableBuilder:
             if item is value:
                 unimplemented("list elements are pointing to the list itself")
 
-        # Tuples are immutable objects, so we should mark its items static. This
-        # avoids wrapping of tuple items as symints. This helps for nn module
-        # attributes like conv2d strides, dilations.
-        if (
-            istype(value, tuple)
-            and all(ConstantVariable.is_literal(item) for item in value)
-            and self.source.guard_source().is_unspecialized_nn_module()
-        ):
-            self.install_guards(GuardBuilder.CONSTANT_MATCH)
-            return TupleVariable([ConstantVariable.create(item) for item in value])
-
         output = [
-            LazyVariableTracker.create(
-                item,
-                source=GetItemSource(self.get_source(), i),
-            )
+            LazyVariableTracker.create(item, source=GetItemSource(self.get_source(), i))
             for i, item in enumerate(value)
         ]
 
