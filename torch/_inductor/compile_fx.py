@@ -1129,6 +1129,16 @@ def compile_fx_aot(
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
     )
+
+    if config_patches.get("aot_inductor.package", False) or config.aot_inductor.package:
+        assert (
+            "aot_inductor.output_path" not in config_patches
+            and not config.aot_inductor.output_path
+        ), (
+            "Specifying an aot_inductor.output_path is prohibited, as this "
+            "should be done subsequently in a call to package_aoti()"
+        )
+
     if (
         "aot_inductor.output_path" not in config_patches
         and not config.aot_inductor.output_path
