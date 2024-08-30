@@ -2980,6 +2980,7 @@ def _disallowed_callable_ids() -> Dict[int, str]:
 
 @FunctionIdSet
 def _builtin_function_ids() -> Dict[int, str]:
+    # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
         id(v): f"builtins.{k}"
         for k, v in builtins.__dict__.items()
@@ -3072,6 +3073,7 @@ def is_forbidden(obj) -> bool:
 
 
 def is_builtin_callable(obj) -> bool:
+    # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     return id(obj) in _builtin_function_ids
 
 
@@ -3243,6 +3245,8 @@ MOD_INLINELIST = [
     "torch.distributions",
     "torch.export._tree_utils",
     "torch.fx._pytree",
+    "torch.fx._symbolic_trace",
+    "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.overrides",
