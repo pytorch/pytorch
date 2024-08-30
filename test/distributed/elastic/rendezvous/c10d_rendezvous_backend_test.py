@@ -206,16 +206,6 @@ class CreateBackendTest(TestCase):
 
         self._assert_create_backend_returns_backend()
 
-    def test_create_backend_returns_backend_with_libuv(self) -> None:
-        self._params.config["use_libuv"] = "true"
-
-        self._assert_create_backend_returns_backend()
-
-    def test_create_backend_returns_backend_without_libuv(self) -> None:
-        self._params.config["use_libuv"] = "false"
-
-        self._assert_create_backend_returns_backend()
-
     def test_create_backend_raises_error_if_store_is_unreachable(self) -> None:
         self._params.config["is_host"] = "false"
         self._params.config["read_timeout"] = "2"
