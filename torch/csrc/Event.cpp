@@ -15,7 +15,7 @@
 #include <structmember.h>
 #include <string>
 
-PyObject* THPEventClass = nullptr;
+PyTypeObject* THPEventClass = nullptr;
 
 static PyObject* THPEvent_pynew(
     PyTypeObject* type,
@@ -316,7 +316,7 @@ PyTypeObject THPEventType = {
 };
 
 void THPEvent_init(PyObject* module) {
-  THPEventClass = (PyObject*)&THPEventType;
+  THPEventClass = &THPEventType;
   if (PyType_Ready(&THPEventType) < 0) {
     throw python_error();
   }
