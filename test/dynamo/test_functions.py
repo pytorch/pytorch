@@ -176,6 +176,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         )
         self.assertTrue(same(expected, actual))
 
+    def test_broadcast_foreach_pow(self):
+        from torch._dynamo.utils import same
+
+        def fn(x, y):
+            return torch._foreach_pow(x, y)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
+        inps = (torch.tensor(0.80), [torch.tensor(3.4), torch.tensor(7.8)])
+
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertTrue(same(actual, expected))
+        self.assertTrue(cnt.frame_count, 1)
+
     @make_test
     def test_functools_partial(a, b):
         return clip01(a + b)
