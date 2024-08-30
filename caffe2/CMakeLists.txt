@@ -1014,6 +1014,10 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
+  if(USE_XCCL)
+  list(APPEND Caffe2_XPU_SRCS
+    ${TORCH_SRC_DIR}/csrc/xpu/xccl.cpp)
+  endif()
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
@@ -1057,10 +1061,6 @@ if(USE_XPU)
   # 2. Using add_custom_command in torch-xpu-ops to define sycl device sources
   #    compilation. add_custom_command requires an explicit dependency.
   list(APPEND ${Caffe2_XPU_INCLUDE} ${TORCH_XPU_OPS_DIR}/src/ATen/)
-  # if(USE_XCCL)
-  #   list(APPEND Caffe2_GPU_SRCS
-  #     ${TORCH_SRC_DIR}/csrc/xpu/xccl.cpp)
-  # endif()
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
 
   add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops

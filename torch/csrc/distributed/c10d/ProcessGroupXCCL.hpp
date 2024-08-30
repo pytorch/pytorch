@@ -10,7 +10,7 @@
 #ifdef USE_C10D_XCCL
 
 #include <oneapi/ccl.hpp>
-#include <nccl.h>
+#include <torch/csrc/xpu/xccl.h>
 #include <exception>
 #include <memory>
 #include <vector>
