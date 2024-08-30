@@ -1517,16 +1517,7 @@ def _export_to_aten_ir_make_fx(
         buffer_len = len(dict(mod.named_buffers(remove_duplicate=False)))
         params_len = param_len + buffer_len
 
-<<<<<<< HEAD
-        gm, graph_signature = transform(_make_fx_helper)(
-=======
-        params_and_buffers = {**named_parameters, **named_buffers}
-        params_and_buffers_flat, _ = pytree.tree_flatten(params_and_buffers)
-        params_and_buffers_flat = tuple(params_and_buffers_flat)
-        params_len = len(params_and_buffers)
-
         gm, _ = transform(_make_fx_helper)(
->>>>>>> c5a13ec9937 (Remove unused variables)
             mod,
             fake_args,
             trace_joint=False,
