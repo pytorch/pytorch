@@ -1874,16 +1874,38 @@ def split_scan_grid(xnumel, rnumel):
     return grid_fn
 
 
-def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
+def grid_combo_kernels(
+    *numels, num_kernels, min_blocks, is_sequential, default_meta=None
+):
     """min_blocks is the minimal size of the grid x dimension"""
     if not is_sequential:
         # round robin dispatch
-        kernel_grid_fn = grid(*numels)
+        numels_agg = list(numels)
+        for i in range(len(numels_agg)):
+            if isinstance(numels_agg[i], (list, tuple)):
+                numels_agg[i] = max(max(numels_agg[i]), 0)  # noqa: PLW3301
+        kernel_grid_fn = grid(*numels_agg)
+
+        if isinstance(numels[-1], (list, tuple)):
+            min_blocks_d = max(-min(numels[-1]), 0) * num_kernels
+        else:
+            min_blocks_d = None
+        if min_blocks is None:
+            assert min_blocks_d is not None
+            min_blocks = min_blocks_d
+        else:
+            assert (
+                min_blocks_d is None or min_blocks == min_blocks_d
+            ), f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
     else:
         # sequential dispatch
         seq_numels = list(numels)
         # x numels are not used here, just a place holder
         seq_numels[-1] = 1024
+        for i in range(len(seq_numels) - 1):
+            if isinstance(seq_numels[i], (list, tuple)):
+                seq_numels[i] = max(seq_numels[i])
+
         kernel_grid_fn = grid(*seq_numels)
 
     def get_grid_dim(numel, block):
@@ -1894,6 +1916,7 @@ def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
         return ceildiv(numel, block)
 
     def grid_fn(meta):
+        assert min_blocks is not None, "min_blocks must be a number"
         cuda_grid = list(kernel_grid_fn(meta))
         cuda_grid[0] = max(num_kernels * cuda_grid[0], min_blocks)
         return tuple(cuda_grid)
@@ -1910,4 +1933,13 @@ def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
         cuda_grid[0] = x_grid
         return tuple(cuda_grid)
 
-    return grid_fn if not is_sequential else seq_grid_fn
+    def grid_fn_default_meta(meta):
+        return grid_fn(default_meta)
+
+    def seq_grid_fn_default_meta(meta):
+        return seq_grid_fn(default_meta)
+
+    if default_meta is None:
+        return grid_fn if not is_sequential else seq_grid_fn
+    else:
+        return grid_fn_default_meta if not is_sequential else seq_grid_fn_default_meta
