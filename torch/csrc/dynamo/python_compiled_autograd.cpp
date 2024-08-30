@@ -185,6 +185,7 @@ size_t AutogradCompilerCall::emplace_hook_with_dedup(PyObject* fn) {
     return it->second;
   }
 
+  Py_INCREF(fn);
   auto obj = c10::SafePyObject(fn, getPyInterpreter());
   size_t idx = emplace_hook(std::move(obj));
   dedup_hook_lookup.emplace(fn, idx);
@@ -198,6 +199,7 @@ TensorArg& TensorArgs::add(
     const std::shared_ptr<VariableMetadata>& metadata) {
   auto hook_input_tensor = THPVariable_Unpack(hook_input);
   TensorArg& arg = add(hook_input_tensor);
+  TORCH_INTERNAL_ASSERT(metadata != nullptr);
   unpack_hook_infos.emplace_back(UnpackHookMetadata{hook_id, *metadata});
   _saved_variables.emplace(&sv, &arg);
   return arg;

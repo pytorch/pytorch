@@ -200,16 +200,16 @@ class AutogradCompilerInstance:
     def proxy_call_unpack_hook(self, hook_input, hook_info):
         hook_id, layout, device, dtype, size = hook_info
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
-        proxies = self.proxy_call_hook(
+        proxy = self.proxy_call_hook(
             hook,
             hook_input,
             hook_type="unpack_hook",
         )
         with disable_proxy_modes_tracing():
-            outs = [torch.empty(size=size, dtype=dtype, layout=layout, device=device)]
-            self.bind_tensors_to_proxies(outs, proxies)
-
-        return outs[0]
+            out = torch.empty(size=size, dtype=dtype, layout=layout, device=device)
+            graph = self.fx_tracer.graph
+            self.bind_tensors_to_proxies([out], [proxy])
+        return out
 
     def proxy_call_hook(self, hook, *args, **kwargs):
         return self.fx_tracer.create_proxy(
