@@ -160,3 +160,7 @@ def foreach_lerp_inplace(self, end, weight):
 
 def foreach_pow_scalar(scalar, exps):
     return torch._foreach_pow([scalar for _ in exps], exps)
+
+
+def addcmul_inplace(self, tensor1, tensor2, value):
+    return self.add_(tensor1 * tensor2 * value)
