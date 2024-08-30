@@ -210,12 +210,12 @@ flex_decoding_template = TritonTemplate(
         block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
         K_block_ptr = tl.make_block_ptr(
-        base=K + k_offset,
-        shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
-        strides=(stride_kk, stride_kn),
-        offsets=(0, off_n),
-        block_shape=(QK_HEAD_DIM, BLOCK_N),
-        order=(0, 1)
+            base=K + k_offset,
+            shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
+            strides=(stride_kk, stride_kn),
+            offsets=(0, off_n),
+            block_shape=(QK_HEAD_DIM, BLOCK_N),
+            order=(0, 1)
         )
         V_block_ptr = tl.make_block_ptr(
             base=V + v_offset,
@@ -277,7 +277,7 @@ flex_decoding_template = TritonTemplate(
     idx_hq = off_hkv*G + off_g[:, None, None]
     idx_m = off_m[None, :, None]
     idx_d = offs_vd[None, None, :]
-    # TODO generalize and add proper mask support
+
     mask = (idx_m < Q_LEN)
     acc = acc.reshape(G, BLOCK_M_PER_HQ, V_HEAD_DIM)
     {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
@@ -546,8 +546,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # See [Note] Handle fully masked out rows:
     # g_M Is the global max among split kv blocks.
     masked_rows = lowerings[aten.eq](g_M, -float("inf"))
-    g_M = lowerings[aten.where](masked_rows, 0.0, g_M)
     adj_M = lowerings[aten.sub](buf_M, g_M)
+    adj_M = lowerings[aten.where](masked_rows, 0, adj_M)
     alpha = lowerings[aten.exp2](adj_M)
 
     buf_L = lowerings[aten.mul](buf_L, alpha)
