@@ -589,6 +589,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     kwargs,
                 )
 
+        @register(torch._foreach_pow)
+        def handle_foreach_pow_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            # In eager it's more performant to call item() from within the C op implementation
+            # in compile, it's more performant to not graph break.
+            if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_pow_scalar),
+                    args,
+                    kwargs,
+                )
+
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
             if (condition.is_python_constant() and condition.as_python_constant()) or (
