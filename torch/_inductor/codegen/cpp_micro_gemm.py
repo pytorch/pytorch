@@ -784,7 +784,6 @@ def create_micro_gemm(
                 continue
             if (
                 config.input_dtype == input_dtype
-                
                 and config.compute_dtype == compute_dtype
                 and config.input2_dtype == input2_dtype
                 and config.output_dtype == output_dtype
