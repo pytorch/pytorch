@@ -369,7 +369,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_nan_p2p(self):
+    def test_nan_rank_filter(self):
         # Putting NaN at recv buffer, program should not fail as NaN checker
         # should not check on receive buffer
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
@@ -379,11 +379,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
         t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
+        if self.rank != 0:
+            # Putting NaN at recv buffer
+            t[1, 1] = float("nan")
+        # Against broadcast
+        c10d.broadcast(t, 0)
+        # Against P2P
         if self.rank == 0:
             c10d.send(t, 1)
         elif self.rank == 1:
-            # Putting NaN at recv buffer
-            t[1, 1] = float("nan")
             c10d.recv(t, 0)
         c10d.destroy_process_group()
         # reset env
@@ -403,6 +407,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
         c10d.broadcast(x, src=0)
         c10d.all_reduce(t)
+        c10d.barrier()
         c10d.destroy_process_group()
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
