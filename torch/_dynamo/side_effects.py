@@ -17,13 +17,14 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import GlobalSource, LocalSource, Source
-from .utils import nn_module_new, object_new
+from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     is_side_effect_safe,
     MutableLocalBase,
     MutableLocalSource,
     VariableTracker,
 )
+from .variables.user_defined import FrozenDataClassVariable
 
 
 class MutableSideEffects(MutableLocalBase):
@@ -285,6 +286,8 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
+        elif is_frozen_dataclass(user_cls):
+            variable_cls = FrozenDataClassVariable
         else:
             variable_cls = variables.UserDefinedObjectVariable
 
