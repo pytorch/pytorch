@@ -93,7 +93,7 @@ def build_triton(
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
-        triton_repo = "https://github.com/openai/triton"
+        triton_repo = "https://github.com/tinglvv/triton"
         if device == "rocm":
             triton_pkg_name = "pytorch-triton-rocm"
         elif device == "xpu":
@@ -108,7 +108,7 @@ def build_triton(
                 ["git", "checkout", f"release/{ver}.{rev}.x"], cwd=triton_basedir
             )
         else:
-            check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
+            check_call(["git", "checkout", "debug-ninja"], cwd=triton_basedir)
 
         # TODO: remove this and patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
         patch_setup_py(triton_pythondir / "setup.py")
