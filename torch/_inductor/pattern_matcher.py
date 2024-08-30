@@ -236,9 +236,13 @@ class Match:
                 replacement graph.
 
         """
-        from torch._inductor.virtualized import V
+        from torch._inductor.virtualized import NullHandler, V
 
-        context = V.fake_mode if V.fake_mode is not None else contextlib.nullcontext
+        context = (
+            V.fake_mode
+            if (not isinstance(V.fake_mode, NullHandler) or (V.fake_mode is None))
+            else contextlib.nullcontext()
+        )
 
         with context:
             if trace_fn is None:
