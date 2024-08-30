@@ -169,8 +169,8 @@ class SideEffects:
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
-        # if "fwd_pre_hook_call_count" in name:
-        #     print(f"id(item): {id(item)}, id(item.mutable_local): {id(item.mutable_local)}, id(item.value): {id(item.value)}, name: {name}, value: {value}")
+        if "fwd_pre_hook_call_count" in name:
+            print(f"id(item): {id(item)}, id(item.mutable_local): {id(item.mutable_local)}, id(item.value): {id(item.value)}, name: {name}, value: {value}, cur_value: {item.value.fwd_pre_hook_call_count}")
         # self.track_object_existing(item.value, item)
         # for k, v in self.id_to_variable.items():
         #     print(f"store_attr: id(self): {id(self)}, id(self.id_to_variable): {id(self.id_to_variable)}, k: {k}, v: {v}")

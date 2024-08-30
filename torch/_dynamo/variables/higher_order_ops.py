@@ -467,17 +467,29 @@ def speculate_subgraph(
             # variable.
             if restore_side_effects:
                 prev_side_effects = tx.output.side_effects.clone()
+                for k, v in prev_side_effects.store_attr_mutations.items():
+                    print(f"before: prev_side_effects.store_attr_mutations: k: {k}")
+                    for k1, v1 in v.items():
+                        print(f"before: prev_side_effects.store_attr_mutations: k1: {k1}, v1: {v1}")
 
             with autograd_ctx:
                 output = f.call_function(tx, args, sub_kwargs)
 
             if restore_side_effects:
                 new_side_effects = tx.output.side_effects.clone()
+                for k, v in new_side_effects.store_attr_mutations.items():
+                    print(f"new_side_effects.store_attr_mutations: k: {k}, v: {v}")
+                    for k1, v1 in v.items():
+                        print(f"new_side_effects.store_attr_mutations: k1: {k1}, v1: {v1}")
                 prev_side_effects.track_tensor_variables_from_runahead_side_effects(
                     new_side_effects
                 )
-                if under_checkpoint:
-                    prev_side_effects.merge(new_side_effects)
+                # if under_checkpoint:
+                #     prev_side_effects.merge(new_side_effects)
+                for k, v in prev_side_effects.store_attr_mutations.items():
+                    print(f"after: prev_side_effects.store_attr_mutations: k: {k}")
+                    for k1, v1 in v.items():
+                        print(f"after: prev_side_effects.store_attr_mutations: k1: {k1}, v1: {v1}")
                 tx.output.side_effects = prev_side_effects
 
             treespec = None

@@ -316,31 +316,32 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
         if not compiled_autograd.compiled_autograd_enabled:
             unimplemented("module-level forward pre-hooks require compiled autograd")
 
-        def _in_graph_fw_pre_hooks(bw_state: BackwardState):
-            """
-            Rather than installing the user hooks in the graph (which
-            don't survive AotAutograd), we install hooks that will call
-            trace_wrapped in the backward pass that CompiledAutograd
-            can turn into actual hook calls.
-            """
-            return functools.partial(
-                trace_wrapped,
-                fn=call_module_forward_hooks_from_backward_state,
-                bw_state=bw_state,
-                hooks_name=user_pre_hooks_name,
-                module_name=module_name,
-            )
+        # def _in_graph_fw_pre_hooks(bw_state: BackwardState):
+        #     """
+        #     Rather than installing the user hooks in the graph (which
+        #     don't survive AotAutograd), we install hooks that will call
+        #     trace_wrapped in the backward pass that CompiledAutograd
+        #     can turn into actual hook calls.
+        #     """
+        #     return functools.partial(
+        #         trace_wrapped,
+        #         fn=call_module_forward_hooks_from_backward_state,
+        #         bw_state=bw_state,
+        #         hooks_name=user_pre_hooks_name,
+        #         module_name=module_name,
+        #     )
 
-        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module, "mod")
-        user_pre_hooks_name, _ = tx.output.add_backward_state_hook(user_pre_hooks)
-        # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
-        proxy = tx.output.create_proxy(
-            "call_function",
-            _in_graph_fw_pre_hooks,
-            (bw_state_proxy,),
-            {},
-        )
-        proxy.node.meta["example_value"] = user_pre_hooks
+        # module_name, bw_state_proxy = tx.output.add_backward_state_hook(module, "mod")
+        # user_pre_hooks_name, _ = tx.output.add_backward_state_hook(user_pre_hooks)
+        # # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
+        # proxy = tx.output.create_proxy(
+        #     "call_function",
+        #     _in_graph_fw_pre_hooks,
+        #     (bw_state_proxy,),
+        #     {},
+        # )
+        # proxy.node.meta["example_value"] = user_pre_hooks
+        proxy = None
         return ForwardPreHookUnderCheckpoint(proxy, module, user_pre_hooks, source=source)
 
     def __init__(
