@@ -27,9 +27,9 @@ if TYPE_CHECKING:
 
 
 def index(iterator, item, start=0, end=None):
-    import itertools
+    from itertools import islice
 
-    for i, elem in itertools.islice(enumerate(iterator), start, end):
+    for i, elem in islice(enumerate(iterator), start, end):
         if item == elem:
             return i
     # This will not run in dynamo
