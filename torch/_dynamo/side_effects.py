@@ -546,21 +546,39 @@ class SideEffects:
                 )
 
             elif isinstance(var, variables.ConstDictVariable):
+                # Reconstruct works as follow:
+                # (1) codegen(...) each pair of key/value
+                # (2) create a new dictionary with the pairs of key/values above
+                # (3) clear the original dictionary
+                #   + only if a key was removed from the input dict
+                # (4) update the original dictionary with the dict created in (2)
+
+                # if not var.has_side_effect_mutation():
+                #     continue
+
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.load_method("update")
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.load_method("clear")
+                if var.pop_items:
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_method("clear")
 
                 suffixes.append(
                     [
-                        *create_call_method(0),  # clear
-                        create_instruction("POP_TOP"),
                         *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )
+
+                if var.pop_items:
+                    suffixes.append(
+                        [
+                            *create_call_method(0),  # clear
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to

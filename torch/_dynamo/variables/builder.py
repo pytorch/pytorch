@@ -601,7 +601,9 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
-                result = ConstDictVariable(result, type(value), source=self.source)
+                result = ConstDictVariable(
+                    result, user_cls=type(value), is_python_arg=True, source=self.source
+                )
 
             return self.set_source_and_track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
