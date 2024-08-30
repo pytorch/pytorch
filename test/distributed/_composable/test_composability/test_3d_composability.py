@@ -11,6 +11,7 @@ from typing import Callable, List, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributed import DeviceMesh
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed._composable.replicate import replicate
@@ -35,7 +36,6 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import Transformer
 
 
 @dataclass
@@ -200,6 +200,7 @@ class Attention(nn.Module):
                 .expand(bs, slen, n_kv_heads, n_rep, head_dim)
                 .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
             )
+
         keys = repeat_kv(xk, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
         values = repeat_kv(xv, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
 
@@ -214,7 +215,7 @@ class Attention(nn.Module):
         ).contiguous()  # (bs, seqlen, n_local_heads, head_dim)
         output = output.view(bs, seqlen, -1)
         return self.wo(output)
-    
+
     def apply_rotary_emb(
         self,
         xq: torch.Tensor,
@@ -240,7 +241,7 @@ class Attention(nn.Module):
         xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
         xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
         ndim = xq_.ndim
-        assert 0 <= 1 < ndim
+        assert 1 < ndim
         seqlen = xq_.shape[1]
         freqs_cis = freqs_cis[0:seqlen]
         assert freqs_cis.shape == (seqlen, xq_.shape[-1])
@@ -448,7 +449,6 @@ class Transformer(nn.Module):
         freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
         return freqs_cis
 
-
     def forward(self, tokens: torch.Tensor):
         """
         Perform a forward pass through the Transformer model.
@@ -505,7 +505,7 @@ class RMSNorm(nn.Module):
         return output * self.weight
 
     def reset_parameters(self):
-        torch.nn.init.ones_(self.weight)  # type: ignore
+        torch.nn.init.ones_(self.weight)
 
 
 def build_norm(norm_type: str, dim: int, eps: float = 1e-6):
@@ -532,10 +532,8 @@ def build_norm(norm_type: str, dim: int, eps: float = 1e-6):
         return nn.LayerNorm(dim, eps=eps, elementwise_affine=False, bias=False)
     elif norm_type == "rmsnorm":
         return RMSNorm(dim, eps=eps)
-    elif norm_type == "fused_rmsnorm":
-        return FusedRMSNorm(dim, eps=eps)
     else:
-        raise NotImplementedError(f"Unknown norm_type: '{norm_type}'")
+        raise NotImplementedError(f"Not implemented norm_type: '{norm_type}'")
 
 
 class Float8Handler:
@@ -871,7 +869,7 @@ class Test3DComposability(FSDPTest):
         # NOTE: At the cost of model code change, we can accelerate Sequence Parallel
         #       by folding (and unfolding) the batch dimension and the sequence dimension.
         #       Examples can be found at https://github.com/pytorch/torchtitan/pull/437
-        for layer_id, transformer_block in model.layers.items():
+        for transformer_block in model.layers.values():
             layer_plan = {
                 "attention_norm": SequenceParallel(),
                 "attention": prepare_module_input(
