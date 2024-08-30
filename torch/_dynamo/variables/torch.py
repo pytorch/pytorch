@@ -578,6 +578,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [args[0], result], {}
                 )
 
+        @register(torch._foreach_lerp_)
+        def handle_inplace_foreach_lerp_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_lerp_inplace),
+                    args,
+                    kwargs,
+                )
+
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
             if (condition.is_python_constant() and condition.as_python_constant()) or (
