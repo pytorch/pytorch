@@ -369,7 +369,7 @@ void cpu_flash_attention(
   int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
   int64_t qSlice = (qSize + qSplitSize - 1) / qSplitSize;
   int64_t kvSlice = (kvSize + kvSplitSize - 1) / kvSplitSize;
-  int64_t kvTail = kvSize % kvSplitSize;
+  int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
   int64_t num_thread = at::get_num_threads();
 
   const auto dtype = query.scalar_type();
@@ -391,7 +391,7 @@ void cpu_flash_attention(
       // BF16 requires better shapes as mkl_gemm_bf16bf16f32 is faster than mkl_gemm_f16f16f32
       need_pack =
           ((kvSize < 448 && kvSize % packb_size == 0) || kvSize >= 448) &&
-          (qSize % 2 == 0) &&
+          (qSize % 2 == 0) && (num_thread >= 4) &&
           (headSize % packb_size == 0 && headSize < 320);
     } else {
       need_pack =
@@ -408,7 +408,7 @@ void cpu_flash_attention(
       // When the number of gemm is much greater than the number of pack,
       // the pack and padding overhead can be overlaped.
       need_pack = need_pack &&
-          (gemm_size_per_thread / pack_size_per_thread >= (dtype == at::ScalarType::BFloat16 ? 7168 : 448));
+          (gemm_size_per_thread / pack_size_per_thread > (dtype == at::ScalarType::BFloat16 ? 9215 : 447));
     }
   }
 
