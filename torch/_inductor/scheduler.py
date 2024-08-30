@@ -65,6 +65,7 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
+loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
 
 @dataclasses.dataclass
@@ -239,6 +240,11 @@ class BaseSchedulerNode:
             self.unmet_dependencies,
             self.read_writes.writes,
         )
+
+    def reorder_loops_by_dep_pair(
+        self, self_dep: MemoryDep, other_dep: MemoryDep
+    ) -> None:
+        return
 
     def update_mutated_names(self, renames: Dict[str, str]) -> None:
         self.set_read_writes(self.read_writes.rename(renames))
@@ -830,12 +836,21 @@ class SchedulerNode(BaseSchedulerNode):
         group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
         self.group = (self.node.get_device(), group_fn(self._sizes))
 
+        # Don't normalize since normalization will merge loops which
+        # makes it hard to decide new loop orders.
+        should_normalize = (
+            not config.loop_ordering_after_fusion
+            or self.node.get_device().type != "cuda"
+        )
+
         if isinstance(self.node, ir.TemplateBuffer):
-            self.set_read_writes(self.node.normalized_read_writes())
+            self.set_read_writes(
+                self.node.extract_read_writes(normalize=should_normalize)
+            )
         else:
             self.set_read_writes(
                 dependencies.extract_read_writes(
-                    self._body, *self._sizes, normalize=True
+                    self._body, *self._sizes, normalize=should_normalize
                 )
             )
 
@@ -843,6 +858,49 @@ class SchedulerNode(BaseSchedulerNode):
         self, extra_indexing_constraints: Tuple[Dict[Any, Any], List[Any]]
     ) -> None:
         self._compute_attrs(extra_indexing_constraints=extra_indexing_constraints)
+
+    def refresh_dependencies(self, normalize: bool) -> None:
+        # Fake dependencies are added manually. They can not be analyzed from
+        # extract_read_writes. Find them out and apply manually.
+        fake_deps = {
+            dep for dep in self.read_writes.reads if isinstance(dep, (WeakDep, StarDep))
+        }
+
+        # don't normalize since the loop order may need to be further changed
+        # later
+        self.set_read_writes(
+            dependencies.extract_read_writes(
+                self._body, *self._sizes, normalize=normalize
+            ).with_read(fake_deps)
+        )
+
+    def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
+        self._body = self._body.reorder_iter_loops(
+            new_order,
+        )
+        self._sizes = self._body.sizes
+
+        self.refresh_dependencies(normalize=False)
+
+    def reorder_loops_by_dep_pair(
+        self, self_dep: MemoryDep, other_dep: MemoryDep
+    ) -> None:
+        new_order = None
+        self_sizes = self._sizes[0]
+        if len(self_sizes) == self_dep.num_vars == other_dep.num_vars:
+            new_order = self_dep.decide_loop_order_to_match(other_dep)
+
+        if new_order:
+            metrics.num_loop_reordering += 1
+            loop_ordering_log.debug(
+                "Reorder loops for %s with order %s", self.get_name(), new_order
+            )
+            self.apply_new_loop_order(new_order)
+        else:
+            loop_ordering_log.debug(
+                "Don't reordering %s because we can not decide the suitable loop order",
+                self.get_name(),
+            )
 
     def debug_str_extra(self) -> str:
         name = self.get_name()
@@ -963,6 +1021,22 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
 
+def refresh_group_node_dependencies(group_snode: BaseSchedulerNode) -> None:
+    snodes = group_snode.snodes  # type: ignore[attr-defined]
+    group_snode.set_read_writes(
+        dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
+    )
+
+    group_snode.unmet_dependencies = (
+        OrderedSet(
+            dep
+            for dep in OrderedSet.union(*[x.unmet_dependencies for x in snodes])
+            if dep.name not in group_snode.get_buffer_names()
+        )
+        - group_snode.read_writes.writes
+    )
+
+
 def init_group_node(
     group_snode: BaseSchedulerNode,
     scheduler: Scheduler,
@@ -976,18 +1050,7 @@ def init_group_node(
         *[x.ancestors for x in snodes if x.ancestors is not None]
     )
 
-    group_snode.set_read_writes(
-        dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
-    )
-
-    group_snode.unmet_dependencies = (
-        OrderedSet(
-            dep
-            for dep in OrderedSet.union(*[x.unmet_dependencies for x in snodes])
-            if dep.name not in group_snode.get_buffer_names()
-        )
-        - group_snode.read_writes.writes
-    )
+    refresh_group_node_dependencies(group_snode)
 
     group_snode.min_order = min(x.min_order for x in group_snode.snodes)
     group_snode.max_order = max(x.max_order for x in group_snode.snodes)
@@ -1014,6 +1077,43 @@ class FusedSchedulerNode(BaseSchedulerNode):
         assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
         return cls(node1.scheduler, nodes)
+
+    def reorder_loops_by_dep_pair(
+        self, self_dep: MemoryDep, other_dep: MemoryDep
+    ) -> None:
+        if self.is_template():
+            # We can not really reorder loops for a triton template
+            return
+        self_sizes = None
+        for snode in self.snodes:
+            assert isinstance(snode, SchedulerNode)
+            if self_sizes is not None and self_sizes != snode._sizes[0]:
+                loop_ordering_log.debug(
+                    "Can not reorder fused node due to different sizes"
+                )
+                return
+            self_sizes = snode._sizes[0]
+        new_order = None
+
+        assert self_sizes is not None
+        if len(self_sizes) == self_dep.num_vars == other_dep.num_vars:
+            new_order = self_dep.decide_loop_order_to_match(other_dep)
+
+        if not new_order:
+            loop_ordering_log.debug(
+                "Dont reordering fused node %s because we can not decide the suitable loop order",
+                self.get_name(),
+            )
+            return
+        metrics.num_loop_reordering += 1
+        loop_ordering_log.debug(
+            "Reorder loops for fused node %s with order %s", self.get_name(), new_order
+        )
+        for snode in self.snodes:
+            assert isinstance(snode, SchedulerNode)
+            snode.apply_new_loop_order(new_order)  # type: ignore[arg-type]
+
+        refresh_group_node_dependencies(self)
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
@@ -1044,10 +1144,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
             for i, node in enumerate(self.snodes)
         ]
         node = self.snodes[0].node
-        assert node is not None
-        device = node.get_device()
-        if ir.is_triton(device):
-            lines.extend(debug_triton_code(self))
+        if node is not None:
+            device = node.get_device()
+            if ir.is_triton(device):
+                lines.extend(debug_triton_code(self))
 
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
@@ -1692,6 +1792,7 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
+        self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
@@ -2121,6 +2222,39 @@ class Scheduler:
         for order, node in enumerate(self.nodes):
             node.min_order = order
             node.max_order = order
+
+    def merge_loops(self) -> None:
+        for node in self.nodes:
+            if not config.loop_ordering_after_fusion:
+                continue
+
+            # Even for CPU, if we are using the halide backend, we still need
+            # the merge loops steps below
+            if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (
+                node.get_device().type != "cuda" and config.cpu_backend != "halide"
+            ):
+                continue
+            for snode in node.get_nodes():
+                # merge loops for the scheduler node
+                if not isinstance(snode, SchedulerNode) or snode.is_template():
+                    continue
+
+                snode._body = snode._body.merge_loops()
+                snode._sizes = snode._body.sizes
+
+                # merge_loops is called after loop reordering.
+                # We still need retain fake dependencies since codegen the
+                # estimated amount of memory access rely on them.
+                snode.refresh_dependencies(normalize=True)
+
+                # Note that for CPU backend, merging loops will change
+                # snode.group. It's fine for Triton backend.
+                # But if we simplify update snode.group like this:
+                #   group_fn = self.get_backend(snode.node.get_device()).group_fn
+                #   snode.group = (snode.node.get_device(), group_fn(snode._sizes))
+                # There is still an issue due to different snode in a
+                # FusedSchedulerNode having different merged loops.
+                # Skip CPU backend for now.
 
     def fuse_nodes(self, nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
         """
@@ -2664,6 +2798,78 @@ class Scheduler:
 
         return str(reasons)
 
+    def has_shared_data_after_reordering_loop(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """
+        Right now just greedily reorder the loop of node1 to be compatible with node2,
+        but ideally we should have some heuristics to reorder the loop for node2
+        to be compatibile with node1 if that's more efficient.
+        """
+
+        # TODO Don't do loop reordering for CPU for now.
+        # Should debug more why it does not work for CPU codegen
+        if not config.loop_ordering_after_fusion or any(
+            n.get_device().type == "cpu" for n in [node1, node2]
+        ):
+            return False
+
+        node1_buffer_names = node1.read_writes.buffer_names()
+        node2_buffer_names = node2.read_writes.buffer_names()
+        # Fast path: no common buffers.
+        common_buffer_names = node1_buffer_names & node2_buffer_names
+        if not common_buffer_names:
+            return False
+
+        node1_name2dep = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
+        node2_name2dep = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
+
+        # Find the commons buffers that has different loop orders
+        candidates = []
+        for buffer_name in common_buffer_names:
+            lhs_dep = node1_name2dep[buffer_name]
+            rhs_dep = node2_name2dep[buffer_name]
+            if (
+                lhs_dep.normalize_with_stride_order()
+                == rhs_dep.normalize_with_stride_order()
+            ):
+                candidates.append(
+                    (
+                        V.graph.sizevars.size_hint(lhs_dep.get_numel(), fallback=0),
+                        lhs_dep,
+                        rhs_dep,
+                    )
+                )
+
+        if len(candidates) == 0:
+            return False
+
+        # Pick the largest buffer to guide the loop reordering
+        numel, lhs_dep, rhs_dep = sorted(candidates, reverse=True, key=lambda x: x[0])[
+            0
+        ]
+
+        if lhs_dep.num_vars != rhs_dep.num_vars:
+            # this can happen due to we don't merge loops.
+            # We can not do loop reordering in this case right now
+            # Simply returning true if the two Deps are the same after
+            # normalization (merging loops)
+            return lhs_dep.normalize() == rhs_dep.normalize()
+
+        # Only reorder loops for pointwise for now
+        if not node1.is_reduction():
+            node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
+        elif not node2.is_reduction():
+            node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)
+        else:
+            loop_ordering_log.debug(
+                "Don't reorder loops since both nodes are reductions: %s v.s. %s",
+                node1.get_name(),
+                node2.get_name(),
+            )
+
+        return self.score_fusion_memory(node1, node2) > 0
+
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -2722,6 +2928,17 @@ class Scheduler:
         del device2
 
         no_shared_data = self.score_fusion_memory(node1, node2) == 0
+        if no_shared_data:
+            no_shared_data = not self.has_shared_data_after_reordering_loop(
+                node1, node2
+            )
+
+        loop_ordering_log.debug(
+            "%s and %s has%s shared data",
+            node1.get_name(),
+            node2.get_name(),
+            " no" if no_shared_data else "",
+        )
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
@@ -2857,6 +3074,12 @@ class Scheduler:
             read_name = read.name
             if read_name in self.mutation_renames:
                 read_name = self.mutation_renames[read_name]
+
+            if read.num_vars != write.num_vars:
+                # merge loops
+                read = read.normalize()
+                write = write.normalize()
+
             return (
                 read_name == write.name
                 and not free_symbol_is_type(read.index, SymT.TMP)
