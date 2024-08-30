@@ -1,6 +1,6 @@
 
 #include <ATen/ops/mkldnn_rnn_layer_cpu_dispatch.h>
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
 using namespace torch::aot_inductor;

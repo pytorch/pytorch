@@ -1884,3 +1884,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         packed.outputs = output_ir
 
         return output_ir
+
+    def codegen(self, wrapper):
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        return super().codegen(wrapper)
