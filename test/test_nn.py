@@ -12085,7 +12085,7 @@ if __name__ == '__main__':
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
     def test_elu_inplace_overlap(self, device):
-        dtype = torch.bfloat16 if device != 'mps' else torch.float16
+        dtype = torch.bfloat16 if device != 'mps:0' else torch.float16
         x = torch.randn((1, 6), dtype=dtype, device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.elu(x, inplace=True)
@@ -12169,7 +12169,7 @@ if __name__ == '__main__':
         expected = torch.tensor([0., 0., 1.], device=device)
         self.assertEqual(a.grad, expected)
 
-        dtype = torch.bfloat16 if device != 'mps' else torch.float16
+        dtype = torch.bfloat16 if device != 'mps:0' else torch.float16
         a_bf16 = torch.tensor([-2., 0., 2.], device=device, dtype=dtype, requires_grad=True)
         b_bf16 = torch.nn.functional.leaky_relu_(a_bf16.clone(), 0.0)
         b_bf16.backward(torch.ones(3, device=device))
