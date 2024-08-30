@@ -3251,6 +3251,7 @@ MOD_INLINELIST = [
     "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
+    "torch.utils._device",
     "torch.utils._foreach_utils",
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
