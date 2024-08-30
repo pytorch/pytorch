@@ -1498,7 +1498,13 @@ class TestReductions(TestCase):
         self.assertEqual(res1, res2.to(dtype=dtype))
 
     def test_prod_bool(self, device):
-        vals = [[True, True], [True, False], [False, False], []]
+        vals = [
+            [True, True],
+            [True, False],
+            [False, False],
+            [],
+            [False] * 256,  # https://github.com/pytorch/pytorch/issues/127866
+        ]
         for val in vals:
             result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
             expect = np.prod(np.array(val), dtype=bool)

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import inspect
+import logging
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING, Union
 
@@ -23,14 +24,20 @@ from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
+    _DimHint,
     _process_dynamic_shapes,
+    _transform_shapes_for_default_dynamic,
     _tree_map_with_path,
 )
 from torch.export.graph_signature import CustomObjArgument
+from torch.fx.experimental import _config as config
 from torch.fx.experimental.symbolic_shapes import (
+    _find_user_code_frame,
+    _suggest_fixes_for_data_dependent_error_non_strict,
     ConstraintViolationError,
     DimDynamic,
     EqualityConstraint,
+    GuardOnDataDependentSymNode,
     ShapeEnv,
     StatelessSymbolicContext,
     ValueRanges,
@@ -46,6 +53,9 @@ from torch.utils._pytree import (
 
 if TYPE_CHECKING:
     from sympy import Symbol
+
+
+log = logging.getLogger(__name__)
 
 
 def key_path_to_source(kp: KeyPath) -> Source:
@@ -85,7 +95,7 @@ def fakify(
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
-        dynamic_sizes=[DimDynamic.STATIC] * n_dims,
+        dynamic_sizes=[DimDynamic.DYNAMIC] * n_dims,
         constraint_sizes=[None] * n_dims,
     )
     t_id = id(t)
@@ -93,7 +103,6 @@ def fakify(
     if t_id in t_constraints:
         for i, constraint in t_constraints[t_id].items():
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
@@ -125,11 +134,12 @@ def make_fake_inputs(
     #   - output_graph.py fakifies inputs.
     #   - [post-tracing] guards.py processes input shape equalities.
 
-    combined_args = _combine_args(
-        nn_module, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
-    )
+    combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
-    constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
+    _dynamic_shapes = _transform_shapes_for_default_dynamic(
+        combined_args, dynamic_shapes
+    )
+    constraints = _process_dynamic_shapes(combined_args, _dynamic_shapes)
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
@@ -138,11 +148,7 @@ def make_fake_inputs(
     if context is not None:
         # This occurs when we are exporting within dynamo. There already exists
         # a toplevel TracingContext with a fake mode, so we do not want to
-        # create another fake mode. In this scenario, we also shouldn't have any
-        # constraints since the toplevel tracing context should handle it.
-        assert (
-            len(constraints) == 0
-        ), "Found constraints when tracing with a toplevel tracing context."
+        # create another fake mode.
         fake_mode = context.fake_mode
     elif not _is_torch_jit_trace:
         code = nn_module.forward.__code__
@@ -338,21 +344,21 @@ def make_constraints(
             continue
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
         for i, d in enumerate(node.meta["val"].shape):
-            if isinstance(d, torch.SymInt):
+            if isinstance(d, torch.SymInt) and not d.node.expr.is_number:
                 # Look up the range constraint for the symbol corresponding to this shape dimension
                 # and store it indexed by the symbolic expression corresponding to it.
                 # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
                 dim = shape_spec[i] if shape_spec else None
-                if dim:
-                    range_constraints[d.node.expr] = ValueRanges(
-                        lower=dim.min, upper=dim.max
-                    )
-                else:
+                if dim is None or isinstance(dim, _DimHint):
                     range_constraints[d.node.expr] = shape_env.var_to_range[
                         d.node._expr
                     ]
+                else:
+                    range_constraints[d.node.expr] = ValueRanges(
+                        lower=dim.min, upper=dim.max
+                    )
                 input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
                 free_symbols.update(d.node.expr.free_symbols)
 
@@ -468,3 +474,43 @@ def _fakify_script_objects(
         for fqn, orig_obj in patched_attr.items():
             cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
             setattr(cur_mod, attr, orig_obj)
+
+
+class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
+    """
+    1. Handles data-dependent errors raised by torch function calls in non-strict.
+
+    Any data-dependent error is due to some condition on unbacked symints
+    that cannot be resolved. A mechanical way of fixing the error is to use
+    a torch._check() call to assert either that condition or its negation.
+    The handler suggests these options as code and points to the location
+    of the torch function call that raised the error as part of the error
+    message shown to the user, who can then simply select and copy-paste
+    a suggested fix at that location.
+
+    NOTE: Not all data-dependent errors are raised by torch function calls.
+    In particular, conditions on unbacked symints can appear outside such
+    calls, and as such are not handled here.
+
+    2. Handles line-of-code logging for each torch function call in non-strict.
+
+    Usage: TORCHEXPORT_EXTENDED_DEBUG_CURRENT_LOC=1 TORCH_LOGS="+export" ...
+    """
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        if log.isEnabledFor(logging.DEBUG) and config.extended_debug_current_loc:
+            frame = _find_user_code_frame()
+            if frame is not None:
+                log.debug(
+                    "%s called at %s:%s in %s",
+                    func.__qualname__,
+                    frame.f_code.co_filename,
+                    frame.f_lineno,
+                    frame.f_code.co_name,
+                )
+        try:
+            return func(*args, **kwargs)
+        except GuardOnDataDependentSymNode as e:
+            _suggest_fixes_for_data_dependent_error_non_strict(e)
+            raise
