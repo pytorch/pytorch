@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <c10/util/CallOnce.h>
+#include <c10/util/env.h>
 
 #include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -145,6 +146,10 @@ bool is_available() {
 
 bool is_macos_13_or_newer(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
+}
+
+bool is_mps_fallback_enabled() {
+  return c10::utils::check_env("PYTORCH_ENABLE_MPS_FALLBACK") == true;
 }
 
 } // namespace at::mps
