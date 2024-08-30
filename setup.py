@@ -1098,12 +1098,17 @@ def configure_extension_build():
             "convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx",
             "convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2",
             "torchrun = torch.distributed.run:main",
-            "torch-dist-fr-trace = tools.flight_recorder.fr_trace:main",
         ],
         "torchrun.logs_specs": [
             "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
         ],
     }
+
+    if cmake_cache_vars["USE_DISTRIBUTED"]:
+        # Only enable fr_trace command if distributed is enabled
+        entry_points["console_scripts"].append(
+            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+        )
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
