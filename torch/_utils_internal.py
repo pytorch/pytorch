@@ -202,6 +202,9 @@ class JustKnobsConfig:
         v = bool(self)
         return f"JustknobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
 
+    def __bool__(self):
+        return self.get()
+
 
 def justknobs_feature(
     name: Optional[str], config_value=None, env_name=None, default: bool = True
@@ -235,7 +238,8 @@ def justknobs_feature(
             killswitch work by having feature return True to turn off features
 
     Requirements:
-        Don't use this at import time - Simply pass in the existing config
+        WARNING - Don't use this at import time - Simply pass in the existing config.
+        If you want to use this at config time, use JustKnobsConfig
     """
     if config_value is not None:
         return config_value

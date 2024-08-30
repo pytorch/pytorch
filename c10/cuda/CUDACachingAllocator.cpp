@@ -2611,7 +2611,7 @@ class DeviceCachingAllocator {
       while (it != large_blocks.blocks.end()) {
         Block* block = *it;
         ++it;
-        if (!block->is_split() &&
+        if (!block->is_split() && !block->expandable_segment_ &&
             static_cast<double>(block->gc_count()) >= age_threshold) {
           block_freed = true;
           gc_reclaimed += block->size;
@@ -2754,7 +2754,8 @@ class DeviceCachingAllocator {
         ? CUDAAllocatorConfig::max_split_size()
         : key.size;
     auto it = pool.blocks.lower_bound(&key);
-    if (it == pool.blocks.end() || (*it)->stream != p.stream()) {
+    if (it == pool.blocks.end() || (*it)->stream != p.stream() ||
+        (*it)->expandable_segment_) {
       // No single block is large enough; free multiple oversize blocks,
       // starting with the largest
       if (it == pool.blocks.begin())
@@ -2766,12 +2767,15 @@ class DeviceCachingAllocator {
              ((*it)->size >= CUDAAllocatorConfig::max_split_size()) &&
              ((*it)->stream == p.stream())) {
         auto cur = it;
-        totalReleased += (*it)->size;
-        if (it != pool.blocks.begin()) {
+        bool is_first = cur == pool.blocks.begin();
+        if (!is_first) {
           --it;
+        }
+        if (!(*cur)->expandable_segment_) {
           release_block(*cur, context);
-        } else {
-          release_block(*cur, context);
+          totalReleased += (*cur)->size;
+        }
+        if (is_first) {
           break;
         }
       }
