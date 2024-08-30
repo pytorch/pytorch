@@ -1302,13 +1302,12 @@ class TestForeach(TestCase):
                 out = foreach_copy_(
                     (self_tensors, src_tensors), is_cuda=True, expect_fastpath=True
                 )
-                self.assertEqual(
-                    out,
-                    [
-                        torch.empty_like(t).copy_(s)
-                        for t, s in zip(self_tensors, src_tensors)
-                    ],
-                )
+                ref_out = [
+                    torch.empty_like(t).copy_(s)
+                    for t, s in zip(self_tensors, src_tensors)
+                ]
+                for t, ref_t in zip(out, ref_out):
+                    self.assertTrue(torch.equal(t, ref_t))
 
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA
