@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
@@ -18,21 +17,7 @@ caching_worker_device_properties: Dict[str, Any] = {}
 caching_worker_current_devices: Dict[str, int] = {}
 
 
-class DeviceInterfaceMeta(type):
-    def __new__(metacls, *args, **kwargs):
-        class_member = args[2]
-        if "Event" in class_member:
-            assert inspect.isclass(class_member["Event"]) and issubclass(
-                class_member["Event"], torch.Event
-            ), "DeviceInterface member Event should be inherit from torch.Event"
-        if "Stream" in class_member:
-            assert inspect.isclass(class_member["Stream"]) and issubclass(
-                class_member["Stream"], torch.Stream
-            ), "DeviceInterface member Stream should be inherit from torch.Stream"
-        return super().__new__(metacls, *args, **kwargs)
-
-
-class DeviceInterface(metaclass=DeviceInterfaceMeta):
+class DeviceInterface:
     """
     This is a simple device runtime interface for Inductor. It enables custom
     backends to be integrated with Inductor in a device-agnostic semantic.
@@ -41,6 +26,18 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
     class device:
         def __new__(cls, device: _device_t):
             raise NotImplementedError
+
+    class Event:
+        def __new__(cls, *args, **kwargs):
+            raise NotImplementedError(
+                "Please ensure member Event is inherited from torch.Event"
+            )
+
+    class Stream:
+        def __new__(cls, *args, **kwargs):
+            raise NotImplementedError(
+                "Please ensure member Stream is inherited from torch.Stream"
+            )
 
     class Worker:
         """
