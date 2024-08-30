@@ -7,7 +7,7 @@ import unittest
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
-from torch.testing._internal.autocast_utils import AutocastTestLists, TestAutocast
+from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyXPU,
