@@ -224,8 +224,7 @@ class CrossMapLRN2d(Function):
 
         ctx.scale = ctx.scale or input.new()
         output = input.new()
-
-        _, channels, _, _ = input.size(0), input.size(1), input.size(2), input.size(3)
+        channels = input.size(1)
 
         output.resize_as_(input)
         ctx.scale.resize_as_(input)
