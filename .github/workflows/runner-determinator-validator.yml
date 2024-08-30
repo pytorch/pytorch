@@ -9,6 +9,10 @@ on:
       - .github/scripts/runner_determinator.py
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
 jobs:
   check-runner-determinator:
     runs-on: ubuntu-latest
