@@ -36,7 +36,7 @@ from torch.fx.experimental.proxy_tensor import (
 # then returns (output, Tensors with the new values)
 #
 # if the passed inputs are views of another inputs, we return the changed
-# base tensor of and regenerate the future views from it.
+# base tensor and regenerate the future views from it.
 
 
 class AutoFunctionalized(HigherOrderOperator):

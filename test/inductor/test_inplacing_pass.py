@@ -136,10 +136,10 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             _, new_out = torch.ops.higher_order.auto_functionalized(
                 sin._opoverload,
                 x=x,
-                _out_base_index=0,
-                _out_size=(3,),
-                _out_stride=(1,),
-                _out_storage_offset=0,
+                _result_base_index=0,
+                _result_size=(3,),
+                _result_stride=(1,),
+                _result_storage_offset=0,
                 _all_bases=[out],
             )
             y = out * new_out
