@@ -74,7 +74,7 @@ jobs:
           - If the first line is a "!" then all users will use the old runners
           - Each user is also a comma-separated list of features/experiments to enable
           - A "#" prefix indicates the user is opted out of the new runners but is opting
-          into features/experiments.
+            into features/experiments.
 
           Example user list:
 
