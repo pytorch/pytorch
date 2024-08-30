@@ -166,8 +166,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adamax_tensor_lr_weight_decay_capturable_xpu": 6,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_cuda": 4,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_xpu": 4,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": 9,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda": 3,
