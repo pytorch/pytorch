@@ -526,7 +526,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
             repl.meta.update(node.meta)
             repl.meta["val"] = repl.meta["val"].to(user_device)
             node.replace_all_uses_with(repl)
-            match.erase_nodes(match.graph)
+            match.erase_nodes()
 
 
 @register_graph_pattern(
@@ -552,7 +552,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         )
         repl.meta.update(node.meta)
         node.replace_all_uses_with(repl)
-        match.erase_nodes(graph)
+        match.erase_nodes()
 
 
 @register_graph_pattern(
@@ -561,12 +561,11 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
 )
 def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
-    graph = match.graph
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
     if size == arg_size:
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
-        match.erase_nodes(graph)
+        match.erase_nodes()
 
 
 # When softmax is used with temperature or other scaling, we get the pattern
