@@ -10,8 +10,8 @@
 namespace torch::inductor {
 
 // Regarding a aten operation implemented by AOTI, the metadata of the input
-// tensors will be cached on the disk to acclerate next run. TensorMetada
-// structure is to represent the metadata of each input tensor. it includes
+// tensors will be cached on the disk to accelerate next run. TensorMetada
+// structure is to represent the metadata of each input tensor. It includes
 // whether the tensor is symbolic, the dtype, the device, the sizes and the
 // strides of the tensor. When the metadata of the input tensors is the same as
 // the cached metadata, the cached kernel library will be loaded and executed.

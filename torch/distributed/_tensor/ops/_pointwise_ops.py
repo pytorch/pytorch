@@ -239,7 +239,12 @@ pointwise_ops = [
     aten.igammac.default,
     aten.igammac.out,
     aten.igammac_.default,
+    aten.isinf.default,
     aten.isnan.default,
+    aten.isneginf.default,
+    aten.isneginf.out,
+    aten.isposinf.default,
+    aten.isposinf.out,
     aten.ldexp.default,
     aten.ldexp.out,
     aten.ldexp_.default,
@@ -476,7 +481,7 @@ def common_pointwise_strategy(
 
         input_specs: List[DTensorSpec] = []
         redistribute_costs: List[List[float]] = []
-        for idx, input_arg in enumerate(args_schema):
+        for input_arg in args_schema:
             if isinstance(input_arg, OpStrategy):
                 # every arg follow the out_placements, but need to handle broadcasting
                 input_arg_spec = input_arg.strategies[0].output_spec
