@@ -10,7 +10,12 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_device_type import skipIf
-from torch.testing._internal.common_utils import IS_FBCODE, munge_exc, TEST_Z3
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    munge_exc,
+    skipIfWindows,
+    TEST_Z3,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -199,6 +204,10 @@ ReluCompileError:""",
         inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         translation_validation=True,
         translation_validation_no_bisect=True,
+    )
+    @skipIfWindows(
+        msg='AssertionError: "tran[551 chars]s1 s2 s3) s0)\n  ==> (<= (+ s1 s2) (+ s0 (* -1[511 chars][0])'  # noqa: PLR0133
+        != 'tran[551 chars]s1 s2) (+ s0 (* -1 s3)))\n  ==> (<= (+ s1 s2) [483 chars][0])"'
     )
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException

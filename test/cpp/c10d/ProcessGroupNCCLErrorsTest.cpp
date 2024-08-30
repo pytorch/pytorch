@@ -25,7 +25,8 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       int rank,
       c10d::OpType opType,
       uint64_t seq)
-      : WorkNCCL(device, rank, opType, seq), simulateError_(simulate_error) {}
+      : WorkNCCL("0", "default_pg", device, rank, opType, seq),
+        simulateError_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors() override {
     if (simulateError_) {
@@ -96,7 +97,7 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       int rank,
       c10d::OpType opType,
       uint64_t seq)
-      : WorkNCCL(device, rank, opType, seq),
+      : WorkNCCL("0", "default_pg", device, rank, opType, seq),
         setTimedoutError_(set_timedout_error) {}
 
  private:
@@ -179,7 +180,7 @@ class ProcessGroupNCCLNoHeartbeatCaught
       : ProcessGroupNCCLTimedOutErrors(store, rank, size, opts),
         hasMonitorThreadCaughtError_(false) {}
 
-  std::mutex& getWatchdogMutex() {
+  std::timed_mutex& getWatchdogMutex() {
     return workMetaListMutex_;
   }
 
@@ -412,7 +413,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   work = pg.allreduce(tensors_);
   {
     // Now run all reduce with errors.
-    std::lock_guard<std::mutex> lock(pg.getWatchdogMutex());
+    std::lock_guard<std::timed_mutex> lock(pg.getWatchdogMutex());
     LOG(INFO) << "Lock watchdog thread.";
     // Wait long enough before monitor thread throws exceptions.
     std::this_thread::sleep_for(
