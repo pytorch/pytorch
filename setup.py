@@ -1103,6 +1103,12 @@ def configure_extension_build():
             "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
         ],
     }
+
+    if cmake_cache_vars["USE_DISTRIBUTED"]:
+        # Only enable fr_trace command if distributed is enabled
+        entry_points["console_scripts"].append(
+            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+        )
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 

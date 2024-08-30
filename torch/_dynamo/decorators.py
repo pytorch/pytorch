@@ -10,7 +10,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
-from .convert_frame import disabled_codes
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
@@ -56,21 +55,9 @@ def disable(fn=None, recursive=True):
     """
     if recursive:
         if fn is not None:
-            id_fn = id(fn)
-            if cached_fn := disabled_codes.get(id_fn):
-                return cached_fn
-
             fn = innermost_fn(fn)
             assert callable(fn)
-            out = DisableContext()(fn)
-
-            # Do not cache Fx graph methods. These come from Dynamo itself. Caching such graphs can increase lifetime of
-            # held objects. Since these are coming from Dynamo itself, there is no benefit of caching.
-            if not (
-                inspect.ismethod(fn) and isinstance(fn.__self__, torch.fx.GraphModule)
-            ):
-                disabled_codes[id_fn] = out
-            return out
+            return DisableContext()(fn)
         return DisableContext()
     else:
         return skip(fn)
@@ -181,6 +168,7 @@ def forbid_in_graph(fn):
 def substitute_in_graph(
     original_fn: _F,
     *,
+    can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
 ) -> Callable[[_F], _F]:
     """
@@ -200,6 +188,10 @@ def substitute_in_graph(
     Args:
         original_fn (callable): The original function, usually a C function, to register a polyfill
             handler for.
+        can_constant_fold_through (bool, optional): Whether the polyfill handler can be constant
+            folded through. That is, if the polyfill handler is a pure function and its arguments
+            are constant, the result of the polyfill handler can be constant folded during the
+            compilation. Defaults to ``False``.
         skip_signature_check (bool, optional): Whether to skip the signature check between the
             original function and the polyfill handler. Defaults to ``False``.
 
@@ -332,6 +324,7 @@ def substitute_in_graph(
 
         wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
+        wrapped.__torch_dynamo_can_constant_fold_through__ = can_constant_fold_through  # type: ignore[attr-defined]
 
         return wrapped  # type: ignore[return-value]
 
@@ -460,8 +453,10 @@ def maybe_mark_dynamic(t, index):
 
 def mark_static(t, index=None):
     """
-    Mark a tensor as having a static dim.
+    Mark a tensor as having a static dim or mark a nn module class as static.
 
+    For tensors
+    ===========
     This will prevent us from attempting to compile it dynamically
     when dynamic=True; this can improve trace-time performance.
 
@@ -469,6 +464,20 @@ def mark_static(t, index=None):
 
     Unlike mark_dynamic, this can be done inside a graph, in which case it
     induces specialization on the tensor.
+
+    For nn.Module classes
+    =====================
+    For static nn.Module classes, TorchDynamo assumes that the module instance
+    attributes will not be modified after compilation. This will ensure that
+    TorchDynamo keeps integer attributes CONSTANT and not symints.
+
+    From TorchDynamo implementation side, the instances of static-marked
+    nn.Module class will be converted to UnspecializedBuiltinNNModuleVariable,
+    which have the same properties.
+
+    Note that we still have to guard on the attributes, because different
+    instances of the nn.Module can have different values of the attributes. The
+    key point here is that the attributes are static.
     """
     if is_compiling():
         if index is None:
@@ -483,11 +492,20 @@ def mark_static(t, index=None):
         # TODO: Make this configurable via a supported public API
         _apply_func_to_inner_tensors_of_same_dim(mark_static, t, index)
 
+    if not isinstance(t, torch.Tensor) and issubclass(t, torch.nn.Module):
+        t._dynamo_marked_static = True
+        return t
+
+    if not isinstance(t, torch.Tensor):
+        raise TypeError(
+            f"mark_static expects a tensor/nn.Module class but recieved {type(t)}"
+        )
+
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_static_indices"):
-            t._dynamo_static_indices = set()
+            t._dynamo_static_indices = set()  # type: ignore[attr-defined]
         # TODO(voz): Should we bounds check?
-        t._dynamo_static_indices.add(index)
+        t._dynamo_static_indices.add(index)  # type: ignore[attr-defined]
     elif index is None:
         for i in range(t.dim()):
             mark_static(t, i)

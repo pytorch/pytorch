@@ -15,6 +15,7 @@ import random
 import re
 import sys
 import types
+import warnings
 import weakref
 from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
 
@@ -25,7 +26,7 @@ from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
-from torch._subclasses.meta_utils import is_sparse_any
+from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -47,6 +48,7 @@ from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
+    AttrProxySource,
     AttrSource,
     CallMethodItemSource,
     ConstantSource,
@@ -218,6 +220,12 @@ static_inputs_log = torch._logging.getArtifactLogger(
 
 
 DimList = List
+
+
+def safe_has_grad(t):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+        return hasattr(t, "grad")
 
 
 class _missing:
@@ -1149,8 +1157,22 @@ class VariableBuilder:
             if item is value:
                 unimplemented("list elements are pointing to the list itself")
 
+        # Tuples are immutable objects, so we should mark its items static. This
+        # avoids wrapping of tuple items as symints. This helps for nn module
+        # attributes like conv2d strides, dilations.
+        if (
+            istype(value, tuple)
+            and all(ConstantVariable.is_literal(item) for item in value)
+            and self.source.guard_source().is_unspecialized_nn_module()
+        ):
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return TupleVariable([ConstantVariable.create(item) for item in value])
+
         output = [
-            LazyVariableTracker.create(item, source=GetItemSource(self.get_source(), i))
+            LazyVariableTracker.create(
+                item,
+                source=GetItemSource(self.get_source(), i),
+            )
             for i, item in enumerate(value)
         ]
 
@@ -1309,6 +1331,13 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
+
+            # Note [Tracing a torch.compiled function]
+            # when make_fx tracing a compiled function, we need
+            if isinstance(value, torch.fx.experimental.proxy_tensor._AttrProxy):
+                value = value.get_base()
+                self.source = AttrProxySource(self.source)
+
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
@@ -1324,7 +1353,9 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")) or getattr(
+                value.__class__, "_dynamo_marked_static", False
+            ):
                 result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
             else:
                 result = UnspecializedNNModuleVariable(value, source=self.source)
@@ -1408,7 +1439,8 @@ class VariableBuilder:
                 or (source and source.guard_source().is_unspecialized_nn_module())
             )
         ):
-            self.mark_static_input(value, guard=False)
+            self.mark_static_input(value, guard=is_parameter_freezing())
+            is_static_input = True
 
         make_graph_attribute = is_static_input and (
             not config.inline_inbuilt_nn_modules or is_parameter_freezing()
@@ -1510,6 +1542,18 @@ class VariableBuilder:
             # export + sparsity is being added but we need to create
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
             unimplemented("torch.compile does not support sparse Tensors")
+
+        if (
+            safe_has_grad(value)
+            and safe_grad(value) is not None
+            and value.dtype != safe_grad(value).dtype
+        ):
+            unimplemented(
+                "Inconsistent dtype between tensor and its gradient. "
+                "This can happen in FSDP and crashes meta tensor creation. "
+                "This is potentially a workaround. Fixing it correctly "
+                "requires some design around FSDP + torch.compile."
+            )
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
@@ -1675,6 +1719,15 @@ class VariableBuilder:
                             value,
                             frame_state_entry.scalar,
                         )
+                        if self.source.guard_source().is_unspecialized_nn_module():
+                            log.info(
+                                "%s",
+                                (
+                                    f"{name} is converted to a symbolic integer. It is an attribute of a "
+                                    "user defined nn module class. If you wish to keep it static, you can "
+                                    "mark the nn module class as `torch._dynamo.mark_static`."
+                                ),
+                            )
                         frame_state_entry.scalar = None
                 self.tx.output.frame_state[name] = frame_state_entry
 

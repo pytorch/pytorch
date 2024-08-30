@@ -14,7 +14,7 @@ __all__ = [
 ]
 
 
-@substitute_in_graph(builtins.all)
+@substitute_in_graph(builtins.all, can_constant_fold_through=True)
 def all(iterable: Iterable[object], /) -> bool:
     for elem in iterable:
         if not elem:
@@ -22,7 +22,7 @@ def all(iterable: Iterable[object], /) -> bool:
     return True
 
 
-@substitute_in_graph(builtins.any)
+@substitute_in_graph(builtins.any, can_constant_fold_through=True)
 def any(iterable: Iterable[object], /) -> bool:
     for elem in iterable:
         if elem:
