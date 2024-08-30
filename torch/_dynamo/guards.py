@@ -101,6 +101,8 @@ from .source import (
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
     WeakRefCallSource,
+    DictGetItemSource,
+    UseIndexOrKey,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
@@ -445,41 +447,72 @@ class NNModuleAttrAccessorInfo:
     l2_key: Optional[str] = None
 
 
-def getitem_on_dict_manager(
+
+def getitem_on_dict_manager_new(
     source, base_guard_manager, base_example_value, example_value, guard_manager_enum
 ):
-    base_source_name = source.base.name()
-    source_name = source.name()
-    if isinstance(source.index, ConstDictKeySource):
-        index = source.index.index
-    else:
-        assert isinstance(base_example_value, dict)
-        index = get_key_index(base_example_value, source.index)
+    if source.use_index_or_key == UseIndexOrKey.USE_INDEX:
+        key_source = source.key_source
+        assert isinstance(key_source, ConstDictKeySource)
+        index = key_source.index
+    
+        base_source_name = source.base.name()
+        value_source = f"{base_source_name}[{key_source.name()}]"
 
-    key_source = get_key_index_source(base_source_name, index)
-    key_example_value = list(base_example_value.keys())[index]
-    if isinstance(key_example_value, (int, str)):
-        value_source = f"{base_source_name}[{key_example_value!r}]"
-    else:
-        value_source = f"{base_source_name}[{key_source}]"
-    if not isinstance(source.index, ConstDictKeySource):
-        # We have to insert a key manager guard here
-        # TODO - source debug string is probably wrong here.
-        base_guard_manager.get_key_manager(
+        # TODO(anijain2305) - Skipping the guarding on key. We guard on the
+        # value accessed by the index, so that should be sufficient. Think more
+        # if this statment is true.
+        return base_guard_manager.get_value_manager(
             index=index,
-            source=key_source,
-            example_value=source.index,
-            guard_manager_enum=GuardManagerType.GUARD_MANAGER,
-        ).add_equals_match_guard(
-            source.index, [f"{key_source} == {key_example_value!r}"]
+            source=value_source,
+            example_value=example_value,
+            guard_manager_enum=guard_manager_enum,
+        )
+    else:
+        assert source.use_index_or_key == UseIndexOrKey.USE_KEY
+        assert not isinstance(base_guard_manager, DictGuardManager)
+        return base_guard_manager.dict_getitem_manager(
+            key=source.key_value,
+            source=source.name(),
+            example_value=example_value,
+            guard_manager_enum=guard_manager_enum,
         )
 
-    return base_guard_manager.get_value_manager(
-        index=index,
-        source=value_source,
-        example_value=example_value,
-        guard_manager_enum=guard_manager_enum,
-    )
+# def getitem_on_dict_manager(
+#     source, base_guard_manager, base_example_value, example_value, guard_manager_enum
+# ):
+#     base_source_name = source.base.name()
+#     source_name = source.name()
+#     if isinstance(source.index, ConstDictKeySource):
+#         index = source.index.index
+#     else:
+#         assert isinstance(base_example_value, dict)
+#         index = get_key_index(base_example_value, source.index)
+
+#     key_source = get_key_index_source(base_source_name, index)
+#     key_example_value = list(base_example_value.keys())[index]
+#     if isinstance(key_example_value, (int, str)):
+#         value_source = f"{base_source_name}[{key_example_value!r}]"
+#     else:
+#         value_source = f"{base_source_name}[{key_source}]"
+#     if not isinstance(source.index, ConstDictKeySource):
+#         # We have to insert a key manager guard here
+#         # TODO - source debug string is probably wrong here.
+#         base_guard_manager.get_key_manager(
+#             index=index,
+#             source=key_source,
+#             example_value=source.index,
+#             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+#         ).add_equals_match_guard(
+#             source.index, [f"{key_source} == {key_example_value!r}"]
+#         )
+
+#     return base_guard_manager.get_value_manager(
+#         index=index,
+#         source=value_source,
+#         example_value=example_value,
+#         guard_manager_enum=guard_manager_enum,
+#     )
 
 
 def match_on_id_for_tensor(guard):
@@ -929,34 +962,23 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
-        elif istype(source, GetItemSource):
-            assert base_guard_manager  # to make mypy happy
-            if isinstance(base_example_value, (dict, collections.OrderedDict)):
-                # TODO(anijain2305) - Consider isolating GetItemSource and
-                # DictGetItemSource (or maybe use ODictGetItemSource for
-                # dicts) so that GetItemSource is only for non dict objects.
-                if isinstance(base_guard_manager, DictGuardManager):
-                    assert self.manager_guards_on_keys(base_guard_manager_enum)
-                    out = getitem_on_dict_manager(
+        elif istype(source, DictGetItemSource):
+            if self.requires_key_order_guarding(source.base):
+                source.set_use_index_or_key(UseIndexOrKey.USE_INDEX)
+            else:
+                source.set_use_index_or_key(UseIndexOrKey.USE_KEY)
+
+            out = getitem_on_dict_manager_new(
                         source,
                         base_guard_manager,
                         base_example_value,
                         example_value,
-                        guard_manager_enum,
-                    )
-                else:
-                    if isinstance(source.index, ConstDictKeySource):
-                        raise RuntimeError(
-                            "Expecting clean index here. Likely Dynamo forgot to mark"
-                            " a dict as guard_on_key_order"
-                        )
-                    out = base_guard_manager.dict_getitem_manager(
-                        key=source.index,
-                        source=source_name,
-                        example_value=example_value,
-                        guard_manager_enum=guard_manager_enum,
-                    )
-            elif isinstance(base_example_value, list) and not source.index_is_slice:
+                        guard_manager_enum
+            )
+
+        elif istype(source, GetItemSource):
+            assert base_guard_manager  # to make mypy happy
+            if isinstance(base_example_value, list) and not source.index_is_slice:
                 out = base_guard_manager.list_getitem_manager(
                     key=source.index,
                     source=source_name,
@@ -980,24 +1002,24 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
-        elif istype(source, ODictGetItemSource):
-            if isinstance(base_guard_manager, DictGuardManager):
-                assert self.manager_guards_on_keys(base_guard_manager_enum)
-                out = getitem_on_dict_manager(
-                    source,
-                    base_guard_manager,
-                    base_example_value,
-                    example_value,
-                    guard_manager_enum,
-                )
-            else:
-                assert base_guard_manager  # to make mypy happy
-                out = base_guard_manager.dict_getitem_manager(
-                    key=source.index,
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
+        # elif istype(source, ODictGetItemSource):
+        #     if isinstance(base_guard_manager, DictGuardManager):
+        #         assert self.manager_guards_on_keys(base_guard_manager_enum)
+        #         out = getitem_on_dict_manager(
+        #             source,
+        #             base_guard_manager,
+        #             base_example_value,
+        #             example_value,
+        #             guard_manager_enum,
+        #         )
+        #     else:
+        #         assert base_guard_manager  # to make mypy happy
+        #         out = base_guard_manager.dict_getitem_manager(
+        #             key=source.index,
+        #             source=source_name,
+        #             example_value=example_value,
+        #             guard_manager_enum=guard_manager_enum,
+        #         )
         elif istype(source, DefaultsSource):
             assert base_guard_manager  # to make mypy happy
             assert callable(base_example_value)
@@ -1718,27 +1740,27 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self._produce_guard_code(guard, code)
 
-    def DICT_CONST_KEYS(self, guard):
-        """Constant keys match"""
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-        t = type(value)
+    # def DICT_CONST_KEYS(self, guard):
+    #     """Constant keys match"""
+    #     ref = self.arg_ref(guard)
+    #     value = self.get(guard.name)
+    #     t = type(value)
 
-        if not config.enable_cpp_guard_manager:
-            # DictGuardManager supports TYPE_MATCH internally
-            self.TYPE_MATCH(guard)
+    #     if not config.enable_cpp_guard_manager:
+    #         # DictGuardManager supports TYPE_MATCH internally
+    #         self.TYPE_MATCH(guard)
 
-        code = []
-        code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
-        self._set_guard_export_info(guard, code)
+    #     code = []
+    #     code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
+    #     self._set_guard_export_info(guard, code)
 
-        if config.enable_cpp_guard_manager:
-            if self.requires_key_order_guarding(guard.originating_source):
-                self.guard_on_dict_keys_and_order(value, guard)
-            else:
-                self.guard_on_dict_keys_and_ignore_order(value, guard)
-        else:
-            self._produce_guard_code(guard, code)
+    #     if config.enable_cpp_guard_manager:
+    #         if self.requires_key_order_guarding(guard.originating_source):
+    #             self.guard_on_dict_keys_and_order(value, guard)
+    #         else:
+    #             self.guard_on_dict_keys_and_ignore_order(value, guard)
+    #     else:
+    #         self._produce_guard_code(guard, code)
 
     def EMPTY_NN_MODULE_HOOKS_DICT(self, guard):
         """Special guard to skip guards on empty hooks. This is controlled by skip_nnmodule_hook_guards"""

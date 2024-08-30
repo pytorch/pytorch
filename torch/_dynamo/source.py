@@ -418,6 +418,81 @@ class DefaultsSource(ChainedSource):
     def name(self):
         return self._name
 
+class UseIndexOrKey(enum.Enum):
+    UNDEFINED = 0
+    USE_INDEX = 1
+    USE_KEY = 2
+
+
+class NO_KEY:
+    pass
+
+@dataclasses.dataclass(frozen=True)
+class DictGetItemSource(ChainedSource):
+    """
+    We handle guards on dict in a special manner because they are so common.
+    Depending on the traced code, it is possible that we have to guard on the
+    dict order. Also, it is possible that the keys of the dict are not constants
+    (like tensors) and therefore we can't save the keys in the guards. In these
+    two cases, we decide to access the item of a dict using the key_source of
+    the key_value in the dict.keys().
+    
+    If we don't have to guard on the dict order and all keys are constant, we
+    can use the key_value directly.
+    
+    At the time of source creation, we don't know if we have to use key_value or
+    key_source. We can make that decision only at the end of tracing. So we save both
+    key_source and key_value here.
+    """
+    key_value : Any = NO_KEY
+    key_source : Optional[Source] = None
+
+    def __post_init__(self):
+        # Skip hashing on this attr
+        object.__setattr__(self, "use_index_or_key", UseIndexOrKey.UNDEFINED)
+
+    def reconstruct(self, codegen):
+        # For reconstruction, we don't have to worry about order. If key_value is a
+        # constant, just use the key_value to reconstruct. Otherwise, use the key_source.
+        if self.key_value is not NO_KEY:
+            self.base.reconstruct(codegen)
+            codegen.append_output(codegen.create_load_const(self.key_value))
+            codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        else:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(utils.__name__, "dict_keys_getitem")
+            )
+            self.base.reconstruct(codegen)
+            codegen.append_output(codegen.create_load_const(self.key_source))
+            codegen.extend_output(create_call_function(2, False))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def set_use_index_or_key(self, index_or_key):
+        object.__setattr__(self, "use_index_or_key", index_or_key)
+
+    def name(self):
+        def name_from_index():
+            assert isinstance(self.key_source, ConstDictKeySource)
+            return f"{self.base.name()}[{self.key_source.name()}]"
+        
+        def name_from_key():
+            return f"{self.base.name()}[{self.key_value!r}]"
+
+
+        if self.use_index_or_key == UseIndexOrKey.UNDEFINED:
+            if self.key_value is NO_KEY:
+                return name_from_index()
+            else:
+                return name_from_key()
+        else:
+            if self.use_index_or_key == UseIndexOrKey.USE_INDEX:
+                return name_from_index()
+            else:
+                assert self.key_value is not NO_KEY
+                return name_from_key()
+
 
 @dataclasses.dataclass(frozen=True)
 class GetItemSource(ChainedSource):

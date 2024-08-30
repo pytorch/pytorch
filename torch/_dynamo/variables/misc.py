@@ -24,7 +24,7 @@ from ..source import (
     AttrSource,
     DefaultsSource,
     GetItemSource,
-    ODictGetItemSource,
+    DictGetItemSource,
     TypeSource,
 )
 from ..utils import (
@@ -202,7 +202,7 @@ class SuperVariable(VariableTracker):
             from .builder import VariableBuilder
 
             key = args[0].as_python_constant()
-            return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
+            return VariableBuilder(tx, DictGetItemSource(self.objvar.source, key, None))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
             )
         elif inner_fn in (

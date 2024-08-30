@@ -62,6 +62,8 @@ from ..source import (
     CallMethodItemSource,
     ConstantSource,
     ConstDictKeySource,
+    DictGetItemSource,
+    NO_KEY,
     ConvertIntSource,
     FloatTensorSource,
     GetItemSource,
@@ -579,15 +581,10 @@ class VariableBuilder:
             result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
-            if all_const:
-                # TODO(anijain2305) - Do we have to guard on all the keys? Can
-                # keys be guarded lazily, similar to values?
-                self.install_guards(GuardBuilder.DICT_CONST_KEYS)
-            else:
+            if not all_const:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity
@@ -604,22 +601,23 @@ class VariableBuilder:
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
                 # values. Indices are cheap to save.
+                self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
                 self.tx.output.guard_on_key_order.add(self.source.name())
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
             def build_key_value(i, k, v):
+                key_source = ConstDictKeySource(self.get_source(), i)
                 if all_const:
-                    key = ConstantVariable.create(k)
-                    source_key = k
+                    key_vt = ConstantVariable.create(k)
+                    value_source = DictGetItemSource(self.get_source(), k, key_source)
                 else:
-                    source_key = ConstDictKeySource(self.get_source(), i)
-                    key = LazyVariableTracker.create(k, source_key)
+                    key_vt = LazyVariableTracker.create(k, key_source)
+                    value_source = DictGetItemSource(self.get_source(), NO_KEY, key_source)
+                
+                value_vt = LazyVariableTracker.create(v, value_source)
 
-                source_value = GetItemSource(self.get_source(), source_key)
-                value = LazyVariableTracker.create(v, source_value)
-
-                return key, value
+                return key_vt, value_vt
 
             result = dict(
                 build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
