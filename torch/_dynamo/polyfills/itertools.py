@@ -10,10 +10,29 @@ from typing import Iterable, Iterator, TypeVar
 from ..decorators import substitute_in_graph
 
 
-__all__ = ["tee"]
+__all__ = [
+    "chain",
+    "chain_from_iterable",
+    "tee",
+]
 
 
 _T = TypeVar("_T")
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
+@substitute_in_graph(itertools.chain, is_embedded_type=True)  # type: ignore[arg-type]
+def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
+    for iterable in iterables:
+        yield from iterable
+
+
+@substitute_in_graph(itertools.chain.from_iterable)  # type: ignore[arg-type]
+def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
+    return itertools.chain(*iterable)
+
+
+chain.from_iterable = chain_from_iterable  # type: ignore[method-assign]
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
