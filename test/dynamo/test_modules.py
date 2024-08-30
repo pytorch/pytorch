@@ -3013,6 +3013,40 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
             helper()
 
+    def test_user_defined_nn_module_dynamic(self):
+        class Conv2d(torch.nn.Conv2d):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def forward(self, x):
+                x = torch.nn.functional.conv2d(
+                    x,
+                    self.weight,
+                    self.bias,
+                    self.stride,
+                    self.padding,
+                    self.dilation,
+                    self.groups,
+                )
+                return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod1 = Conv2d(64, 64, kernel_size=(2, 2), stride=(1, 1))
+        mod2 = Conv2d(64, 64, kernel_size=(2, 2), stride=(2, 2))
+        mod3 = Conv2d(64, 64, kernel_size=(2, 2), stride=(3, 3))
+
+        opt_mod1 = torch.compile(mod1, backend=cnts, fullgraph=True)
+        opt_mod2 = torch.compile(mod2, backend=cnts, fullgraph=True)
+        opt_mod3 = torch.compile(mod3, backend=cnts, fullgraph=True)
+
+        x = torch.randn(1, 64, 64, 64)
+        opt_mod1(x)
+        opt_mod2(x)
+        opt_mod3(x)
+
+        # Must be 3 compilations. If not marked static there would be 2, because strides would be converted to symints.
+        self.assertEqual(cnts.frame_count, 3)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
