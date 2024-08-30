@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -57,14 +58,6 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
     PyTuple_SET_ITEM(pyinput, i, PyLong_FromSsize_t(inputs[i]));
-  }
-  return pyinput;
-}
-
-static PyObject* wrap_uint_list(const std::vector<uint32_t>& inputs) {
-  PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
-  for (const auto i : c10::irange(inputs.size())) {
-    PyTuple_SET_ITEM(pyinput, i, THPUtils_packUInt32(inputs[i]));
   }
   return pyinput;
 }
@@ -177,13 +170,14 @@ size_t CompiledNodeArgs::add_unpack_hook(PyObject* obj) {
 void CompiledNodeArgs::collect(
     const SavedVariable& sv,
     PyObject* unpack_hook,
-    PyObject* hook_input) {
+    PyObject* hook_input,
+    const std::shared_ptr<VariableMetadata>& meta) {
   TORCH_CHECK(
       THPVariable_Check(hook_input),
       "Saved tensor pack hooks returning non-tensors not supported yet for compiled autograd");
   size_t hook_id = add_unpack_hook(unpack_hook);
   collect(hook_id);
-  collect(_compiler.tensor_args.add(sv, hook_input, hook_id));
+  collect(_compiler.tensor_args.add(sv, hook_input, hook_id, meta));
 }
 
 size_t AutogradCompilerCall::emplace_hook_with_dedup(PyObject* fn) {
@@ -200,10 +194,11 @@ size_t AutogradCompilerCall::emplace_hook_with_dedup(PyObject* fn) {
 TensorArg& TensorArgs::add(
     const SavedVariable& sv,
     PyObject* hook_input,
-    size_t hook_id) {
+    size_t hook_id,
+    const std::shared_ptr<VariableMetadata>& metadata) {
   auto hook_input_tensor = THPVariable_Unpack(hook_input);
   TensorArg& arg = add(hook_input_tensor);
-  expected_unpack_hook_calls.emplace_back(hook_id);
+  unpack_hook_infos.emplace_back(UnpackHookMetadata{hook_id, *metadata});
   _saved_variables.emplace(&sv, &arg);
   return arg;
 }
@@ -453,6 +448,23 @@ void set_ivalue_proxies(
   }
 }
 
+PyObject* wrap_unpack_hook_info(const TensorArgs& tensor_args) {
+  const auto& infos = tensor_args.unpack_hook_infos;
+  PyObject* pyinfos = PyTuple_New(static_cast<Py_ssize_t>(infos.size()));
+  for (const auto i : c10::irange(infos.size())) {
+    const auto& info = infos[i];
+    PyObject* pyinfo = PyTuple_Pack(
+        5,
+        autograd::utils::wrap(static_cast<uint64_t>(info.hook_id)),
+        autograd::utils::wrap(info.output_info.layout),
+        THPDevice_New(info.output_info.device),
+        autograd::utils::wrap(info.output_info.dtype),
+        autograd::utils::wrap(info.output_info.sizes));
+    PyTuple_SET_ITEM(pyinfos, i, pyinfo);
+  }
+  return pyinfos;
+}
+
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
@@ -463,13 +475,15 @@ static TraceState call_begin_capture(
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
   THPObjectPtr pyivalueargsinput(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
+  THPObjectPtr py_unpack_hook_info_input(
+      wrap_unpack_hook_info(compiler_call.tensor_args));
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self,
       method_name,
       pyinput.get(),
       pysizeinput.get(),
       pyivalueargsinput.get(),
-      wrap_uint_list(compiler_call.tensor_args.expected_unpack_hook_calls),
+      py_unpack_hook_info_input.get(),
       nullptr)));
 
   PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr},

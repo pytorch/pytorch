@@ -48,8 +48,9 @@ at::Tensor PySavedVariableHooks::call_unpack_hook() {
 
 void PySavedVariableHooks::compiled_args(
     torch::dynamo::autograd::CompiledNodeArgs& args,
-    const SavedVariable& sv) {
-  args.collect(sv, unpack_hook_, data_);
+    const SavedVariable& sv,
+    const std::shared_ptr<torch::dynamo::autograd::VariableMetadata>& meta) {
+  args.collect(sv, unpack_hook_, data_, meta);
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)

@@ -4,7 +4,8 @@
 
 namespace torch::dynamo::autograd {
 class CompiledNodeArgs;
-}
+struct VariableMetadata;
+} // namespace torch::dynamo::autograd
 
 namespace torch::autograd {
 
@@ -15,7 +16,9 @@ struct TORCH_API SavedVariableHooks {
   virtual at::Tensor call_unpack_hook() = 0;
   virtual void compiled_args(
       torch::dynamo::autograd::CompiledNodeArgs& args,
-      const SavedVariable& sv) = 0;
+      const SavedVariable& sv,
+      const std::shared_ptr<torch::dynamo::autograd::VariableMetadata>&
+          meta) = 0;
   virtual ~SavedVariableHooks() = default;
 };
 

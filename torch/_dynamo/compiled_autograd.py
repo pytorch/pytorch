@@ -87,7 +87,7 @@ class AutogradCompilerInstance:
         inputs: List[torch.Tensor],
         sizes: List[int],
         scalars: List[Union[int, float]],
-        expected_unpack_hook_calls: List[int],
+        unpack_hook_infos: List[int],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
@@ -143,13 +143,14 @@ class AutogradCompilerInstance:
         def pack(x):
             return x
 
-        next_unpack_hook_call_idx = 0
+        next_unpack_hook_idx = 0
 
         def unpack(x):
-            nonlocal next_unpack_hook_call_idx
-            hook_idx = expected_unpack_hook_calls[next_unpack_hook_call_idx]
-            proxy = self.proxy_call_unpack_hook(x, hook_idx)
-            next_unpack_hook_call_idx += 1
+            nonlocal next_unpack_hook_idx
+            proxy = self.proxy_call_unpack_hook(
+                x, unpack_hook_infos[next_unpack_hook_idx]
+            )
+            next_unpack_hook_idx += 1
             return proxy
 
         # TODO(jansel): are all these modes needed?
@@ -196,7 +197,8 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
-    def proxy_call_unpack_hook(self, hook_input, hook_id):
+    def proxy_call_unpack_hook(self, hook_input, hook_info):
+        hook_id, layout, device, dtype, size = hook_info
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(
             hook,
@@ -204,8 +206,7 @@ class AutogradCompilerInstance:
             hook_type="unpack_hook",
         )
         with disable_proxy_modes_tracing():
-            # TODO: this metadata may be incorrect
-            outs = [hook_input.clone().detach()]
+            outs = [torch.empty(size=size, dtype=dtype, layout=layout, device=device)]
             self.bind_tensors_to_proxies(outs, proxies)
 
         return outs[0]

@@ -19,7 +19,9 @@ struct PySavedVariableHooks : public SavedVariableHooks {
   at::Tensor call_unpack_hook() override;
   void compiled_args(
       torch::dynamo::autograd::CompiledNodeArgs& args,
-      const SavedVariable& sv) override;
+      const SavedVariable& sv,
+      const std::shared_ptr<torch::dynamo::autograd::VariableMetadata>& meta)
+      override;
   ~PySavedVariableHooks() override;
 
  private:

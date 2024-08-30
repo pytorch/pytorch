@@ -102,6 +102,13 @@ void SavedVariable::save_metadata(const Variable& data) {
     fw_grad_ = std::make_shared<ForwardGrad>();
     fw_grad_->set_value(fw_grad, /* level */ 0);
   }
+
+  original_metadata_ = std::make_shared<dynamo::autograd::VariableMetadata>(
+      dynamo::autograd::VariableMetadata{
+          data.layout(),
+          data.device(),
+          data.dtype().toScalarType(),
+          data.sizes()});
 }
 
 std::unique_ptr<SavedVariableHooks> SavedVariable::get_default_hooks() {
@@ -280,7 +287,8 @@ void SavedVariable::register_hooks(
 
 void SavedVariable::compiled_args(
     torch::dynamo::autograd::CompiledNodeArgs& args) const {
-  hooks_->compiled_args(args, *this);
+  TORCH_INTERNAL_ASSERT(original_metadata_ != nullptr);
+  hooks_->compiled_args(args, *this, original_metadata_);
 }
 
 const char* ERR_BACKWARD_TWICE =

@@ -25,6 +25,20 @@ struct SizeInput {
   int64_t value;
 };
 
+struct VariableMetadata {
+  VariableMetadata() = delete;
+  at::Layout layout;
+  at::Device device;
+  at::ScalarType dtype;
+  at::IntArrayRef sizes;
+};
+
+struct UnpackHookMetadata {
+  UnpackHookMetadata() = delete;
+  size_t hook_id;
+  VariableMetadata output_info;
+};
+
 struct CacheKeyBuffer {
   CacheKeyBuffer(const uint8_t* key, uint16_t len) : data(new uint8_t[len]) {
     std::memcpy(data.get(), key, len);
@@ -143,7 +157,11 @@ struct TensorArgs {
     return lookup(tensor, true);
   }
 
-  TensorArg& add(const SavedVariable& sv, PyObject* hook_input, size_t hook_id);
+  TensorArg& add(
+      const SavedVariable& sv,
+      PyObject* hook_input,
+      size_t hook_id,
+      const std::shared_ptr<VariableMetadata>& meta);
 
   TensorArg& add(const SavedVariable& sv, const std::shared_ptr<Node>& node) {
     at::Tensor tensor = sv.unpack(node);
@@ -155,8 +173,8 @@ struct TensorArgs {
   // the concrete tensors that will get passed into the graph as inputs
   std::vector<at::Tensor> inputs;
 
-  // indexes of expected unpack hook call order
-  std::vector<uint32_t> expected_unpack_hook_calls;
+  // expected unpack hook in call order
+  std::vector<UnpackHookMetadata> unpack_hook_infos;
 
  private:
   std::unordered_map<const c10::TensorImpl*, TensorArg> _args;
@@ -237,7 +255,8 @@ class CompiledNodeArgs {
   void collect(
       const SavedVariable& sv,
       PyObject* unpack_hook,
-      PyObject* hook_input);
+      PyObject* hook_input,
+      const std::shared_ptr<VariableMetadata>& meta);
   void collect(const SavedVariable& sv, bool is_output) {
     if (!sv.has_hooks()) {
       // Note: SavedVariable missing hooks
