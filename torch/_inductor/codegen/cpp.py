@@ -3372,13 +3372,10 @@ class TilingSelect:
                         for _node in sub_block.graph.nodes:
                             if _node.target in ["index_expr", "load", "store"]:
                                 # get the index and replace prefix from z to x
+                                arg_idx = 1 if _node.target == "index_expr" else 2
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
-                                )[
-                                    _node.args[
-                                        1 if _node.target == "index_expr" else 2
-                                    ].args[0]
-                                ]
+                                )[_node.args[arg_idx].args[0]]
                                 if _is_valid_indices(itervars, tiling_indices):
                                     stride = _try_get_stride(
                                         index, itervars, tiling_factor, tiling_indices
@@ -3778,7 +3775,11 @@ class CppKernelProxy(CppKernel):
                 )
                 main_loop.set_kernel(vec_kernel)
                 main_loop.simd_vec = True
-                if could_masked_vec and (tail_loop.size - tail_loop.offset) >= 4:
+                if (
+                    config.cpp.enable_loop_tail_vec
+                    and could_masked_vec
+                    and (tail_loop.size - tail_loop.offset) >= 4
+                ):
                     tail_loop.steps = tail_loop.size - tail_loop.offset
                     masked_vec_kernel = codegen_kernel(
                         CppVecKernel,
@@ -3818,7 +3819,7 @@ class CppKernelProxy(CppKernel):
                 )
                 inner_main_loop.set_kernel(tile2d_kernel)
 
-                if could_masked_vec:
+                if config.cpp.enable_loop_tail_vec and could_masked_vec:
                     (
                         inner_main_loop_of_outer_tail_loop,
                         inner_tail_loop_of_outer_tail_loop,
@@ -4540,7 +4541,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
-        arg_defs, _, _ = self.args.cpp_argdefs()
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         args_num = len(arg_defs)
         return args_num
 
@@ -4883,7 +4884,7 @@ class LoopNestWithSplit:
         loops = self.root
         for loop in loops:
             loop.parallel = par_depth
-        for _ in range(1, par_depth):
+        for i in range(1, par_depth):
             loops = loops[0].inner
             loops[0].collapsed = True
 

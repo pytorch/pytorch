@@ -36,6 +36,7 @@ if not is_available():
 
 
 else:
+    from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _find_pg_by_ranks_and_tag,
         _get_default_group,
@@ -66,7 +67,7 @@ else:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
             self.mesh_dim_group_options: Dict[
-                int, Tuple[str, Optional[ProcessGroup.Options]]
+                int, Tuple[str, Optional[C10dBackend.Options]]
             ] = {}
             self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
@@ -279,7 +280,7 @@ else:
             self,
             dim: int,
             backend: str,
-            pg_options: Optional[ProcessGroup.Options] = None,
+            pg_options: Optional[C10dBackend.Options] = None,
         ) -> None:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
 
@@ -334,6 +335,35 @@ else:
                 curr_idx = next_idx
 
             return slice_mesh_dims
+
+        def _get_all_submeshes(
+            self, device_mesh: "DeviceMesh", mesh_dim_name: str
+        ) -> List["DeviceMesh"]:
+            """
+            Return all the submeshes of a given mesh dimension of the device mesh.
+            """
+            mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
+            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+                -1, device_mesh.mesh.size(mesh_dim)
+            )
+
+            cur_rank = device_mesh.get_rank()
+            res_submeshes = []
+            for mesh_1d in pg_ranks_by_dim:
+                submesh = DeviceMesh(
+                    device_mesh.device_type,
+                    mesh_1d,
+                    mesh_dim_names=(mesh_dim_name,),
+                    _init_backend=False,
+                )
+                submesh._dim_group_infos = (
+                    [device_mesh._dim_group_infos[mesh_dim]]
+                    if cur_rank in mesh_1d
+                    else []
+                )
+                res_submeshes.append(submesh)
+
+            return res_submeshes
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
