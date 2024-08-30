@@ -5,22 +5,15 @@
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
-#include <xccl.h>
+#include <torch/csrc/xpu/xccl.h>
 
 #include <limits>
 #include <sstream>
 #include <type_traits>
 #include <unordered_map>
 
-xcclComm_t* to_xccl_comm(torch::xpu::xccl::xcclComm_t* var) {
-  return reinterpret_cast<xcclComm_t*>(var);
-}
 
-xcclComm_t to_xccl_comm(torch::xpu::xccl::xcclComm_t var) {
-  return reinterpret_cast<xcclComm_t>(var);
-}
-
-ccl::datatype to_nccl_data_type(c10::ScalarType type) {
+ccl::datatype to_xccl_data_type(c10::ScalarType type) {
   switch (type) {
     case at::kFloat:
       return ccl::datatype::float32;
@@ -45,7 +38,7 @@ ccl::datatype to_nccl_data_type(c10::ScalarType type) {
   }
 }
 
-ncclDataType_t to_xccl_data_type(const at::Tensor& t) {
+ccl::datatype to_xccl_data_type(const at::Tensor& t) {
   if (!t.is_xpu()) {
     TORCH_CHECK(
         false,
@@ -61,11 +54,13 @@ ccl::reduction to_xccl_red_op(int var) {
 
 namespace torch::xpu::xccl {
 
+XCCL_KVS kvs;
+std::mutex kvs_mutex;
+
 XCCL_KVS get_kvs(int rank, c10d::Store& store) {
+  std::lock_guard<std::mutex> lock(kvs_mutex);
   if (kvs)
     return kvs;
-  // Each process group is with different store, so we use the unique key for
-  // broadcast the bootstrap network information.
   std::string storeKey = "ccl_kvs";
 
   // Rank 0 broadcast the bootstrap network information to other ranks
@@ -82,9 +77,9 @@ XCCL_KVS get_kvs(int rank, c10d::Store& store) {
     }
     ccl::kvs::address_type main_addr;
     std::copy_n(
-        std::make_move_iterator(ccl_kvs_addr.begin()),
-        ccl::kvs::address_max_size,
-        main_addr.begin());
+      ccl_kvs_addr.begin(),
+      ccl::kvs::address_max_size,
+      main_addr.begin());
     kvs = ccl::create_kvs(main_addr);
   }
 
@@ -190,82 +185,82 @@ static inline void check_tensor(
   }
 }
 
-void check_inputs(
-    TensorList inputs,
-    TensorList outputs,
-    int input_multiplier,
-    int output_multiplier) {
-  // len(inputs) == len(outputs)
-  size_t len = inputs.size();
+// void check_inputs(
+//     TensorList inputs,
+//     TensorList outputs,
+//     int input_multiplier,
+//     int output_multiplier) {
+//   // len(inputs) == len(outputs)
+//   size_t len = inputs.size();
 
-  if (len <= 0) {
-    throw std::runtime_error("input sequence can't be empty");
-  }
+//   if (len <= 0) {
+//     throw std::runtime_error("input sequence can't be empty");
+//   }
 
-  if (len != outputs.size()) {
-    std::stringstream err;
-    err << "inputs and outputs sequences have to be of the same length, but got input of length "
-        << len << " and output of length " << outputs.size();
-    throw std::runtime_error(err.str());
-  }
+//   if (len != outputs.size()) {
+//     std::stringstream err;
+//     err << "inputs and outputs sequences have to be of the same length, but got input of length "
+//         << len << " and output of length " << outputs.size();
+//     throw std::runtime_error(err.str());
+//   }
 
-  device_set devices;
-  int64_t numel = inputs[0].numel();
-  auto dtype = inputs[0].scalar_type();
+//   device_set devices;
+//   int64_t numel = inputs[0].numel();
+//   auto dtype = inputs[0].scalar_type();
 
-  for (const auto i : c10::irange(len)) {
-    auto input = inputs[i];
-    auto output = outputs[i];
+//   for (const auto i : c10::irange(len)) {
+//     auto input = inputs[i];
+//     auto output = outputs[i];
 
-    check_tensor(
-        input, output, input_multiplier, output_multiplier, numel, dtype);
+//     check_tensor(
+//         input, output, input_multiplier, output_multiplier, numel, dtype);
 
-    auto input_device = input.get_device();
-    // inputs must be on unique devices
-    if (devices.test(input_device)) {
-      throw std::runtime_error("inputs must be on unique devices");
-    }
-    devices.set(input_device);
-  }
-}
+//     auto input_device = input.get_device();
+//     // inputs must be on unique devices
+//     if (devices.test(input_device)) {
+//       throw std::runtime_error("inputs must be on unique devices");
+//     }
+//     devices.set(input_device);
+//   }
+// }
 
-void check_inputs(
-    TensorList inputs,
-    const at::Tensor& output,
-    int root,
-    int input_multiplier,
-    int output_multiplier) {
-  auto len = inputs.size();
+// void check_inputs(
+//     TensorList inputs,
+//     const at::Tensor& output,
+//     int root,
+//     int input_multiplier,
+//     int output_multiplier) {
+//   auto len = inputs.size();
 
-  if (len <= 0) {
-    throw std::runtime_error("input sequence can't be empty");
-  }
+//   if (len <= 0) {
+//     throw std::runtime_error("input sequence can't be empty");
+//   }
 
-  device_set devices;
-  int64_t numel = inputs[0].numel();
-  auto dtype = inputs[0].scalar_type();
+//   device_set devices;
+//   int64_t numel = inputs[0].numel();
+//   auto dtype = inputs[0].scalar_type();
 
-  for (const auto i : c10::irange(len)) {
-    auto input = inputs[i];
+//   for (const auto i : c10::irange(len)) {
+//     auto input = inputs[i];
 
-    check_tensor(
-        input,
-        i == static_cast<std::remove_cv_t<decltype(i)>>(root)
-            ? std::optional<at::Tensor>{output}
-            : std::nullopt,
-        input_multiplier,
-        output_multiplier,
-        numel,
-        dtype);
+//     check_tensor(
+//         input,
+//         i == static_cast<std::remove_cv_t<decltype(i)>>(root)
+//             ? std::optional<at::Tensor>{output}
+//             : std::nullopt,
+//         input_multiplier,
+//         output_multiplier,
+//         numel,
+//         dtype);
 
-    auto input_device = input.get_device();
-    // inputs must be on unique devices
-    if (devices.test(input_device)) {
-      throw std::runtime_error("inputs must be on unique devices");
-    }
-    devices.set(input_device);
-  }
-}
+//     auto input_device = input.get_device();
+//     // inputs must be on unique devices
+//     if (devices.test(input_device)) {
+//       throw std::runtime_error("inputs must be on unique devices");
+//     }
+//     devices.set(input_device);
+//   }
+// }
 
 } // namespace detail
 

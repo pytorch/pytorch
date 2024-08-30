@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <optional>
 #include <vector>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 
 namespace torch::xpu::xccl {
 
@@ -12,7 +13,7 @@ using xcclComm_t = ccl::communicator;
 
 using XCCL_KVS = ccl::shared_ptr_class<ccl::kvs>;
 
-XCCL_KVS kvs;
+extern XCCL_KVS kvs;
 
 XCCL_KVS get_kvs(int rank, c10d::Store& store);
 
@@ -54,21 +55,21 @@ void check_inputs(
 
 } // namespace detail
 
-using comm_list = std::vector<xor>;
-using stream_list = std::vector<std::optional<at::xpu::XPUStream>>;
+// using comm_list = std::vector<xor>;
+// using stream_list = std::vector<std::optional<at::xpu::XPUStream>>;
 
 std::uint64_t version();
 const char* version_suffix();
 
 bool is_available(at::TensorList tensors);
 
-comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank);
-void comm_destroy(ncclComm_t comm);
+// comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank);
+// void comm_destroy(xcclComm_t comm);
 
-void all_reduce(
-    const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
-    int32_t op = static_cast<int>(xcclRedOp::Sum),
-    const stream_list& streams = {},
-    const comm_list& user_comms = {});
+// void all_reduce(
+//     const std::vector<at::Tensor>& inputs,
+//     std::vector<at::Tensor>& outputs,
+//     int32_t op = static_cast<int>(xcclRedOp::Sum),
+//     const stream_list& streams = {},
+//     const comm_list& user_comms = {});
 } // namespace torch::xpu::xccl
