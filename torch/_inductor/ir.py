@@ -745,6 +745,22 @@ def get_reduction_combine_fn(
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
 
 
+def significant_strides_equal(
+    strides1: Sequence[_IntLike], strides2: Sequence[_IntLike], size: Sequence[_IntLike]
+) -> bool:
+    """
+    Returns true if the strides are equal, ignoring dimensions of size 1 .
+    """
+    non_1_indices = [
+        i
+        for i, dim in enumerate(size)
+        if V.graph.sizevars.size_hint(dim, fallback=2) != 1
+    ]
+    strides1 = [V.graph.sizevars.size_hint(strides1[i]) for i in non_1_indices]
+    strides2 = [V.graph.sizevars.size_hint(strides2[i]) for i in non_1_indices]
+    return strides1 == strides2
+
+
 @dataclasses.dataclass
 class Reduction(Loops):
     reduction_ranges: List[Expr]
@@ -2085,6 +2101,7 @@ def as_storage_and_layout(
     want_contiguous: bool = False,
     stride_order: Optional[Sequence[Union[int, Integer]]] = None,
     allow_padding: bool = False,
+    exact_strides: Optional[Sequence[Union[int, Integer]]] = None,
 ) -> Tuple[StorageBox, Layout]:
     """
     Try to simplify x into a StorageBox and a Layout.
@@ -2099,6 +2116,7 @@ def as_storage_and_layout(
             want_contiguous=want_contiguous,
             stride_order=stride_order,
             allow_padding=allow_padding,
+            exact_strides=exact_strides,
         )
     if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
         if freeze:
@@ -2108,6 +2126,10 @@ def as_storage_and_layout(
             elif stride_order is not None:
                 x.data.freeze_layout_with_stride_order(
                     stride_order, allow_padding=allow_padding
+                )
+            elif exact_strides is not None:
+                x.data.freeze_layout_with_exact_strides(
+                    exact_strides, allow_padding=allow_padding
                 )
             else:
                 x.data.decide_layout()
@@ -3202,6 +3224,19 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
+    def as_exact_strides(self, exact_strides, allow_padding=False):
+        new_stride = exact_strides
+        if self.should_pad_strides() and allow_padding:
+            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
+
+        return FixedLayout(
+            self.device,
+            self.dtype,
+            self.size,
+            new_stride,
+            self.offset,
+        )
+
     def as_fill_order(self, order):
         new_stride = self.fill_ordered(self.size, order)
         if self.should_pad_strides():
@@ -3427,6 +3462,12 @@ class Buffer(IRNode):
     def freeze_layout_with_same_order(self, stride):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
+
+    def freeze_layout_with_exact_strides(self, exact_strides, allow_padding=False):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_exact_strides(
+            exact_strides, allow_padding=allow_padding
+        )
 
     def is_zero_elements(self):
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))  # type: ignore[arg-type]
@@ -3678,6 +3719,7 @@ class ComputedBuffer(OperationBuffer):
                 self.get_store_function(),
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
+                *args,
             )
         index_vars = []
         reduce_vars: List[Any] = []
@@ -3745,36 +3787,55 @@ class ComputedBuffer(OperationBuffer):
         if not V.graph.has_feature(self, BackendFeature.PREFER_STORE_LOOP_ORDER):
             memory_addrs.extend(body.reads_name2expr.values())
 
-        def simplify_and_reorder(x_vars, support_vars, sizes):
+        def simplify_and_reorder(x_vars, support_vars, sizes, simplify_loops):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
                 x_vars, support_vars, sizes, memory_addrs
             )
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
-            sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
-                x_vars,
-                sizes,
-                index_prevent_reordering(index_formulas, x_vars, sizes),
-            )
-            reindex = fuse_reindexing(reindex1, reindex2)
+
+            if simplify_loops:
+                sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
+                    x_vars,
+                    sizes,
+                    index_prevent_reordering(index_formulas, x_vars, sizes),
+                )
+                reindex = fuse_reindexing(reindex1, reindex2)
+            else:
+                reindex = reindex1
             return sizes, reindex, reindex1
 
         support_vars = index_vars + reduce_vars
+        should_merge_loops = (
+            self.get_device().type != "cuda" or not config.loop_ordering_after_fusion
+        )
         iter_ranges, iter_reindex, _ = simplify_and_reorder(
             index_vars,
             support_vars,
             index_size,
+            should_merge_loops,
         )
+
+        # Like iteration dimensions, we may also want to delay merging reduction dimensions.
+        # E.g., if we reduce a tensor [M, N, K] for its M and N dimensions followed by a pointwise
+        # kernel, merging M and N dimension too early makes it hard to decide what loop order
+        # we should pick for the piontwise kernel so that it is fusible with the reduction.
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
-            reduce_vars, support_vars, reduce_size
+            reduce_vars, support_vars, reduce_size, should_merge_loops
         )
 
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_ranges, reduce_ranges, prefix="z"
+            iter_ranges,
+            reduce_ranges,
+            prefix="z",
         )
         body = LoopBody(
-            body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
+            body,
+            [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
+            var_ranges,
+            iter_vars,
+            reduce_vars,
         )
         return (iter_ranges, reduce_ranges), body
 
@@ -3845,9 +3906,9 @@ class TemplateBuffer(OperationBuffer):
         V.graph.register_operation(self)
 
     def get_read_writes(self):
-        return self.normalized_read_writes()
+        return self.extract_read_writes(normalize=True)
 
-    def normalized_read_writes(self):
+    def extract_read_writes(self, normalize):
         name = self.get_name()
         indexer = self.layout.make_indexer()
 
@@ -3856,7 +3917,7 @@ class TemplateBuffer(OperationBuffer):
             return ops.store(name, indexer(index), "fake")
 
         deps = dependencies.extract_read_writes(
-            dummy, self.get_size(), (), normalize=True
+            dummy, self.get_size(), (), normalize=normalize
         )
         deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
         return deps
@@ -4680,53 +4741,93 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def require_stride_order(cls, x, order, allow_padding=False):
+    def require_strides(
+        cls,
+        x,
+        order: Optional[Sequence[int]] = None,
+        exact_strides: Optional[Sequence[_IntLike]] = None,
+        allow_padding=False,
+    ):
+        assert order is not None or exact_strides is not None
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
-
-        # require x to have the layout as strided_ordered as order
+        # require x to have the layout
         if is_storage_and_layout(x):
             while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
-                # If the the FlexibleLayout already has the size and stride in the required order,
-                # freeze it to a FixedLayout by using its current size and stride.
-                # The behavior of using its current size and stride or the given order can be different
-                # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
-                # size=[s0, 1, 28, 28], stride=[784, 784, 28, 1]. If the required order is [3, 0, 2, 1] (channels last),
-                # the current size and stride already satisfies this order.
-                # However by freezing it to the required order, the layout will be changed to:
-                # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
+                if order:
+                    # If the the FlexibleLayout already has the size and stride in the required order,
+                    # freeze it to a FixedLayout by using its current size and stride.
+                    # The behavior of using its current size and stride or the given order can be different
+                    # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
+                    # size=[s0, 1, 28, 28], stride=[784, 784, 28, 1]. If the required order is [3, 0, 2, 1] (channels last),
+                    # the current size and stride already satisfies this order.
+                    # However by freezing it to the required order, the layout will be changed to:
+                    # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
 
-                # fix flexiblelayout to be FixedLayout with stride_order
-                as_storage_and_layout(
-                    x,
-                    freeze=True,
-                    want_contiguous=False,
-                    stride_order=get_stride_order(
-                        V.graph.sizevars.size_hints(x.get_layout().stride)
+                    # fix flexiblelayout to be FixedLayout with stride_order
+                    as_storage_and_layout(
+                        x,
+                        freeze=True,
+                        want_contiguous=False,
+                        stride_order=get_stride_order(
+                            V.graph.sizevars.size_hints(x.get_layout().stride)
+                        )
+                        if is_stride_order_storage_and_layout(x, order)
+                        else order,
+                        allow_padding=allow_padding,
                     )
-                    if is_stride_order_storage_and_layout(x, order)
-                    else order,
-                    allow_padding=allow_padding,
+                    return x
+                else:
+                    # If the exact_strides is given, freeze the FlexibleLayout to a FixedLayout with the exact_strides.
+                    as_storage_and_layout(
+                        x,
+                        freeze=True,
+                        want_contiguous=False,
+                        stride_order=None,
+                        allow_padding=allow_padding,
+                        exact_strides=exact_strides,
+                    )
+                    return x
+            elif isinstance(x.get_layout(), FixedLayout) and (
+                (order and x.get_layout().is_stride_ordered(order))
+                or (
+                    exact_strides
+                    and significant_strides_equal(
+                        exact_strides, x.get_layout().stride, x.get_size()
+                    )
                 )
-                return x
-            elif isinstance(
-                x.get_layout(), FixedLayout
-            ) and x.get_layout().is_stride_ordered(order):
+            ):
                 return x
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
                 if isinstance(x.get_layout().real_layout(), FlexibleLayout):
                     raise AssertionError(
                         "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
                     )
-                elif isinstance(
-                    x.get_layout().real_layout(), FixedLayout
-                ) and x.get_layout().real_layout().is_stride_ordered(order):
+                elif isinstance(x.get_layout().real_layout(), FixedLayout) and (
+                    (order and x.get_layout().real_layout().is_stride_ordered(order))
+                    or (
+                        exact_strides
+                        and significant_strides_equal(
+                            exact_strides,
+                            x.get_layout().real_layout().stride,
+                            x.get_size(),
+                        )
+                    )
+                ):
                     return x
 
         # TODO - Storage to InputBuffer
-        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
+        if isinstance(x, InputBuffer) and (
+            (order and x.get_layout().is_stride_ordered(order))
+            or (
+                exact_strides
+                and significant_strides_equal(
+                    exact_strides, x.get_layout().stride, x.get_size()
+                )
+            )
+        ):
             return x
         if (
             isinstance(x, TensorBox)
@@ -4737,7 +4838,14 @@ class ExternKernel(InputsKernel):
         ):
             try:
                 x.data = cls.convert_to_reinterpret_view(x.data)
-                return cls.require_stride_order(x, order, allow_padding=allow_padding)
+                if order:
+                    return cls.require_stride_order(
+                        x, order, allow_padding=allow_padding
+                    )
+                elif exact_strides:
+                    return cls.require_exact_strides(
+                        x, exact_strides, allow_padding=allow_padding
+                    )
             except NotImplementedError:
                 pass
         # Although this is a clone, inductor is good about fusing clones into previous
@@ -4749,9 +4857,21 @@ class ExternKernel(InputsKernel):
             want_contiguous=False,
             stride_order=order,
             allow_padding=allow_padding,
+            exact_strides=exact_strides,
         )
-        assert is_stride_order_storage_and_layout(x, order)
+        if order:
+            assert is_stride_order_storage_and_layout(x, order)
         return x
+
+    @classmethod
+    def require_exact_strides(cls, x, exact_strides, allow_padding=False):
+        return cls.require_strides(
+            x, exact_strides=exact_strides, allow_padding=allow_padding
+        )
+
+    @classmethod
+    def require_stride_order(cls, x, order, allow_padding=False):
+        return cls.require_strides(x, order=order, allow_padding=allow_padding)
 
     @classmethod
     def require_channels_last(cls, x):
@@ -5103,10 +5223,19 @@ class UserDefinedTritonKernel(ExternKernel):
         raw_args = [
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         ]
+
+        # NOTE: raw_args doesn't include autotuned args.
+        # But, kernel.constexprs includes indices of autotuned args.
+        # So, let's recalculate constexpr indices wrt to raw_args.
+        constexpr_indices = []
+        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+            if kernel.arg_names.index(kwarg) in kernel.constexprs:
+                constexpr_indices.append(idx)
+
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
+            new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -5914,17 +6043,9 @@ class FallbackKernel(ExternKernelAlloc):
             if V.graph.cpp_wrapper:
                 from torchgen.aoti.fallback_ops import inductor_fallback_ops
 
-                if (
-                    config.is_fbcode()
-                    and kernel not in has_c_shim
+                if config.abi_compatible and str(kernel) not in inductor_fallback_ops:
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
-                    # If you do hit a missed op, please update gen_aoti_c_shim.py.
-                    and config.c_shim_version == "1"
-                ) or (
-                    config.abi_compatible
-                    and config.c_shim_version == "2"
-                    and str(kernel) not in inductor_fallback_ops
-                ):
+                    # If you do hit a missed op, please update fallback_ops.py.
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
                         kernel,
@@ -6686,9 +6807,19 @@ class LoopBody:
     indexing simplifications and makes it easier to analyze loop bodies.
     """
 
-    def __init__(self, fn, args, var_ranges):
+    def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
         super().__init__()
+
+        _flat_sizes = tuple(var_ranges.values())
+        self.sizes = (
+            _flat_sizes[: len(iter_vars)],
+            _flat_sizes[len(iter_vars) :],
+        )
+
+        self.iter_vars = iter_vars
+        self.reduce_vars = reduce_vars
         self.var_ranges = var_ranges
+
         self.indexing_exprs = {}
         self.indexing_exprs_name = {}
         self.reads = []
@@ -6702,6 +6833,112 @@ class LoopBody:
         self.indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr] = {}
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
+
+    def merge_loops(self) -> LoopBody:
+        """
+        Merge both iteration and reduction loops and return a new LoopBody.
+        """
+        old_body = self
+        old_sizes = self.sizes
+        old_iter_vars, old_reduce_vars = old_body.vars
+        old_iter_sizes, old_reduce_sizes = old_sizes
+
+        index_exprs = [*old_body.indexing_exprs.values()]
+
+        iter_sizes, iter_reindex, _ = V.graph.sizevars._simplify_loops(
+            old_iter_vars,
+            old_iter_sizes,
+            index_prevent_reordering(index_exprs, old_iter_vars, old_iter_sizes),
+        )
+
+        reduce_sizes, reduce_reindex, _ = V.graph.sizevars._simplify_loops(
+            old_reduce_vars,
+            old_reduce_sizes,
+            index_prevent_reordering(index_exprs, old_reduce_vars, old_reduce_sizes),
+        )
+
+        # if iter_sizes == old_iter_sizes:
+        #     # no dimensions get merged.
+        #     return old_sizes, old_body
+
+        # Note: if no dimension get merges, the symbol prefix will
+        # remain 'y'. But if we merge dimensions, we change prefix to
+        # 'z'. If this is an issue, we can always retrace the LoopBody
+        # to change symbol prefix to 'z'.
+        #
+        # There is indeed an issue due to symbol name conflicting.
+        # y0 maybe reused for the y dimension later.
+        (
+            iter_vars,
+            reduce_vars,
+        ), var_ranges = dependencies.index_vars_no_squeeze(
+            iter_sizes, reduce_sizes, prefix="t"
+        )
+        new_body = LoopBody(
+            old_body,
+            [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+        )
+
+        # use the original symbol prefix
+        # Can try to optimize if this is a bottleneck for compilation time
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            iter_sizes, reduce_sizes, prefix="z"
+        )
+        new_body2 = LoopBody(
+            new_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body2
+
+    def reorder_iter_loops(self, new_order) -> LoopBody:
+        """
+        Reorder iteration loops and return a new LoopBody.
+        """
+        old_body = self
+        old_sizes = self.sizes
+        assert len(old_sizes[0]) == len(new_order)
+        reorder_fn = same_reorder(new_order)
+
+        iter_size, reduce_size = old_sizes
+        new_iter_size = reorder_fn(iter_size)
+
+        new_sizes = (new_iter_size, reduce_size)
+
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            *new_sizes, prefix="t"  # type: ignore[arg-type]
+        )
+
+        inverse_order = {b: a for a, b in enumerate(new_order)}
+        inverse_order = [inverse_order[i] for i in range(len(new_order))]
+
+        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
+            index = list(itertools.chain(*indices))
+            assert len(index) == len(iter_size) + len(reduce_size)
+            iter_idx = index[: len(iter_size)]
+            reduce_idx = index[len(iter_size) :]
+            iter_idx = [iter_idx[i] for i in inverse_order]
+            return old_body(iter_idx, reduce_idx)
+
+        loop_body = LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        )
+
+        # use the original symbol prefix so we can do multiple round of reordering
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            *new_sizes, prefix="z"  # type: ignore[arg-type]
+        )
+        new_body = LoopBody(
+            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body
+
+    @property
+    def vars(self):
+        assert self.iter_vars is not None
+        assert self.reduce_vars is not None
+        return self.iter_vars, self.reduce_vars
 
     @cache_on_self
     def get_nodes(self):
@@ -6730,6 +6967,8 @@ class LoopBody:
             ]
         )
         return "\n".join(lines)
+
+    __repr__ = debug_str
 
     def add_index_expr(self, expr: sympy.Expr, category, buf_name):
         getattr(self, category).append(expr)
@@ -6771,7 +7010,9 @@ class LoopBody:
     def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert all(v not in self.var_ranges for v in index)
+        assert all(
+            v not in self.var_ranges for v in index
+        ), f"{self.var_ranges=}, {indices=}"
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)
