@@ -156,7 +156,8 @@ class ConstDictVariable(VariableTracker):
         self.items = {make_hashable(x): v for x, v in items.items()}
         # Mark where a pop/delitem was executed
         self.pop_items = not is_python_arg or False
-        self.original_items = {k: v.realize() for k, v in items.items()}
+        # self.original_items = {k: v.realize() for k, v in items.items()}
+        self.original_items = items.copy()
         self.user_cls = user_cls
 
     def as_proxy(self):
@@ -201,11 +202,18 @@ class ConstDictVariable(VariableTracker):
             ]
         )
 
-    def has_side_effect_mutation(self):
-        return self.pop_items or any(
-            self.original_items.get(key.vt) != value
-            for key, value in self.items.items()
-        )
+    # def has_side_effect_mutation(self):
+    #     def maybe_realize(item):
+    #         return item.realize() if item else item
+
+    #     return self.pop_items or any(
+    #         maybe_realize(self.original_items.get(key.vt)) != value
+    #         # self.original_items.get(key.vt) != value
+    #         for key, value in self.items.items()
+    #     )
+
+    def _maybe_realize(self, item):
+        return item.realize() if item else item
 
     def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
@@ -221,7 +229,9 @@ class ConstDictVariable(VariableTracker):
         # instructions to build the dict keys and values
         n_insert = 0
         for key, value in self.items.items():
-            ne = self.original_items.get(key.vt) != value.realize()
+            # We can safely call realize() here as it won't introduce any new guards
+            ne = self._maybe_realize(self.original_items.get(key.vt)) != value.realize()
+
             if ne or self.pop_items:
                 codegen(key.vt)
                 codegen(value)
