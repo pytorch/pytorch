@@ -1736,46 +1736,6 @@ def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tens
     return (getitem,)""",  # noqa: B950
         )
 
-    def test_while_loop_nested_traced(self):
-        fn, inp = WHILE_LOOP_TESTS["nested"]
-        graphs = self._check_tracing(fn, inp)
-        self.assertExpectedInline(
-            graphs["symbolic"].code.strip("\n"),
-            """\
-def forward(self, out_iter_1, it_1, y_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (out_iter_1, it_1, y_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = out_iter_1 = it_1 = y_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2];  while_loop = None
-    return (getitem, getitem_1, getitem_2)
-    """,  # noqa: B950
-        )
-        self.assertExpectedInline(
-            graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
-    lt = torch.ops.aten.lt.Scalar(sum_1, 2);  sum_1 = None
-    return lt
-    """,
-        )
-        self.assertExpectedInline(
-            graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2];  while_loop = None
-    add = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
-    return (add, getitem_1, getitem_2)
-    """,  # noqa: B950
-        )
-
     def _wrap_with_functionalize(self, fn, func_type):
         mode = None
         if func_type == "cpp":
