@@ -564,6 +564,13 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+    if(IOS)
+        # Workaround for compile flags ending up in the link interface for XNNPACK.
+        # TODO Remove this after landing fix upstream and updating.
+        find_package(Python COMPONENTS Interpreter)
+        execute_process(COMMAND ${Python_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/third_party/patch_xnnpack_cmake.py")
+    endif()
+
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
