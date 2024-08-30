@@ -4184,7 +4184,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
   std::vector<int64_t> outSplitSizes;
   int64_t total_numel = 0;
 
-  auto device = outputTensors[0].device();
+  auto device = inputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
     check_gpu_single_tensor(outputTensors[r], true);
     check_gpu_single_tensor(inputTensors[r], true);
@@ -4214,30 +4214,168 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
-  return collective(
-      inputTensors[0],
-      outputTensors[0],
-      [&](at::Tensor& /* unused */,
-          at::Tensor& /* unused */,
-          ncclComm_t comm,
-          at::cuda::CUDAStream& stream) {
-        torch::cuda::nccl::all2all(outputTensors, inputTensors, comm, stream);
-        return ncclSuccess;
-      },
-      [&](at::cuda::CUDAStream&,
-          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
-        if (avoidRecordStreams_) {
-          // inputTensor0 and outputTensor0 are stashed redundantly by
-          // collective(), but that's ok.
-          auto& v = work->stashed_for_allocator_safety_;
-          v->insert(v->end(), inputTensors.begin(), inputTensors.end());
-          v->insert(v->end(), outputTensors.begin(), outputTensors.end());
-        }
-      },
-      [](at::cuda::CUDAStream&,
-         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+  if (enableNanCheck_) {
+    for (const auto& input : inputTensors) {
+      checkForNan(input);
+    }
+  }
+  // Environment setting by the user may add onto collective call's option
+  c10::cuda::CaptureStatus capture_status =
+      c10::cuda::currentStreamCaptureStatusMayInitCtx();
+  errorIfCapturingNonCapturableNCCL(capture_status);
+
+  // Bump collective counter
+  seqCollective_++;
+  op_id_++;
+
+  const auto key = getKeyFromDevice(device);
+  auto ncclComm = getNCCLComm(key, device, OpType::ALLTOALL);
+
+  if (coalescing_state_ & CoalActive) {
+    coalescing_state_ |= CoalColl;
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(
+          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
+  }
+
+  // Used many times below, so we stash the unordered_map lookup
+  auto ncclStream = ncclStreams_.at(key);
+
+  // First let NCCL streams wait for input tensors allocation streams
+  syncStream(device, ncclEvents_[key], ncclStream);
+
+  bool enqueue =
+      !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
+  auto work = initWork(
+      device,
+      rank_,
       OpType::ALLTOALL,
-      "nccl:all_to_all");
+      "nccl:all_to_all",
+      inputTensors,
+      outputTensors,
+      enqueue);
+
+  // Store references to outputs to be used by WorkNCCL::result and operator<<.
+  work->outputs_ =
+      std::make_shared<std::vector<at::Tensor>>(std::move(outputTensors));
+
+  at::cuda::OptionalCUDAGuard gpuGuard;
+
+  // Start event should only be recorded before the ncclGroupStart()
+  if (work->timingEnabled_) {
+    work->ncclStartEvent_->record(ncclStream);
+  }
+
+  if (avoidRecordStreams_) {
+    // inputTensor0 and outputTensor0 are stashed redundantly by
+    // collective(), but that's ok.
+    auto& v = work->stashed_for_allocator_safety_;
+    v->insert(v->end(), inputTensors.begin(), inputTensors.end());
+    v->insert(v->end(), outputTensors.begin(), outputTensors.end());
+  }
+
+  ncclComm_t comm = ncclComm->getNcclComm();
+
+  // Both `inputs' and `outputs' are created on a worker stream and used in
+  // different ncclStreams.  Hence, both must record the ncclStream to
+  // prevent being freed before the collective finishes.
+  //
+  // We only record `inputs' here, and leave recording `outputs' to `fn' for
+  // operations where `inputs' and `outputs' are not the same.
+  //
+  // See [Sync Streams].
+  if (!avoidRecordStreams_) {
+    if (!inputTensors[0].is_sparse()) {
+      c10::cuda::CUDACachingAllocator::recordStream(
+          inputTensors[0].storage().data_ptr(), ncclStream);
+    } else {
+      // for sparse input case record streams on both index and value
+      // tensors
+      c10::cuda::CUDACachingAllocator::recordStream(
+          inputTensors[0].values().storage().data_ptr(), ncclStream);
+      c10::cuda::CUDACachingAllocator::recordStream(
+          inputTensors[0].indices().storage().data_ptr(), ncclStream);
+    }
+  }
+
+  auto fn = ([](std::vector<at::Tensor>& outputTensors,
+                std::vector<at::Tensor>& inputTensors,
+                ncclComm_t comm,
+                at::cuda::CUDAStream& stream) {
+    torch::cuda::nccl::all2all(outputTensors, inputTensors, comm, stream);
+    return ncclSuccess;
+  });
+#ifndef NCCL_HAS_COMM_NONBLOCKING
+  C10D_NCCL_CHECK(
+      fn(outputTensors, inputTensors, comm, ncclStream),
+      ncclComm->getNcclCommFailureReason());
+#else
+  C10D_NCCL_CHECK_TIMEOUT(
+      fn(outputTensors, inputTensors, comm, ncclStream),
+      comm,
+      ncclComm->getNcclCommFailureReason());
+#endif
+
+  // End event should only be recorded after the ncclGroupEnd()
+  if (!coalescing_state_) {
+    work->ncclEndEvent_->record(ncclStream);
+  }
+  work->ncclComm_ = ncclComm;
+
+  {
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStream);
+    std::vector<at::Device> devices{device};
+    work->future_ = c10::make_intrusive<at::ivalue::Future>(
+        c10::ListType::create(c10::TensorType::get()), devices);
+
+    // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
+    // future blocks the stream this callback runs on the corresponding
+    // ncclEndEvents_ ensuring appropriate synchronization.
+    if (work->recordFunctionEndCallback_) {
+      work->future_->addCallback(
+          [work](at::ivalue::Future& /* unused */) {
+            work->recordFunctionEndCallback_();
+          },
+          // uses_future = false allows us to skip synchronization in
+          // ivalue::Future, but is only valid as long as the lambda doesn't use
+          // the "Future" argument.
+          /*uses_future=*/false);
+    }
+    work->future_->markCompleted(at::IValue(*work->outputs_));
+  }
+
+  // Set appropriate work parameters.
+  work->blockingWait_ = blockingWait_;
+  work->avoidRecordStreams_ = avoidRecordStreams_;
+  work->store_ = store_;
+  assignTimeoutToWork(work, options_);
+  // Record size info for debug.
+  work->numelIn_ = 0;
+  work->numelOut_ = 0;
+  for (const auto& input : inputTensors) {
+    work->numelIn_ += input.numel();
+  }
+  for (const auto& output : outputTensors) {
+    work->numelOut_ += output.numel();
+  }
+
+  // Notify graphs before we check the capture status preemptively
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+  if (enqueue) {
+    workEnqueue(work);
+  } else {
+    at::cuda::CUDAGraph::dec_pending_event_queries();
+  }
+
+  return work;
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
