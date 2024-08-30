@@ -15,7 +15,11 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.runtime.hints import DeviceProperties
-from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
+from torch._inductor.utils import (
+    run_and_get_code,
+    run_and_get_graph_lowering,
+    run_fw_bw_and_get_code,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
@@ -1239,6 +1243,20 @@ class CudaReproTests(TestCase):
         idxs = remove_unaligned_input_idxs(inputs, [0, 2])
         self.assertEqual(idxs, [0])
 
+    @config.patch("triton.cudagraphs", True)
+    def test_unused_cpu_input_cudagraphs(self):
+        def fn(x, y):
+            return x.sin().sin().sin().sin().cos() + 1
+
+        fx_graph = torch.fx.symbolic_trace(fn)
+        inp = [torch.randn(64, device="cuda"), torch.randn(64, device="cpu")]
+        compiled_fn, (graph,) = run_and_get_graph_lowering(
+            torch._inductor.compile, fx_graph, inp
+        )
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+        self.assertEqual(compiled_fn(*inp), fn(*inp))
+
     def test_epilogue_fusion_with_view(self):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -1261,6 +1279,27 @@ class CudaReproTests(TestCase):
             out = cm(input_tensor)
             out2 = m(input_tensor)
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
+
+    @config.patch("triton.cudagraphs", True)
+    def test_cpu_index(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x[torch.arange(32)]
+
+        result, (graph,) = run_and_get_graph_lowering(
+            fn, torch.randn(64, device="cuda")
+        )
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+
+        inp = torch.randn(64, device="cuda", requires_grad=True)
+        result, (graph,) = run_and_get_graph_lowering(fn, inp)
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+
+        result, (graph,) = run_and_get_graph_lowering(lambda: result.sum().backward())
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
 
     def test_reflection_pad_loop_order(self):
         def fn(x, y):
