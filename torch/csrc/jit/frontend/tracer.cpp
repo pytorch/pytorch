@@ -153,7 +153,19 @@ Value* TracingState::getValue(const IValue& var) {
       auto& value_map = env_stack.at(env_stack.size() - 1 - i);
       auto it = value_map.find(var);
       if (it == value_map.end()) {
-        continue;
+        // If we can't find corresponding TensorImpl based on it's hashed ptr, perform search by
+        // try to find a tensor based on matching storage alias and metadata...
+        it = value_map.begin();
+        for (; it != value_map.end(); ++it) {
+          if (it->first.is_alias_of(ten.unsafeGetTensorImpl())) {
+            // If found, add mapped var for quicker subsequent searches...
+            value_map[var] = it->second;
+            break;
+          }
+        }
+
+        if (it == value_map.end())
+          continue;
       }
       if (!it->second->hasDebugName()) {
         auto unique_name = getTracingState()->lookup_var_name_fn(ten);
@@ -166,6 +178,21 @@ Value* TracingState::getValue(const IValue& var) {
 
     // Didn't find it. Bake in a constant
     if (ten.requires_grad()) {
+#if 0
+      std::cout << "[DEBUG][TracingState::getValue] Failed to find mapped node for Tensor [impl = " 
+                << ten.unsafeGetTensorImpl() 
+                << ", storage = " 
+                << ten.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl() << "]" << std::endl;
+
+      std::cout << "EnvStack contains following tensors: " << std::endl;
+      for (const auto i : c10::irange(env_stack.size())) {
+          auto& value_map = env_stack.at(env_stack.size() - 1 - i);
+          for (auto it = value_map.begin(); it != value_map.end(); ++it) {
+            it->first.debugPrint();
+            std::cout << " mapped to node " << it->second->debugName() << std::endl;
+          }
+      }
+#endif
       pauseTracing();
       std::ostringstream oss;
       oss << "Cannot insert a Tensor that requires grad as a constant. "
@@ -553,6 +580,11 @@ void TracingState::setValue(const IValue& v, Value* value) {
     AT_ASSERT(var.defined());
     env_stack.back()[v] = value;
 
+    // Hold tensor reference for the duration of tracing so that
+    // temporary Variables (i.e. created by SavedVariable::unpackSaved via make_variable)
+    // are not released too early
+    backup_.push_back(var);
+    
     // If the value comes from a CallFunction or CallMethod, it may not have
     // shape information attached. For debuggability, we enhance the type
     // information by assigning the concrete value's tupe to the jit::Value.
