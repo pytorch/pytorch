@@ -6403,6 +6403,7 @@ class StorageBox(MutableBox):
             and isinstance(self.data, (Pointwise, Reduction))
             and (
                 self.num_reads() > config.realize_reads_threshold
+                or users > config.realize_opusers_threshold
                 or self.has_large_inner_fn()
                 or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
