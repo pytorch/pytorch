@@ -1343,6 +1343,30 @@ def select_int(func, *args, **kwargs):
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
+@register_jagged_func(
+        torch.ops.aten.flip.default,
+        "self: jt, dims: any"
+)
+def flip_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True)
+
+    inp = new_kwargs.pop("input")
+    dims = new_kwargs.pop("dims")
+
+    if not isinstance(dims, list) or len(dims) == 0 or not all (isinstance(x, int) for x in dims):
+        raise RuntimeError("flip() expected a non-empty list of integers for the dims")
+    
+    if 0 in dims:
+        raise RuntimeError("Calling flip() on batch dimension is not supported")
+    
+    args = extract_kwargs(inp)
+    args["offsets"] = inp.offsets().flip(dims=[0]) if 1 in dims else inp.offsets()
+    res_values = inp.values.flip(dims = dims)
+
+    return NestedTensor(
+        values=res_values,
+        **args,
+    )
 
 @register_jagged_func(
     torch.ops.aten.slice.Tensor,
