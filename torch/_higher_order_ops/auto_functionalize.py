@@ -129,13 +129,35 @@ class ViewInfo:
     size: Any = None
     stride: Any = None
     storage_offset: Any = None
-    is_alias_to_base: bool = False
+    # When is_view is false, the tensor is the base.
+    # When is_view is true, size, stride and storage_offset are all None.
+    is_view: bool = True
+
+    def regenerate_view(self, bases_list: List[Tensor]):
+        if not self.is_view:
+            return bases_list[self.base_index]
+        return torch.as_strided(
+            bases_list[self.base_index],
+            self.size,
+            self.stride,
+            self.storage_offset,
+        )
 
 
-def serialize_views_meta(
-    arg_names, arg_types, input_kwargs, output_kwargs, arg_to_base_index
+# arg_to_base_index maps arg_name to ViewInfo | [ViewInfo]
+def write_view_information_to_args(
+    arg_names: List[str],
+    arg_types: List[torch.Type],
+    input_kwargs: Dict[str, Any],
+    output_kwargs: Dict[str, Any],
+    arg_to_base_index: Dict[str, Any],
 ):
-    def serialize_single_view(prefix, tensor, base_index):
+    def write_single_view(prefix: str, tensor: Tensor, base_index: int):
+        assert f"{prefix}_base_index" not in output_kwargs
+        assert f"{prefix}_size" not in output_kwargs
+        assert f"{prefix}_stride" not in output_kwargs
+        assert f"{prefix}_storage_offset" not in output_kwargs
+
         if tensor is None:
             output_kwargs[f"{prefix}_base_index"] = None
         elif tensor._base is None:
@@ -156,12 +178,12 @@ def serialize_views_meta(
 
             output_kwargs[f"_{arg_name}_length"] = len(arg)
             for i, elem in enumerate(arg):
-                serialize_single_view(
+                write_single_view(
                     f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
                 )
 
         elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
-            serialize_single_view(
+            write_single_view(
                 f"_{arg_name}",
                 input_kwargs[arg_name],
                 arg_to_base_index.get(arg_name, None),
@@ -170,28 +192,36 @@ def serialize_views_meta(
             raise RuntimeError(f"Unsupported type {arg_type}")
 
 
-def deserialize_views_meta(arg_names, arg_types, input_kwargs, all_bases, pop_args):
+# Returns a dict of arg_name -> ViewInfo | [ViewInfo]
+def read_view_information_from_args(
+    arg_names: List[str],
+    arg_types: List[torch.Type],
+    input_kwargs: Dict[str, Any],
+    all_bases: List[Tensor],
+    pop_args: bool,
+):
     def get_arg(name):
         if pop_args:
             return input_kwargs.pop(name)
 
         return input_kwargs[name]
 
-    def deserialize_single_view(prefix):
+    def read_single_view(prefix):
         base_index = get_arg(f"{prefix}_base_index")
         if base_index is None:
             return None
         elif f"{prefix}_size" not in input_kwargs:
-            # This means the argument is an alias of the base
-            return ViewInfo(base_index, all_bases[base_index], is_alias_to_base=True)
+            assert f"{prefix}_stride" not in input_kwargs
+            assert f"{prefix}_storage_offset" not in input_kwargs
+
+            # This means that the argument is the base tensor
+            return ViewInfo(base_index, all_bases[base_index], is_view=False)
 
         else:
             size = get_arg(f"{prefix}_size")
             stride = get_arg(f"{prefix}_stride")
             storage_offset = get_arg(f"{prefix}_storage_offset")
-            return ViewInfo(
-                base_index, size, stride, storage_offset, is_alias_to_base=False
-            )
+            return ViewInfo(base_index, size, stride, storage_offset, is_view=True)
 
     args_view_info: Dict[str, Any] = {}
     for arg_name, arg_type in zip(arg_names, arg_types):
@@ -202,11 +232,11 @@ def deserialize_views_meta(arg_names, arg_types, input_kwargs, all_bases, pop_ar
                 args_view_info[arg_name] = None
             else:
                 args_view_info[arg_name] = [
-                    deserialize_single_view(f"_{arg_name}_{i}") for i in range(length)
+                    read_single_view(f"_{arg_name}_{i}") for i in range(length)
                 ]
 
         elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
-            args_view_info[arg_name] = deserialize_single_view(f"_{arg_name}")
+            args_view_info[arg_name] = read_single_view(f"_{arg_name}")
         else:
             raise RuntimeError(f"Unsupported type {arg_type}")
     return args_view_info
@@ -220,7 +250,7 @@ def auto_functionalized_dense(
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
     mutable_args_names, mutable_args_types = get_mutable_args(_mutable_op)
-    args_view_info = deserialize_views_meta(
+    args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases, pop_args=True
     )
 
@@ -237,16 +267,6 @@ def auto_functionalized_dense(
 
     all_bases_new = [maybe_copy(i, t) for i, t in enumerate(all_bases)]
 
-    def regenerate_view(ViewInfo):
-        if ViewInfo.is_alias_to_base:
-            return all_bases_new[ViewInfo.base_index]
-        return torch.as_strided(
-            all_bases_new[ViewInfo.base_index],
-            ViewInfo.size,
-            ViewInfo.stride,
-            ViewInfo.storage_offset,
-        )
-
     # create new args
     new_kwargs = dict(**kwargs)
 
@@ -261,9 +281,13 @@ def auto_functionalized_dense(
                     new_kwargs[arg_name].append(None)
                 else:
                     view_info = args_view_info[arg_name][i]
-                    new_kwargs[arg_name].append(regenerate_view(view_info))
+                    new_kwargs[arg_name].append(
+                        view_info.regenerate_view(all_bases_new)
+                    )
         else:
-            new_kwargs[arg_name] = regenerate_view(args_view_info[arg_name])
+            new_kwargs[arg_name] = args_view_info[arg_name].regenerate_view(
+                all_bases_new
+            )
 
     out = _mutable_op(**new_kwargs)
 
@@ -371,10 +395,10 @@ def do_auto_functionalize(
     mutable_args_names, mutable_args_types = get_mutable_args(op)
 
     # A list of all bases of mutable args without duplication
-    all_basis = []
-    all_basis_addresses: list[int] = []
+    all_bases = []
+    all_bases_addresses: list[int] = []
 
-    # Map arg_name to the index of its base in all_basis.
+    # Map arg_name to the index of its base in all_bases.
     arg_to_base_index: Dict[str, Any] = {}
 
     def update_dict(tensor, arg_name, index=None):
@@ -386,12 +410,12 @@ def do_auto_functionalize(
             else:
                 arg_to_base_index[arg_name][index] = base_index
 
-        if not all_basis_addresses.__contains__(base._cdata):
-            all_basis_addresses.append(base._cdata)
-            all_basis.append(base)
-            set_result(len(all_basis) - 1)
+        if not all_bases_addresses.__contains__(base._cdata):
+            all_bases_addresses.append(base._cdata)
+            all_bases.append(base)
+            set_result(len(all_bases) - 1)
         else:
-            set_result(all_basis_addresses.index(base._cdata))
+            set_result(all_bases_addresses.index(base._cdata))
 
     for arg_name in mutable_args_names:
         arg = normalized_kwargs[arg_name]
@@ -411,7 +435,7 @@ def do_auto_functionalize(
             update_dict(arg, arg_name)
 
     # add view_meta for each args into unwrapped_kwargs.
-    serialize_views_meta(
+    write_view_information_to_args(
         mutable_args_names,
         mutable_args_types,
         normalized_kwargs,
@@ -423,7 +447,7 @@ def do_auto_functionalize(
     for arg_name in mutable_args_names:
         del unwrapped_kwargs[arg_name]  # type: ignore[arg-type]
 
-    all_basis_unwrapped = ctx.unwrap_tensors(all_basis)
+    all_basis_unwrapped = ctx.unwrap_tensors(all_bases)
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
@@ -431,11 +455,11 @@ def do_auto_functionalize(
         )
 
     unwrapped_actual_out: Union[Any, Tuple[Any]] = (
-        unwrapped_outs if len(all_basis) == 0 else unwrapped_outs[: -len(all_basis)]
+        unwrapped_outs if len(all_bases) == 0 else unwrapped_outs[: -len(all_bases)]
     )
 
     unwrapped_mutable_out = (
-        [] if len(all_basis) == 0 else unwrapped_outs[-len(all_basis) :]
+        [] if len(all_bases) == 0 else unwrapped_outs[-len(all_bases) :]
     )
 
     if len(op._schema.returns) == 0:
@@ -447,7 +471,7 @@ def do_auto_functionalize(
     else:
         assert len(unwrapped_actual_out) == len(op._schema.returns)
 
-    for orig_arg, unwrapped_out in zip(all_basis, unwrapped_mutable_out):
+    for orig_arg, unwrapped_out in zip(all_bases, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue

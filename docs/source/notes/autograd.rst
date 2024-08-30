@@ -240,9 +240,9 @@ This better runtime comes with a drawback: tensors created in inference mode
 will not be able to be used in computations to be recorded by autograd after
 exiting inference mode.
 
-Enable inference mode when you are performing computations that don’t need
-to be recorded in the backward graph, AND you don’t plan on using the tensors
-created in inference mode in any computation that is to be recorded by autograd later.
+Enable inference mode when you are performing computations that do not have
+interactions with autograd, AND you don’t plan on using the tensors created
+in inference mode in any computation that is to be recorded by autograd later.
 
 It is recommended that you try out inference mode in the parts of your code
 that do not require autograd tracking (e.g., data processing and model evaluation).

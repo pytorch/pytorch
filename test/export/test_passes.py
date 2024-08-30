@@ -41,10 +41,12 @@ from torch.export._remove_auto_functionalized_pass import (
     unsafe_remove_auto_functionalized_pass,
 )
 from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
+from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
@@ -1177,6 +1179,42 @@ default](args = (%x, %b_state), kwargs = {})
     %getitem_4 : [num_users=1] = call_function[target=operator.getitem](args = (%custom_mutator_tuple_default, 1), kwargs = {})
     return (b_state, getitem_3, getitem_4)""",
             )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass(self):
+        class Model(torch.nn.Module):
+            def __init__(self, size=4, h_dim=10):
+                super().__init__()
+                self.rnn = torch.nn.GRU(size, h_dim, batch_first=True)
+
+            def forward(self, x):
+                _, states = self.rnn(x)
+                return states
+
+        # move the exported program from cpu to cuda:0
+        mod = Model()
+        example_inputs = (torch.rand(1, 10, 4),)
+        ep = export(mod, example_inputs)
+        location = torch.device("cuda:0")
+        ep = move_to_device_pass(ep, location=location)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, torch.device("cuda:0"))
+        # move it back to cpu
+        location = "cpu"
+        ep = move_to_device_pass(ep, location=location)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to("cpu"),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, torch.device("cpu"))
+        # move it to cuda:0 again
+        location = {"cpu": "cuda:0"}
+        ep = move_to_device_pass(ep, location=location)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, torch.device("cuda:0"))
 
 
 if __name__ == "__main__":

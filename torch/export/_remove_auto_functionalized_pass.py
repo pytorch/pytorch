@@ -11,11 +11,15 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     get_mutable_args,
 )
-from torch._inductor.fx_passes.post_grad import (
-    decompose_auto_functionalized,
-    remove_self_clone,
-)
+from torch._inductor.fx_passes.post_grad import decompose_auto_functionalized
 from torch.export import ExportedProgram
+
+
+def remove_self_clone(graph: torch.fx.Graph):
+    for node in graph.nodes:
+        if node.target == torch.ops.aten.copy_.default and node.args[0] == node.args[1]:
+            node.replace_all_uses_with(node.args[0])
+            graph.erase_node(node)
 
 
 def unsafe_remove_auto_functionalized_pass(

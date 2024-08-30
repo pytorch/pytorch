@@ -293,7 +293,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             return
 
         src_inp, src_src, src_scatter_view_op = src.args  # type: ignore[union-attr]
-        with graph.inserting_before(src):
+        with graph.inserting_before(src):  # type: ignore[arg-type]
             new_node = graph_call_function(
                 graph,
                 _generalized_scatter,
@@ -316,7 +316,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 handle_views(new_src)
                 src.replace_all_uses_with(new_src)  # type: ignore[union-attr]
 
-            graph.erase_node(src)
+            graph.erase_node(src)  # type: ignore[arg-type]
 
     for node in graph.nodes:
         if _is_view_op(node.target):
@@ -585,8 +585,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.target = inplaceable_op.inplace_op
         elif node.target == torch.ops.higher_order.auto_functionalized:
             from torch._higher_order_ops.auto_functionalize import (
-                deserialize_views_meta,
                 get_mutable_args,
+                read_view_information_from_args,
             )
 
             _mutable_op = node.args[0]
@@ -621,7 +621,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # The loop bellow is only needed to generate the log message and possibly_missed_reinplacing_opportunities.
             args_cloned = []
             possibly_missed_reinplacing_opportunities = []
-            args_view_info = deserialize_views_meta(
+            args_view_info = read_view_information_from_args(
                 arg_names, arg_types, kwargs, all_bases, pop_args=False
             )
             for arg_name, view_info in args_view_info.items():
