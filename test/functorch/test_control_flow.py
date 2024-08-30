@@ -24,6 +24,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    requiresCrossRef,
+    skipIfCrossRef,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -1362,6 +1364,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef # Arg order changes with crossref, see _crossref version of the test below
     def test_cond_simple_with_linear_compile_check_graph(self):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
@@ -1395,6 +1398,115 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
     result = cond[0];  cond = None
     grad_out = torch.ones_like(result)
     return (result, grad_out)""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            gm.cond_true_0.code.strip(),
+            """\
+def forward(self, l_x_):
+    l_x__1 = l_x_
+    sin = l_x__1.sin();  l_x__1 = None
+    return (sin,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            gm.cond_false_0.code.strip(),
+            """\
+def forward(self, l_x_):
+    l_x__1 = l_x_
+    cos = l_x__1.cos();  l_x__1 = None
+    return (cos,)""",  # noqa: B950
+        )
+
+        backward_gm = backend.graphs[1]
+        self.assertExpectedInline(
+            backward_gm.code.strip(),
+            """\
+def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tensor, L_flat_grads_0_ : torch.Tensor):
+    l_ctx_saved_tensors_0_ = L_ctx_saved_tensors_0_
+    l_ctx_pred = L_ctx_pred
+    l_flat_grads_0_ = L_flat_grads_0_
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, [l_ctx_saved_tensors_0_, l_flat_grads_0_]);  l_ctx_pred = cond_true_0 = cond_false_0 = l_ctx_saved_tensors_0_ = l_flat_grads_0_ = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",  # noqa: B950
+        )
+
+    def test_while_loop_nested_traced(self):
+        fn, inp = WHILE_LOOP_TESTS["nested"]
+        graphs = self._check_tracing(fn, inp)
+        self.assertExpectedInline(
+            graphs["symbolic"].code.strip("\n"),
+            """\
+def forward(self, out_iter_1, it_1, y_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (out_iter_1, it_1, y_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = out_iter_1 = it_1 = y_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2];  while_loop = None
+    return (getitem, getitem_1, getitem_2)
+    """,  # noqa: B950
+        )
+        self.assertExpectedInline(
+            graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+    lt = torch.ops.aten.lt.Scalar(sum_1, 2);  sum_1 = None
+    return lt
+    """,
+        )
+        self.assertExpectedInline(
+            graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2];  while_loop = None
+    add = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
+    return (add, getitem_1, getitem_2)
+    """,  # noqa: B950
+        )
+    
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @requiresCrossRef
+    def test_cond_simple_with_linear_compile_check_graph_crossref(self):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        x = torch.randn(4, requires_grad=True)
+
+        def f(pred, x):
+            result = cond(pred, true_fn, false_fn, (x,))
+            grad_out = torch.ones_like(result)
+            return torch.autograd.grad(result, (x,), grad_out)
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend)(torch.tensor(False), x)
+        self.assertEqual(len(backend.graphs), 2)
+        gm = backend.graphs[0]
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
+    l_pred_ = L_pred_
+    l_x_ = L_x_
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_x_]);  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
+    result = cond[0];  cond = None
+    r = torch.ones_like(result)
+    return (result, r)""",  # noqa: B950
         )
 
         self.assertExpectedInline(
@@ -1624,6 +1736,7 @@ def forward(self, arg0_1):
         self._check_compile(fn, inp, backend=backend)
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef # Arg order changes with cross ref (see _crossref version of test)
     def test_while_loop_simple_with_linear_compile_check_graph(self):
         fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
         from torch._dynamo.testing import EagerAndRecordGraphs
@@ -1664,6 +1777,83 @@ def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_lin
     child = l_iter_ - 1;  l_iter_ = None
     child_1 = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
     return (child, child_1)""",  # noqa: B950
+            )
+        else:
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
+def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
+    l_iter_ = L_iter_
+    l_x_ = L_x_
+    l__self___dec = self.L__self___dec
+    l__self___linear_weight = self.L__self___linear_weight
+    l__self___linear_bias = self.L__self___linear_bias
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l__self___dec, l__self___linear_bias, l__self___linear_weight));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l__self___dec = l__self___linear_bias = l__self___linear_weight = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1];  while_loop = None
+    return (getitem, getitem_1)""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.cond_fn_0.code.strip(),
+                """\
+def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
+    sub = l_iter_ - l__self___dec_cond_fn;  l_iter_ = l__self___dec_cond_fn = None
+    gt = sub > 0;  sub = None
+    return gt""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.body_fn_0.code.strip(),
+                """\
+def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
+    child = l_iter_ - 1;  l_iter_ = None
+    child_1 = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
+    return (child, child_1)""",  # noqa: B950
+            )
+    
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @requiresCrossRef
+    def test_while_loop_simple_with_linear_compile_check_graph_crossref(self):
+        fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend)(*inp)
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
+def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor, L_self_buffers_dec_ : torch.Tensor, L_self_modules_linear_parameters_weight_ : torch.nn.parameter.Parameter, L_self_modules_linear_parameters_bias_ : torch.nn.parameter.Parameter):
+    l_iter_ = L_iter_
+    l_x_ = L_x_
+    l_self_buffers_dec_ = L_self_buffers_dec_
+    l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
+    l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l_self_buffers_dec_, l_self_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l_self_buffers_dec_ = l_self_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1];  while_loop = None
+    return (getitem, getitem_1)""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.cond_fn_0.code.strip(),
+                """\
+def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
+    sub = l_iter_ - l_self_buffers_dec__cond_fn;  l_iter_ = l_self_buffers_dec__cond_fn = None
+    gt = sub > 0;  sub = None
+    return gt""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.body_fn_0.code.strip(),
+                """\
+def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
+    child = l_iter_ - 1;  l_iter_ = None
+    r = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
+    return (child, r)""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(
