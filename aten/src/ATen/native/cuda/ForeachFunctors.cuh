@@ -18,10 +18,10 @@ inline void increment_version(TensorList tensors) {
 }
 
 // Initializes args and checks if all args are aligned
-template <int depth, typename T>
+template <int depth, typename T, bool large_kernel_arg>
 __device__ bool init_args(
     T** args,
-    TensorListMetadata<depth>& tl,
+    TensorListMetadata<depth, large_kernel_arg>& tl,
     const int64_t chunk_idx,
     const int64_t chunk_size,
     const int64_t tensor_loc) {
@@ -38,10 +38,10 @@ __device__ bool init_args(
 }
 
 // Initializes args and checks if all args are aligned
-template <int depth, typename T, typename T2>
+template <int depth, typename T, typename T2, bool large_kernel_arg>
 __device__ bool init_args(
     T** args,
-    TensorListScalarListMetadata<T2, depth>& tl,
+    TensorListScalarListMetadata<T2, depth, large_kernel_arg>& tl,
     const int64_t chunk_idx,
     const int64_t chunk_size,
     const int64_t tensor_loc) {
@@ -57,10 +57,10 @@ __device__ bool init_args(
   return all_aligned;
 }
 
-template <int depth, typename T>
+template <int depth, typename T, bool large_kernel_arg>
 __device__ bool init_args(
     T** args,
-    FusedOptimizerTensorListMetadata<depth>& tl,
+    FusedOptimizerTensorListMetadata<depth, large_kernel_arg>& tl,
     const int64_t chunk_idx,
     const int64_t chunk_size,
     const int64_t tensor_loc) {
@@ -203,13 +203,19 @@ __device__ __forceinline__ void pointwise_op_scalar(
 //
 // Binary Functors
 //
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct BinaryOpScalarFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       Op op,
       opmath_t scalar) {
     const int tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -227,13 +233,19 @@ struct BinaryOpScalarFunctor {
   }
 };
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct BinaryOpScalarListFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListScalarListMetadata<opmath_t, depth>& tl,
+      TensorListScalarListMetadata<opmath_t, depth, large_kernel_arg>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -251,13 +263,19 @@ struct BinaryOpScalarListFunctor {
   }
 };
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct BinaryOpListAlphaFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       Op op,
       opmath_t alpha) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -303,13 +321,19 @@ struct BinaryOpListAlphaFunctor {
   }
 };
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct BinaryOpScalarTensorFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       Op op,
       T* scalar,
       opmath_t alpha) {
@@ -361,11 +385,17 @@ struct BinaryOpScalarTensorFunctor {
 // Unary Functors
 //
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct ZeroFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<1>& tl) {
+      TensorListMetadata<1, large_kernel_arg>& tl) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     auto n = tl.numel_for_tensor[tensor_loc];
@@ -401,13 +431,19 @@ struct ZeroFunctor {
   }
 };
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct UnaryOpFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -453,13 +489,19 @@ struct UnaryOpFunctor {
 // Pointwise Functors
 //
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct PointwiseOpScalarFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       Op op,
       opmath_t scalar) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -477,13 +519,19 @@ struct PointwiseOpScalarFunctor {
   }
 };
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct PointwiseOpScalarListFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListScalarListMetadata<opmath_t, depth>& tl,
+      TensorListScalarListMetadata<opmath_t, depth, large_kernel_arg>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -501,13 +549,14 @@ struct PointwiseOpScalarListFunctor {
   }
 };
 
-template <typename T, int depth>
+template <typename T, int depth, bool large_kernel_arg>
 struct PointwiseOpListFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -552,13 +601,19 @@ struct PointwiseOpListFunctor {
   }
 };
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct TernaryOpListFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       Op op) {
     static_assert(depth == 3 || depth == 4, "");
     static_assert(depth >= r_args_depth, "");
@@ -606,13 +661,19 @@ struct TernaryOpListFunctor {
   }
 };
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct TernaryOpScalarFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       Op op,
       opmath_t alpha) {
     static_assert(depth == 2 || depth == 3, "");
