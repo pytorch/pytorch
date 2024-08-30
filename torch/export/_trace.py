@@ -1511,7 +1511,7 @@ def _export_to_aten_ir_make_fx(
         buffer_len = len(dict(mod.named_buffers(remove_duplicate=False)))
         params_len = param_len + buffer_len
 
-        gm, _ = transform(_make_fx_helper)(
+        gm, graph_signature = transform(_make_fx_helper)(
             mod,
             fake_args,
             trace_joint=False,

@@ -4840,9 +4840,7 @@ def avg_pool3d_backward(
     *_, depth, height, width = x.get_size()
 
     _, ceil_mode_d = pooling_size(depth, 0, kernel_size, stride, padding, ceil_mode)
-    _, ceil_mode_h = pooling_size(
-        height, 1, kernel_size, stride, padding, ceil_mode
-    )
+    _, ceil_mode_h = pooling_size(height, 1, kernel_size, stride, padding, ceil_mode)
     _, ceil_mode_w = pooling_size(width, 2, kernel_size, stride, padding, ceil_mode)
 
     grad_loader = grad_output.make_loader()
