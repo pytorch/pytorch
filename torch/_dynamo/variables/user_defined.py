@@ -1209,9 +1209,9 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         field_map = {}
         for field in fields(value):
             if hasattr(value, field.name):
-                field_map[field.name] = VariableBuilder(tx, AttrSource(source, field.name))(
-                    getattr(value, field.name)
-                )
+                field_map[field.name] = VariableBuilder(
+                    tx, AttrSource(source, field.name)
+                )(getattr(value, field.name))
 
         return FrozenDataClassVariable(value, fields=field_map, source=source)
 
