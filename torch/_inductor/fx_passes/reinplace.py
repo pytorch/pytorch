@@ -601,6 +601,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             new_bases_to_clone: List[int] = reinplace_and_refine_tensors_to_clone(
                 bases_to_clone, base_tensors_dct, node.target, auto_functionalize=True
             )
+            # Stash the metadata. There is a pass later on where we decompose
+            # auto_functionalized into clones + a mutable op; this metadata
+            # tells the decomp to only clone the following inputs
             node.meta["only_clone_these_bases"] = new_bases_to_clone
         elif node.target in inplaceable_triton_ops:
             kernel_idx = node.kwargs["kernel_idx"]
