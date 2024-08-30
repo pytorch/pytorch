@@ -1985,6 +1985,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
+            enable_grad=False,
             set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
