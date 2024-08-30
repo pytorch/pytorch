@@ -104,7 +104,7 @@ class BuiltinVariable(VariableTracker):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        return BuiltinVariable(value, source=source)
+        return cls(value, source=source)
 
     @staticmethod
     @functools.lru_cache(None)
