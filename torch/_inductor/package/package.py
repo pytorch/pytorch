@@ -174,13 +174,13 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
     # Save using the PT2 packaging format
     # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
 
-    for model_name, aoti_output_dir in aoti_files.items():
-        log.debug(
-            "Packaging AOTInductor files from %s with model name, %s",
-            aoti_output_dir,
-            model_name,
-        )
-        with PT2ArchiveWriter(archive_file) as archive_writer:
+    with PT2ArchiveWriter(archive_file) as archive_writer:
+        for model_name, aoti_output_dir in aoti_files.items():
+            log.debug(
+                "Packaging AOTInductor files from %s with model name, %s",
+                aoti_output_dir,
+                model_name,
+            )
             for root, dirs, files in os.walk(aoti_output_dir):
                 for file in files:
                     log.debug(
@@ -194,7 +194,6 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
                         f"{AOTINDUCTOR_DIR}{model_name}/{file}",
                         os.path.join(root, file),
                     )
-
     return archive_file
 
 

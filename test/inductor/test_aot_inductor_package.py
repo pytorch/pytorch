@@ -8,6 +8,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
 from torch._inductor.test_case import TestCase
+from torch.export import Dim
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.triton_utils import HAS_CUDA
@@ -126,6 +127,57 @@ class AOTInductorTestsTemplate:
         loaded_metadata = compiled_model.get_metadata()  # type: ignore[attr-defined]
 
         self.assertEqual(loaded_metadata.get("dummy"), "moo")
+
+    def test_multiple_methods(self):
+        options = {"aot_inductor.package": True}
+
+        class Model1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, a, b):
+                return torch.cat([a, b], dim=0)
+
+        b = torch.randn(3, 4, device=self.device)
+        dim0_a = Dim("dim0_a", min=1, max=10)
+        dim0_b = Dim("dim0_b", min=1, max=20)
+        dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}
+        example_inputs1 = (
+            torch.randn(2, 4, device=self.device),
+            torch.randn(3, 4, device=self.device),
+        )
+        ep1 = torch.export.export(
+            Model1(), example_inputs1, dynamic_shapes=dynamic_shapes
+        )
+        aoti_files1 = torch._inductor.aot_compile(
+            ep1.module(), example_inputs1, options=options
+        )
+
+        class Model2(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.device = device
+
+            def forward(self, x):
+                t = torch.tensor(x.size(-1), device=self.device, dtype=torch.float)
+                t = torch.sqrt(t * 3)
+                return x * t
+
+        example_inputs2 = (torch.randn(5, 5, device=self.device),)
+        ep2 = torch.export.export(Model2(self.device), example_inputs2)
+        aoti_files2 = torch._inductor.aot_compile(
+            ep2.module(), example_inputs2, options=options
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            package_path = package_aoti(
+                f.name, {"model1": aoti_files1, "model2": aoti_files2}
+            )
+            loaded1 = load_package(package_path, "model1")
+            loaded2 = load_package(package_path, "model2")
+
+        self.assertEqual(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
+        self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)

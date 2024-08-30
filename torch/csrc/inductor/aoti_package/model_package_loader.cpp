@@ -242,9 +242,6 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     // Only compile files in the specified model directory
     if (filepath.parent_path() ==
         fmt::format("data/aotinductor/{}", model_name)) {
-      found_filenames += filename;
-      found_filenames += "\n";
-
       fs::path output_path = temp_dir / filename;
       fs::create_directories(output_path.parent_path());
       mz_zip_reader_extract_file_to_file(
