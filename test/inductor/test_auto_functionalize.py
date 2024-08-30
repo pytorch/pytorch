@@ -333,7 +333,7 @@ arg2_1 = arg3_1 = arg1_1 = arg0_1 = foo_default = None
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
-    
+
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -355,7 +355,6 @@ arg2_1 = arg3_1 = arg1_1 = arg0_1 = foo_default = None
 
         x = torch.zeros(100, dtype=torch.int64)
         f(x)
-
 
 
 if __name__ == "__main__":

@@ -111,6 +111,7 @@ def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
 
     return wrapper
 
+
 class MyPickledModule(torch.nn.Module):
     def __init__(self, z):
         super().__init__()
@@ -11091,7 +11092,7 @@ fn
         x = torch.randn(10)
         opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         self.assertEqual(mod(x), opt_mod(x))
-    
+
     def test_frozen_dict(self):
         # A pattern from StableDiffusion
         class FrozenDict(collections.OrderedDict):
