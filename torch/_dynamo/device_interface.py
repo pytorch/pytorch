@@ -30,13 +30,13 @@ class DeviceInterface:
     class Event:
         def __new__(cls, *args, **kwargs):
             raise NotImplementedError(
-                "Please ensure member Event is inherited from torch.Event"
+                "Event should be inherited from torch.Event, otherwise, it couldn't be captured by dynamo."
             )
 
     class Stream:
         def __new__(cls, *args, **kwargs):
             raise NotImplementedError(
-                "Please ensure member Stream is inherited from torch.Stream"
+                "Stream should be inherited from torch.Stream, otherwise, it couldn't be captured by dynamo."
             )
 
     class Worker:
