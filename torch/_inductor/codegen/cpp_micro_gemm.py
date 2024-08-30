@@ -477,6 +477,15 @@ def check_amx_extra(config, m, n, k, alpha, num_threads):
         VecAMX,
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
         input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_amx_extra,
+    ),
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        input_dtype=torch.bfloat16,
         output_dtype=torch.float,
         extra_check=check_amx_extra,
     ),
@@ -594,15 +603,12 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
     // create a buffer for tiles of B.
-    // TODO: loop-unrolling of the "compute" lambda may result in incorrect output
-    // as this buffer would be used, so maybe 4 of these should be used?
-    // Since UT output is correct, looks like loop unrolling isn't actually happening.
-    alignas(64) {{input_t}} bf16_weights_buf[512];
+    // alignment of 128 is being used to prevent segfault on RHEL with some specific libstdc++ version.
+    alignas(128) {{input_t}} bf16_weights_buf[512];
 
     int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
     int b_tile_ptr_stride = ldb * {{vnni_size}};
 
-    // TODO: verify whether or not these lambdas inline
     auto load_B_row = [&]({{input2_t}}* src, {{input_t}}* dst) {
         {{kernel.unroll_pragma(2)}}
         for (int i = 0; i < 2; i++) {
@@ -778,6 +784,7 @@ def create_micro_gemm(
                 continue
             if (
                 config.input_dtype == input_dtype
+                
                 and config.compute_dtype == compute_dtype
                 and config.input2_dtype == input2_dtype
                 and config.output_dtype == output_dtype
@@ -792,6 +799,13 @@ def create_micro_gemm(
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
+                if (config.vec_isa_cls == VecAMX
+                    and m < block_m
+                    and input_dtype == torch.bfloat16
+                    and input2_dtype == torch.int8
+                ):
+                    # For int8 WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
+                    continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC
                 # 2. Dividable by block sizes (block_m, block_n, block_k)
