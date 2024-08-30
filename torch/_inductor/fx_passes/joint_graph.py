@@ -509,27 +509,24 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
         else:
             return  # bail out
 
-    user_device, *_ = user_devices
-    if (
-        len(user_devices) == 1
-        and device.type != user_device.type
-        and "val" in node.meta
-    ):
-        repl = match.graph.call_function(
-            torch.ops.prims.iota.default,
-            (length,),
-            {
-                "start": start,
-                "step": step,
-                "dtype": dtype,
-                "device": user_device,
-                "requires_grad": requires_grad,
-            },
-        )
-        repl.meta.update(node.meta)
-        repl.meta["val"] = repl.meta["val"].to(user_device)
-        node.replace_all_uses_with(repl)
-        match.erase_nodes(match.graph)
+    if len(user_devices) == 1 and "val" in node.meta:
+        (user_device,) = user_devices
+        if device.type != user_device.type:
+            repl = match.graph.call_function(
+                torch.ops.prims.iota.default,
+                (length,),
+                {
+                    "start": start,
+                    "step": step,
+                    "dtype": dtype,
+                    "device": user_device,
+                    "requires_grad": requires_grad,
+                },
+            )
+            repl.meta.update(node.meta)
+            repl.meta["val"] = repl.meta["val"].to(user_device)
+            node.replace_all_uses_with(repl)
+            match.erase_nodes(match.graph)
 
 
 @register_graph_pattern(
