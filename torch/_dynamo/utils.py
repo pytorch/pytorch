@@ -64,6 +64,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._C import (
     _get_function_stack_at,
+    _instruction_counter,
     _len_torch_function_stack,
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
@@ -1727,6 +1728,26 @@ def same(
 
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
+                # Fix a corner case that res and fp64_ref does not contains NaN and match (with loose tolerance)
+                # while the ref contains NaN. In this case, RMSE should not match any ways.
+                # But res is 'BETTER' than ref so we count it pass.
+                #
+                # This happens for Super_SloMo when loop ordering after fusion is enabled:
+                # https://gist.github.com/shunting314/11f235c70f7db0d52718d26f4a701cab
+                loose_tol = 1e-2 * 4
+                if (
+                    not fp64_ref.isnan().any()
+                    and not res.isnan().any()
+                    and ref.isnan().any()
+                    and torch.allclose(
+                        fp64_ref.to(dtype=res.dtype),
+                        res,
+                        atol=loose_tol,
+                        rtol=loose_tol,
+                        equal_nan=equal_nan,
+                    )
+                ):
+                    return True
                 ref_error = rmse(fp64_ref, ref).item()
                 # ref unable to produce this with stable numerics in this precision, ignore
                 if math.isnan(ref_error):
@@ -3203,3 +3224,41 @@ def get_user_object_from_id(obj_id):
 def store_user_object_weakref(obj):
     obj_id = id(obj)
     user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+
+
+class CompileTimeInstructionCounter:
+    _counter: int = 0
+    _id: int = -1
+    _depth = 0
+
+    @classmethod
+    def start(cls) -> None:
+        cls._depth = cls._depth + 1
+        if cls._depth == 1:
+            cls._id = _instruction_counter.start()
+
+    @classmethod
+    def end(cls) -> None:
+        cls._depth = cls._depth - 1
+        if cls._depth == 0:
+            cls._counter += _instruction_counter.end(cls._id)
+            cls._id = -1
+
+    @classmethod
+    def clear(cls) -> None:
+        cls._counter = 0
+
+    @classmethod
+    def value(cls) -> int:
+        return cls._counter
+
+    @classmethod
+    @contextmanager
+    def record(cls):
+        try:
+            if config.record_compile_time_instruction_count:
+                cls.start()
+            yield
+        finally:
+            if config.record_compile_time_instruction_count:
+                cls.end()
