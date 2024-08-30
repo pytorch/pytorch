@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import ctypes
 import gc
 import json
 import os
@@ -4097,6 +4098,62 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
+    def test_max_split_expandable(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        total_allowed = 120 * mb
+        fraction_allowed = total_allowed / all_memory
+        assert int(fraction_allowed * all_memory) == total_allowed
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,max_split_size_mb:40"
+        )
+        a = alloc(40)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:True,max_split_size_mb:40"
+        )
+        b = alloc(40)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,max_split_size_mb:40"
+        )
+        c = alloc(40)
+        with self.assertRaises(torch.OutOfMemoryError):
+            alloc(40)
+        del a, b, c
+        # force release_cached_blocks to run with some expandable segments in the free list
+        alloc(120)
+
+    def test_garbage_collect_expandable(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        total_allowed = 120 * mb
+        fraction_allowed = total_allowed / all_memory
+        assert int(fraction_allowed * all_memory) == total_allowed
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,garbage_collection_threshold:0.5"
+        )
+        a = alloc(40)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:True,garbage_collection_threshold:0.5"
+        )
+        b = alloc(40)
+        del a, b
+        # causes GC to run. The expandable segment block will be split
+        # so GC would not attempt to free it anyway, but this at least makes sure
+        # expandable_segment blocks can be in the free list when this is called.
+        alloc(80)
+
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1
@@ -4806,10 +4863,25 @@ class TestMemPool(TestCase):
 
         dummy_allocator_source = """
         #include <torch/extension.h>
+        #include <ATen/cuda/Exceptions.h>
+        #include <cuda_runtime_api.h>
+
         extern "C" {
+          C10_EXPORT int called_dummy_alloc = 0;
+          C10_EXPORT int called_dummy_free = 0;
+
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
-          C10_EXPORT void dummy_free(void* ptr) { }
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
+            called_dummy_alloc = 123;
+            void* ptr;
+            C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
+            return ptr;
+          }
+
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
+            called_dummy_free = 321;
+            C10_CUDA_CHECK(cudaFree(ptr));
+          }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
@@ -4819,6 +4891,7 @@ class TestMemPool(TestCase):
             is_python_module=False,
             keep_intermediates=False,
             verbose=True,
+            with_cuda=True,
         )
         allocator = torch.cuda.memory.CUDAPluggableAllocator(
             dummy_allocator,
@@ -4829,6 +4902,18 @@ class TestMemPool(TestCase):
 
         # pool should point to the same allocator as the one passed into it
         self.assertEqual(allocator.allocator(), pool.allocator)
+
+        # no allocations happened yet, so called_dummy_alloc should be 0
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        self.assertEqual(called_dummy_alloc.value, 0)
+
+        with torch.cuda.use_mem_pool(pool):
+            out = torch.randn(1, device="cuda")
+
+        # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
+        # out tensor
+        self.assertEqual(called_dummy_alloc.value, 123)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
