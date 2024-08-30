@@ -1554,7 +1554,7 @@ if(USE_XPU)
   add_dependencies(torch_xpu torch_cpu)
 
   if(MSVC)
-    target_link_libraries(torch_xpu PRIVATE torch_cpu_library)
+    target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
   else()
     include(CheckLinkerFlag)
 
