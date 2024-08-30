@@ -117,10 +117,10 @@ struct Schedule</*PingPong=*/true, /*FastAccum=*/true> {
 
 // Cutlass rowwise kernel
 template <
-    typename Transposed,
     typename TileShape,
     typename ClusterShape,
     typename PingPong,
+    typename Transposed,
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
@@ -293,10 +293,10 @@ void f8f8bf16_rowwise_impl(
 }
 
 template <
-    typename Transposed,
     typename TileShape,
     typename ClusterShape,
     typename PingPong,
+    typename Transposed,
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
@@ -309,11 +309,25 @@ void handle_transposition(
     std::optional<at::Tensor> bias,
     at::Tensor out) {
   if constexpr (!Transposed::value) {
-    f8f8bf16_rowwise_impl<Transposed, TileShape, ClusterShape, PingPong, FastAccum, DtypeA, DtypeB, DtypeBias>(
-        XQ, WQ, x_scale, w_scale, bias, out);
+    f8f8bf16_rowwise_impl<
+        TileShape,
+        ClusterShape,
+        PingPong,
+        Transposed,
+        FastAccum,
+        DtypeA,
+        DtypeB,
+        DtypeBias>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
-    f8f8bf16_rowwise_impl<Transposed, TileShape, ClusterShape, PingPong, FastAccum, DtypeB, DtypeA, DtypeBias>(
-        WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t());
+    f8f8bf16_rowwise_impl<
+        TileShape,
+        ClusterShape,
+        PingPong,
+        Transposed,
+        FastAccum,
+        DtypeB,
+        DtypeA,
+        DtypeBias>(WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t());
   }
 }
 
@@ -348,24 +362,24 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
   KernelMode kernel = get_kernel_mode(XQ, WQ);
   if (kernel == KernelMode::Small) {
     return handle_transposition<
-        /*Transposed=*/std::false_type,
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
         /*PingPong=*/std::false_type,
+        /*Transposed=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else if (kernel == KernelMode::Large) {
     return handle_transposition<
-        /*Transposed=*/std::false_type,
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
         /*PingPong=*/std::true_type,
+        /*Transposed=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     return handle_transposition<
-        /*Transposed=*/std::false_type,
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
         /*PingPong=*/std::false_type,
+        /*Transposed=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
