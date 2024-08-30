@@ -573,6 +573,14 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     AtenTensorHandle self,
     const char* msg);
 
+// When AOTI debug printer option is enabled, this function will be invoked to
+// torch pickle save the intermediate tensor for debugging purpose.
+AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
+    AtenTensorHandle self,
+    const char* tensor_name,
+    const char* launch_prefix,
+    const char* kernel_name);
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;

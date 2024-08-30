@@ -1130,28 +1130,40 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # where sharded and non-sharded parameters must be handled separately
         max_norm = float(max_norm)
         norm_type = float(norm_type)
-        sharded_params = set()
-        nonsharded_params = set()  # `NO_SHARD` or not FSDP-managed
+        sharded_params_set = set()
+        nonsharded_params_set = set()  # `NO_SHARD` or not FSDP-managed
+        # Make sure to compute the local norm using lists for deterministic
+        # iteration order and hence deterministic total norm computation
+        sharded_params = []
+        nonsharded_params = []
         grads: List[torch.Tensor] = []
         for handle in self._all_handles:
-            target_set = (
-                sharded_params if handle.uses_sharded_strategy else nonsharded_params
-            )
+            if handle.uses_sharded_strategy:
+                target_set = sharded_params_set
+                target_list = sharded_params
+            else:
+                target_set = nonsharded_params_set
+                target_list = nonsharded_params
             if handle._use_orig_params:
                 for param in handle.flat_param._params:
-                    target_set.add(param)
-                    if param.grad is not None:
-                        grads.append(param.grad)
+                    if param not in target_set:
+                        target_set.add(param)
+                        target_list.append(param)
+                        if param.grad is not None:
+                            grads.append(param.grad)
             else:
-                target_set.add(handle.flat_param)
-                if handle.flat_param.grad is not None:
-                    grads.append(handle.flat_param.grad)
+                if handle.flat_param not in target_set:
+                    target_set.add(handle.flat_param)
+                    target_list.append(handle.flat_param)
+                    if handle.flat_param.grad is not None:
+                        grads.append(handle.flat_param.grad)
         for param in self.parameters():
             not_fsdp_managed = (
-                param not in sharded_params and param not in nonsharded_params
+                param not in sharded_params_set and param not in nonsharded_params_set
             )
             if not_fsdp_managed:
-                nonsharded_params.add(param)
+                nonsharded_params_set.add(param)
+                nonsharded_params.append(param)
                 if param.grad is not None:
                     grads.append(param.grad)
         # Compute local norms (forced to be in FP32)
@@ -2044,7 +2056,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             def __init__(
                 self,
                 flat_param_handle: Optional[FlatParamHandle],
-                unshard_event: torch.cuda.Event,
+                unshard_event: torch.Event,
             ):
                 self._flat_param_handle = flat_param_handle
                 self._unshard_event = unshard_event
