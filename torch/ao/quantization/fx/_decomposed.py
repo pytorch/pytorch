@@ -42,6 +42,50 @@ def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
 
 
 quantized_decomposed_lib.define(
+    "int4mm_packed(Tensor input, Tensor weight, Tensor scalesAndZeroPoints) -> Tensor"
+)
+
+
+@impl(quantized_decomposed_lib, "int4mm_packed", "CPU")
+def int4mm_packed(
+    input: torch.Tensor, weight: torch.Tensor, scalesAndZeroPoints: torch.Tensor
+) -> torch.Tensor:
+    """Custom op that computes weight-only-quantization GEMM for int4 quantization
+    with requiring group size to be known, since it can be derived
+
+    Args:
+       input (torch.Tensor): original bfloat16 Tensor
+       weight (torch.Tensor): int4 weights packed in int32 dtype
+       scaleAndZeroPoints (torch.tensor):
+
+    Returns:
+       GEMM output
+    """
+    qGroupSize = (weight.numel() * 16) // scalesAndZeroPoints.numel()
+    return torch.ops.aten._weight_int4pack_mm(
+        input, weight, qGroupSize, scalesAndZeroPoints
+    )
+
+
+@impl(quantized_decomposed_lib, "int4mm_packed", "Meta")
+def int4mm_packed_meta(
+    input: torch.Tensor, weights: torch.Tensor, scalesAndZeroPoints: torch.Tensor
+) -> torch.Tensor:
+    torch._check(input.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(weights.dim() == 4, lambda: "w must be a 4D tensor")
+    # May support motre dtypes later
+    torch._check(
+        input.dtype in [torch.bfloat16],
+        lambda: f"expected x to be bf16, got {input.dtype}",
+    )
+    torch._check(
+        weights.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {weights.dtype}",
+    )
+    return input.new_empty(input.size(0), weights.size(0) * 8, dtype=input.dtype)
+
+
+quantized_decomposed_lib.define(
     "quantize_per_tensor(Tensor input, float scale, int zero_point, "
     "int quant_min, int quant_max, ScalarType dtype) -> Tensor"
 )

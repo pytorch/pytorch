@@ -3515,14 +3515,6 @@ Tensor _weight_int4pack_mm_cpu(
   return C;
 }
 
-Tensor _weight_int4pack_mm_cpu(
-    const Tensor& A,
-    const Tensor& B,
-    const Tensor& qScaleAndZeros) {
-    auto qGroupSize = (B.numel() * 16) / qScaleAndZeros.numel();
-    return _weight_int4pack_mm_cpu(A, B, qGroupSize, qScaleAndZeros);
-}
-
 
 Tensor _weight_int8pack_mm_cpu(
     const Tensor& A,

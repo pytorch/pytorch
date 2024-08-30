@@ -1553,7 +1553,7 @@ def _register_woq_mm_int4_pattern(graph_module: torch.fx.GraphModule):
             ZPS = node.args[3]
             with graph_module.graph.inserting_before(node):
                 new_output_node = graph_module.graph.call_function(
-                    torch.ops.aten._weight_int4pack_mm._derive_groupsize,
+                    quantized_decomposed.int4mm_packed,
                     args=(X, W, ZPS),
                 )
                 node.replace_all_uses_with(new_output_node)

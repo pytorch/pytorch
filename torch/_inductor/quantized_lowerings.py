@@ -4,6 +4,9 @@ import logging
 import torch
 from torch._inductor.kernel.mm_common import mm_args
 
+# Makes sure that quantized_decomposed ops are registered
+from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+
 from . import config as inductor_config, lowering
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
@@ -23,7 +26,7 @@ aten__weight_int8pack_mm = ExternKernelChoice(
 )
 
 aten__weight_int4pack_mm = ExternKernelChoice(
-    torch._weight_int4pack_mm, "at::_weight_int4pack_mm", has_out_variant=False
+    torch.ops.quantized_decomposed.int4mm_packed, None, has_out_variant=False
 )
 
 quantized = torch.ops.quantized
@@ -95,7 +98,7 @@ def register_woq_mm_ops():
         )
 
     @register_lowering(
-        aten._weight_int4pack_mm._derive_groupsize, type_promotion_kind=None
+        torch.ops.quantized_decomposed.int4mm_packed, type_promotion_kind=None
     )
     def int4pack_mm(input, weight, qScaleAndZeros, *, layout=None):
         _, _, _, layout, mat1, mat2 = mm_args(
@@ -124,7 +127,7 @@ def register_woq_mm_ops():
                 is_int4_woq_gemm=True,
             )
             if can_work is False:
-                choices = ()
+                choices = []
             else:
                 return autotune_select_algorithm(
                     "_weight_int4pack_mm",
