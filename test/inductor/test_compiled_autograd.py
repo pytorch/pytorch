@@ -153,6 +153,17 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_compiler_fn(self):
+        def compile(*args, **kwargs):
+            pass
+
+        with self.assertRaisesRegex(
+            AssertionError, "Expected a torch.compile function"
+        ):
+            with compiled_autograd.enable(compile):
+                x = torch.randn(10, requires_grad=True)
+                x.sum().backward()
+
     def test_cache_hit(self):
         def fn():
             for _ in range(3):

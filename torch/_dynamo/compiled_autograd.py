@@ -60,6 +60,9 @@ def maybe_clone(x):
 
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
+        assert isinstance(
+            compiler_fn, torch._dynamo.eval_frame.OptimizeContext
+        ), f"Expected a torch.compile function, but got {compiler_fn}"
         self.compiler_fn = compiler_fn
         self.stack = contextlib.ExitStack()
         self.close = self.stack.close
