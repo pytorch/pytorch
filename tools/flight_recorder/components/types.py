@@ -68,13 +68,13 @@ NCCLOp:
 
 
 class Group(NamedTuple):
-    id: int
+    id: str
     desc: str
     size: int
 
 
 class Membership(NamedTuple):
-    group_id: Ref[Group]
+    group_id: str
     global_rank: int
 
 
@@ -85,13 +85,13 @@ class Traceback(NamedTuple):
 
 class Collective(NamedTuple):
     id: int
-    group_id: Ref[Group]
+    group_id: str
 
 
 class NCCLCall(NamedTuple):
     id: int
     collective_id: Ref[Collective]
-    group_id: Ref[Group]
+    group_id: str
     global_rank: int  # technically Ref[Process] once we have it
     traceback_id: Ref[Traceback]
     collective_type: str
@@ -188,7 +188,9 @@ class Op:
         nccl:recv 3<-0
     """
 
-    def __init__(self, event: Dict[Any, Any], memberships: Dict[str, Set[Any]]):
+    def __init__(
+        self, event: Dict[Any, Any], memberships: Dict[str, Set[Any]], pg_name: str
+    ):
         profiling_name = event["profiling_name"]
         nccl, name = profiling_name.split(":")
         assert nccl == "nccl", f"name formatting error? {nccl} != 'nccl'"
@@ -209,7 +211,7 @@ class Op:
             self._dst, self._src = int(d), int(s)
         else:
             self._src, self._dst = -1, -1
-        pg_name, pg_desc = event["process_group"]
+        _, pg_desc = event["process_group"]
         self._init_global_src_dst(memberships[pg_name])
         self.pg_size = len(memberships[pg_name])
         if type in P2P | COLLECTIVES:
@@ -239,10 +241,8 @@ class Op:
 
     def __repr__(self) -> str:
         if self.type in P2P:
-            return (
-                f"{self.type}(s={self._src_g} d={self._dst_g}, sz={self.input_sizes})"
-            )
-        return f"{self.type}(input_sizes={self.input_sizes}, {self.state})"
+            return f"{self.type}(s={self._src_g} d={self._dst_g}, sz={self.input_sizes}, state={self.state})"
+        return f"{self.type}(input_sizes={self.input_sizes}, state={self.state})"
 
     def match(self, other: "Op") -> MatchState:
         # TODO: I think this can validly not match,
