@@ -1393,8 +1393,8 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_x_]);  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
     result = cond[0];  cond = None
-    r = torch.ones_like(result)
-    return (result, r)""",  # noqa: B950
+    grad_out = torch.ones_like(result)
+    return (result, grad_out)""",  # noqa: B950
         )
 
         self.assertExpectedInline(
