@@ -17220,7 +17220,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                # No error raised
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_requires_grad_error"),
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_and_grad"),
            )),
     BinaryUfuncInfo('__radd__',
                     op=torch.Tensor.__radd__,
@@ -19292,6 +19292,12 @@ op_db: List[OpInfo] = [
            supports_autograd_on_out=True,
            check_batched_grad=False,
            skips=(
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   "TestCommon",
+                   "test_out_and_grad",
+                   dtypes=(torch.cfloat,),
+               ),
                # Expected __torch_dispatch__ for aten::unbind_copy.int_out to return None
                # but it returned something else instead.
                DecorateInfo(
