@@ -840,18 +840,21 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
             ).decode(*SUBPROCESS_DECODE_ARGS)
             omp_path = output.rstrip()
             if os.path.isfile(omp_path):
+                os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
                 omp_module = cdll.LoadLibrary(omp_path)
                 return True
         except subprocess.SubprocessError:
             pass
         return False
 
-    if _load_icx_built_in_lib_by_name(cpp_compiler, "libiomp5md.dll"):
-        os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-
+    """
+    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    We need preload them like openmp library.
+    """
     preload_list = [
-        "svml_dispmd.dll",
-        "libmmd.dll",
+        "libiomp5md.dll",  # openmp
+        "svml_dispmd.dll",  # svml library
+        "libmmd.dll",  # libm
     ]
 
     for lib_name in preload_list:
