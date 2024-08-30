@@ -10,6 +10,7 @@
 #ifdef USE_C10D_XCCL
 
 #include <oneapi/ccl.hpp>
+#include <nccl.h>
 #include <exception>
 #include <memory>
 #include <vector>
@@ -34,24 +35,25 @@ namespace c10d {
 constexpr const char* XCCL_BACKEND_NAME = "xccl";
 
 class ProcessGroupXCCL : public Backend {
-public:
+ public:
   class WorkXCCL : public Work {
-  public:
-    WorkXCCL(        
+   public:
+    WorkXCCL(
         std::vector<std::vector<at::Tensor>> outputTensors,
         int rank = -1,
         OpType opType = UNKNOWN,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
-        : outputTensors_(std::move(outputTensors)) {}
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt)
+        : Work(rank, opType), outputTensors_(std::move(outputTensors)) {}
 
     WorkXCCL(const WorkXCCL& w)
         : outputTensors_(w.outputTensors_), events_(w.events_) {}
 
     ~WorkXCCL() override {
-        // Ensures all events are properly handled before destruction
-        for (auto& event : events_) {
-            event.wait();
-        }
+      // Ensures all events are properly handled before destruction
+      for (auto& event : events_) {
+        event.wait();
+      }
     }
 
     bool isCompleted() override {
@@ -64,11 +66,12 @@ public:
     }
 
     bool isSuccess() const override {
-        TORCH_CHECK(false, "ProcessGroupXCCL::WorkXCCL::isSuccess not implemented");
+      TORCH_CHECK(
+          false, "ProcessGroupXCCL::WorkXCCL::isSuccess not implemented");
     }
 
     void abort() override {
-        TORCH_CHECK(false, "ProcessGroupXCCL::WorkXCCL::abort not implemented");
+      TORCH_CHECK(false, "ProcessGroupXCCL::WorkXCCL::abort not implemented");
     }
 
     void synchronize() override {
@@ -78,34 +81,37 @@ public:
     }
 
     void wait() override {
+      std::lock_guard<std::mutex> lock(mutex_);
       for (auto& event : events_) {
-        call_with_lock(globalMutex, [&]() {
-            CCL_CHECK(event.wait());
-        });
+        CCL_CHECK(event.wait());
       }
       events_.clear();
     }
 
-    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
-
-    std::vector<at::Tensor> result() override {
-        return outputTensors_.empty() ? std::vector<at::Tensor>() : outputTensors_[0];
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
+      TORCH_CHECK(
+          false, "ProcessGroupXCCL::WorkXCCL::getFuture not implemented");
     }
 
-  protected:
+    std::vector<at::Tensor> result() override {
+      return outputTensors_.empty() ? std::vector<at::Tensor>()
+                                    : outputTensors_[0];
+    }
+
+   protected:
     friend class ProcessGroupXCCL;
     std::vector<ccl::event> events_;
     const std::vector<std::vector<at::Tensor>> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
   };
 
-  explicit ProcessGroupXCCL(const c10::intrusive_ptr<Store>& store,
-                            int rank,
-                            int size)
-      : store_(store), rank_(rank), size_(size) {
-      }
+  explicit ProcessGroupXCCL(
+      const c10::intrusive_ptr<Store>& store,
+      int rank,
+      int size)
+      : store_(store), rank_(rank), size_(size) {}
 
-  virtual ~ProcessGroupXCCL();
+  ProcessGroupXCCL::~ProcessGroupXCCL() = default;
 
   const std::string getBackendName() const override {
     return std::string(XCCL_BACKEND_NAME);
@@ -123,11 +129,11 @@ public:
       int rank = -1,
       int size = -1);
 
-private:
+ private:
   int rank_;
   int size_;
 
-public:
+ public:
   std::unordered_map<std::string, std::shared_ptr<XCCLComm>>
       inInitializationCommMap_;
   std::unordered_map<std::string, std::shared_ptr<XCCLComm>> devXCCLCommMap_;
