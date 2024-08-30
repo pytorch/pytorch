@@ -798,7 +798,8 @@ def create_micro_gemm(
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
-                if (config.vec_isa_cls == VecAMX
+                if (
+                    config.vec_isa_cls == VecAMX
                     and m < block_m
                     and input_dtype == torch.bfloat16
                     and input2_dtype == torch.int8
