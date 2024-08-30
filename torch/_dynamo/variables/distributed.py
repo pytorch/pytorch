@@ -313,34 +313,6 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
         user_pre_hooks: VariableTracker,
         source: AttrSource,
     ):
-        if not compiled_autograd.compiled_autograd_enabled:
-            unimplemented("module-level forward pre-hooks require compiled autograd")
-
-        # def _in_graph_fw_pre_hooks(bw_state: BackwardState):
-        #     """
-        #     Rather than installing the user hooks in the graph (which
-        #     don't survive AotAutograd), we install hooks that will call
-        #     trace_wrapped in the backward pass that CompiledAutograd
-        #     can turn into actual hook calls.
-        #     """
-        #     return functools.partial(
-        #         trace_wrapped,
-        #         fn=call_module_forward_hooks_from_backward_state,
-        #         bw_state=bw_state,
-        #         hooks_name=user_pre_hooks_name,
-        #         module_name=module_name,
-        #     )
-
-        # module_name, bw_state_proxy = tx.output.add_backward_state_hook(module, "mod")
-        # user_pre_hooks_name, _ = tx.output.add_backward_state_hook(user_pre_hooks)
-        # # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
-        # proxy = tx.output.create_proxy(
-        #     "call_function",
-        #     _in_graph_fw_pre_hooks,
-        #     (bw_state_proxy,),
-        #     {},
-        # )
-        # proxy.node.meta["example_value"] = user_pre_hooks
         proxy = None
         return ForwardPreHookUnderCheckpoint(proxy, module, user_pre_hooks, source=source)
 
@@ -361,35 +333,69 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
     def as_proxy(self):
         return self.proxy
 
-    # def call_method(
-    #     self,
-    #     tx,
-    #     name,
-    #     args: List[VariableTracker],
-    #     kwargs: Dict[str, VariableTracker],
-    # ) -> VariableTracker:
-    #     # if name in ("setup_input_hook", "setup_output_hook"):
-    #     #     return self._setup_hook(tx, name, *args, **kwargs)
-    #     return super().call_method(tx, name, args, kwargs)
-
     def call_function(self, tx: "InstructionTranslator", args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]") -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        def _partial_hook_call(*args, **kwargs):
-            return functools.partial(self.user_pre_hooks.fn, self.module.value)(*args, **kwargs)
+        if not compiled_autograd.compiled_autograd_enabled:
+            unimplemented("module-level forward pre-hooks require compiled autograd")
+
+        module_name, bw_state_proxy = tx.output.add_backward_state_hook(self.module, "mod")
+        user_pre_hooks_name, _ = tx.output.add_backward_state_hook(self.user_pre_hooks)
+        # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
+
+        def _in_graph_fw_pre_hooks(bw_state):
+            """
+            Rather than installing the user hooks in the graph (which
+            don't survive AotAutograd), we install hooks that will call
+            trace_wrapped in the backward pass that CompiledAutograd
+            can turn into actual hook calls.
+            """
+            return functools.partial(
+                trace_wrapped,
+                fn=call_module_forward_hooks_from_backward_state,
+                bw_state=bw_state,
+                hooks_name=user_pre_hooks_name,
+                module_name=module_name,
+            )
+
+        hook_proxy = tx.output.create_proxy(
+            "call_function",
+            _in_graph_fw_pre_hooks,
+            (bw_state_proxy,),
+            {},
+        )
+        # hook_proxy.node.meta["example_value"] = self.user_pre_hooks.fn
+
+        def call_hook(hook_proxy, *args, **kwargs):
+            return hook_proxy(self.module, *args, **kwargs)
+            # return tx.output.create_proxy(
+            #     "call_function",
+            #     functools.partial(hook_proxy, self.module),
+            #     args,
+            #     kwargs,
+            # ),
+            # return functools.partial(
+            #     trace_wrapped,
+            #     fn=call_module_forward_hooks_from_backward_state,
+            #     bw_state=bw_state_proxy,
+            #     hooks_name=user_pre_hooks_name,
+            #     module_name=module_name,
+            # )(*args, **kwargs)
+            # return functools.partial(self.user_pre_hooks.fn, self.module.value)(*args, **kwargs)
 
         new_args = wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
                 "call_function",
-                _partial_hook_call,
-                tuple(arg.as_proxy() for arg in args[1:]),
+                call_hook,
+                tuple([hook_proxy] + [arg.as_proxy()[0] for arg in args[1:]]),
+                # tuple([arg.as_proxy()[0] for arg in args[1:]]),
                 {},
             ),
         )
-        print(f"args: {args}")
-        print(f"new_args: {new_args}")
+
         return super().call_function_inner(tx, [self.module, new_args], kwargs)
+        # return super().call_function_inner(tx, args, kwargs)
 
     # def _setup_hook(self, tx: "InstructionTranslator", hook_method_name, args):
     #     from .builder import wrap_fx_proxy
@@ -403,6 +409,22 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
     #             {},
     #         ),
     #     )
+
+    # def _partial_hook_call(*args, **kwargs):
+    #     return functools.partial(self.user_pre_hooks.fn, self.module.value)(*args, **kwargs)
+
+    # new_args = wrap_fx_proxy(
+    #     tx,
+    #     tx.output.create_proxy(
+    #         "call_function",
+    #         _partial_hook_call,
+    #         tuple(arg.as_proxy() for arg in args[1:]),
+    #         {},
+    #     ),
+    # )
+    # print(f"args: {args}")
+    # print(f"new_args: {new_args}")
+
 
 # class ForwardHookUnderCheckpoint  # should we just merge this into ForwardPreHookUnderCheckpoint and rename that class?
 

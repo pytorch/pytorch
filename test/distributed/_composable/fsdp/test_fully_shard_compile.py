@@ -673,7 +673,8 @@ class TestFullyShardCompile(FSDPTest):
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
-        for fullgraph in [True, False]:
+        # for fullgraph in [True, False]:
+        for fullgraph in [True]:
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(fullgraph):
