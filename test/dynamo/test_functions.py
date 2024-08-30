@@ -2089,6 +2089,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sum(mylist)
 
     @make_test
+    def test_are_functorch_transforms_active(x):
+        if torch._C._are_functorch_transforms_active():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_partials_udf_kwarg(x):
         par_mul = functools.partial(udf_mul, y=torch.ones(10, 10))
         return par_mul(x)
