@@ -3749,13 +3749,13 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_model_parameters_weight_: "f32[3, 3]", L_model_parameters_bias_: "f32[3]", L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
-        l_model_parameters_weight_ = L_model_parameters_weight_
-        l_model_parameters_bias_ = L_model_parameters_bias_
+    def forward(self, L_params_weight_: "f32[3, 3]", L_params_bias_: "f32[3]", L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
+        l_params_weight_ = L_params_weight_
+        l_params_bias_ = L_params_bias_
         l_inputs_ = L_inputs_
         l_targets_ = L_targets_
 
-        prediction: "f32[64, 3]" = torch._C._nn.linear(l_inputs_, l_model_parameters_weight_, l_model_parameters_bias_);  l_inputs_ = l_model_parameters_weight_ = l_model_parameters_bias_ = None
+        prediction: "f32[64, 3]" = torch._C._nn.linear(l_inputs_, l_params_weight_, l_params_bias_);  l_inputs_ = l_params_weight_ = l_params_bias_ = None
 
         mse_loss: "f32[]" = torch.nn.functional.mse_loss(prediction, l_targets_);  prediction = l_targets_ = None
         return (mse_loss,)
