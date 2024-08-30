@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import zipfile
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 import torch._inductor
@@ -198,18 +198,29 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
     return archive_file
 
 
-def load_package(path: str, model_name: str = "model") -> Callable:  # type: ignore[type-arg]
+class AOTICompiledModel:
+    """
+    Callable AOT Inductor loaded model from a .pt2
+    """
+
+    def __init__(self, loader: torch._C._aoti.AOTIModelPackageLoader) -> None:
+        self.loader = loader
+
+    def __call__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        call_spec = self.loader.get_call_spec()  # type: ignore[attr-defined]
+        in_spec = pytree.treespec_loads(call_spec[0])
+        out_spec = pytree.treespec_loads(call_spec[1])
+        flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
+        flat_outputs = self.loader.run(flat_inputs)  # type: ignore[attr-defined]
+        return pytree.tree_unflatten(flat_outputs, out_spec)
+
+    def get_metadata(self) -> Dict[str, str]:
+        return self.loader.get_metadata()  # type: ignore[attr-defined]
+
+
+def load_package(path: str, model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
     if not path.endswith(".pt2"):
         raise RuntimeError("Unable to load package. Path must be a .pt2 file.")
 
     loader = torch._C._aoti.AOTIModelPackageLoader(path, model_name)  # type: ignore[call-arg]
-
-    def optimized(*args, **kwargs):  # type: ignore[no-untyped-def]
-        call_spec = loader.get_call_spec()  # type: ignore[attr-defined]
-        in_spec = pytree.treespec_loads(call_spec[0])
-        out_spec = pytree.treespec_loads(call_spec[1])
-        flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
-        flat_outputs = loader.run(flat_inputs)  # type: ignore[attr-defined]
-        return pytree.tree_unflatten(flat_outputs, out_spec)
-
-    return optimized
+    return AOTICompiledModel(loader)

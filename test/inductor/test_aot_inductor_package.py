@@ -3,12 +3,10 @@ import copy
 import sys
 import tempfile
 import unittest
-from dataclasses import dataclass
-from typing import Callable
 
 import torch
 from torch._inductor import config
-from torch._inductor.package import load_package, package_aoti
+from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import IS_FBCODE
@@ -26,13 +24,9 @@ except (unittest.SkipTest, ImportError) as e:
     raise
 
 
-@dataclass
-class CompiledResult:
-    loader: torch._C._aoti.AOTIModelPackageLoader
-    compiled_model: Callable
-
-
-def compile(model, example_inputs, dynamic_shapes, options, device) -> CompiledResult:
+def compile(
+    model, example_inputs, dynamic_shapes, options, device
+) -> AOTICompiledModel:
     ep = torch.export.export(
         model,
         example_inputs,
@@ -43,9 +37,8 @@ def compile(model, example_inputs, dynamic_shapes, options, device) -> CompiledR
     aoti_files = torch._inductor.aot_compile(gm, example_inputs, options=options)  # type: ignore[arg-type]
     with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
         package_path = package_aoti(f.name, aoti_files)
-        compiled_model = load_package(package_path)
-        loader = torch._C._aoti.AOTIModelPackageLoader(package_path)  # type: ignore[call-arg]
-    return CompiledResult(loader, compiled_model)
+        loaded = load_package(package_path)
+    return loaded
 
 
 def check_model(
@@ -57,7 +50,7 @@ def check_model(
     disable_constraint_solver=False,
     atol=None,
     rtol=None,
-) -> CompiledResult:
+) -> AOTICompiledModel:
     with torch.no_grad(), config.patch(
         {
             "aot_inductor.package": True,
@@ -71,7 +64,7 @@ def check_model(
         expected = ref_model(*ref_inputs)
 
         torch.manual_seed(0)
-        compiled_result = compile(
+        compiled_model = compile(
             model,
             example_inputs,
             dynamic_shapes,
@@ -79,10 +72,10 @@ def check_model(
             self.device,
         )
 
-        actual = compiled_result.compiled_model(*example_inputs)
+        actual = compiled_model(*example_inputs)
 
     self.assertEqual(actual, expected, atol=atol, rtol=rtol)
-    return compiled_result
+    return compiled_model
 
 
 class AOTInductorTestsTemplate:
@@ -126,11 +119,11 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
         )
         metadata = {"dummy": "moo"}
-        compiled_result = self.check_model(
+        compiled_model = self.check_model(
             Model(), example_inputs, options={"aot_inductor.metadata": metadata}
         )
 
-        loaded_metadata = compiled_result.loader.get_metadata()  # type: ignore[attr-defined]
+        loaded_metadata = compiled_model.get_metadata()  # type: ignore[attr-defined]
 
         self.assertEqual(loaded_metadata.get("dummy"), "moo")
 

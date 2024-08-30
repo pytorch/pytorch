@@ -242,7 +242,6 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     // Only compile files in the specified model directory
     if (filepath.parent_path() ==
         fmt::format("data/aotinductor/{}", model_name)) {
-
       found_filenames += filename;
       found_filenames += "\n";
 
