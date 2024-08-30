@@ -457,7 +457,6 @@ class AutogradCompilerInstance:
         assert self.hooks_proxy is not None
         proxy = self.hooks_proxy[index]  # type: ignore[index]
         bw_state = BackwardState.get_singleton()
-        print(f"bind_backward_state: id(bw_state): {id(bw_state)}")
         track_tensor_tree(bw_state, proxy, constant=None, tracer=self.fx_tracer)
         return bw_state
 

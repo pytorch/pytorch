@@ -32,7 +32,6 @@ _trace_wrapped_fwd_hook_op = TraceWrappedFwdHook()
 @_trace_wrapped_fwd_hook_op.py_impl(ProxyTorchDispatchMode)
 def inner_trace(mode, *args, bw_state=None, **kwargs):
     def self_invoke(*args, **dyn_kwargs):
-        # torch._dynamo.comptime.comptime.print(f"self_invoke: args: {args}, dyn_kwargs: {dyn_kwargs}, kwargs: {kwargs}")
         with torch.no_grad():
             return _trace_wrapped_fwd_hook_op(*args, **dyn_kwargs, **kwargs)
 
@@ -65,7 +64,6 @@ def inner_trace(mode, *args, bw_state=None, **kwargs):
 
 @_trace_wrapped_fwd_hook_op.py_impl(FakeTensorMode)
 def inner_fake(*args, **kwargs):
-    print(f"inner_fake: args: {args}")
     return args[2:]  # args[0] is hook, args[1] is module, args[2] is args tuple
 
 
