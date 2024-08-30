@@ -15,6 +15,7 @@ import subprocess
 import sys
 import sysconfig
 import warnings
+from ctypes import cdll
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
@@ -131,6 +132,9 @@ def check_compiler_exist_windows(compiler: str) -> None:
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+    except subprocess.SubprocessError:
+        # Expected that some compiler(clang, clang++) is exist, but they not support `/help` args.
+        pass
 
 
 def get_cpp_compiler() -> str:
@@ -139,7 +143,9 @@ def get_cpp_compiler() -> str:
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
-            return build_paths.cc()
+            return (
+                build_paths.cc() if torch.version.hip is None else build_paths.clang()
+            )
         if isinstance(config.cpp.cxx, (list, tuple)):
             search = tuple(config.cpp.cxx)
         else:
@@ -158,6 +164,13 @@ def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
         return _is_apple_clang(cpp_compiler)
+    elif _IS_WINDOWS:
+        # clang suite have many compilers, and only clang-cl is supported.
+        if re.search(r"((clang$)|(clang\+\+$))", cpp_compiler):
+            raise RuntimeError(
+                "Please use clang-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
+            )
+        return bool(re.search(r"(clang-cl)", cpp_compiler))
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
@@ -622,10 +635,20 @@ def _setup_standard_sys_libs(
 
     if config.is_fbcode():
         cflags.append("nostdinc")
-        include_dirs.append(build_paths.sleef())
-        include_dirs.append(build_paths.cc_include())
-        include_dirs.append(build_paths.libgcc())
-        include_dirs.append(build_paths.libgcc_arch())
+        # Note that the order of include paths do matter, as a result
+        # we need to have several branches interleaved here
+        if torch.version.hip is None:
+            include_dirs.append(build_paths.sleef())
+        include_dirs.append(build_paths.openmp())
+        include_dirs.append(build_paths.python())
+        if torch.version.hip is not None:
+            include_dirs.append(build_paths.clang_include())
+            include_dirs.append(build_paths.gcc_include())
+            include_dirs.append(build_paths.gcc_install_tools_include())
+        else:
+            include_dirs.append(build_paths.cc_include())
+            include_dirs.append(build_paths.libgcc())
+            include_dirs.append(build_paths.libgcc_arch())
         include_dirs.append(build_paths.libgcc_backward())
         include_dirs.append(build_paths.glibc())
         include_dirs.append(build_paths.linux_kernel())
@@ -761,6 +784,20 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+@functools.lru_cache(None)
+def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
+    try:
+        output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
+            "utf8"
+        )
+        omp_path = os.path.join(output.rstrip(), omp_name)
+        if os.path.isfile(omp_path):
+            os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+            omp_module = cdll.LoadLibrary(omp_path)
+    except subprocess.SubprocessError:
+        pass
+
+
 def _get_openmp_args(
     cpp_compiler: str,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
@@ -817,11 +854,16 @@ def _get_openmp_args(
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
     elif _IS_WINDOWS:
-        # /openmp, /openmp:llvm
-        # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
-        # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
-        cflags.append("openmp")
-        cflags.append("openmp:experimental")  # MSVC CL
+        if _is_clang(cpp_compiler):
+            cflags.append("openmp")
+            libs.append("libomp")
+            perload_clang_libomp_win(cpp_compiler, "libomp.dll")
+        else:
+            # /openmp, /openmp:llvm
+            # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
+            # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
+            cflags.append("openmp")
+            cflags.append("openmp:experimental")  # MSVC CL
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp())
@@ -1040,7 +1082,9 @@ def get_cpp_torch_cuda_options(
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
+        os.environ["CUDA_HOME"] = (
+            build_paths.rocm() if torch.version.hip else build_paths.cuda()
+        )
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
@@ -1056,7 +1100,7 @@ def get_cpp_torch_cuda_options(
                 libraries += ["amdhip64"]
             else:
                 libraries += ["c10_hip", "torch_hip"]
-                definations.append(" __HIP_PLATFORM_AMD__")
+            definations.append(" __HIP_PLATFORM_AMD__")
         else:
             if config.is_fbcode():
                 libraries += ["cuda"]

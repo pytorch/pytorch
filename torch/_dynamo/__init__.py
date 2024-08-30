@@ -36,7 +36,7 @@ from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_fra
 
 
 # Register polyfill functions
-from . import polyfills  # usort: skip # noqa: F401
+from .polyfills import loader as _  # usort: skip # noqa: F401
 
 
 __all__ = [

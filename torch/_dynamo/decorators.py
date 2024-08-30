@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
 import functools
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
@@ -164,7 +165,14 @@ def forbid_in_graph(fn):
     return fn
 
 
-def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
+def substitute_in_graph(
+    original_fn: _F,
+    *,
+    can_constant_fold_through: bool = False,
+    skip_signature_check: bool = False,
+    # type that is embedded in the Python interpreter
+    is_embedded_type: bool = False,  # internal use only
+) -> Callable[[_F], _F]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
     used in place of the original function when inlining the original function in the graph.
@@ -182,6 +190,12 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
     Args:
         original_fn (callable): The original function, usually a C function, to register a polyfill
             handler for.
+        can_constant_fold_through (bool, optional): Whether the polyfill handler can be constant
+            folded through. That is, if the polyfill handler is a pure function and its arguments
+            are constant, the result of the polyfill handler can be constant folded during the
+            compilation. Defaults to ``False``.
+        skip_signature_check (bool, optional): Whether to skip the signature check between the
+            original function and the polyfill handler. Defaults to ``False``.
 
     Returns:
         A decorator that registers the polyfill handler for the original function.
@@ -207,12 +221,78 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
         >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
         2
     """
-    if not is_function(original_fn):
+    if not is_function(original_fn) and not (
+        is_embedded_type and inspect.isclass(original_fn)
+    ):
         raise TypeError(
             f"substitute_in_graph expects a function but got {type(original_fn)!r}"
         )
+    if is_embedded_type:
+        if not inspect.isclass(original_fn):
+            raise TypeError(
+                f"substitute_in_graph expects a class but got {type(original_fn)!r}"
+            )
+
+        from .variables.builder import ITERTOOLS_POLYFILLED_TYPE_IDS, ITERTOOLS_TYPE_IDS
+
+        if id(original_fn) in ITERTOOLS_TYPE_IDS:
+            ITERTOOLS_POLYFILLED_TYPE_IDS.add(id(original_fn))
 
     def wrapper(traceable_fn: _F) -> _F:
+        if not is_function(traceable_fn):
+            raise TypeError(
+                f"@substitute_in_graph(...) expects a function but got {type(traceable_fn)!r}"
+            )
+
+        if not skip_signature_check:
+            try:
+                original_sig = inspect.signature(original_fn)
+            except ValueError:
+                pass
+            else:
+                traceable_sig = inspect.signature(traceable_fn)
+
+                def sig_ident(sig):
+                    # Ignore annotations for parameters and return type
+                    return (
+                        tuple(
+                            p.name
+                            for p in sig.parameters.values()
+                            if (
+                                p.kind
+                                not in {
+                                    p.KEYWORD_ONLY,
+                                    # the name of *args and **kwargs is not important
+                                    p.VAR_POSITIONAL,
+                                    p.VAR_KEYWORD,
+                                }
+                            )
+                        ),
+                        {
+                            p.name
+                            for p in sig.parameters.values()
+                            if p.kind == p.KEYWORD_ONLY
+                        },
+                        {
+                            p.name: p.default
+                            for p in sig.parameters.values()
+                            # the name of *args and **kwargs is not important
+                            if p.kind not in {p.VAR_POSITIONAL, p.VAR_KEYWORD}
+                        },
+                    )
+
+                wildcard_sig = inspect.signature(lambda *args, **kwargs: None)
+
+                if (
+                    sig_ident(original_sig) != sig_ident(traceable_sig)
+                    and sig_ident(original_sig) != sig_ident(wildcard_sig)
+                    and sig_ident(traceable_sig) != sig_ident(wildcard_sig)
+                ):
+                    raise TypeError(
+                        f"Signature mismatch between {original_fn} and {traceable_fn}: "
+                        f"{original_sig} != {traceable_sig}"
+                    )
+
         from torch._dynamo.guards import GuardBuilder
         from torch._dynamo.trace_rules import get_torch_obj_rule_map
         from torch._dynamo.variables import PolyfilledFunctionVariable
@@ -258,6 +338,7 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
 
         wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
+        wrapped.__torch_dynamo_can_constant_fold_through__ = can_constant_fold_through  # type: ignore[attr-defined]
 
         return wrapped  # type: ignore[return-value]
 
