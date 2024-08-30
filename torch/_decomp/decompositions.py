@@ -5088,6 +5088,95 @@ def resize_as(self, other, memory_format=None):
     return aten.resize(self, other.shape, memory_format=memory_format)
 
 
+@register_decomposition(aten.median.default)
+@out_wrapper()
+def median(x):
+    if x.numel() == 0 or x.ndim == 0:
+        return x.new_full([], float("nan")).to(x.dtype)
+
+    return median_impl(x.flatten(), dim=0, keepdim=False, ignore_nan=False)[0]
+
+
+@register_decomposition(aten.nanmedian.default)
+@out_wrapper()
+def nanmedian(x):
+    if x.numel() == 0 or x.ndim == 0:
+        return x.new_full([], float("nan")).to(x.dtype)
+
+    return median_impl(x.flatten(), dim=0, keepdim=False, ignore_nan=True)[0]
+
+
+@register_decomposition(aten.median.dim)
+@out_wrapper("values", "indices")
+def median_dim(x, dim, keepdim=False):
+    utils.alert_not_deterministic("median with indices output")
+    return median_impl(x, dim=dim, keepdim=keepdim, ignore_nan=False)
+
+
+@register_decomposition(aten.nanmedian.dim)
+@out_wrapper("values", "indices")
+def nanmedian_dim(x, dim, keepdim=False):
+    utils.alert_not_deterministic("median with indices output")
+    return median_impl(x, dim=dim, keepdim=keepdim, ignore_nan=True)
+
+
+def median_impl(x, dim, keepdim=False, ignore_nan=True):
+    dim = utils.canonicalize_dim(x.dim(), dim)
+
+    if x.ndim == 0:
+        return x.new_zeros([]), x.new_zeros([], dtype=torch.int64)
+
+    size = x.shape[dim]
+    torch._check(
+        size != 0,
+        lambda: f"median(): Expected reduction dim {dim} to have non-zero size.",
+    )
+
+    result_shape = list(x.shape)
+    if keepdim:
+        result_shape[dim] = 1
+    else:
+        del result_shape[dim]
+
+    if x.numel() == 0:
+        return x.new_empty(result_shape), x.new_empty(result_shape, dtype=torch.int64)
+
+    sorted_vals, sorted_idxs = aten.sort(x, dim=dim)
+
+    if ignore_nan:
+        k = ((size - 1) - x.isnan().sum(dim=dim, keepdim=True)) // 2
+        strides = sorted_vals.stride()
+        indices = k * strides[dim]
+        for d in range(x.ndim):
+            if d == dim:
+                continue
+            idx_shape = [1] * x.ndim
+            idx_shape[d] = -1
+            indices = indices + strides[d] * torch.arange(
+                x.shape[d], device=x.device
+            ).view(idx_shape)
+
+        result_val = aten._unsafe_index(sorted_vals.flatten(), [indices.flatten()])
+        result_ind = aten._unsafe_index(sorted_idxs.flatten(), [indices.flatten()])
+    else:
+        k = (size - 1) // 2
+        val_indices: List[Optional[TensorLike]] = [None] * x.ndim
+        val_indices[dim] = torch.tensor([k], device=x.device)
+        mask_indices: List[Optional[TensorLike]] = [None] * x.ndim
+        mask_indices[dim] = torch.tensor([x.shape[dim] - 1], device=x.device)
+
+        result_val = aten._unsafe_index(sorted_vals, val_indices)
+        result_ind = aten._unsafe_index(sorted_idxs, val_indices)
+
+        last_val = aten._unsafe_index(sorted_vals, mask_indices)
+        last_ind = aten._unsafe_index(sorted_idxs, mask_indices)
+
+        result_val = torch.where(last_val.isnan(), last_val, result_val)
+        result_ind = torch.where(last_val.isnan(), last_ind, result_ind)
+
+    return result_val.view(result_shape), result_ind.view(result_shape)
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
