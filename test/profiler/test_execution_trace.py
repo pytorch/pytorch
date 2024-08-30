@@ -394,7 +394,10 @@ class TestExecutionTrace(TestCase):
                 found_cos = True
         assert found_cos
 
-instantiate_device_type_tests(TestExecutionTrace, globals())
+devices = ["cpu", "cuda"]
+if TEST_HPU:
+    devices.append("hpu")
+instantiate_device_type_tests(TestExecutionTrace, globals(),only_for=devices)
 
 if __name__ == "__main__":
     run_tests()
