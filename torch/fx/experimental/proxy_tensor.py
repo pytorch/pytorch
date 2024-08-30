@@ -1581,6 +1581,9 @@ class _ModuleStackTracer(PythonKeyTracer):
                     )
                 return tracer.attr_proxy_map[attr_val]
 
+            def get_base(self) -> Module:
+                return tracer.proxy_modules[self]
+
             @property
             def _modules(self) -> Dict[str, AttrProxy]:
                 assert "_modules" in self.__dict__
