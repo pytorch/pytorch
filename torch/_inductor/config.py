@@ -411,6 +411,9 @@ aggressive_fusion = False
 debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
+loop_ordering_after_fusion = (
+    os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0") == "1"
+)
 
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
@@ -767,6 +770,9 @@ class cpp:
     # For example, if the total number of threads is 56, "7,4,2" means the work is
     # decomposed into 7x4x2 thread blocks along MxNxK of a GEMM.
     gemm_thread_factors = os.environ.get("TORCHINDUCTOR_CPP_GEMM_THREAD_FACTORS", None)
+
+    # Whether to enable masked vectorization for the tail_loop.
+    enable_loop_tail_vec = True
 
 
 # config specific to codegen/triton.py
