@@ -15,7 +15,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 
-
 # TODO to figure out a more generic approach
 ALLOWABLE_OPS = [
     torch.ops.aten.linear.default,
@@ -28,7 +27,6 @@ ALLOWABLE_OPS = [
     torch.ops.aten.div.Scalar,
 ]
 
-
 class OutDtypeOperator(HigherOrderOperator):
     """
     The out_dtype operator takes an existing ATen functional operator, an
@@ -40,7 +38,7 @@ class OutDtypeOperator(HigherOrderOperator):
     The general implementation for all operators will be the following:
         1. Promote inputs dtypes based on default PyTorch dtype promotion rules,
             using the dtypes of all input Tensors/Scalars and the `out_dtype`
-            arugument.
+            argument.
         2. Execute the operator
         3. Cast the output to `out_dtype`
     """
@@ -60,7 +58,7 @@ class OutDtypeOperator(HigherOrderOperator):
             and isinstance(op._schema.returns[0].type, torch.TensorType)
         ):
             raise ValueError(
-                "out_dtype's can only apply to ops that return a single tensor"
+                "out_dtype can only apply to ops that return a single tensor. "
                 f"Instead got {[r.type for r in op._schema.returns]}"
             )
 
@@ -69,25 +67,16 @@ class OutDtypeOperator(HigherOrderOperator):
                 f"out_dtype only allows the following operators: {ALLOWABLE_OPS}."
             )
 
-        res = super().__call__(op, output_dtype, *args)
-
-        return res
-
+        return super().__call__(op, output_dtype, *args)
 
 out_dtype = OutDtypeOperator()
 
-
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
-    # NB: Long-term we should put the decomposition logic into
-    # ProxyTorchDispatchMode so that people do not need to call maybe_handle_decomp
-    # in all HigherOrderOp proxy implementations.
     r = maybe_handle_decomp(proxy_mode, func_overload, (op, output_dtype, *args), {})
     if r is not NotImplemented:
         return r
 
     with disable_proxy_modes_tracing():
-        # This is a simplified implementation of this operator just for tracing.
-        # Actual implementation may also first promote the arguments
         out = op(*args).to(dtype=output_dtype)
 
     node_args = (op, output_dtype, *args)
@@ -97,13 +86,11 @@ def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
     )
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
-
 @out_dtype.py_impl(DispatchKey.CompositeExplicitAutograd)
 def out_dtype_dense(op: torch._ops.OpOverload, output_dtype: torch.dtype, *args):
     if is_int_mm(op, output_dtype, args):
         return torch._int_mm(*args)
     return out_dtype_fallback(op, output_dtype, *args)
-
 
 def is_int_mm(op, output_dtype, args):
     return (
@@ -115,7 +102,6 @@ def is_int_mm(op, output_dtype, args):
         and args[0].is_cuda
         and args[1].is_cuda
     )
-
 
 def out_dtype_fallback(op, output_dtype, *args):
     flat_inputs = pytree.arg_tree_leaves(*args) + [torch.ones(1, dtype=output_dtype)]
@@ -130,11 +116,9 @@ def out_dtype_fallback(op, output_dtype, *args):
     res = op(*casted_args).to(dtype=output_dtype)
     return res
 
-
 out_dtype.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(out_dtype, deferred_error=True)
 )
-
 
 @out_dtype.py_impl(ProxyTorchDispatchMode)
 def out_dtype_proxy(
@@ -145,7 +129,6 @@ def out_dtype_proxy(
 ):
     return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
 
-
 @out_dtype.py_impl(FakeTensorMode)
 def out_dtype_fake_tensor_mode(
     mode: FakeTensorMode,
@@ -155,7 +138,6 @@ def out_dtype_fake_tensor_mode(
 ):
     with mode:
         return out_dtype_dense(op, output_dtype, *args)
-
 
 @out_dtype.py_functionalize_impl
 def out_dtype_func(ctx, op, output_dtype, *args):
