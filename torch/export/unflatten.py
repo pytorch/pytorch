@@ -407,6 +407,7 @@ class UnflattenedModule(torch.nn.Module):
         assert [fqn for fqn, _ in self.named_modules(remove_duplicate=False)] == list(
             fqn_order.keys()
         )
+        self.graph.lint()
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
@@ -838,14 +839,8 @@ class _ModuleFrame:
         # To avoid this we copy these call_function nodes with sym_type results.
         # This should however only be done for sym_type nodes - call_function nodes on tensors
         # should not be deduplicated in the first place.
-        args = tuple(
-            self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
-            for _x in x.args
-        )
-        kwargs = {
-            k: self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
-            for k, _x in x.kwargs.items()
-        }
+        args = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.args)
+        kwargs = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.kwargs)
         node = self.graph.call_function(x.target, args, kwargs)
         node.meta = copy.copy(x.meta)
         self.node_map[x] = node
@@ -870,7 +865,10 @@ class _ModuleFrame:
                 with self.parent.graph.inserting_before(self.parent_call_module):
                     self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
             return self.node_to_placeholder[x]
-        elif x.op == "call_function":
+        elif x.op == "call_function" and (
+            x.target == torch.ops.aten.sym_size.int
+            or (hasattr(x.target, "__module__") and x.target.__module__ == "_operator")
+        ):
             # export deduplicates sym_size nodes, and may need to re-copy them
             # if module call signature needs to be preserved
             self.copy_sym_call_function(x)
@@ -879,7 +877,6 @@ class _ModuleFrame:
             raise RuntimeError(
                 f"Could not run remap_input() on op type: {x.op} for node {x}"
             )
-        return self.node_to_placeholder[x]
 
     def finalize_outputs(self):
         orig_outputs = []
