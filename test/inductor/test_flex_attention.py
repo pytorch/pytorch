@@ -28,8 +28,8 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, skipIfRocm
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
+from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
 
@@ -278,7 +278,7 @@ class TestFlexAttention(InductorTestCase):
         block_mask: Optional[BlockMask] = None,
     ):
         if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest('enable_gqa=True is unsupported on ROCM, for now')
+            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
