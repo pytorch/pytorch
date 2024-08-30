@@ -411,7 +411,6 @@ class OutputGraph:
         # Use to pass values to backward hooks when using compiled autograd
         self.backward_state: Dict[str, VariableTracker] = {}
         self.backward_state_obj = BackwardState.get_singleton()
-        print(f"OutputGraph ctor: id(self.backward_state_obj): {id(self.backward_state_obj)}")
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = self.install_global_by_id(
             "bw_state", self.backward_state_obj
