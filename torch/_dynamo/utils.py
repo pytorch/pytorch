@@ -1728,6 +1728,26 @@ def same(
 
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
+                # Fix a corner case that res and fp64_ref does not contains NaN and match (with loose tolerance)
+                # while the ref contains NaN. In this case, RMSE should not match any ways.
+                # But res is 'BETTER' than ref so we count it pass.
+                #
+                # This happens for Super_SloMo when loop ordering after fusion is enabled:
+                # https://gist.github.com/shunting314/11f235c70f7db0d52718d26f4a701cab
+                loose_tol = 1e-2 * 4
+                if (
+                    not fp64_ref.isnan().any()
+                    and not res.isnan().any()
+                    and ref.isnan().any()
+                    and torch.allclose(
+                        fp64_ref.to(dtype=res.dtype),
+                        res,
+                        atol=loose_tol,
+                        rtol=loose_tol,
+                        equal_nan=equal_nan,
+                    )
+                ):
+                    return True
                 ref_error = rmse(fp64_ref, ref).item()
                 # ref unable to produce this with stable numerics in this precision, ignore
                 if math.isnan(ref_error):
