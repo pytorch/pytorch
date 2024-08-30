@@ -27,34 +27,13 @@ if TYPE_CHECKING:
 
 
 def index(iterator, item, start=0, end=None):
+    from itertools import islice
+
     for i, elem in islice(enumerate(iterator), start, end):
         if item == elem:
             return i
     # This will not run in dynamo
     raise ValueError(f"{item} is not in {type(iterator)}")
-
-
-def islice(iterator, start=0, end=None, step=1):
-    if start < 0 or (end is not None and end < 0) or step < 0:
-        raise ValueError("Indices must be non-negative")
-    if step == 0:
-        raise ValueError("Step cannot be 0")
-
-    it = iter(iterator)
-
-    for _ in range(start):
-        next(it)
-
-    if end is None:
-        for i, element in enumerate(it):
-            if i % step == 0:
-                yield element
-    else:
-        for i, element in enumerate(it):
-            if i % step == 0 and i + start < end - start:
-                yield element
-            elif i + start >= end - start:
-                break
 
 
 def repeat(item, count):
