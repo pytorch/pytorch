@@ -192,6 +192,28 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(actual, expected))
         self.assertTrue(cnt.frame_count, 1)
 
+    def test_addcmul_(self):
+        from copy import deepcopy
+
+        from torch._dynamo.utils import same
+
+        def fn(x, y, z, s):
+            return x.addcmul_(y, z, value=s)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
+        inps = (
+            torch.ones(2, 2),
+            torch.ones(2, 2) + 1,
+            torch.rand(2, 2),
+            torch.tensor(0.3),
+        )
+        inps_2 = deepcopy(inps)
+        actual = fn_opt(*inps)
+        expected = fn(*inps_2)
+        self.assertTrue(same(actual, expected))
+        self.assertEqual(cnt.frame_count, 1)
+
     @make_test
     def test_functools_partial(a, b):
         return clip01(a + b)
