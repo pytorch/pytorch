@@ -148,3 +148,19 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     if isinstance(obj, cls):
         obj.__init__(*args, **kwargs)
     return obj
+
+
+def foreach_lerp_inplace(self, end, weight):
+    # decompose foreach lerp into constituent ops, prevents a graph break due to
+    # converting a value to a scalar when arg[2] is a single tensor
+    result = torch._foreach_sub(end, self)
+    result = torch._foreach_mul(result, weight)
+    return torch._foreach_add_(self, result)
+
+
+def foreach_pow_scalar(scalar, exps):
+    return torch._foreach_pow([scalar for _ in exps], exps)
+
+
+def addcmul_inplace(self, tensor1, tensor2, value):
+    return self.add_(tensor1 * tensor2 * value)
