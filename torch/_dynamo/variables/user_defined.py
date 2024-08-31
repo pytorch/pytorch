@@ -456,6 +456,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.NamedTupleVariable(items, self.value)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             from .builder import SourcelessBuilder
+
             fields = dataclasses.fields(self.value)
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
@@ -469,16 +470,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         if not field.init:
                             continue
 
-                        if not field.default is dataclasses.MISSING:
+                        if field.default is not dataclasses.MISSING:
                             var_tracker = SourcelessBuilder.create(tx, field.default)
-                        elif not field.default_factory is dataclasses.MISSING:
-                            factory_fn = SourcelessBuilder.create(tx, field.default_factory)
+                        elif field.default_factory is not dataclasses.MISSING:
+                            factory_fn = SourcelessBuilder.create(
+                                tx, field.default_factory
+                            )
                             var_tracker = factory_fn.call_function(tx, [], {})
                         else:
-                            # if we are subclass, the constructor could possibly 
+                            # if we are subclass, the constructor could possibly
                             # be missing args
                             continue
-
 
                     default_kwargs[field.name] = var_tracker
             kwargs.update(default_kwargs)
@@ -1240,7 +1242,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         kwargs = {}
         for field in fields(self.value):
             proxy = self.fields[field.name].as_proxy()
-            if field.kw_only:
+            if hasattr(field, "kw_only") and field.kw_only:
                 kwargs[field.name] = proxy
             else:
                 args.append(proxy)

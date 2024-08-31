@@ -10178,13 +10178,13 @@ def ___make_guard_fn():
         inps = (torch.ones(2, 2), torch.ones(2, 2))
         actual = fn_opt(*inps)
         expected = fn(*inps)
-    
+
     def test_frozen_dataclass_default_value(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
             x: torch.Tensor
             y: torch.Tensor
-            z: int = dataclasses.field(default=5) 
+            z: int = dataclasses.field(default=5)
             a: int = 6
 
         @allow_in_graph
@@ -10201,15 +10201,14 @@ def ___make_guard_fn():
         expected = fn(*inps)
 
         self.assertEqual(actual, expected)
-    
+
     def test_frozen_dataclass_default_factory(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
             x: torch.Tensor
             y: torch.Tensor
-            z: int = dataclasses.field(default_factory=list) 
+            z: int = dataclasses.field(default_factory=list)
             a: int = dataclasses.field(default_factory=lambda: [5])
-
 
         @allow_in_graph
         def inner_fn(dc):
@@ -10231,9 +10230,8 @@ def ___make_guard_fn():
         class TestDataClass:
             x: torch.Tensor
             y: torch.Tensor
-            z: int = dataclasses.field(kw_only=True) 
+            z: int = dataclasses.field(kw_only=True)
             a: int = dataclasses.field(kw_only=True)
-
 
         @allow_in_graph
         def inner_fn(dc):
