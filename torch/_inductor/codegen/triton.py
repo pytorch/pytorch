@@ -1236,15 +1236,11 @@ class TritonKernel(SIMDKernel):
 
         self.codegen_range_tree()
 
-    def _get_symt(self, tree: IterationRangesEntry) -> SymT:
-        #TODO refactor to a tree property
-        return prefix_to_symt[tree.prefix]
-
     def _get_block_size(self, tree: IterationRangesEntry) -> sympy.Symbol:
-        return block_sizes[self._get_symt(tree)]
+        return block_sizes[tree.SymT]
 
     def _get_block_offset(self, tree: IterationRangesEntry) -> sympy.Symbol:
-        return block_offsets[self._get_symt(tree)]
+        return block_offsets[tree.SymT]
 
     def _max_block_size(self, tree: IterationRangesEntry) -> int:
         return TRITON_MAX_BLOCK[tree.prefix.upper()]
@@ -2434,7 +2430,7 @@ class TritonKernel(SIMDKernel):
             for level, tree in sorted(enumerate(loop_trees), reverse=True):
                 with self.body.indent(offset=level + 1):
                     # Advance pointers at the end of each loop.
-                    for advancement in self.pointer_advancements[self._get_symt(tree)]:
+                    for advancement in self.pointer_advancements[tree.SymT]:
                         assert len(advancement) > 0, f"Missing advancement for type {symt}"
                         self.body.writeline(advancement)
 
@@ -2841,7 +2837,7 @@ class TritonKernel(SIMDKernel):
                 code.writeline(f"rnumel = {int(rnumel)}")
 
             # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
-            rblock = sympy_product(block_sizes[self._get_symt(tree)] for tree in reduction_trees)
+            rblock = sympy_product(block_sizes[tree.SymT] for tree in reduction_trees)
             code.writeline(f"RBLOCK: tl.constexpr = {rblock}")
 
     def _get_grid_fn(self):

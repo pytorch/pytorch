@@ -29,7 +29,7 @@ import torch
 import torch._logging
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
-from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from torch.utils._sympy.symbol import free_symbol_is_type, prefix_to_symt, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
@@ -108,6 +108,10 @@ class IterationRanges:
     @property
     def is_reduction(self) -> bool:
         return prefix_is_reduction(self.prefix)
+
+    @property
+    def SymT(self) -> SymT:
+        return prefix_to_symt[self.prefix]
 
     def symbol(self):
         return sympy_index_symbol(self.name)
