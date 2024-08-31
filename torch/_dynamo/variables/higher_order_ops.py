@@ -1152,21 +1152,21 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         sub_args = [
-            leaf.call_method(
+            inp.call_method(
                 tx,
                 "new_empty",
                 args=(
                     SourcelessBuilder.create(
                         tx,
-                        leaf_init.size
-                        if leaf_init.size is not None
+                        ini.size
+                        if ini.size is not None
                         else tuple(
-                            [
+                            [  # noqa: C416
                                 it
                                 for it in BuiltinVariable(getattr)
                                 .call_function(
                                     tx,
-                                    [leaf_init, ConstantVariable.create("shape")],
+                                    [ini, ConstantVariable.create("shape")],
                                     {},
                                 )
                                 .items
@@ -1175,12 +1175,12 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ),
                 ),
                 kwargs={
-                    "dtype": SourcelessBuilder.create(tx, leaf.dtype),
-                    "device": SourcelessBuilder.create(tx, leaf.device),
-                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
+                    "dtype": SourcelessBuilder.create(tx, inp.dtype),
+                    "device": SourcelessBuilder.create(tx, inp.device),
+                    "requires_grad": SourcelessBuilder.create(tx, inp.requires_grad),
                 },
             )
-            for leaf, leaf_init in itertools.chain(
+            for inp, ini in itertools.chain(
                 zip(input.items, init.items), zip(input.items, init.items)
             )
         ]
