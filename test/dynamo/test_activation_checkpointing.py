@@ -1301,8 +1301,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def test_side_effect_in_forward_hooks(self):
         """
         NOTE(yf225): Status:
-        1. Running forward pre-hook in compiled AC is supported
-        2. Running forward hook in compiled AC is WIP
+        1. [DONE] Running forward pre-hook in compiled AC
+        2. [TODO] Running forward hook in compiled AC
+        3. [TODO] Clean up and deduplicate
 
         We need support for both forward pre-hook and forward hook in AC region, because eager FSDP2 uses it
         (verified by patching https://gist.github.com/yf225/ae73b47c14f56f2b96ea3bfdfe2ed30c and then running test_train_parity_with_activation_checkpointing unit test).
