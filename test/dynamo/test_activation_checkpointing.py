@@ -1309,13 +1309,12 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def fwd_pre_hook(state, m, args):
             # TODO(yf225): explore how to support kwargs in forward hooks
-            # TODO(yf225): test multiple args input
             state.fwd_pre_hook_call_count += 1
             return (args[0] * 7, args[1] * 13)
 
-        # def fwd_hook(state, m, i, o):
-        #     state.fwd_hook_call_count += 1
-        #     return o
+        def fwd_hook(state, m, args, outputs):
+            state.fwd_hook_call_count += 1
+            return (outputs[0] * args[0] * 17, outputs[1] * args[1] * 19, outputs[2] * 23)
 
         def fn(model, args, state, compiled=False):
             if compiled:
@@ -1324,14 +1323,15 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 ctx = contextlib.nullcontext()
             with ctx:
                 self.assertEqual(state.fwd_pre_hook_call_count, 0)  # before forward
-                # self.assertEqual(state.fwd_hook_call_count, 0)
+                # self.assertEqual(state.fwd_hook_call_count, 0)  # before forward
                 out = model(*args)
                 self.assertEqual(state.fwd_pre_hook_call_count, 1)  # after forward
-                # self.assertEqual(state.fwd_hook_call_count, 1)
-                loss = out.sum()
+                # self.assertEqual(state.fwd_hook_call_count, 1)  # after forward
+                print(f"out: {out}")
+                loss = out[2].sum()
                 loss.backward()
                 self.assertEqual(state.fwd_pre_hook_call_count, 2)  # after backward
-                # self.assertEqual(state.fwd_hook_call_count, 2)
+                # self.assertEqual(state.fwd_hook_call_count, 2)  # after backward
                 return out, loss
 
         class TestModel(torch.nn.Module):
@@ -1340,7 +1340,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 self.lin = torch.nn.Linear(8, 8)
 
             def forward(self, x, y):
-                return self.lin(x) + self.lin(y)
+                lin_x_out = self.lin(x)
+                lin_y_out = self.lin(y)
+                return lin_x_out, lin_y_out, lin_x_out + lin_y_out
 
         def test_fn(compiled=False, hook_using_partial=False):
             torch.manual_seed(0)
@@ -1348,11 +1350,15 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             state = MyState()
             if hook_using_partial:
                 mod.register_forward_pre_hook(functools.partial(fwd_pre_hook, state))
+                # mod.register_forward_hook(functools.partial(fwd_hook, state))
             else:
-                def _hook(m, i):
-                    return fwd_pre_hook(state, m, i)
-                mod.register_forward_pre_hook(_hook)
-            # mod.register_forward_hook(fwd_hook)
+                def _pre_hook(m, args):
+                    return fwd_pre_hook(state, m, args)
+                mod.register_forward_pre_hook(_pre_hook)
+                def _hook(m, args, outputs):
+                    return fwd_hook(state, m, args, outputs)
+                # mod.register_forward_hook(_hook)
+            
             mod = CheckpointWrapper(mod)
             if compiled:
                 mod = torch.compile(mod, backend=cnt, fullgraph=True)

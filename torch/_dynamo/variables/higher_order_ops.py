@@ -606,7 +606,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "_export_tracepoint":
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "trace_wrapped" or value.__name__ == "trace_wrapped_fwd_hook":
+        elif value.__name__ in ["trace_wrapped", "trace_wrapped_fwd_pre_hook", "trace_wrapped_fwd_hook"]:
             return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
         elif value.__name__ == "strict_mode":
             return StrictModeHigherOrderVariable(value, source, **kwargs)

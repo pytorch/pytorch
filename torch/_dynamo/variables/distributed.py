@@ -8,9 +8,10 @@ from torch.fx.experimental._backward_state import BackwardState
 
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
+from .._trace_wrapped_fwd_pre_hook_higher_order_op import trace_wrapped_fwd_pre_hook
 from .._trace_wrapped_fwd_hook_higher_order_op import trace_wrapped_fwd_hook
 from ..exc import unimplemented
-from ..external_utils import call_module_hooks_from_backward_state, call_module_forward_hooks_from_backward_state
+from ..external_utils import call_module_hooks_from_backward_state, call_module_forward_pre_hook_from_backward_state, call_module_forward_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import istype
@@ -301,35 +302,40 @@ class ProcessGroupVariable(DistributedVariable):
         return istype(value, (ProcessGroup, FakeProcessGroup))
 
 
+# TODO(yf225): is there prior art for how to handle this?
+def _get_example_value(x):
+    if isinstance(x, variables.TensorVariable):
+        return x.proxy.node.meta["example_value"]
+    return x.as_python_constant()
+
+
 class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
     """
-    Handles module-level forward pre-hooks.
+    Handles module-level forward pre-hook.
     """
 
     @staticmethod
     def create(
         tx,
         module: VariableTracker,
-        # user_hooks: VariableTracker,
-        user_pre_hooks: VariableTracker,
+        user_pre_hook: VariableTracker,
         source: AttrSource,
     ):
+        # TODO(yf225): no need for this create function
         proxy = None
-        return ForwardPreHookUnderCheckpoint(proxy, module, user_pre_hooks, source=source)
+        return ForwardPreHookUnderCheckpoint(proxy, module, user_pre_hook, source=source)
 
     def __init__(
         self,
         proxy: torch.fx.Proxy,
         module: VariableTracker,
-        # user_hooks: VariableTracker,
-        user_pre_hooks: VariableTracker,
+        user_pre_hook: VariableTracker,
         **options,
     ) -> None:
-        super().__init__(fn=user_pre_hooks.fn, **options)
+        super().__init__(fn=user_pre_hook.fn, **options)
         self.proxy = proxy
         self.module = module
-        # self.user_hooks = user_hooks
-        self.user_pre_hooks = user_pre_hooks
+        self.user_pre_hook = user_pre_hook
 
     def as_proxy(self):
         return self.proxy
@@ -341,78 +347,143 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
             return super().call_function_inner(tx, args, kwargs)
 
         if not compiled_autograd.compiled_autograd_enabled:
-            unimplemented("module-level forward pre-hooks require compiled autograd")
+            unimplemented("module-level forward pre-hook require compiled autograd")
 
         module_name, bw_state_proxy = tx.output.add_backward_state_hook(self.module, "mod")
-        user_pre_hooks_name, _ = tx.output.add_backward_state_hook(self.user_pre_hooks)
-        # user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
+        user_pre_hook_name, _ = tx.output.add_backward_state_hook(self.user_pre_hook)
 
-        def _in_graph_fw_pre_hooks(bw_state):
+        def _in_graph_fw_pre_hook(bw_state):
             """
-            Rather than installing the user hooks in the graph (which
-            don't survive AotAutograd), we install hooks that will call
+            Rather than installing the user hook in the graph (which
+            don't survive AotAutograd), we install hook that will call
             trace_wrapped in the backward pass that CompiledAutograd
             can turn into actual hook calls.
             """
             return functools.partial(
-                trace_wrapped_fwd_hook,
-                fn=call_module_forward_hooks_from_backward_state,
+                trace_wrapped_fwd_pre_hook,
+                fn=call_module_forward_pre_hook_from_backward_state,
                 bw_state=bw_state,
-                hooks_name=user_pre_hooks_name,
+                hook_name=user_pre_hook_name,
                 module_name=module_name,
             )
 
         hook_proxy = tx.output.create_proxy(
             "call_function",
-            _in_graph_fw_pre_hooks,
+            _in_graph_fw_pre_hook,
             (bw_state_proxy,),
             {},
         )
-        # hook_proxy.node.meta["example_value"] = self.user_pre_hooks.fn
+        hook_proxy.node.meta["example_value"] = self.user_pre_hook.fn
 
         def call_hook(hook_proxy, *args, **kwargs):
             return hook_proxy(None, *args, **kwargs)
-            # return tx.output.create_proxy(
-            #     "call_function",
-            #     functools.partial(hook_proxy, self.module),
-            #     args,
-            #     kwargs,
-            # ),
-            # return functools.partial(
-            #     trace_wrapped_fwd_hook,
-            #     fn=call_module_forward_hooks_from_backward_state,
-            #     bw_state=bw_state_proxy,
-            #     hooks_name=user_pre_hooks_name,
-            #     module_name=module_name,
-            # )(*args, **kwargs)
-            # return functools.partial(self.user_pre_hooks.fn, self.module.value)(*args, **kwargs)
 
         assert len(args) == 2
-        assert isinstance(args[1], variables.TupleVariable)
-        # TODO(yf225): is there prior art for how to handle this?
-        example_value = []
-        for arg in args[1].items:
-            if isinstance(arg, variables.TensorVariable):
-                example_value.append(arg.proxy.node.meta["example_value"])
-            else:
-                example_value.append(arg.as_python_constant())
-        new_args = wrap_fx_proxy(
+        hook_args = args[1]
+        assert isinstance(hook_args, variables.TupleVariable)  # hook args
+        new_hook_args = wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
                 "call_function",
                 call_hook,
-                tuple([hook_proxy] + list(args[1].as_proxy())),
+                tuple([hook_proxy] + [hook_args.as_proxy()]),
                 # tuple([arg.as_proxy()[0] for arg in args[1:]]),
                 {},
             ),
-            example_value=tuple(example_value),
+            example_value=tuple([_get_example_value(x) for x in hook_args.items]),
             source=self.source,
         )
 
-        return super().call_function_inner(tx, [self.module, new_args], kwargs)
+        return super().call_function_inner(tx, [self.module, new_hook_args], kwargs)
 
 
-# class ForwardHookUnderCheckpoint  # should we just merge this into ForwardPreHookUnderCheckpoint and rename that class?
+class ForwardHookUnderCheckpoint(variables.functions.UserFunctionVariable):
+    """
+    Handles module-level forward hook.
+    """
+
+    @staticmethod
+    def create(
+        tx,
+        module: VariableTracker,
+        user_hook: VariableTracker,
+        source: AttrSource,
+    ):
+        # TODO(yf225): no need for this create function
+        proxy = None
+        return ForwardHookUnderCheckpoint(proxy, module, user_hook, source=source)
+
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        module: VariableTracker,
+        user_hook: VariableTracker,
+        **options,
+    ) -> None:
+        super().__init__(fn=user_hook.fn, **options)
+        self.proxy = proxy
+        self.module = module
+        self.user_hook = user_hook
+
+    def as_proxy(self):
+        return self.proxy
+
+    def call_function(self, tx: "InstructionTranslator", args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]") -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            return super().call_function_inner(tx, args, kwargs)
+
+        if not compiled_autograd.compiled_autograd_enabled:
+            unimplemented("module-level forward hook require compiled autograd")
+
+        module_name, bw_state_proxy = tx.output.add_backward_state_hook(self.module, "mod")
+        user_hook_name, _ = tx.output.add_backward_state_hook(self.user_hook)
+
+        def _in_graph_fw_hook(bw_state):
+            """
+            Rather than installing the user hook in the graph (which
+            don't survive AotAutograd), we install hook that will call
+            trace_wrapped in the backward pass that CompiledAutograd
+            can turn into actual hook calls.
+            """
+            return functools.partial(
+                trace_wrapped_fwd_hook,
+                fn=call_module_forward_hook_from_backward_state,
+                bw_state=bw_state,
+                hook_name=user_hook_name,
+                module_name=module_name,
+            )
+
+        hook_proxy = tx.output.create_proxy(
+            "call_function",
+            _in_graph_fw_hook,
+            (bw_state_proxy,),
+            {},
+        )
+        hook_proxy.node.meta["example_value"] = self.user_hook.fn
+
+        def call_hook(hook_proxy, *args, **kwargs):
+            return hook_proxy(None, *args, **kwargs)
+
+        assert len(args) == 3
+        hook_args = args[1]
+        assert isinstance(hook_args, variables.TupleVariable)  # hook args
+        hook_outputs = args[2]
+        assert isinstance(hook_outputs, variables.TupleVariable)  # hook outputs
+        new_hook_outputs = wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                call_hook,
+                tuple([hook_proxy] + list(hook_args.as_proxy()) + list(hook_outputs.as_proxy())),
+                {},
+            ),
+            example_value=tuple([_get_example_value(x) for x in hook_outputs.items]),
+            source=self.source,
+        )
+
+        return super().call_function_inner(tx, [self.module, hook_args, new_hook_outputs], kwargs)
 
 class BackwardHookVariable(VariableTracker):
     """

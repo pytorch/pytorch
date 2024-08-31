@@ -3221,6 +3221,7 @@ if torch.distributed.is_available():
 MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_fwd_hook_higher_order_op",
+    "torch._dynamo._trace_wrapped_fwd_pre_hook_higher_order_op",
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",

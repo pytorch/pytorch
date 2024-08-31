@@ -103,6 +103,7 @@ class BaseListVariable(VariableTracker):
             )
         else:
             assert isinstance(index, (int, torch.SymInt))
+            assert index < len(self.items), f"self.items: {self.items}, len(self.items): {len(self.items)}, index: {index}"
             return self.items[index]
 
     def unpack_var_sequence(self, tx):

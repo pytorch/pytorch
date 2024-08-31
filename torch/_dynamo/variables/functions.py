@@ -334,13 +334,15 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     return variables.ForwardPreHookUnderCheckpoint.create(tx, mod_var, self, source=self.source).call_function(
                         tx, args, kwargs
                     )
-            # elif fn in (
-            #     *torch.nn.modules.module._global_forward_hooks.values(),
-            #     *mod._forward_hooks.values(),
-            # ):
-            #     return variables.ForwardHookUnderCheckpoint(fn, source=source).call_function(
-            #         tx, [self] + list(args), kwargs
-            #     )
+            elif self.fn in (
+                *torch.nn.modules.module._global_forward_hooks.values(),
+                *mod._forward_hooks.values(),
+            ):
+                assert self.source
+                with torch._dynamo.variables.higher_order_ops.dynamo_within_forward_hook_under_checkpoint(tx):
+                    return variables.ForwardHookUnderCheckpoint.create(tx, mod_var, self, source=self.source).call_function(
+                        tx, args, kwargs
+                    )
         ret = self.call_function_inner(tx, args, kwargs)
         return ret
 

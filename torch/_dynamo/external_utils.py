@@ -145,9 +145,19 @@ def call_module_hooks_from_backward_state(
     return result
 
 
-def call_module_forward_hooks_from_backward_state(
-    _, *args, bw_state, hooks_name: str, module_name: str
+def call_module_forward_pre_hook_from_backward_state(
+    _, *args, bw_state, hook_name: str, module_name: str
 ):
     module = getattr(bw_state, module_name)
-    hooks = getattr(bw_state, hooks_name)
-    return hooks(module, args)  # TODO: just make it "hook" in name, not "hooks"
+    hook = getattr(bw_state, hook_name)
+    assert len(args) == 1  # should only have 1 TupleVariable which maps to hook args
+    return hook(module, args[0])
+
+
+def call_module_forward_hook_from_backward_state(
+    _, *args, bw_state, hook_name: str, module_name: str
+):
+    module = getattr(bw_state, module_name)
+    hook = getattr(bw_state, hook_name)
+    assert len(args) == 2  # should have 2 TupleVariable: one for hook args and one for hook outputs
+    return hook(module, args[0], args[1])
