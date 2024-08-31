@@ -472,6 +472,12 @@ static Tensor _grid_sampler_2d_cpu_quantized(
   int64_t out_H = grid.size(1);
   int64_t out_W = grid.size(2);
   uint8_t zero_point = input.q_zero_point();
+  double quantized_value = value.value_or(0.) / input.q_scale() + zero_point;
+  if (padding_mode == GridSamplerPadding::Constant) {
+        TORCH_CHECK(
+          quantized_value >= 0 && quantized_value <= 255,
+          "_grid_sampler_2d_cpu_quantized(): constant padding value out of range for QUInt8 dtype");
+  }
   auto output = at::_empty_affine_quantized(
       {N, C, out_H, out_W},
       at::device(c10::kCPU).dtype(c10::kQUInt8),
@@ -534,19 +540,38 @@ static Tensor _grid_sampler_2d_cpu_quantized(
               out_ptr + n * out_sN + h * out_sH + w * out_sW;
           for (int64_t c = 0; c < C;
                ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
-            float res = 0;
-            res += within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)
-                ? inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw
-                : zero_point * nw;
-            res += within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)
-                ? inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW] * ne
-                : zero_point * ne;
-            res += within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)
-                ? inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW] * sw
-                : zero_point * sw;
-            res += within_bounds_2d(iy_se, ix_se, inp_H, inp_W)
-                ? inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se
-                : zero_point * se;
+            double res = 0;
+            bool any_within_bounds = false;
+
+            if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
+              res += inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw;
+              any_within_bounds = true;
+            } else {
+              res += zero_point * nw;
+            }
+            if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
+              res += inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW] * ne;
+              any_within_bounds = true;
+            } else {
+              res += zero_point * ne;
+            }
+            if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
+              res += inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW] * sw;
+              any_within_bounds = true;
+            } else {
+              res += zero_point * sw;
+            }
+            if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
+              res += inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se;
+              any_within_bounds = true;
+            } else {
+              res += zero_point * se;
+            }
+
+            if (!any_within_bounds && padding_mode == GridSamplerPadding::Constant) {
+              res = quantized_value;
+            }
+
             *out_ptr_NCHW = std::nearbyint(res);
           }
         }
@@ -565,8 +590,6 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
   check_grid_sampler_2d(input, grid);
-
-#define HANDLE_CONSTANT_PADDING(padding_mode) padding_mode == GridSamplerPadding::Constant ? value.value_or(0.) : 0
 
   auto interpolation_mode = static_cast<GridSamplerInterpolation>(interpolation_mode_);
   auto padding_mode = static_cast<GridSamplerPadding>(padding_mode_);
@@ -675,7 +698,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               if (within_bounds_2d(iy_nearest, ix_nearest, inp_H, inp_W)) {
                 *out_ptr_NCHW = inp_ptr_NC[iy_nearest * inp_sH + ix_nearest * inp_sW];
               } else {
-                *out_ptr_NCHW = static_cast<scalar_t>(HANDLE_CONSTANT_PADDING(padding_mode));
+                *out_ptr_NCHW = static_cast<scalar_t>(value.value_or(0.));
               }
             }
           } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
@@ -701,10 +724,10 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               // Interpolate 4 values in the x direction
               for (const auto i : c10::irange(4)) {
                 coefficients[i] = cubic_interp1d<scalar_t>(
-                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, HANDLE_CONSTANT_PADDING(padding_mode)),
-                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, HANDLE_CONSTANT_PADDING(padding_mode)),
-                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, HANDLE_CONSTANT_PADDING(padding_mode)),
-                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, HANDLE_CONSTANT_PADDING(padding_mode)),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, value.value_or(0.)),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, value.value_or(0.)),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, value.value_or(0.)),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, value.value_or(0.)),
                   tx);
               }
 
@@ -722,7 +745,6 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
     }
   });
   return output;
-#undef HANDLE_CONSTANT_PADDING
 }
 
 std::tuple<Tensor, Tensor>
@@ -1064,6 +1086,11 @@ Tensor grid_sampler(
   bool align_corners,
   std::optional<double> value
 ) {
+
+  TORCH_CHECK(!value.has_value() || *value == 0 || static_cast<GridSamplerPadding>(padding_mode) == GridSamplerPadding::Constant,
+              "Padding mode \"", padding_mode_string(static_cast<GridSamplerPadding>(padding_mode)),
+              "\" doesn't take in value argument");
+
   if (cond_cudnn_grid_sampler(input, grid) &&
       static_cast<GridSamplerInterpolation>(interpolation_mode) ==
         GridSamplerInterpolation::Bilinear &&

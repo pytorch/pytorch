@@ -563,7 +563,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
   inline void forward(TensorAccessor<scalar_t, 3>& out_slice,
                       const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
-                      int64_t len, float value) const {
+                      int64_t len, const double value) const {
     auto x = compute_W.apply(grid_x);
     auto y = compute_H.apply(grid_y);
 
@@ -752,7 +752,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
   inline void forward(TensorAccessor<scalar_t, 3>& out_slice,
                       const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
-                      int64_t len, float value) const {
+                      int64_t len, const double value) const {
     auto x = compute_W.apply(grid_x);
     auto y = compute_H.apply(grid_y);
 
@@ -890,7 +890,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     coeffs[3] = (Vec(3) * A * x - Vec(10) * A) * x + Vec(8) * A;
   }
 
-  inline Vec get_value_bounded(const scalar_t* data, const Vec& x, const Vec& y, float value) const {
+  inline Vec get_value_bounded(const scalar_t* data, const Vec& x, const Vec& y, const double value) const {
     auto ix = convert_to_int_of_same_size(compute_W.compute_coordinates(x));
     auto iy = convert_to_int_of_same_size(compute_H.compute_coordinates(y));
 
@@ -933,7 +933,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   inline void forward(TensorAccessor<scalar_t, 3>& out_slice,
                       const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
-                      int64_t len, float value) const {
+                      int64_t len, const double value) const {
 
     auto x = compute_W.unnormalize(grid_x);
     auto y = compute_H.unnormalize(grid_y);

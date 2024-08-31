@@ -102,4 +102,18 @@ inline bool cond_cudnn_grid_sampler(
     input.sym_size(1) <= 1024);
 }
 
+static inline c10::string_view padding_mode_string(GridSamplerPadding m) {
+  switch (m) {
+    case GridSamplerPadding::Zeros:
+      return "zeros";
+    case GridSamplerPadding::Border:
+      return "border";
+    case GridSamplerPadding::Reflection:
+      return "reflection";
+    case GridSamplerPadding::Constant:
+      return "constant";
+  }
+  TORCH_CHECK(false, "Invalid padding mode (", static_cast<int64_t>(m), ")");
+}
+
 } // namespace at::native

@@ -220,7 +220,7 @@ static inline scalar_t get_value_bounded(
     int64_t sH,
     GridSamplerPadding padding_mode,
     bool align_corners,
-    double value) {
+    const double value) {
 
   x = compute_coordinates(x, W, padding_mode, align_corners);
   y = compute_coordinates(y, H, padding_mode, align_corners);
