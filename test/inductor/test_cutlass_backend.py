@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import logging
+import math
 import os
 import unittest
 from typing import Callable, List, Optional
@@ -9,17 +10,19 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
-from torch._inductor.ir import ChoiceCaller
+from torch._inductor.codegen.cuda.cutlass_utils import get_max_alignment
+from torch._inductor.ir import ChoiceCaller, FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
+from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -33,6 +36,7 @@ HAS_CUDA = HAS_CUDA and not torch.version.hip
 SM75OrLater = SM75OrLater and not torch.version.hip
 SM80OrLater = SM80OrLater and not torch.version.hip
 SM90OrLater = SM90OrLater and not torch.version.hip
+SM80 = SM80OrLater and torch.cuda.get_device_capability() == (8, 0)
 
 
 def _get_path_without_sccache() -> str:
@@ -168,8 +172,8 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
 
         with config.patch(
             {
@@ -183,6 +187,59 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_regular_mm_streamk(
+        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+            }
+        ):
+            for M, K, N in (
+                (128, 16, 128),
+                (1024, 256, 1024),
+                (
+                    16384,
+                    1024,
+                    16384,
+                ),
+                (
+                    16384,
+                    1408,
+                    16384,
+                ),
+            ):
+                a = torch.randn(M, K).cuda().half()
+                b = torch.randn(K, N).cuda().half()
+                Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+                Y = mm(a, b)
+                # we need relaxed numerical limits due to the sheer size of the
+                # matmuls involved. Many small addition differences add up.
+                torch.testing.assert_close(Y_compiled, Y, atol=0.01, rtol=0.01)
 
     def _test_max_autotune_cutlass_backend_epilogue_fusion(
         self,
@@ -479,7 +536,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not SM80, "need sm_80 exactly")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
@@ -503,8 +560,9 @@ class TestCutlassBackend(TestCase):
         # layouts for this operation, thus the transpose of tensor b.
         # Also, for CUTLASS alignment requirements, number of columns
         # of the first tensor has to be divisible by 16.
-        a = torch.randn(100, 16).cuda().half()
-        b = torch.randint(0, 5, (100, 16), dtype=torch.int8).cuda().T
+        m, n, k = 100, 16, 100
+        a = torch.randn(m, k).cuda().half()
+        b = torch.randint(0, 5, (n, k), dtype=torch.int8).cuda().T
 
         with config.patch(
             {
@@ -514,11 +572,78 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "use_mixed_mm": True,
+                "autotune_local_cache": True,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+
+        cache = torch._inductor.codecache.LocalCache().lookup("mixed_mm")
+        high = cache[
+            f"[('cuda', 'torch.float16', {m}, {k}, {k}, 1, 0), "
+            f"('cuda', 'torch.int8', {k}, {n}, 1, {k}, 0)]"
+        ]["high"]
+        cutlass_kernels_count = 0
+        for kernel, time in high.items():
+            if kernel.startswith("cutlass_gemm") and not math.isinf(time):
+                cutlass_kernels_count += 1
+        assert cutlass_kernels_count > 0
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM80, "need sm_80 exactly")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_sparse_semi_structured_mm(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        SparseSemiStructuredTensor._FORCE_CUTLASS = True
+
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        m, n, k = 32, 8, 64
+        mask = torch.tensor([0, 0, 1, 1]).tile(m, k // 4).cuda().half()
+        a = torch.rand(m, k).cuda().half() * mask
+        a_sparse = to_sparse_semi_structured(a)
+        b = torch.rand(k, n).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "autotune_local_cache": True,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a_sparse, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+        cache = torch._inductor.codecache.LocalCache().lookup(
+            "sparse_semi_structured_mm"
+        )
+        high = cache[
+            f"[('cuda', 'torch.float16', {m}, {k // 2}, {k // 2}, 1, 0), "
+            f"('cuda', 'torch.int16', {m}, {k // 16}, {k // 16}, 1, 0), "
+            f"('cuda', 'torch.float16', {k}, {n}, {n}, 1, 0)]"
+        ]["high"]
+        cutlass_kernels_count = 0
+        for kernel, time in high.items():
+            if kernel.startswith("cutlass_gemm") and not math.isinf(time):
+                cutlass_kernels_count += 1
+        assert cutlass_kernels_count > 0
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
@@ -615,6 +740,52 @@ class TestCutlassBackend(TestCase):
                             ), "Only pingpong Kernels should have been allowed"
                             cuda_template_count += 1
                     assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_get_max_alignment(self):
+        l4 = FixedLayout("cpu", torch.half, size=(1, 2, 4), stride=(0, 4, 1))
+        m4 = get_max_alignment(l4)
+        self.assertEqual(
+            m4, 4, "Wrong max alignment. Should have been 4. (simple, contiguous case)"
+        )
+
+        l4_2 = FixedLayout("cpu", torch.half, size=(1, 4, 2), stride=(0, 1, 4))
+        m4_2 = get_max_alignment(l4_2)
+        self.assertEqual(
+            m4_2,
+            4,
+            "Wrong max alignment. Should have been 4. Did not deal with strides correctly",
+        )
+
+        l1 = FixedLayout("cpu", torch.half, size=(2, 4, 2), stride=(23, 1, 4))
+        m1 = get_max_alignment(l1)
+        self.assertEqual(
+            m1,
+            1,
+            "Wrong max alignment. Should have been 1. Did not take stride into account correctly",
+        )
+
+        l2 = FixedLayout("cpu", torch.half, size=(1, 2, 4), stride=(0, 4, 1), offset=6)
+        m2 = get_max_alignment(l2)
+        self.assertEqual(
+            m2, 2, "Wrong max alignment. Should have been 2. (due to choice of offset)"
+        )
+
+        l8 = FixedLayout(
+            "cpu", torch.half, size=(2, 2, 8), stride=(32, 8, 1), offset=24
+        )
+        m8 = get_max_alignment(l8)
+        self.assertEqual(m8, 8, "Wrong max alignment. Should have been 8.")
+
+        l4 = FixedLayout(
+            "cpu", torch.float32, size=(2, 2, 8), stride=(32, 8, 1), offset=24
+        )
+        m4 = get_max_alignment(l4)
+        self.assertEqual(
+            m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
+        )
 
 
 if __name__ == "__main__":

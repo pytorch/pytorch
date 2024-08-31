@@ -94,7 +94,6 @@ def define_kineto():
             "kineto/libkineto/include",
             "kineto/libkineto/src",
         ],
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
         raw_headers = glob([
             "kineto/libkineto/include/*.h",
             "kineto/libkineto/src/*.h",
@@ -138,7 +137,6 @@ def define_kineto():
             "kineto/libkineto/include",
             "kineto/libkineto/src",
         ],
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
         raw_headers = glob([
             "kineto/libkineto/include/*.h",
             "kineto/libkineto/src/*.h",

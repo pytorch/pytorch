@@ -27,7 +27,7 @@ struct DefaultArgs : torch::CustomClassHolder {
     x = scale * x + add;
     return x;
   }
-  int64_t divide(c10::optional<int64_t> factor) {
+  int64_t divide(std::optional<int64_t> factor) {
     if (factor) {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       x = x / *factor;
@@ -58,6 +58,10 @@ struct Foo : torch::CustomClassHolder {
   }
   bool eq(c10::intrusive_ptr<Foo> other) {
     return this->x == other->x && this->y == other->y;
+  }
+  std::tuple<std::tuple<std::string, int64_t>, std::tuple<std::string, int64_t>>
+  __obj_flatten__() {
+    return std::tuple(std::tuple("x", this->x), std::tuple("y", this->y));
   }
 };
 
@@ -136,7 +140,7 @@ struct TensorQueue : torch::CustomClassHolder {
 
     for (const auto index : c10::irange(queue_size)) {
       at::Tensor val;
-      queue_[index] = dict.at(key + "/" + c10::to_string(index));
+      queue_[index] = dict.at(key + "/" + std::to_string(index));
       queue_.push_back(val);
     }
   }
@@ -148,7 +152,7 @@ struct TensorQueue : torch::CustomClassHolder {
     dict.insert(
         key + "/size", torch::tensor(static_cast<int64_t>(queue_.size())));
     for (const auto index : c10::irange(queue_.size())) {
-      dict.insert(key + "/" + c10::to_string(index), queue_[index]);
+      dict.insert(key + "/" + std::to_string(index), queue_[index]);
     }
     return dict;
   }
@@ -186,6 +190,15 @@ struct TensorQueue : torch::CustomClassHolder {
     return queue_.size();
   }
 
+  bool is_empty() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return queue_.empty();
+  }
+
+  double float_size() {
+    return 1. * queue_.size();
+  }
+
   std::vector<at::Tensor> clone_queue() {
     std::lock_guard<std::mutex> guard(mutex_);
     std::vector<at::Tensor> ret;
@@ -199,10 +212,29 @@ struct TensorQueue : torch::CustomClassHolder {
     return raw_queue;
   }
 
+  std::tuple<std::tuple<std::string, std::vector<at::Tensor>>> __obj_flatten__() {
+    return std::tuple(std::tuple("queue", this->get_raw_queue()));
+  }
+
  private:
   std::deque<at::Tensor> queue_;
   std::mutex mutex_;
   at::Tensor init_tensor_;
+};
+
+struct ConstantTensorContainer : torch::CustomClassHolder {
+  explicit ConstantTensorContainer(at::Tensor x) : x_(x) {}
+
+  at::Tensor get() {
+    return x_;
+  }
+
+  std::string tracing_mode() {
+    return "real";
+  }
+
+ private:
+  at::Tensor x_;
 };
 
 at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
@@ -326,7 +358,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
   // collection types like vector, optional, and dict.
   using SerializationType = std::tuple<
       std::vector<std::string> /*input_names_*/,
-      c10::optional<std::string> /*output_name_*/,
+      std::optional<std::string> /*output_name_*/,
       c10::Dict<std::string, at::Tensor> /*constants_*/,
       std::vector<InstructionType> /*instructions_*/
       >;
@@ -352,7 +384,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
 
   // Class members
   std::vector<std::string> input_names_;
-  c10::optional<std::string> output_name_;
+  std::optional<std::string> output_name_;
   c10::Dict<std::string, at::Tensor> constants_;
   std::vector<InstructionType> instructions_;
 };
@@ -363,11 +395,31 @@ struct ReLUClass : public torch::CustomClassHolder {
   }
 };
 
+struct FlattenWithTensorOp : public torch::CustomClassHolder {
+  explicit FlattenWithTensorOp(at::Tensor t) : t_(t) {}
+
+  at::Tensor get() {
+    return t_;
+  }
+
+  std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {
+    return std::tuple(std::tuple("t", this->t_.sin()));
+  }
+
+ private:
+  at::Tensor t_;
+  ;
+};
+
 struct ContainsTensor : public torch::CustomClassHolder {
   explicit ContainsTensor(at::Tensor t) : t_(t) {}
 
   at::Tensor get() {
     return t_;
+  }
+
+  std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {
+    return std::tuple(std::tuple("t", this->t_));
   }
 
   at::Tensor t_;
@@ -417,6 +469,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("add_tensor", &Foo::add_tensor)
       .def("__eq__", &Foo::eq)
       .def("combine", &Foo::combine)
+      .def("__obj_flatten__", &Foo::__obj_flatten__)
       .def_pickle(
           [](c10::intrusive_ptr<Foo> self) { // __getstate__
             return std::vector<int64_t>{self->x, self->y};
@@ -424,6 +477,17 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           [](std::vector<int64_t> state) { // __setstate__
             return c10::make_intrusive<Foo>(state[0], state[1]);
           });
+
+  m.class_<FlattenWithTensorOp>("_FlattenWithTensorOp")
+      .def(torch::init<at::Tensor>())
+      .def("get", &FlattenWithTensorOp::get)
+      .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__);
+
+  m.class_<ConstantTensorContainer>("_ConstantTensorContainer")
+      .def(torch::init<at::Tensor>())
+      .def("get", &ConstantTensorContainer::get)
+      .def("tracing_mode", &ConstantTensorContainer::tracing_mode);
+
   m.def(
       "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
   m.def(
@@ -551,6 +615,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<ContainsTensor>("_ContainsTensor")
       .def(torch::init<at::Tensor>())
       .def("get", &ContainsTensor::get)
+      .def("__obj_flatten__", &ContainsTensor::__obj_flatten__)
       .def_pickle(
           // __getstate__
           [](const c10::intrusive_ptr<ContainsTensor>& self) -> at::Tensor {
@@ -565,9 +630,12 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("push", &TensorQueue::push)
       .def("pop", &TensorQueue::pop)
       .def("top", &TensorQueue::top)
+      .def("is_empty", &TensorQueue::is_empty)
+      .def("float_size", &TensorQueue::float_size)
       .def("size", &TensorQueue::size)
       .def("clone_queue", &TensorQueue::clone_queue)
       .def("get_raw_queue", &TensorQueue::get_raw_queue)
+      .def("__obj_flatten__", &TensorQueue::__obj_flatten__)
       .def_pickle(
           // __getstate__
           [](const c10::intrusive_ptr<TensorQueue>& self)

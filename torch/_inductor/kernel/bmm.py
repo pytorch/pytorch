@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 
 import torch
@@ -15,10 +16,9 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-
 from .mm import _is_static_problem
-
 from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -59,8 +59,15 @@ bmm_template = TritonTemplate(
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
+        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+    else:
+        ram = rm % M
+    if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
+        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    else:
+        rbn = rn % N
+
     rk = tl.arange(0, BLOCK_K)
 
     idx_q = tl.program_id(1)  # batch dimension for BMM
@@ -149,9 +156,9 @@ def tuned_bmm(mat1, mat2, *, layout=None):
             )
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+        from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
     if len(choices) == 0:
         log.warning("No choices for GEMM, using ATen backend as fallback")

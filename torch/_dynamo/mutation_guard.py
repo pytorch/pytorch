@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
 
 import functools
@@ -5,9 +6,12 @@ import weakref
 
 import torch.nn
 from torch.nn import Module
-from . import config
 
-from .utils import ExactWeakKeyDictionary, is_lazy_module
+from . import config
+from .utils import ExactWeakKeyDictionary, is_lazy_module, nn_module_has_global_hooks
+
+
+unpatched_nn_module_init = torch.nn.Module.__init__
 
 
 class MutationTracker:
@@ -83,6 +87,12 @@ class GenerationTracker:
             and cls.generation_values[obj] == cls.generation
         )
 
+    @classmethod
+    def clear(cls):
+        cls.generation = 0
+        cls.dynamic_classes = ExactWeakKeyDictionary()
+        cls.generation_values = ExactWeakKeyDictionary()
+
 
 def is_dynamic_nn_module(obj, is_export):
     """Check for nn.Modules() created dynamically or mutated"""
@@ -97,7 +107,14 @@ def is_dynamic_nn_module(obj, is_export):
     # 1) Input signature problem because params are lifted as inputs
     # 2) nn module stack info changes
     # 3) adjust failing tests
-    if config.inline_inbuilt_nn_modules and not is_export:
+    if (
+        isinstance(obj, torch.nn.Module)
+        and config.inline_inbuilt_nn_modules
+        and not is_export
+    ):
+        return True
+
+    if isinstance(obj, torch.nn.Module) and nn_module_has_global_hooks():
         return True
     dyn = GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
         obj

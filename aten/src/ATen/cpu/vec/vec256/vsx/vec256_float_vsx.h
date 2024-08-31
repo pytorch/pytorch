@@ -267,6 +267,9 @@ class Vectorized<float> {
   Vectorized<float> C10_ALWAYS_INLINE acos() const {
     return {Sleef_acosf4_u10(_vec0), Sleef_acosf4_u10(_vec1)};
   }
+  Vectorized<float> C10_ALWAYS_INLINE acosh() const {
+  return {Sleef_acoshf4_u10(_vec0), Sleef_acoshf4_u10(_vec1)};
+  }
   Vectorized<float> C10_ALWAYS_INLINE asin() const {
     return {Sleef_asinf4_u10(_vec0), Sleef_asinf4_u10(_vec1)};
   }
@@ -454,6 +457,41 @@ Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<fl
 template <>
 Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
   return a.minimum(b);
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator+(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator-(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator*(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator/(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_div(a.vec0(), b.vec0()), vec_div(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator&(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator|(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator^(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
 }
 
 } // namespace

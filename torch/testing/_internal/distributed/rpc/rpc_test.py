@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import concurrent.futures
 import contextlib
@@ -144,7 +144,7 @@ def set_and_check_done(value):
 TensorClass = namedtuple("TensorClass", ["tensors"])
 
 class MyPickleClass:
-    def __init__(self):
+    def __init__(self) -> None:
         self.t = None
 
     def __getstate__(self):
@@ -1232,7 +1232,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_rref_proxy_non_exist(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
-        msg = "has no attribute \'non_exist\'"
+        msg = "has no attribute 'non_exist'"
         with self.assertRaisesRegex(AttributeError, msg):
             rref.rpc_sync().non_exist()
 
@@ -1446,7 +1446,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             world_size=self.world_size)
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = torch.nn.Linear(3, 4)
 

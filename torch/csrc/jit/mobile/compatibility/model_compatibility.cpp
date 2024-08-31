@@ -20,8 +20,7 @@ namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
 } // namespace c10
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
@@ -31,7 +30,7 @@ using caffe2::serialize::ReadAdapterInterface;
 c10::IValue readArchive(
     const std::string& archive_name,
     PyTorchStreamReader& stream_reader) {
-  c10::optional<at::Device> device;
+  std::optional<at::Device> device;
   std::shared_ptr<CompilationUnit> compilation_unit =
       std::make_shared<CompilationUnit>();
 
@@ -43,7 +42,7 @@ c10::IValue readArchive(
 
   std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit =
       std::make_shared<mobile::CompilationUnit>();
-  auto obj_loader = [&](const at::StrongTypePtr& type, IValue input) {
+  auto obj_loader = [&](const at::StrongTypePtr& type, const IValue& input) {
     return objLoaderMobile(type, input, *mobile_compilation_unit);
   };
   bool bytecode_tensor_in_constants_archive =
@@ -86,7 +85,7 @@ uint64_t _get_model_bytecode_version(const std::string& filename) {
 }
 
 uint64_t _get_model_bytecode_version(
-    std::shared_ptr<ReadAdapterInterface> rai) {
+    const std::shared_ptr<ReadAdapterInterface>& rai) {
   auto [data, size] = get_rai_content(rai.get());
   return _get_model_bytecode_version_from_bytes(data.get(), size);
 }
@@ -345,7 +344,7 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
 
 ModelCompatCheckResult is_compatible(
     RuntimeCompatibilityInfo runtime_info,
-    ModelCompatibilityInfo model_info) {
+    const ModelCompatibilityInfo& model_info) {
   ModelCompatCheckResult result = {ModelCompatibilityStatus::OK, {}};
   // Check that the models bytecode version is less than or equal to
   // kMaxSupportedBytecodeVersion from the runtime
@@ -444,5 +443,4 @@ ModelCompatCheckResult is_compatible(
   return result;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

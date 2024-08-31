@@ -16,10 +16,9 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
-c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
+std::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
     bool ignore_custom_classes,
     AliasDb* db) {
@@ -28,14 +27,14 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     if (auto ival = toIValue(input)) {
       stack.push_back(*ival);
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
   switch (n->kind()) {
     case prim::ListUnpack: {
       if (stack.back().toList().size() != n->outputs().size()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       listUnpack(stack, n->outputs().size());
     } break;
@@ -78,14 +77,14 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
         // vararg schemas require the number of inputs at the top of the stack
         // but this is broken in other places in constant prop, so disable it
         // for now
-        return c10::nullopt;
+        return std::nullopt;
       }
 
       try {
         auto op = n->getOperation();
         op(stack);
       } catch (...) {
-        return c10::nullopt;
+        return std::nullopt;
       }
     } break;
   }
@@ -95,13 +94,13 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
       const at::Tensor& t = v.toTensor();
       if (t.defined() && t.requires_grad()) {
         // requires grad tensors cannot be constants
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
     // Weak form of const propagation
     if (ignore_custom_classes) {
       if (v.isCustomClass()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
     // see [Constant Object Weak CompilationUnit Reference]
@@ -123,7 +122,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     }
     if (v.isObject()) {
       if (!v.toObject()->is_weak_compilation_ref()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
   }
@@ -348,8 +347,7 @@ struct ConstantPropagator {
   }
 
   bool supportedNode(Node* n) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    bool no_mutation;
+    bool no_mutation = false;
     if (aliasing_types_) {
       no_mutation = !getOrCreateAliasDb()->hasWriters(n);
     } else {
@@ -434,5 +432,4 @@ bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   return made_change;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

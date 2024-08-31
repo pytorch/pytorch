@@ -29,6 +29,7 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   return c10::GetCPUAllocator();
 }
 
+#ifndef C10_MOBILE
 constexpr uint64_t storage_max() {
   // int64_t and size_t are used somewhat inconsistently throughout ATen.
   // To be safe, storage size calculations must fit in both types.
@@ -38,6 +39,7 @@ constexpr uint64_t storage_max() {
       std::numeric_limits<size_t>::max());
   return std::min(int64_max, size_max);
 }
+#endif
 
 inline void raise_warning_for_complex_half(ScalarType dtype) {
   if (dtype == kComplexHalf) {
@@ -163,7 +165,7 @@ TensorBase _empty_generic(
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
     ScalarType scalar_type,
-    c10::optional<c10::MemoryFormat> memory_format_opt) {
+    std::optional<c10::MemoryFormat> memory_format_opt) {
   at::detail::check_size_nonnegative(size);
   at::detail::raise_warning_for_complex_half(scalar_type);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
@@ -197,7 +199,7 @@ TensorBase empty_generic(
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
     ScalarType scalar_type,
-    c10::optional<c10::MemoryFormat> memory_format_opt) {
+    std::optional<c10::MemoryFormat> memory_format_opt) {
   return _empty_generic(size, allocator, ks, scalar_type, memory_format_opt);
 }
 
@@ -206,7 +208,7 @@ TensorBase empty_generic_symint(
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
     ScalarType scalar_type,
-    c10::optional<c10::MemoryFormat> memory_format_opt) {
+    std::optional<c10::MemoryFormat> memory_format_opt) {
   return _empty_generic(size, allocator, ks, scalar_type, memory_format_opt);
 }
 
@@ -252,7 +254,7 @@ TensorBase empty_strided_symint_generic(
 }
 
 TensorBase empty_cpu(IntArrayRef size, ScalarType dtype, bool pin_memory,
-                     c10::optional<c10::MemoryFormat> memory_format_opt) {
+                     std::optional<c10::MemoryFormat> memory_format_opt) {
   auto allocator = GetCPUAllocatorMaybePinned(pin_memory);
   constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
   return empty_generic(size, allocator, cpu_ks, dtype, memory_format_opt);
@@ -260,11 +262,11 @@ TensorBase empty_cpu(IntArrayRef size, ScalarType dtype, bool pin_memory,
 
 TensorBase empty_cpu(
     IntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt,
-    c10::optional<c10::MemoryFormat> memory_format_opt) {
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt,
+    std::optional<c10::MemoryFormat> memory_format_opt) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
@@ -295,10 +297,10 @@ TensorBase empty_strided_cpu(IntArrayRef size, IntArrayRef stride,
 TensorBase empty_strided_cpu(
     IntArrayRef size,
     IntArrayRef stride,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt) {
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
@@ -328,7 +330,7 @@ struct MetaAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t nbytes) override {
+  DataPtr allocate(const size_t nbytes [[maybe_unused]]) override {
     return {nullptr, nullptr, &deleter, at::Device(DeviceType::Meta)};
   }
   DeleterFnPtr raw_deleter() const override {
@@ -342,7 +344,7 @@ static MetaAllocator g_meta_alloc;
 REGISTER_ALLOCATOR(kMeta, &g_meta_alloc);
 
 TensorBase empty_meta(IntArrayRef size, ScalarType dtype,
-                     c10::optional<c10::MemoryFormat> memory_format_opt) {
+                     std::optional<c10::MemoryFormat> memory_format_opt) {
   auto *allocator = GetAllocator(kMeta);
   constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
   return at::detail::empty_generic(
@@ -351,11 +353,11 @@ TensorBase empty_meta(IntArrayRef size, ScalarType dtype,
 
 TensorBase empty_meta(
   IntArrayRef size,
-  c10::optional<ScalarType> dtype_opt,
-  c10::optional<Layout> layout_opt,
-  c10::optional<Device> device_opt,
-  c10::optional<bool> pin_memory_opt,
-  c10::optional<c10::MemoryFormat> memory_format_opt
+  std::optional<ScalarType> dtype_opt,
+  std::optional<Layout> layout_opt,
+  std::optional<Device> device_opt,
+  std::optional<bool> pin_memory_opt,
+  std::optional<c10::MemoryFormat> memory_format_opt
 ) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::Meta);
   // NB: because there is no SparseMeta (yet), non-strided layout is
@@ -371,11 +373,11 @@ TensorBase empty_meta(
 
 TensorBase empty_symint_meta(
   SymIntArrayRef size,
-  c10::optional<ScalarType> dtype_opt,
-  c10::optional<Layout> layout_opt,
-  c10::optional<Device> device_opt,
-  c10::optional<bool> pin_memory_opt,
-  c10::optional<c10::MemoryFormat> memory_format_opt
+  std::optional<ScalarType> dtype_opt,
+  std::optional<Layout> layout_opt,
+  std::optional<Device> device_opt,
+  std::optional<bool> pin_memory_opt,
+  std::optional<c10::MemoryFormat> memory_format_opt
 ) {
   auto *allocator = GetAllocator(kMeta);
   constexpr c10::DispatchKeySet ks(c10::DispatchKey::Meta);
@@ -405,10 +407,10 @@ TensorBase empty_strided_meta(IntArrayRef size, IntArrayRef stride,
 TensorBase empty_strided_meta(
     IntArrayRef size,
     IntArrayRef stride,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt) {
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::Meta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
@@ -440,10 +442,9 @@ TensorBase empty_strided_symint_meta(SymIntArrayRef size, SymIntArrayRef stride,
 TensorBase empty_strided_symint_meta(
     SymIntArrayRef size,
     SymIntArrayRef stride,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt) {
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::Meta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
@@ -460,8 +461,7 @@ TensorBase empty_strided_symint_meta(
       stride,
       optTypeMetaToScalarType(options.dtype_opt()),
       options.layout_opt(),
-      options.device_opt(),
-      options.pinned_memory_opt());
+      options.device_opt());
 }
 
 } // namespace at::detail

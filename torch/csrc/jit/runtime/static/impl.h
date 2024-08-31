@@ -405,7 +405,7 @@ class BlockInfo {
 class TORCH_API StaticModule {
  public:
   explicit StaticModule(
-      std::shared_ptr<torch::jit::Graph> g,
+      const std::shared_ptr<torch::jit::Graph>& g,
       const StaticModuleOptions& opts = StaticModuleOptions(),
       std::vector<IValue> sample_inputs = {});
 
@@ -417,7 +417,7 @@ class TORCH_API StaticModule {
 
  private:
   explicit StaticModule(
-      std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
+      std::pair<std::shared_ptr<torch::jit::Graph>, std::optional<Module>>
           graph_and_module,
       const StaticModuleOptions& opts);
 
@@ -490,7 +490,7 @@ class TORCH_API StaticModule {
 
   C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
-  const c10::optional<c10::FunctionSchema>& schema() const {
+  const std::optional<c10::FunctionSchema>& schema() const {
     return schema_;
   }
 
@@ -539,8 +539,8 @@ class TORCH_API StaticModule {
   // metadata that is stored in IR nodes as attribute
   at::intrusive_ptr<jit::StaticRuntimeMetadata> sr_metadata_;
   std::shared_ptr<torch::jit::Graph> graph_;
-  c10::optional<torch::jit::Module> module_;
-  c10::optional<c10::FunctionSchema> schema_;
+  std::optional<torch::jit::Module> module_;
+  std::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
 
   // Bookkeeping for creating new StaticRuntime instances
@@ -556,7 +556,7 @@ class TORCH_API StaticModule {
 
   size_t num_intermediate_values_ = 0;
 
-  // Includes self if module_ != nullopt.
+  // Includes self if module_ != std::nullopt.
   // Note that we might have num_inputs_ == 0 even if the schema has a `self`
   // argument. In this case, `self` isn't used in the graph, but the schema
   // includes it anyways to be consistent with the JIT interpreter.

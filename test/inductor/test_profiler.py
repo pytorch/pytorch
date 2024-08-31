@@ -1,18 +1,17 @@
 # Owner(s): ["module: inductor"]
 import json
 import unittest
+from typing import Callable, Optional
 
 import torch
 import torch._inductor.test_case
 import torch._inductor.utils
-
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
-
-from torch.testing._internal.common_utils import skipIfRocm, TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.inductor_utils import HAS_CUDA
-
 from torch.utils._triton import has_triton
+
 
 HAS_TRITON = has_triton()
 
@@ -49,7 +48,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             any(("name" in event and kernel_name == event["name"]) for event in events)
         )
 
-    def _test_profiling_kernel_names(self, fn, args, kernel_name_str: str):
+    def _test_profiling_kernel_names(
+        self, fn, args, kernel_name_str: str, check_fn: Optional[Callable] = None
+    ):
         """
         We expect a record_function event to be added on the CPU side, surrounding
         the launch of each triton kernel.
@@ -58,6 +59,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
         for _ in range(2):
             fn_opt(*args)
+
+        if check_fn is not None:
+            check_fn()
 
         with torch.profiler.profile(
             activities=[ProfilerActivity.CPU], record_shapes=True
@@ -99,7 +103,6 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
-    @skipIfRocm
     def test_inductor_profiling_kernel_names_template(self):
         with config.patch(
             {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
@@ -110,7 +113,21 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
             args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
 
-            events = self._test_profiling_kernel_names(fn, args, "mm")
+            def check_fn():
+                # test_profiling_kernel_names will check this before asserting mm is in the trace.
+                # reason: sometimes testing runs on machines with not enough SMs, and autotuning is skipped.
+                if (
+                    torch._dynamo.utils.counters["inductor"][
+                        "select_algorithm_autotune"
+                    ]
+                    == 0
+                ):
+                    raise unittest.SkipTest(
+                        "select_algorithm didn't run, we probably won't get profiling data. GPU might not have enough SMs."
+                    )
+
+            events = self._test_profiling_kernel_names(fn, args, "mm", check_fn)
+
             event_found = False
             for event in events:
                 if event.name == "triton_tem_fused_mm_0":
@@ -159,10 +176,10 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
         hooks_called = {"enter": False, "exit": False}
 
-        def launch_enter_hook(*args):
+        def launch_enter_hook(lazy_dict):
             hooks_called["enter"] = True
 
-        def launch_exit_hook(*args):
+        def launch_exit_hook(lazy_dict):
             hooks_called["exit"] = True
 
         CompiledKernel.launch_enter_hook = launch_enter_hook

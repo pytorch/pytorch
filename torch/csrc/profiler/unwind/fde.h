@@ -7,6 +7,8 @@
 #include <sstream>
 #include <vector>
 
+namespace torch::unwind {
+
 struct TableState {
   Action cfa;
   std::array<Action, D_REG_SIZE> registers;
@@ -398,3 +400,5 @@ struct FDE {
     return strstr(augmentation_string_, s) != nullptr;
   }
 };
+
+} // namespace torch::unwind

@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <memory>
 
+namespace torch::unwind {
 // helper to open a process with stdin/stdout/stderr streams.
 struct Communicate {
   Communicate(const char* command, const char** args) {
@@ -63,3 +64,5 @@ struct Communicate {
   std::unique_ptr<std::ostream> out_;
   std::unique_ptr<std::ostream> err_;
 };
+
+} // namespace torch::unwind

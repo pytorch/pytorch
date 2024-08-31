@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import os
 import sys
@@ -15,9 +15,6 @@ from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
     CudaDdpComparisonTest,
     DdpComparisonTest,
     DdpUnderDistAutogradTest,
-)
-from torch.testing._internal.distributed.pipe_with_ddp_test import (
-    PipeWithDDPTest,
 )
 from torch.testing._internal.distributed.nn.api.remote_module_test import (
     CudaRemoteModuleTest,
@@ -121,7 +118,6 @@ GENERIC_CUDA_TESTS = [
     CudaDistAutogradTest,
     CudaRemoteModuleTest,
     CudaDdpComparisonTest,
-    PipeWithDDPTest,
 ]
 
 

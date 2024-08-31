@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 from collections import defaultdict
 

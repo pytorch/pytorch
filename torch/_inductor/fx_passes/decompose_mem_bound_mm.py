@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import List
 
@@ -6,9 +7,9 @@ from torch import Tensor
 from torch._dynamo.utils import counters
 
 from .. import config
-
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
-from .split_cat import construct_pattern_matcher_pass, get_config_flag
+from .split_cat import construct_pattern_matcher_pass
+
 
 aten = torch.ops.aten
 log = logging.getLogger(__name__)
@@ -19,12 +20,12 @@ MAX_OTHER_DIMENSION_DECOMPOSITION = 32
 
 min_first_dimension_decomposition = MIN_FIRST_DIMENSION_DECOMPOSITION
 max_other_dimention_decomposition = MAX_OTHER_DIMENSION_DECOMPOSITION
-if "decompose_mem_bound_mm" in config.post_grad_fusion_options:
+if "decompose_mm_pass" in config.post_grad_fusion_options:
     min_first_dimension_decomposition = config.post_grad_fusion_options[
-        "decompose_mem_bound_mm"
+        "decompose_mm_pass"
     ].get("min_first_dimension_decomposition", MIN_FIRST_DIMENSION_DECOMPOSITION)
     max_other_dimention_decomposition = config.post_grad_fusion_options[
-        "decompose_mem_bound_mm"
+        "decompose_mm_pass"
     ].get("max_other_dimention_decomposition", MAX_OTHER_DIMENSION_DECOMPOSITION)
 
 
@@ -94,11 +95,12 @@ def print_decompose_pattern(match: Match, inputs: List[torch.fx.Node]):
 @register_graph_pattern(
     CallFunction(aten.bmm, Arg(), Arg()),
     pass_dict=construct_pattern_matcher_pass("decompose_mm_pass"),
-    extra_check=get_config_flag("decompose_mm_pass", "decompose_mem_bound_mm"),
 )
 def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     def repl(mat1, mat2):
-        return torch.sum(mat1[:, :, :, None] * mat2[:, None, :, :], dim=-2)
+        return torch.sum(mat1[:, :, :, None] * mat2[:, None, :, :], dim=-2).to(
+            mat1.dtype
+        )
 
     if should_decompose_bmm(mat1, mat2):
         counters["inductor"]["decompose_bmm"] += 1
@@ -111,7 +113,6 @@ def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
 @register_graph_pattern(
     CallFunction(aten.addmm, Arg(), Arg(), Arg()),
     pass_dict=construct_pattern_matcher_pass("decompose_mm_pass"),
-    extra_check=get_config_flag("decompose_mm_pass", "decompose_mem_bound_mm"),
 )
 def decompose_addmm(
     match: Match,
@@ -120,7 +121,9 @@ def decompose_addmm(
     mat3: torch.fx.Node,
 ):
     def repl(mat1, mat2, mat3):
-        return torch.sum(mat2[:, :, None] * mat3[None, :, :], dim=-2) + mat1
+        return (
+            torch.sum(mat2[:, :, None] * mat3[None, :, :], dim=-2).to(mat2.dtype) + mat1
+        )
 
     if should_decompose_mm(mat2, mat3):
         counters["inductor"]["decompose_addmm"] += 1
@@ -133,7 +136,6 @@ def decompose_addmm(
 @register_graph_pattern(
     CallFunction(aten.mm, Arg(), Arg()),
     pass_dict=construct_pattern_matcher_pass("decompose_mm_pass"),
-    extra_check=get_config_flag("decompose_mm_pass", "decompose_mem_bound_mm"),
 )
 def decompose_mm(
     match: Match,
@@ -141,7 +143,7 @@ def decompose_mm(
     mat2: torch.fx.Node,
 ):
     def repl(mat1, mat2):
-        return torch.sum(mat1[:, :, None] * mat2[None, :, :], dim=-2)
+        return torch.sum(mat1[:, :, None] * mat2[None, :, :], dim=-2).to(mat1.dtype)
 
     if should_decompose_mm(mat1, mat2):
         counters["inductor"]["decompose_mm"] += 1

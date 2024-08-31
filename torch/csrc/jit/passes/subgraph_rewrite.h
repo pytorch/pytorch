@@ -16,8 +16,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Forward declarations.
 struct RewritePatternDescr;
@@ -113,5 +112,4 @@ struct RewritePatternDescr {
   std::unordered_map<std::string, std::string> value_name_map;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

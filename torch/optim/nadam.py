@@ -1,39 +1,50 @@
-from typing import List, Optional
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
+r"""Implementation for the NAdam algorithm."""
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
+
 from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
-    _dispatch_sqrt,
+    _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
+    _maximize_doc,
     _stack_if_compiling,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
+
 
 __all__ = ["NAdam", "nadam"]
 
 
-class NAdam(Optimizer):
+class NAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
-        params,
-        lr=2e-3,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-        weight_decay=0,
-        momentum_decay=4e-3,
+        params: ParamsT,
+        lr: Union[float, Tensor] = 2e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0,
+        momentum_decay: float = 4e-3,
         decoupled_weight_decay: bool = False,
         *,
         foreach: Optional[bool] = None,
+        maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -53,15 +64,17 @@ class NAdam(Optimizer):
             weight_decay=weight_decay,
             momentum_decay=momentum_decay,
             decoupled_weight_decay=decoupled_weight_decay,
+            maximize=maximize,
             foreach=foreach,
             capturable=capturable,
             differentiable=differentiable,
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
+            group.setdefault("maximize", False)
             group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
@@ -140,7 +153,7 @@ class NAdam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -154,13 +167,13 @@ class NAdam(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_avg_sqs = []
-            mu_products = []
-            state_steps = []
-            beta1, beta2 = group["betas"]
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_avg_sqs: List[Tensor] = []
+            mu_products: List[Tensor] = []
+            state_steps: List[Tensor] = []
+            beta1, beta2 = cast(Tuple[float, float], group["betas"])
 
             has_complex = self._init_group(
                 group,
@@ -185,6 +198,7 @@ class NAdam(Optimizer):
                 weight_decay=group["weight_decay"],
                 momentum_decay=group["momentum_decay"],
                 eps=group["eps"],
+                maximize=group["maximize"],
                 decoupled_weight_decay=group["decoupled_weight_decay"],
                 foreach=group["foreach"],
                 capturable=group["capturable"],
@@ -204,12 +218,15 @@ NAdam.__doc__ = (
             &\textbf{input}      : \gamma_t \text{ (lr)}, \: \beta_1,\beta_2 \text{ (betas)},
                 \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)}                   \\
             &\hspace{13mm} \: \lambda \text{ (weight decay)}, \:\psi \text{ (momentum decay)}    \\
-            &\hspace{13mm} \: \textit{decoupled\_weight\_decay}                                  \\
+            &\hspace{13mm} \: \textit{decoupled\_weight\_decay}, \:\textit{maximize}             \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0 \leftarrow 0 \text{ ( second moment)}                                 \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
+            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})         \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
             &\hspace{5mm} \theta_t \leftarrow \theta_{t-1}                                       \\
             &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
             &\hspace{10mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
@@ -236,7 +253,7 @@ NAdam.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 2e-3)
+        lr (float, Tensor, optional): learning rate (default: 2e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
@@ -246,6 +263,7 @@ NAdam.__doc__ = (
         decoupled_weight_decay (bool, optional): whether to use decoupled weight
             decay as in AdamW to obtain NAdamW (default: False)
         {_foreach_doc}
+        {_maximize_doc}
         {_capturable_doc}
         {_differentiable_doc}
 
@@ -256,76 +274,6 @@ NAdam.__doc__ = (
 
     """
 )
-
-
-def nadam(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    mu_products: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    decoupled_weight_decay: bool = False,
-    foreach: Optional[bool] = None,
-    capturable: bool = False,
-    differentiable: bool = False,
-    has_complex: bool = False,
-    *,
-    beta1: float,
-    beta2: float,
-    lr: float,
-    weight_decay: float,
-    momentum_decay: float,
-    eps: float,
-):
-    r"""Functional API that performs NAdam algorithm computation.
-
-    See :class:`~torch.optim.NAdam` for details.
-    """
-
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError(
-            "API has changed, `state_steps` argument must contain a list of singleton tensors"
-        )
-
-    if not all(isinstance(t, torch.Tensor) for t in mu_products):
-        raise RuntimeError(
-            "API has changed, `mu_products` argument must contain a list of singleton tensors"
-        )
-
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_nadam
-    else:
-        func = _single_tensor_nadam
-
-    func(
-        params,
-        grads,
-        exp_avgs,
-        exp_avg_sqs,
-        mu_products,
-        state_steps,
-        beta1=beta1,
-        beta2=beta2,
-        lr=lr,
-        weight_decay=weight_decay,
-        momentum_decay=momentum_decay,
-        decoupled_weight_decay=decoupled_weight_decay,
-        eps=eps,
-        capturable=capturable,
-        differentiable=differentiable,
-        has_complex=has_complex,
-    )
 
 
 def _single_tensor_nadam(
@@ -343,12 +291,13 @@ def _single_tensor_nadam(
     momentum_decay: float,
     eps: float,
     decoupled_weight_decay: bool,
+    maximize: bool,
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
 ):
     for i, param in enumerate(params):
-        grad = grads[i]
+        grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         mu_product = mu_products[i]
@@ -362,9 +311,14 @@ def _single_tensor_nadam(
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
-            assert (param.is_cuda and mu_product.is_cuda and step_t.is_cuda) or (
-                param.is_xla and mu_product.is_xla and step_t.is_xla
-            ), "If capturable=True, params, mu_products, and state_steps must be CUDA or XLA tensors."
+            capturable_supported_devices = _get_capturable_supported_devices()
+            assert (
+                param.device.type == mu_product.device.type == step_t.device.type
+                and param.device.type in capturable_supported_devices
+            ), (
+                f"If capturable=True, params, mu_products and state_steps must be "
+                f"on supported devices: {capturable_supported_devices}."
+            )
 
         # update step
         step_t += 1
@@ -431,6 +385,7 @@ def _multi_tensor_nadam(
     momentum_decay: float,
     eps: float,
     decoupled_weight_decay: bool,
+    maximize: bool,
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
@@ -442,33 +397,47 @@ def _multi_tensor_nadam(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
         assert all(
-            p.is_cuda and mp.is_cuda and step.is_cuda
+            p.device.type == mp.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
             for p, mp, step in zip(params, mu_products, state_steps)
-        ), "If capturable=True, params, mu_products, and state_steps must be CUDA tensors."
+        ), f"If capturable=True, params, mu_products, and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps]
+        [params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps]  # type: ignore[list-item]
     )
     for (
-        grouped_params,
-        grouped_grads,
-        grouped_exp_avgs,
-        grouped_exp_avg_sqs,
-        grouped_mu_products,
-        grouped_state_steps,
+        grouped_params_,
+        grouped_grads_,
+        grouped_exp_avgs_,
+        grouped_exp_avg_sqs_,
+        grouped_mu_products_,
+        grouped_state_steps_,
     ), _ in grouped_tensors.values():
+        grouped_params = cast(List[Tensor], grouped_params_)
+        grouped_grads = cast(List[Tensor], grouped_grads_)
+        grouped_exp_avgs = cast(List[Tensor], grouped_exp_avgs_)
+        grouped_exp_avg_sqs = cast(List[Tensor], grouped_exp_avg_sqs_)
+        grouped_mu_products = cast(List[Tensor], grouped_mu_products_)
+        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+
         # handle complex
         if has_complex:
             _view_as_real(
                 grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs
             )
 
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
+
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if grouped_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -480,9 +449,15 @@ def _multi_tensor_nadam(
                 # Perform stepweight decay
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                grouped_grads = torch._foreach_add(
-                    grouped_grads, grouped_params, alpha=weight_decay
-                )
+                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                if maximize:
+                    torch._foreach_add_(
+                        grouped_grads, grouped_params, alpha=weight_decay
+                    )
+                else:
+                    grouped_grads = torch._foreach_add(  # type: ignore[assignment]
+                        grouped_grads, grouped_params, alpha=weight_decay
+                    )
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
@@ -494,6 +469,9 @@ def _multi_tensor_nadam(
 
         exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
 
+        bias_correction_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
+        mus: Union[Tuple[Tensor, ...], List[Tensor]]
+        mu_nexts: Union[Tuple[Tensor, ...], List[Tensor]]
         if capturable:
             # mus will be beta1 * (1 - 0.5 * 0.96 ** (step * momentum_decay))
             exponent = torch._foreach_mul(grouped_state_steps, momentum_decay)
@@ -519,8 +497,7 @@ def _multi_tensor_nadam(
             torch._foreach_sqrt_(bias_correction_sqrt)
         else:
             bias_correction_sqrt = [
-                _dispatch_sqrt(1 - beta2 ** _get_value(step))
-                for step in grouped_state_steps
+                (1 - beta2 ** _get_value(step)) ** 0.5 for step in grouped_state_steps
             ]
             mus = [
                 beta1 * (1.0 - 0.5 * (0.96 ** (_get_value(step) * momentum_decay)))
@@ -576,20 +553,97 @@ def _multi_tensor_nadam(
         else:
             step_size_grads = _stack_if_compiling(
                 [
-                    (lr * (1.0 - mu) / (1.0 - _get_value(mu_product))) * -1
+                    (_get_value(lr) * (1.0 - mu) / (1.0 - _get_value(mu_product))) * -1
                     for mu_product, mu in zip(grouped_mu_products, mus)
                 ]
             )
             step_size_expavg = _stack_if_compiling(
                 [
-                    (lr * mu_next / (1.0 - _get_value(mu_product) * mu_next)) * -1
+                    (
+                        _get_value(lr)
+                        * mu_next
+                        / (1.0 - _get_value(mu_product) * mu_next)
+                    )
+                    * -1
                     for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)
                 ]
             )
 
             torch._foreach_addcdiv_(
-                grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads
+                grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads  # type: ignore[arg-type]
             )
             torch._foreach_addcdiv_(
-                grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg
+                grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg  # type: ignore[arg-type]
             )
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_nadam)
+def nadam(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    mu_products: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    decoupled_weight_decay: bool = False,
+    foreach: Optional[bool] = None,
+    capturable: bool = False,
+    differentiable: bool = False,
+    has_complex: bool = False,
+    maximize: bool = False,
+    *,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    momentum_decay: float,
+    eps: float,
+):
+    r"""Functional API that performs NAdam algorithm computation.
+
+    See :class:`~torch.optim.NAdam` for details.
+    """
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
+
+    if not all(isinstance(t, torch.Tensor) for t in mu_products):
+        raise RuntimeError(
+            "API has changed, `mu_products` argument must contain a list of singleton tensors"
+        )
+
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_nadam
+    else:
+        func = _single_tensor_nadam
+
+    func(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        mu_products,
+        state_steps,
+        beta1=beta1,
+        beta2=beta2,
+        lr=lr,
+        weight_decay=weight_decay,
+        momentum_decay=momentum_decay,
+        maximize=maximize,
+        decoupled_weight_decay=decoupled_weight_decay,
+        eps=eps,
+        capturable=capturable,
+        differentiable=differentiable,
+        has_complex=has_complex,
+    )

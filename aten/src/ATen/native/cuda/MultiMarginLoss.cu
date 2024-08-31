@@ -132,7 +132,7 @@ void multi_margin_loss_shape_check(
     const int64_t& ndims,
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight) {
+    const std::optional<Tensor>& weight) {
     TORCH_CHECK(
         (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
         "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
@@ -162,7 +162,7 @@ void multi_margin_loss_shape_check(
 
 Tensor& multi_margin_loss_cuda_out(
     const Tensor &input_, const Tensor &target_, const Scalar &p_, const Scalar &margin_,
-    const c10::optional<Tensor> &weights_, int64_t reduction, Tensor& out_) {
+    const std::optional<Tensor> &weights_, int64_t reduction, Tensor& out_) {
   auto p = p_.toLong();
   int64_t nframe, dim;
   const auto ndims = input_.dim();
@@ -288,7 +288,7 @@ Tensor& multi_margin_loss_cuda_out(
 
 Tensor multi_margin_loss_cuda(
     const Tensor &input, const Tensor &target, const Scalar &p, const Scalar &margin,
-    const c10::optional<Tensor> &weights, int64_t reduction) {
+    const std::optional<Tensor> &weights, int64_t reduction) {
   auto out = at::empty({0}, input.options());
   multi_margin_loss_cuda_out(input, target, p, margin, weights, reduction, out);
   return out;
@@ -296,7 +296,7 @@ Tensor multi_margin_loss_cuda(
 
 Tensor& multi_margin_loss_cuda_backward_out(
     const Tensor &grad_output_,const Tensor &input_, const Tensor &target_,
-    const Scalar &p_, const Scalar &margin_, const c10::optional<Tensor> &weights_,
+    const Scalar &p_, const Scalar &margin_, const std::optional<Tensor> &weights_,
     int64_t reduction, Tensor &grad_input_) {
   auto p = p_.toLong();
   int64_t nframe, dim;
@@ -403,7 +403,7 @@ Tensor& multi_margin_loss_cuda_backward_out(
 
 Tensor multi_margin_loss_cuda_backward(
     const Tensor &grad_output, const Tensor &input, const Tensor &target,
-    const Scalar &p, const Scalar &margin, const c10::optional<Tensor> &weights,
+    const Scalar &p, const Scalar &margin, const std::optional<Tensor> &weights,
     int64_t reduction) {
   auto grad_input = at::empty({0}, input.options());
   multi_margin_loss_cuda_backward_out(

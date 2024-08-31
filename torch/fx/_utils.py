@@ -1,11 +1,12 @@
+# mypy: allow-untyped-defs
+import sys
 from typing import Dict, Optional
 
 import torch
-
 from torch._logging import LazyString
 
 
-def lazy_format_graph_code(name, gm, maybe_id=None):
+def lazy_format_graph_code(name, gm, maybe_id=None, **kwargs):
     """
     Returns a LazyString that formats the graph code.
     """
@@ -16,11 +17,17 @@ def lazy_format_graph_code(name, gm, maybe_id=None):
         else:
             return name
 
+    if "print_output" not in kwargs:
+        kwargs["print_output"] = False
+
+    if "colored" in kwargs and not sys.stdout.isatty():
+        kwargs["colored"] = False
+
     return LazyString(
         lambda: _format_graph_code(
             f"===== {format_name()} =====\n",
             gm.forward.__code__.co_filename,
-            gm.print_readable(print_output=False),
+            gm.print_readable(**kwargs),
         )
     )
 

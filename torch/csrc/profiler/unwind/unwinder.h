@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <limits>
 
+namespace torch::unwind {
+
 struct UnwindState {
   int64_t rip, rbp, rsp;
 };
@@ -75,3 +77,5 @@ struct Unwinder {
   int64_t rbp_off_;
   bool deref_{false};
 };
+
+} // namespace torch::unwind

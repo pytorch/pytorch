@@ -7,8 +7,8 @@
 
 namespace c10::utils {
 // Reads an environment variable and returns
-// - optional<true>,              if set equal to "1"
-// - optional<false>,             if set equal to "0"
+// - std::optional<true>,              if set equal to "1"
+// - std::optional<false>,             if set equal to "0"
 // - nullopt,   otherwise
 //
 // NB:

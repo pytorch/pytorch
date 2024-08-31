@@ -137,7 +137,7 @@ public:
    * and returns it if it is registered WITH A SCHEMA.
    * Returns nullopt otherwise.
    */
-  c10::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
+  std::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
 
   /**
    * Variant of findSchema that results in less code generated at the call site.
@@ -155,7 +155,7 @@ public:
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
 
   // Like findSchema, but also returns OperatorHandle even if there is no schema
-  c10::optional<OperatorHandle> findOp(const OperatorName& operator_name);
+  std::optional<OperatorHandle> findOp(const OperatorName& operator_name);
 
   // Returns a list of all operator names present in the operatorLookupTable_
   const std::vector<OperatorName> getAllOpNames();
@@ -196,7 +196,7 @@ public:
 
   // Used by torchdeploy/multipy for multiple interpreters racing.
   void waitForDef(const FunctionSchema& schema);
-  void waitForImpl(const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key);
+  void waitForImpl(const OperatorName& op_name, std::optional<DispatchKey> dispatch_key);
 
   // ------------------------------------------------------------------------
   //
@@ -221,7 +221,7 @@ public:
    */
   // NB: steals the inferred function schema, as we may need to hold on to
   // it for a bit until the real schema turns up
-  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  RegistrationHandleRAII registerImpl(OperatorName op_name, std::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
    * Given an operator, tells the Dispatcher that we have implemented a fake impl
@@ -234,7 +234,7 @@ public:
    */
   void throwIfHasPythonModule(OperatorName op_name);
 
-  c10::optional<std::pair<const char*, const char*>> getPyStub(OperatorName op_name);
+  std::optional<std::pair<const char*, const char*>> getPyStub(OperatorName op_name);
 
   /**
    * Register a new operator by name.
@@ -299,7 +299,7 @@ public:
    * Returns the names of all operators with a kernel registered for the specified DispatchKey.
    * If no DispatchKey is specified, it returns all registered operators.
    */
-  std::vector<OperatorName> getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const;
+  std::vector<OperatorName> getRegistrationsForDispatchKey(std::optional<DispatchKey> k) const;
 
 private:
   Dispatcher();
@@ -321,7 +321,7 @@ private:
   void deregisterImpl_(
     const OperatorHandle& op,
     const OperatorName& op_name,
-    c10::optional<DispatchKey> dispatch_key,
+    std::optional<DispatchKey> dispatch_key,
     impl::OperatorEntry::AnnotatedKernelContainerIterator kernel_handle);
   void deregisterName_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterFallback_(DispatchKey dispatchKey);
@@ -607,6 +607,8 @@ struct CaptureKernelCall<void> {
   void release() && {}
 };
 
+TORCH_API void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet);
+
 } // namespace detail
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
@@ -668,9 +670,7 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandl
 #ifndef NDEBUG
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
-      auto nesting_value = dispatch_trace_nesting_value();
-      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
-      std::cerr << "[call] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+    detail::_print_dispatch_trace("[call]", toString(op.operator_name()), dispatchKeySet);
   }
 #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
@@ -707,9 +707,7 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
 #ifndef NDEBUG
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
-      auto nesting_value = dispatch_trace_nesting_value();
-      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
-      std::cerr << "[redispatch] op=[" << op.operator_name() << "], key=[" << toString(currentDispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+    detail::_print_dispatch_trace("[redispatch]", toString(op.operator_name()), currentDispatchKeySet);
   }
 #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(currentDispatchKeySet);
@@ -723,9 +721,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 #ifndef NDEBUG
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
-      auto nesting_value = dispatch_trace_nesting_value();
-      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
-      std::cerr << "[callBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+    detail::_print_dispatch_trace("[callBoxed]", toString(op.operator_name()), dispatchKeySet);
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
@@ -776,9 +772,7 @@ inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet
 #ifndef NDEBUG
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
-      auto nesting_value = dispatch_trace_nesting_value();
-      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
-      std::cerr << "[redispatchBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+    detail::_print_dispatch_trace("[redispatchBoxed]", toString(op.operator_name()), dispatchKeySet);
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);

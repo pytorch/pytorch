@@ -1,8 +1,8 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace torch::cuda {
@@ -17,8 +17,8 @@ TORCH_CUDA_CU_API void _record_memory_history(
     bool record_cpp_context = false);
 
 TORCH_CUDA_CU_API void _record_memory_history(
-    c10::optional<std::string> enabled = "all",
-    c10::optional<std::string> context = "all",
+    std::optional<std::string> enabled = "all",
+    std::optional<std::string> context = "all",
     const std::string& stacks = "all",
     size_t max_entries = SIZE_MAX);
 
