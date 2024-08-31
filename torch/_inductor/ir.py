@@ -3739,6 +3739,7 @@ class ComputedBuffer(OperationBuffer):
     def simplify_and_reorder(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ):
         """
         This is a main place where we do loop transformations in a
@@ -3754,12 +3755,23 @@ class ComputedBuffer(OperationBuffer):
         to fuse scheduler nodes with compatible ranges, e.g. (s0*s1*...,) and (s0, s1, s2, ...)
         on CPU by preventing indexing simplifications and obtaining index/reduce ranges for
         the scheduler node compatible with other nodes.
+        Optional argument recompute_sizes_body_func can be used to recompute sizes and body
+        on the default body. This can be useful to append additional loop transformations.
         """
         (
             (index_size, reduce_size),
             body,
             (index_vars, reduce_vars),
         ) = self.get_default_sizes_body()
+
+        if recompute_sizes_body_func:
+            (
+                (index_size, reduce_size),
+                body,
+                (index_vars, reduce_vars),
+            ) = recompute_sizes_body_func(
+                (index_size, reduce_size), body, (index_vars, reduce_vars)
+            )
 
         index_formulas = [*body.indexing_exprs.values()]
         if extra_indexing_constraints is not None:
@@ -3937,6 +3949,7 @@ class TemplateBuffer(OperationBuffer):
     def simplify_and_reorder(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ):
         return (
             (
