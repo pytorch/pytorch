@@ -716,7 +716,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
 // Same as calling synchronize().
 bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
   RECORD_PARAM_COMMS(
-      static_cast<int>(this->seq_), // seq
+      std::make_tuple(static_cast<int>(this->seq_), isP2POp(this->opType_)),
       std::make_tuple(pgUID_, pgDesc_), // PG name tuple
       rank_, // rank
       "wait", // collective name
@@ -2256,7 +2256,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
 
   RECORD_PARAM_COMMS(
-      0, // seq
+      std::make_tuple(0, false), // not used for "init"
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       rank, // rank
       "init", // collective name
@@ -2428,7 +2428,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       device,
       rank,
       opType,
-      seqCollective_,
+      isP2POp(opType) ? seqP2P_ : seqCollective_,
       profilingTitle,
       profilingTitle != nullptr ? std::optional<std::vector<at::Tensor>>(inputs)
                                 : std::nullopt,
@@ -4007,8 +4007,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      // seq + 1 to match collective
+      // isP2P is not used for "barrier"
+      std::make_tuple(static_cast<int>(this->getSequenceNumberForGroup() + 1), false),
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       rank_, // rank
       "barrier", // collective name
@@ -4263,7 +4264,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
 
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+          this->seqP2P_ + 1), // seqP2P_ + 1 to match pointToPoint op
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
@@ -4304,7 +4305,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
 
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+          this->seqP2P_ + 1), // seqP2P_ + 1 to match pointToPoint op
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
