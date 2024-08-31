@@ -352,6 +352,7 @@ class FakeTensorConverter:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         if type(t) is torch.nn.Parameter:
             assert not make_constant
+        maybe_constant_t = t if make_constant else None
 
         def mk_fake_tensor(make_meta_t: Callable[[], object]) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
@@ -361,6 +362,10 @@ class FakeTensorConverter:
             # invariant is that make_meta_t only calls factories
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
+            if t_descr is not None:
+                maybe_memo = self.tensor_memo.get(t_descr.id)
+                if maybe_memo is not None:
+                    return maybe_memo
             with no_dispatch():
                 return FakeTensor(
                     fake_mode,
@@ -915,6 +920,22 @@ class FakeTensor(Tensor):
             torch._check(s >= 2)
             out.append(s)
         return out
+
+    def get_nested_int(self):
+        if self._nested_int_memo_vc != self._version:
+            self._nested_int_memo = None
+
+        if not self._nested_int_memo:
+            # We only reach here for intermediate offsets?
+            # we never look up nested int with coeff.
+            self._nested_int_memo = self.fake_mode.shape_env.create_unbacked_symint()
+            self._nested_int_memo_vc = self._version
+
+        return self._nested_int_memo
+
+    def set_nested_int(self, val):
+        self._nested_int_memo = val
+        self._nested_int_memo_vc = self._version
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]

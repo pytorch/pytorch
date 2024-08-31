@@ -5,6 +5,9 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from torch.fx.experimental.sym_node import SymNode, NestedIntNode
+from torch.nested._internal import union_find
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -12,23 +15,15 @@ _tensor_id_counter = 0
 _tensor_symint_registry = WeakTensorKeyDictionary()
 
 
-def get_tensor_symint(tensor, *, coeff=1):
-    from torch._subclasses.fake_tensor import FakeTensor
-    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
-
-    # NB: Only FakeTensor is associated with a memo
-    tensor = mb_unwrap_functional_tensor(tensor)
-    if isinstance(tensor, FakeTensor):
-        return tensor.get_nested_int(coeff=coeff)
-
-    global _tensor_id_counter
-
-    tensor_symint = _tensor_symint_registry.get(tensor)
-    if tensor_symint is None:
-        tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
-        _tensor_id_counter += 1
-        _tensor_symint_registry[tensor] = tensor_symint
-    return tensor_symint
+def get_nested_symint(tensor, coeff=1, for_hint=False):
+    if isinstance(tensor, torch._subclasses.functional_tensor.FunctionalTensor):
+        tensor = torch._from_functional_tensor(tensor.elem)
+        return get_nested_symint(tensor, coeff=coeff)
+    if (isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor)) and not for_hint:
+        return tensor.get_nested_int()
+    uf = union_find.get_union_find()
+    t_id = uf._tensor_int_map.get_int(tensor)
+    return torch.SymInt(NestedIntNode(t_id, tensor, coeff))
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -90,7 +85,7 @@ class NestedTensor(torch.Tensor):
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1)
+        ragged_size = get_nested_symint(ragged_source, coeff=1)
         _ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         if lengths is not None:
@@ -264,6 +259,7 @@ class NestedTensor(torch.Tensor):
         if max_seqlen_tensor is not None:
             metadata_cache["max_seqlen"] = max_seqlen_tensor
         ragged_idx = meta["ragged_idx"]
+<<<<<<< HEAD
 
         # Alternatively, we could make it the caller's responsibility to
         # cache it. But this heuristic seems simple enough.
@@ -271,6 +267,9 @@ class NestedTensor(torch.Tensor):
         if isinstance(ragged_source, FakeTensor):
             ragged_size = outer_size[ragged_idx]
             ragged_source.nested_int_memo = ragged_size
+=======
+        ragged_source = offsets if lengths is None else lengths
+>>>>>>> a2eb5343c4e ([do not review] Saving more things)
 
         return NestedTensor(
             values,
