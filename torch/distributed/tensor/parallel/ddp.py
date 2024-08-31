@@ -1,10 +1,12 @@
-from typing import Any, List, Tuple
+# mypy: allow-untyped-defs
+from typing import Any, List, Optional, Set, Tuple
 
 import torch.nn as nn
 from torch.distributed.tensor.parallel._data_parallel_utils import (
     _flatten_tensor,
     _unflatten_tensor,
 )
+
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -45,12 +47,18 @@ def _reconstruct_dtensor(module: nn.Module, _input: Any):
     _update_module_param(param_list)  # type: ignore[arg-type]
 
 
-def _localize_dtensor(module: nn.Module, *_: Any):
+def _localize_dtensor(
+    module: nn.Module, *_: Any, ignored_params: Optional[Set[nn.Parameter]] = None
+):
     """
     Convert DTensor parameters to local tensors
     """
+    if ignored_params is None:
+        ignored_params = set()
     param_list = []
     for name, param in module.named_parameters():
+        if param in ignored_params:
+            continue
         t, sharding_info = _flatten_tensor(param)
         if sharding_info is not None:
             t = nn.Parameter(t)

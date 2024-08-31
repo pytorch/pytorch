@@ -89,7 +89,7 @@ def gradcheck_semantics(test_name='gradcheck'):
 
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             self.ignore_op, check_strides=False,
             check_aliasing=False,
@@ -207,8 +207,9 @@ class TestSparse(TestSparseBase):
         """
         assert not x.is_coalesced()
         existing_indices = set()
+        indices = x._indices()
         for i in range(x._nnz()):
-            index = str(x._indices()[:, i])
+            index = str(indices[:, i])
             if index in existing_indices:
                 return True
             else:
@@ -3030,7 +3031,6 @@ class TestSparse(TestSparseBase):
 
     def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size, dtype, device):
         x_v_numel = torch.zeros(x_v).numel()
-        y_v_numel = torch.zeros(y_v).numel()
         x = torch.sparse_coo_tensor(torch.zeros(x_i),
                                     torch.arange(x_v_numel).resize_(x_v).to(torch.float),
                                     torch.Size(x_size), dtype=dtype, device=device)
@@ -4236,7 +4236,6 @@ class TestSparseMaskedReductions(TestCase):
 class TestSparseMeta(TestCase):
     exact_dtype = True
 
-    @skipIfTorchDynamo("changing sparse tensor dimensionality confuses dynamo")
     def _test_meta_sparse_coo(self, dtype):
         r = torch.empty(4, 4, layout=torch.sparse_coo, device='meta', dtype=dtype)
         self.assertTrue(r.is_meta)
@@ -4267,7 +4266,7 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta', dtype=dtype))
 
-    def _test_meta_sparse_compressed(self, dtype, index_dtype, layout, batchsize, densesize):
+    def _test_meta_sparse_compressed(self, dtype, layout, batchsize, densesize):
         index_dtype = torch.int64
         blocksize = (2, 3) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
         sparsesize = (4, 6)
@@ -4323,9 +4322,8 @@ class TestSparseMeta(TestCase):
         if layout is torch.sparse_coo:
             self._test_meta_sparse_coo(dtype)
         else:
-            index_dtype = torch.int64
             for batchsize, densesize in itertools.product([(), (2,)], [(), (3,)]):
-                self._test_meta_sparse_compressed(dtype, index_dtype, layout, batchsize, densesize)
+                self._test_meta_sparse_compressed(dtype, layout, batchsize, densesize)
 
     def _test_print_meta_data(self, dtype, layout, batchsize, sparsesize, densesize):
         index_dtype = torch.int64
@@ -4381,6 +4379,60 @@ class TestSparseMeta(TestCase):
             self.maxDiff = orig_maxDiff
             raise
 
+    def assertEqualMeta(self, x, y, expected_nnz):
+        self.assertEqual(x.layout, y.layout)
+        self.assertEqual(x.shape, y.shape)
+        self.assertEqual(x.dtype, y.dtype)
+        self.assertEqual(x.sparse_dim(), y.sparse_dim())
+        self.assertEqual(x.dense_dim(), y.dense_dim())
+
+        def assertEqualAttrs(x, y, expected_shape):
+            self.assertEqual(x.shape, expected_shape)
+            self.assertEqual(x.dtype, y.dtype)
+            self.assertEqual(x.layout, y.layout)
+            if not x.is_meta:
+                self.assertEqual(x.device, y.device)
+
+        if x.layout is torch.sparse_coo:
+            assertEqualAttrs(x._indices(), y._indices(), (*y._indices().shape[:-1], expected_nnz))
+            assertEqualAttrs(x._values(), y._values(), (expected_nnz, *y._values().shape[1:]))
+        elif x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            assertEqualAttrs(x.crow_indices(), y.crow_indices(), y.crow_indices().shape)
+            assertEqualAttrs(x.col_indices(), y.col_indices(), (*y.col_indices().shape[:-1], expected_nnz))
+            batch_dim = x.col_indices().ndim - 1
+            values_shape = (*y.values().shape[:batch_dim], expected_nnz, *y.values().shape[batch_dim + 1:])
+            self.assertEqual(x.values().layout, y.values().layout)
+            self.assertEqual(x.values().dtype, y.values().dtype)
+            self.assertEqual(x.values().shape, values_shape)
+        elif x.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            assertEqualAttrs(x.ccol_indices(), y.ccol_indices(), y.ccol_indices().shape)
+            assertEqualAttrs(x.row_indices(), y.row_indices(), (*y.row_indices().shape[:-1], expected_nnz))
+            batch_dim = x.row_indices().ndim - 1
+            values_shape = (*y.values().shape[:batch_dim], expected_nnz, *y.values().shape[batch_dim + 1:])
+            self.assertEqual(x.values().layout, y.values().layout)
+            self.assertEqual(x.values().dtype, y.values().dtype)
+            self.assertEqual(x.values().shape, values_shape)
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_to_meta(self, dtype, layout):
+        index_dtype = torch.int64
+        device = 'cpu'
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            m = t.to(device="meta")
+            self.assertEqual(m.device.type, "meta")
+            self.assertEqualMeta(m, t, 0)
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_zeros_like_meta(self, dtype, layout):
+        index_dtype = torch.int64
+        device = 'cpu'
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            m = torch.zeros_like(t, device="meta")
+            self.assertEqual(m.device.type, "meta")
+            self.assertEqualMeta(m, t, 0)
+
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_fake(self, dtype, layout):
@@ -4391,45 +4443,11 @@ class TestSparseMeta(TestCase):
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
             f = FakeTensor.from_tensor(t, fake_mode)
             self.assertIsInstance(f, FakeTensor)
-            self.assertEqual(f.layout, layout)
-            self.assertEqual(f.shape, t.shape)
-            self.assertEqual(f.device, t.device)
-            if layout is torch.sparse_coo:
-                nnz = 0
-                indices = f._indices()
-                self.assertEqual(indices.dtype, index_dtype)
-                self.assertEqual(indices.device, t.device)
-                self.assertEqual(indices.shape, (*t._indices().shape[:-1], nnz))
-                values = f._values()
-                self.assertEqual(values.dtype, dtype)
-                self.assertEqual(values.device, t.device)
-                self.assertEqual(values.shape, (nnz, *t._values().shape[1:]))
-            else:
-                nnz = 0
-                if layout in {torch.sparse_csr, torch.sparse_bsr}:
-                    f_compressed_indices, f_plain_indices = f.crow_indices(), f.col_indices()
-                    compressed_indices, plain_indices = t.crow_indices(), t.col_indices()
-                else:
-                    f_compressed_indices, f_plain_indices = f.ccol_indices(), f.row_indices()
-                    compressed_indices, plain_indices = t.ccol_indices(), t.row_indices()
-                f_values = f.values()
-                values = t.values()
-                batch_dims = len(compressed_indices.shape) - 1
-                self.assertEqual(f_compressed_indices.layout, compressed_indices.layout)
-                self.assertEqual(f_compressed_indices.shape, compressed_indices.shape)
-                self.assertEqual(f_compressed_indices.dtype, compressed_indices.dtype)
-                self.assertEqual(f_compressed_indices.device, compressed_indices.device)
+            self.assertEqualMeta(f, t, 0)
 
-                self.assertEqual(f_plain_indices.layout, plain_indices.layout)
-                self.assertEqual(f_plain_indices.shape, (*plain_indices.shape[:-1], nnz))
-                self.assertEqual(f_plain_indices.dtype, plain_indices.dtype)
-                self.assertEqual(f_plain_indices.device, plain_indices.device)
-
-                batch_dim = plain_indices.ndim - 1
-                self.assertEqual(f_values.layout, values.layout)
-                self.assertEqual(f_values.shape, (*values.shape[:batch_dim], nnz, *values.shape[batch_dim + 1:]))
-                self.assertEqual(f_values.dtype, values.dtype)
-                self.assertEqual(f_values.device, values.device)
+            d = f.detach()
+            self.assertIsInstance(d, FakeTensor)
+            self.assertEqualMeta(d, t, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
@@ -4445,6 +4463,7 @@ class TestSparseMeta(TestCase):
             with no_dispatch():
                 result = torch.zeros_like(f, device=f.fake_device)
             self.assertEqual(result, expected)
+            self.assertEqualMeta(result, expected, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
@@ -4454,9 +4473,9 @@ class TestSparseMeta(TestCase):
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
             m = t.to(device='meta')
             r = torch.sum(m)
-            self.assertEqual(r.layout, torch.strided)
+            expected = torch.sum(t).to(device="meta")
             self.assertTrue(r.is_meta)
-            self.assertEqual(r.shape, ())
+            self.assertEqualMeta(r, expected, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
@@ -4464,9 +4483,10 @@ class TestSparseMeta(TestCase):
         device = 'cpu'
         index_dtype = torch.int64
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            expected = torch.add(t, t).to(device='meta')
             m = t.to(device='meta')
             r = torch.add(m, m)
-            self.assertEqual(r, m)
+            self.assertEqualMeta(r, expected, 0)
 
 
 class _SparseDataset(torch.utils.data.Dataset):
@@ -5317,6 +5337,153 @@ class TestSparseAny(TestCase):
             torch.randn(1).to_sparse(blocksize=[1, 1, 1])
         with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
             torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=True)
+    def test_constructor_pin_memory(self, device, layout):
+        """Tests sparse_xyz_tensor(indices, values, pin_memory=True)
+        """
+        self.assertEqual(device, "cpu")
+        for t in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,  # pinning zero-sized tensors is a no-op
+                pin_memory=True,
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+        ):
+            if layout is torch.sparse_coo:
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
+            elif layout in {torch.sparse_csr, torch.sparse_bsr}:
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout in {torch.sparse_csc, torch.sparse_bsc}:
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout is torch.strided:
+                pass
+            else:
+                assert 0  # unreachable
+            self.assertTrue(t.is_pinned())
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=True)
+    def test_method_pin_memory(self, device, layout):
+        """Tests sparse_xyz_tensor(indices, values, pin_memory=False).pin_memory()
+        """
+
+        for t_ in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,  # pinning zero-sized tensors is a no-op
+                pin_memory=False,         # no pinning
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+        ):
+            t = t_.pin_memory()
+            self.assertTrue(t.is_pinned())
+
+            # registering a non-pinned tensor with CUDA memory is a
+            # clone operation
+            self.assertFalse(t_.is_pinned())
+
+            # registering already pinned tensor with CUDA memory is an
+            # identity operation:
+            t2 = t.pin_memory()
+            self.assertTrue(t2 is t)
+
+            if layout is torch.sparse_coo:
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
+                self.assertFalse(t_._indices().is_pinned())
+                self.assertFalse(t_._values().is_pinned())
+            elif layout in {torch.sparse_csr, torch.sparse_bsr}:
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+                self.assertFalse(t_.crow_indices().is_pinned())
+                self.assertFalse(t_.col_indices().is_pinned())
+                self.assertFalse(t_.values().is_pinned())
+            elif layout in {torch.sparse_csc, torch.sparse_bsc}:
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+                self.assertFalse(t_.ccol_indices().is_pinned())
+                self.assertFalse(t_.row_indices().is_pinned())
+                self.assertFalse(t_.values().is_pinned())
+            elif layout is torch.strided:
+                pass
+            else:
+                assert 0  # unreachable
+
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=True)
+    def test_constructor_pinned_memory(self, device, layout):
+        """Tests sparse_xyz_tensor(indices.pin_memory(device), values.pin_memory(device))
+        """
+        pin_memory_device = "cuda"
+        for t in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,     # pinning zero-sized tensors is a no-op
+                pin_memory=None,             # constructor does not specify pin_memory=...
+                members_pin_memory=True,     # indices and values are pinned
+                enable_batch=False,          # TODO: remove after gh-104868 is resolved
+        ):
+            if layout is torch.sparse_coo:
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
+            elif layout in {torch.sparse_csr, torch.sparse_bsr}:
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout in {torch.sparse_csc, torch.sparse_bsc}:
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout is torch.strided:
+                pass
+            else:
+                assert 0  # unreachable
+            self.assertTrue(t.is_pinned())
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_constructor_mismatched_pinned_memory(self, device, layout):
+        """Test the failure to construct sparse tensor from indices and values
+        that have different pinning states.
+        """
+        def generic_constructor(*args, **kwargs):
+            if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+                kwargs.update(layout=layout)
+                return torch.sparse_compressed_tensor(*args, **kwargs)
+            elif layout is torch.sparse_coo:
+                return torch.sparse_coo_tensor(*args, **kwargs)
+            else:
+                raise NotImplementedError(layout)
+
+        for args, kwargs in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,     # pinning zero-sized tensors is a no-op
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+                output_tensor=False):
+
+            # indices are pinned, values is a non-pinned tensor
+            args1 = (args[0].pin_memory(), *args[1:])
+
+            # indices are non-pinned, values is a pinned tensor
+            args2 = (*args[:-1], args[-1].pin_memory())
+
+            with self.assertRaisesRegex(
+                    RuntimeError, r"memory pinning of \w*indices \(=1\) must match memory pinning of values \(=0\)"):
+                generic_constructor(*args1, **kwargs)
+
+            with self.assertRaisesRegex(
+                    RuntimeError, r"memory pinning of \w*indices \(=0\) must match memory pinning of values \(=1\)"):
+                generic_constructor(*args2, **kwargs)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

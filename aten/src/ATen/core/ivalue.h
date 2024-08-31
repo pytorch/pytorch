@@ -86,24 +86,24 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
 
 } // namespace ivalue
 
-// This is an owning wrapper for a c10::optional<std::vector<T>>
-// that can be implicitly converted to a (non-owning) optional<ArrayRef<T>>.
+// This is an owning wrapper for a std::optional<std::vector<T>>
+// that can be implicitly converted to a (non-owning) std::optional<ArrayRef<T>>.
 // Its purpose is to be used in generated code to keep the vector alive
 // either until the end of a statement (as a temporary), or as a saved arg
 // in autograd.
 template <typename T>
 struct OptionalArray {
-  c10::optional<std::vector<T>> list;
+  std::optional<std::vector<T>> list;
 
   OptionalArray() = default;
   OptionalArray(std::vector<T> val) : list(std::move(val)) {}
 
   // Used when saving an argument for the backwards pass.
-  OptionalArray& operator=(c10::optional<ArrayRef<T>> ref) {
+  OptionalArray& operator=(std::optional<ArrayRef<T>> ref) {
     if (ref) {
       list = std::vector<T>(ref->begin(), ref->end());
     } else {
-      list = nullopt;
+      list = std::nullopt;
     }
     return *this;
   }
@@ -113,21 +113,21 @@ struct OptionalArray {
     if (ref) {
       list = std::vector<T>(ref->begin(), ref->end());
     } else {
-      list = nullopt;
+      list = std::nullopt;
     }
     return *this;
   }
 
-  operator c10::optional<c10::ArrayRef<T>>() {
+  operator std::optional<c10::ArrayRef<T>>() {
     if (!list) {
-      return nullopt;
+      return std::nullopt;
     }
     return *list;
   }
 
   operator c10::OptionalArrayRef<T>() {
     if (!list) {
-      return nullopt;
+      return std::nullopt;
     }
     return *list;
   }
@@ -697,7 +697,7 @@ struct TORCH_API IValue final {
   c10::intrusive_ptr<ivalue::ConstantString> toString() &&;
   c10::intrusive_ptr<ivalue::ConstantString> toString() const&;
   const std::string& toStringRef() const;
-  c10::optional<std::reference_wrapper<const std::string>> toOptionalStringRef()
+  std::optional<std::reference_wrapper<const std::string>> toOptionalStringRef()
       const;
   c10::string_view toStringView() const;
 
@@ -726,9 +726,9 @@ struct TORCH_API IValue final {
 
   // OptionalTensorList
   bool isOptionalTensorList() const;
-  c10::List<c10::optional<at::Tensor>> toOptionalTensorList() &&;
-  c10::List<c10::optional<at::Tensor>> toOptionalTensorList() const&;
-  std::vector<c10::optional<at::Tensor>> toOptionalTensorVector() const;
+  c10::List<std::optional<at::Tensor>> toOptionalTensorList() &&;
+  c10::List<std::optional<at::Tensor>> toOptionalTensorList() const&;
+  std::vector<std::optional<at::Tensor>> toOptionalTensorVector() const;
 
   // GenericList
   IValue(c10::List<IValue> v);
@@ -817,10 +817,10 @@ struct TORCH_API IValue final {
       IValue(std::unordered_map<Key, Value> v);
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
-  IValue(c10::optional<T> v);
+  IValue(std::optional<T> v);
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::OptionalArrayRef<T> v);
-  IValue(c10::nullopt_t);
+  IValue(std::nullopt_t);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);
@@ -1021,9 +1021,9 @@ struct TORCH_API IValue final {
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
   template <typename T>
-  optional<T> toOptional();
+  std::optional<T> toOptional();
   template <typename T>
-  optional<T> toOptional() const;
+  std::optional<T> toOptional() const;
 
   /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
@@ -1117,6 +1117,23 @@ struct TORCH_API IValue final {
   using HashAliasedIValueMap =
       std::unordered_map<IValue, IValue, HashAliasedIValue, CompAliasedIValues>;
 
+  struct HashIdentityIValue {
+    size_t operator()(const IValue& val) const {
+      return val.payload.u.as_int;
+    }
+  };
+
+  struct CompIdentityIValues {
+    bool operator()(const IValue& lhs, const IValue& rhs) const {
+      return lhs.is(rhs);
+    }
+  };
+
+  using HashIdentityIValues =
+      std::unordered_set<IValue, HashIdentityIValue, CompIdentityIValues>;
+  using HashIdentityIValueMap =
+      std::unordered_map<IValue, IValue, HashIdentityIValue, CompIdentityIValues>;
+
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
   bool overlaps(const IValue& rhs) const;
@@ -1128,10 +1145,10 @@ struct TORCH_API IValue final {
   // TODO: There are several places that recurse over IValue. This is fragile.
   // This visitor should be used to recurse over ivalues.
   void visit(const std::function<bool(const IValue&)>& visitor) const;
-  IValue deepcopy(c10::optional<at::Device> device = c10::nullopt) const;
+  IValue deepcopy(std::optional<at::Device> device = std::nullopt) const;
   IValue deepcopy(
-      HashAliasedIValueMap& memo,
-      c10::optional<at::Device> device = c10::nullopt) const;
+      HashIdentityIValueMap& memo,
+      std::optional<at::Device> device = std::nullopt) const;
 
  private:
   static c10::intrusive_ptr_target* null_to_undefined_tensor(
@@ -1506,32 +1523,32 @@ struct TORCH_API WeakTypePtr {
 struct WeakOrStrongCompilationUnit {
   explicit WeakOrStrongCompilationUnit(
       std::shared_ptr<torch::jit::CompilationUnit> shared_cu)
-      : strong_ptr_(std::move(shared_cu)), weak_ptr_(c10::nullopt) {}
+      : strong_ptr_(std::move(shared_cu)), weak_ptr_(std::nullopt) {}
 
   explicit WeakOrStrongCompilationUnit(
       std::weak_ptr<torch::jit::CompilationUnit> weak_cu)
-      : strong_ptr_(c10::nullopt), weak_ptr_(std::move(weak_cu)) {}
+      : strong_ptr_(std::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
+    TORCH_INTERNAL_ASSERT(strong_ptr_ != std::nullopt);
     return *strong_ptr_;
   }
 
   std::weak_ptr<torch::jit::CompilationUnit> getWeakRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(weak_ptr_ != c10::nullopt);
+    TORCH_INTERNAL_ASSERT(weak_ptr_ != std::nullopt);
     return *weak_ptr_;
   }
 
   bool holdingStrongRef() const {
-    return strong_ptr_ != c10::nullopt;
+    return strong_ptr_ != std::nullopt;
   }
 
   bool holdingEmptyStrongRef() const {
     return holdingStrongRef() && *strong_ptr_ == nullptr;
   }
 
-  c10::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
-  c10::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
+  std::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
+  std::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
 };
 
 // An Object will hold a non-owning Compilation Unit reference if it is a

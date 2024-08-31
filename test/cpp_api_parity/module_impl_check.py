@@ -21,7 +21,6 @@ import types
 from string import Template
 
 import torch
-
 from cpp_api_parity.sample_module import SAMPLE_MODULE_CPP_SOURCE
 from cpp_api_parity.utils import (
     add_test,
@@ -39,6 +38,8 @@ from cpp_api_parity.utils import (
     TorchNNModuleTestParams,
     try_remove_folder,
 )
+from torch.jit._pickle import restore_type_tag
+
 
 # Expected substitutions:
 #
@@ -193,7 +194,9 @@ def test_forward_backward(unit_test_class, test_params):
             backward_grad_dict_file_path,
         )
         cpp_output = torch.load(forward_output_file_path)
-        cpp_grad_dict = torch.load(backward_grad_dict_file_path)
+        # weights_only: need GLOBAL torch.jit._pickle.restore_type_tag
+        with torch.serialization.safe_globals([restore_type_tag]):
+            cpp_grad_dict = torch.load(backward_grad_dict_file_path)
 
         # Check that forward outputs are equal
         unit_test_class.assertEqual(

@@ -397,7 +397,7 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   // NOTE: this is where we record aten::to in the graph during tracing. However, the behavior of aten::to
   // is different with respect to TensorOptions fields that are not present: aten::to inherits fields that
@@ -407,18 +407,18 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
   return self.to(self.options().device(device).memory_format(optional_memory_format), non_blocking, copy);
 }
 
-static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy);
 }
 
-static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   // TODO: Make this call the TensorOptions version, maybe?
   return self.to(dtype, non_blocking, copy, optional_memory_format);
 }
 
-static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   // TODO: Make this call the TensorOptions version, maybe?
   return self.to(device, dtype, non_blocking, copy, optional_memory_format);
@@ -501,6 +501,29 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_mtia(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "mtia(Device? device=None, bool non_blocking=False, *, MemoryFormat? memory_format=None)",
+    "mtia(Device? device=None, bool async=False, *, MemoryFormat? memory_format=None)|deprecated"
+  });
+  auto& self_ = THPVariable_Unpack(self);
+  ParsedArgs<3> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if (r.has_torch_function()) {
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  auto device = r.isNone(0) ? at::Device(at::DeviceType::MTIA) : r.device(0);
+  auto opt_memory_format = r.memoryformatOptional(2);
+  TORCH_CHECK(device.is_mtia(), "Invalid device, must be MTIA device");
+  torch::utils::device_lazy_init(at::kMTIA);
+  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_xpu(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -546,7 +569,7 @@ static PyObject * THPVariable_ipu(PyObject* self, PyObject* args, PyObject* kwar
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType, std::optional<c10::MemoryFormat> optional_memory_format) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
   return THPVariable_Wrap(dispatch_to(self_, scalarType, false, false, optional_memory_format));
@@ -1272,6 +1295,7 @@ PyMethodDef variable_methods[] = {
   {"copy_", castPyCFunctionWithKeywords(THPVariable_copy_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", castPyCFunctionWithKeywords(THPVariable_cpu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"cuda", castPyCFunctionWithKeywords(THPVariable_cuda), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"mtia", castPyCFunctionWithKeywords(THPVariable_mtia), METH_VARARGS | METH_KEYWORDS, NULL},
   {"xpu", castPyCFunctionWithKeywords(THPVariable_xpu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"ipu", castPyCFunctionWithKeywords(THPVariable_ipu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"data_ptr", THPVariable_data_ptr, METH_NOARGS, NULL},

@@ -29,7 +29,7 @@ c10::intrusive_ptr<c10d::TCPStore> _createServer(
           /* waitWorkers */ false,
           /* timeout */ std::chrono::seconds(timeout),
           /* multiTenant */ false,
-          /* masterListenFd */ c10::nullopt,
+          /* masterListenFd */ std::nullopt,
           /* useLibUV*/ useLibUV});
 }
 
@@ -166,11 +166,11 @@ TEST(TCPStoreTest, testHelperUV) {
 }
 
 TEST(TCPStoreTest, testHelperPrefix) {
-  testHelper(false, "testPrefix");
+  testHelper(false, "testPrefixNoUV");
 }
 
 TEST(TCPStoreTest, testHelperPrefixUV) {
-  testHelper(true, "testPrefix");
+  testHelper(true, "testPrefixUV");
 }
 
 TEST(TCPStoreTest, testCleanShutdown) {

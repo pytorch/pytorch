@@ -19,7 +19,7 @@
 #define IS_SPMM_AVAILABLE() 0
 #endif
 
-#if defined(USE_ROCM) && ROCM_VERSION >= 50200
+#if defined(USE_ROCM)
 #define IS_SPMM_HIP_AVAILABLE() 1
 #else
 #define IS_SPMM_HIP_AVAILABLE() 0
@@ -204,7 +204,7 @@ void csrmm2(
   T alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
   T *b, int64_t ldb, T beta, T *c, int64_t ldc)
 {
-  TORCH_INTERNAL_ASSERT(false, "cusparse csr MM only supports data type of float, double, cfloat and cdouble.");
+  static_assert(false&&sizeof(T), "cusparse csr MM only supports data type of float, double, cfloat and cdouble.");
 }
 
 template<> void csrmm2<float>(
@@ -381,7 +381,7 @@ void csrmm2(
   T alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
   T *b, int64_t ldb, T beta, T *c, int64_t ldc)
 {
-  TORCH_INTERNAL_ASSERT(false, "cusparse csr MM only supports data type of float, double, cfloat and cdouble.");
+  static_assert(false&&sizeof(T), "cusparse csr MM only supports data type of float, double, cfloat and cdouble.");
 }
 
 template<> void csrmm2<float>(

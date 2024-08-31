@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Graph;
 
@@ -39,5 +38,4 @@ TORCH_API bool mergeTypes(
     ArrayRef<Value*> rhs,
     ArrayRef<Value*> outputs);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

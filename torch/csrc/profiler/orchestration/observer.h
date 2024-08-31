@@ -21,12 +21,19 @@ enum class C10_API_ENUM ActivityType {
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
 
+inline std::string actToString(ActivityType t) {
+  const std::string ActivityTypeNames[] = {
+      "CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
+  return ActivityTypeNames[static_cast<int>(t)];
+}
+
 enum class C10_API_ENUM ProfilerState {
   Disabled = 0,
   CPU, // CPU-only profiling
   CUDA, // CPU + CUDA events
   NVTX, // only emit NVTX markers
   ITT, // only emit ITT markers
+  PRIVATEUSE1, // only emit PRIVATEUSE1 markers
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   KINETO_PRIVATEUSE1_FALLBACK, // use PrivateUse1 events
@@ -39,7 +46,8 @@ enum class C10_API_ENUM ActiveProfilerType {
   LEGACY,
   KINETO,
   NVTX,
-  ITT
+  ITT,
+  PRIVATEUSE1
 };
 
 struct TORCH_API ExperimentalConfig {

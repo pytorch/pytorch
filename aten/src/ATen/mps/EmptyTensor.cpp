@@ -20,11 +20,11 @@
 namespace at::detail {
 TensorBase empty_mps(
     IntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt,
-    c10::optional<c10::MemoryFormat> memory_format_opt) {
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt,
+    std::optional<c10::MemoryFormat> memory_format_opt) {
 #if defined(__APPLE__)
 #if __is_target_os(macOS)
   if (at::hasMPS()) {
@@ -95,7 +95,7 @@ TensorBase empty_strided_mps(
     IntArrayRef size,
     IntArrayRef stride,
     ScalarType dtype,
-    c10::optional<Device> device_opt) {
+    std::optional<Device> device_opt) {
 #if defined(__APPLE__)
 #if __is_target_os(macOS)
   if (at::hasMPS()) {

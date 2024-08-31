@@ -327,7 +327,7 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
 // see overloads of computeStride() below.
 //
 template <typename ResultVec, typename NewShapeVec, typename Numel>
-inline c10::optional<ResultVec> computeStride_impl(
+inline std::optional<ResultVec> computeStride_impl(
     const NewShapeVec& oldshape,
     const NewShapeVec& oldstride,
     const NewShapeVec& newshape,
@@ -380,7 +380,7 @@ inline c10::optional<ResultVec> computeStride_impl(
         view_d--;
       }
       if (view_numel != tensor_numel) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       if (tensor_d > 0) {
         chunk_base_stride = oldstride[tensor_d - 1];
@@ -390,12 +390,12 @@ inline c10::optional<ResultVec> computeStride_impl(
     }
   }
   if (view_d != -1) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return newstride;
 }
 
-c10::optional<std::vector<int64_t>> computeStride(
+std::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape) {
@@ -403,7 +403,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   return computeStride_impl<std::vector<int64_t>, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
 }
 
-c10::optional<SymDimVector> computeStride(
+std::optional<SymDimVector> computeStride(
     c10::SymIntArrayRef oldshape,
     c10::SymIntArrayRef oldstride,
     c10::SymIntArrayRef newshape) {
@@ -411,7 +411,7 @@ c10::optional<SymDimVector> computeStride(
   return computeStride_impl<SymDimVector, c10::SymIntArrayRef, c10::SymInt>(oldshape, oldstride, newshape, toResult);
 }
 
-c10::optional<DimVector> computeStride(
+std::optional<DimVector> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     const DimVector& newshape) {

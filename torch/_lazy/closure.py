@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os
 import threading
 from queue import Empty as EmptyQueue, Queue
@@ -6,7 +7,7 @@ from torch._lazy.device_context import get_device_context
 
 
 class ClosureHandler:
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def run(self, closure):

@@ -14,11 +14,11 @@ AllenaiLongformerBase,pass,9
 
 
 
-BartForCausalLM,pass,12
+BartForCausalLM,pass,6
 
 
 
-BartForConditionalGeneration,pass,24
+BartForConditionalGeneration,pass,8
 
 
 
@@ -34,11 +34,11 @@ BlenderbotForCausalLM,eager_fail_to_run,0
 
 
 
-BlenderbotSmallForCausalLM,pass,12
+BlenderbotSmallForCausalLM,pass,6
 
 
 
-BlenderbotSmallForConditionalGeneration,pass,24
+BlenderbotSmallForConditionalGeneration,pass,8
 
 
 
@@ -102,11 +102,11 @@ M2M100ForConditionalGeneration,pass,4
 
 
 
-MBartForCausalLM,pass,12
+MBartForCausalLM,pass,6
 
 
 
-MBartForConditionalGeneration,pass,24
+MBartForConditionalGeneration,pass,8
 
 
 
@@ -130,23 +130,23 @@ MobileBertForQuestionAnswering,pass,3
 
 
 
-OPTForCausalLM,pass,12
+OPTForCausalLM,pass,6
 
 
 
-PLBartForCausalLM,pass,12
+PLBartForCausalLM,pass,6
 
 
 
-PLBartForConditionalGeneration,pass,29
+PLBartForConditionalGeneration,pass,8
 
 
 
-PegasusForCausalLM,pass,12
+PegasusForCausalLM,pass,6
 
 
 
-PegasusForConditionalGeneration,pass,23
+PegasusForConditionalGeneration,pass,7
 
 
 
@@ -158,7 +158,7 @@ RobertaForQuestionAnswering,pass,5
 
 
 
-Speech2Text2ForCausalLM,pass,12
+Speech2Text2ForCausalLM,pass,6
 
 
 
@@ -170,11 +170,11 @@ T5Small,pass,5
 
 
 
-TrOCRForCausalLM,pass,12
+TrOCRForCausalLM,pass,6
 
 
 
-XGLMForCausalLM,pass,12
+XGLMForCausalLM,pass,6
 
 
 

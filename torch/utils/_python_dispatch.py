@@ -1,8 +1,11 @@
+# mypy: allow-untyped-defs
 import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque
+from typing_extensions import TypeGuard
+from collections import deque
 
 import torch
 import torchgen
@@ -23,10 +26,10 @@ from torch._C import (
 # - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
 
 _is_in_torch_dispatch_mode = False
+_is_in_non_infra_torch_dispatch_mode = False
 
-
-def is_in_torch_dispatch_mode() -> bool:
-    return _is_in_torch_dispatch_mode
+def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
+    return _is_in_torch_dispatch_mode if include_infra_modes else _is_in_non_infra_torch_dispatch_mode
 
 
 class TorchDispatchMode:
@@ -65,15 +68,32 @@ class TorchDispatchMode:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)
             self.__dict__["_dispatch_key"] = _dispatch_key
 
-        self.old_dispatch_mode_flag = False
+        self.old_dispatch_mode_flags: Deque[bool] = deque()
+        self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()
+
+    def _lazy_init_old_dispatch_mode_flags(self):
+        if not hasattr(self, "old_dispatch_mode_flags"):
+            self.old_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
+
+        if not hasattr(self, "old_non_infra_dispatch_mode_flags"):
+            self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
+
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
     def __enter__(self):
         global _is_in_torch_dispatch_mode
-        self.old_dispatch_mode_flag = _is_in_torch_dispatch_mode
+        global _is_in_non_infra_torch_dispatch_mode
+        # Previously, there wasn't any state in this class' constructor
+        # super calls were added to existing modes, but for any new modes
+        # this will replicate the previous behavior of not strictly needing
+        # to call super().__init__()
+        self._lazy_init_old_dispatch_mode_flags()
+        self.old_dispatch_mode_flags.append(_is_in_torch_dispatch_mode)
         _is_in_torch_dispatch_mode = True
+        self.old_non_infra_dispatch_mode_flags.append(_is_in_non_infra_torch_dispatch_mode)
+        _is_in_non_infra_torch_dispatch_mode = _is_in_non_infra_torch_dispatch_mode or not self.is_infra_mode()
         _push_mode(self)
         return self
 
@@ -84,7 +104,9 @@ class TorchDispatchMode:
             # We should probably revisit this.
             mb_dk_or_mode_key = self.__dict__.get("_mode_key", None)
         global _is_in_torch_dispatch_mode
-        _is_in_torch_dispatch_mode = self.old_dispatch_mode_flag
+        _is_in_torch_dispatch_mode = self.old_dispatch_mode_flags.pop()
+        global _is_in_non_infra_torch_dispatch_mode
+        _is_in_non_infra_torch_dispatch_mode = self.old_non_infra_dispatch_mode_flags.pop()
         _pop_mode(mb_dk_or_mode_key)
 
     @classmethod
@@ -95,6 +117,11 @@ class TorchDispatchMode:
         instance = cls(*args, **kwargs)
         return instance
 
+    @classmethod
+    def is_infra_mode(cls):
+        return False
+
+
 
 def _get_current_dispatch_mode():
     stack_len = _len_torch_dispatch_stack()
@@ -104,24 +131,25 @@ def _get_current_dispatch_mode():
     return None
 
 
-def _detect_functional_mode():
+def _detect_infra_mode(key):
+    assert key in [torch._C._TorchDispatchModeKey.FUNCTIONAL, torch._C._TorchDispatchModeKey.PROXY]
     from torch._ops import _get_dispatch_mode_pre_dispatch
 
-    pre_dispatch_functional_mode = _get_dispatch_mode_pre_dispatch(
-        torch._C._TorchDispatchModeKey.FUNCTIONAL
+    pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(
+        key
     )
-    post_dispatch_functional_mode = torch._C._get_dispatch_mode(
-        torch._C._TorchDispatchModeKey.FUNCTIONAL
-    )
-
-    assert (pre_dispatch_functional_mode is None) or (
-        post_dispatch_functional_mode is None
+    post_dispatch_mode = torch._C._get_dispatch_mode(
+        key
     )
 
-    if pre_dispatch_functional_mode is None:
-        return post_dispatch_functional_mode
+    assert (pre_dispatch_mode is None) or (
+        post_dispatch_mode is None
+    )
 
-    return pre_dispatch_functional_mode
+    if pre_dispatch_mode is None:
+        return post_dispatch_mode
+
+    return pre_dispatch_mode
 
 
 def _unset_infra_mode(key):
@@ -204,6 +232,7 @@ def _disable_current_modes():
     )
     from torch._subclasses.functional_tensor import FunctionalTensorMode
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+    from torch._subclasses.schema_check_mode import SchemaCheckMode
 
     mode_len_pre_dispatch = _len_torch_dispatch_stack_pre_dispatch()
     old_pre_dispatch_modes = [
@@ -212,12 +241,15 @@ def _disable_current_modes():
 
     has_proxy_mode_in_pre_dispatch = False
     has_functional_mode_in_pre_dispatch = False
+    has_schema_check_mode_in_pre_dispatch = False
 
     for i in old_pre_dispatch_modes:
         if isinstance(i, ProxyTorchDispatchMode):
             has_proxy_mode_in_pre_dispatch = True
         if isinstance(i, FunctionalTensorMode):
             has_functional_mode_in_pre_dispatch = True
+        if isinstance(i, SchemaCheckMode):
+            has_schema_check_mode_in_pre_dispatch = True
 
     mode_len = _len_torch_dispatch_stack()
     old_modes = [_pop_mode() for _ in range(mode_len)]
@@ -233,6 +265,13 @@ def _disable_current_modes():
         if isinstance(old, ProxyTorchDispatchMode) and has_proxy_mode_in_pre_dispatch:
             raise AssertionError(
                 "Can't have ProxyTorchDispatchMode available both in PreDispatch and Python Key"
+            )
+        if (
+            isinstance(old, SchemaCheckMode)
+            and has_schema_check_mode_in_pre_dispatch
+        ):
+            raise AssertionError(
+                "Can't have SchemaCheckMode available both in PreDispatch and Python Key"
             )
 
     # Manually disable proxy and fake modes, if any are active
@@ -252,7 +291,70 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         return func(*args, **kwargs)
 
 
-def is_traceable_wrapper_subclass(t):
+# Subtypes which have __tensor_flatten__ and __tensor_unflatten__.
+class TensorWithFlatten(Protocol):
+    def __tensor_flatten__(self) -> Tuple[Sequence[str], object]:
+        ...
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors: int, flatten_spec: int, outer_size: int, outer_stride: int) -> torch.Tensor:
+        ...
+
+    # It would be really nice to be able to say that the return of
+    # is_traceable_wrapper_subclass() is Intersection[torch.Tensor,
+    # TensorWithFlatten] - but that doesn't exist.
+
+    shape: torch._C.Size
+
+    @overload
+    def stride(self, dim: None = None) -> Tuple[int, ...]:
+        ...
+
+    @overload
+    def stride(self, dim: int) -> int:
+        ...
+
+    def dim(self) -> int:
+        ...
+
+    @overload
+    def to(
+            self,
+            dtype: torch.types._dtype,
+            non_blocking: bool = False,
+            copy: bool = False,
+            *,
+            memory_format: Optional[torch.memory_format] = None
+    ) -> torch.Tensor:
+        ...
+
+    @overload
+    def to(
+            self,
+            device: Optional["torch._prims_common.DeviceLikeType"] = None,
+            dtype: Optional[torch.types._dtype] = None,
+            non_blocking: bool = False,
+            copy: bool = False,
+            *,
+            memory_format: Optional[torch.memory_format] = None
+    ) -> torch.Tensor:
+        ...
+
+    @overload
+    def to(
+            self,
+            other: torch.Tensor,
+            non_blocking: bool = False,
+            copy: bool = False,
+            *,
+            memory_format: Optional[torch.memory_format] = None
+    ) -> torch.Tensor:
+        ...
+
+
+
+
+def is_traceable_wrapper_subclass(t: object) -> TypeGuard[TensorWithFlatten]:
     """
     Returns whether or not a tensor subclass that implements __torch_dispatch__
     is 'traceable' with torch.compile.
@@ -361,44 +463,23 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
                     r
                 ), f"""Called {str(func)} with input of type {type(arg)}
 and output of type {type(ret)}. But expected types to match."""
-        # Need to run under no_dispatch, because we explicitly do **not**
+        # Need to call a non-dispatcher helper, because we explicitly do **not**
         # want our subclass to intercept the set_() call.
         # instead, our subclass should directly have its storage swapped out.
-        with torch.utils._mode_utils.no_dispatch():
-            # See Note: [Fake Tensor Dispatch Keys]
-            # we're borrowing the way it modifies dispatch key TLS.
-            meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            try:
-                # directly calling this overload, and passing ret.shape, because we **explicitly**
-                # don't want to reset the sizes on ret, if the storage implies a size change.
-                # Why?
-                # The purpose of this API is *not* to change the size/strides of our output- we assume it's already correct.
-                # We just want to "fix up" the storage aliasing, without modifying or output's metadata.
-                # Example: out = inp.expand(inp.shape[0], inp.shape[0])
-                #     This requires swapping the storage of out to be the same as inp,
-                #     but we do *not* want it to change the sizes/strides that were compute for out.
+        # we **explicitly** don't want to reset the sizes on ret, if the storage implies a size change.
+        # Why?
+        # The purpose of this API is *not* to change the size/strides of our output- we assume it's already correct.
+        # We just want to "fix up" the storage aliasing, without modifying or output's metadata.
+        # Example: out = inp.expand(inp.shape[0], inp.shape[0])
+        #     This requires swapping the storage of out to be the same as inp,
+        #     but we do *not* want it to change the sizes/strides that were compute for out.
 
-                if isinstance(ret, list):
-                    for r in ret:
-                        torch.ops.aten.set_.source_Storage_storage_offset(
-                            r,
-                            arg.untyped_storage(),
-                            r.storage_offset(),
-                            r.shape,
-                            r.stride(),
-                        )
-                else:
-                    assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    torch.ops.aten.set_.source_Storage_storage_offset(
-                        ret,
-                        arg.untyped_storage(),
-                        ret.storage_offset(),
-                        ret.shape,
-                        ret.stride(),
-                    )
-            finally:
-                torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
+        if isinstance(ret, list):
+            for r in ret:
+                torch._functionalize_unsafe_set(r, arg)
+        else:
+            assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
+            torch._functionalize_unsafe_set(ret, arg)
 
     def is_read_only_alias_match(arg, ret):
         shared_aliases = arg.alias_set & ret.alias_set
@@ -534,7 +615,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         return None
 
     def get_arg_from_alias(output_alias, schema_info, args, kwargs):
-        new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(
+        new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(  # type: ignore[misc]
             func, args=args, kwargs=kwargs
         )
 

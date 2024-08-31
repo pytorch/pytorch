@@ -6,6 +6,7 @@ import torch
 import torch._prims as prims
 from torchgen.gen import parse_native_yaml
 
+
 ROOT = Path(__file__).absolute().parent.parent.parent.parent
 NATIVE_FUNCTION_YAML_PATH = ROOT / Path("aten/src/ATen/native/native_functions.yaml")
 TAGS_YAML_PATH = ROOT / Path("aten/src/ATen/native/tags.yaml")

@@ -1,4 +1,6 @@
-from typing import List, Optional
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -7,14 +9,18 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
+
 
 __all__ = ["Adamax", "adamax"]
 
@@ -22,17 +28,19 @@ __all__ = ["Adamax", "adamax"]
 class Adamax(Optimizer):
     def __init__(
         self,
-        params,
-        lr=2e-3,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-        weight_decay=0,
+        params: ParamsT,
+        lr: Union[float, Tensor] = 2e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0,
         foreach: Optional[bool] = None,
         *,
         maximize: bool = False,
         differentiable: bool = False,
         capturable: bool = False,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -126,11 +134,11 @@ class Adamax(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_infs = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_infs: List[Tensor] = []
+            state_steps: List[Tensor] = []
 
             beta1, beta2 = group["betas"]
             eps = group["eps"]
@@ -197,7 +205,7 @@ Adamax.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 2e-3)
+        lr (float, Tensor, optional): learning rate (default: 2e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square
         eps (float, optional): term added to the denominator to improve
@@ -215,6 +223,193 @@ Adamax.__doc__ = (
 )
 
 
+def _single_tensor_adamax(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_infs: List[Tensor],
+    state_steps: List[Tensor],
+    *,
+    eps: float,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    maximize: bool,
+    differentiable: bool,
+    capturable: bool,
+    has_complex: bool,
+):
+    for i, param in enumerate(params):
+        grad = grads[i]
+        grad = grad if not maximize else -grad
+        exp_avg = exp_avgs[i]
+        exp_inf = exp_infs[i]
+        step_t = state_steps[i]
+
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
+            capturable_supported_devices = _get_capturable_supported_devices()
+            assert (
+                param.device.type == step_t.device.type
+                and param.device.type in capturable_supported_devices
+            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+
+        # update step
+        step_t += 1
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        if torch.is_complex(param):
+            param = torch.view_as_real(param)
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_inf = torch.view_as_real(exp_inf)
+
+        # Update biased first moment estimate.
+        exp_avg.lerp_(grad, 1 - beta1)
+        # Update the exponentially weighted infinity norm.
+        if not differentiable:
+            torch.maximum(
+                exp_inf.mul_(beta2),
+                grad.abs().add_(eps),
+                out=exp_inf,
+            )
+        else:
+            norm_buf = torch.cat(
+                [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)],
+                0,
+            )
+            exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
+
+        if capturable:
+            # why jump through extra hoops and negate bias_correction? check out #121238
+            # once fixed, we should use bias_correction with addcdiv value=-1 for readability
+            neg_bias_correction = beta1**step_t - 1
+            neg_bias_correction.div_(lr)
+            denom = exp_inf * neg_bias_correction
+            param.addcdiv_(exp_avg, denom)
+        else:
+            bias_correction = 1 - beta1 ** _get_value(step_t)
+            clr = lr / bias_correction
+
+            param.addcdiv_(exp_avg, exp_inf, value=-clr)
+
+
+def _multi_tensor_adamax(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_infs: List[Tensor],
+    state_steps: List[Tensor],
+    *,
+    eps: float,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    maximize: bool,
+    differentiable: bool,
+    capturable: bool,
+    has_complex: bool,
+):
+    assert not differentiable, "_foreach ops don't support autograd"
+
+    if len(params) == 0:
+        return
+
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
+        assert all(
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_infs, state_steps]  # type: ignore[list-item]
+    )
+    for (
+        grouped_params_,
+        grouped_grads_,
+        grouped_exp_avgs_,
+        grouped_exp_infs_,
+        grouped_state_steps_,
+    ), _ in grouped_tensors.values():
+        grouped_params = cast(List[Tensor], grouped_params_)
+        grouped_grads = cast(List[Tensor], grouped_grads_)
+        grouped_exp_avgs = cast(List[Tensor], grouped_exp_avgs_)
+        grouped_exp_infs = cast(List[Tensor], grouped_exp_infs_)
+        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+
+        if has_complex:
+            _view_as_real(
+                grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs
+            )
+
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
+
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
+            torch._foreach_add_(
+                grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
+            )
+        else:
+            torch._foreach_add_(grouped_state_steps, 1)
+
+        if weight_decay != 0:
+            if maximize:
+                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+            else:
+                grouped_grads = torch._foreach_add(  # type: ignore[assignment]
+                    grouped_grads, grouped_params, alpha=weight_decay
+                )
+
+        # Update biased first moment estimate.
+        torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
+
+        # Update the exponentially weighted infinity norm.
+        torch._foreach_mul_(grouped_exp_infs, beta2)
+
+        # in this case, we need to introduce a copy of the grads
+        # since one has not been introduced previously
+        if not maximize and weight_decay == 0:
+            grouped_grads = torch._foreach_abs(grouped_grads)  # type: ignore[assignment]
+        else:
+            torch._foreach_abs_(grouped_grads)
+
+        torch._foreach_add_(grouped_grads, eps)
+        torch._foreach_maximum_(grouped_exp_infs, grouped_grads)
+
+        bias_corrections: Union[Tuple[Tensor, ...], List[Tensor]]
+        if capturable:
+            bias_corrections = torch._foreach_pow(beta1, grouped_state_steps)
+            # foreach_sub doesn't allow a scalar as the first arg
+            torch._foreach_sub_(bias_corrections, 1)
+            torch._foreach_div_(bias_corrections, lr)
+
+            denom = torch._foreach_mul(grouped_exp_infs, bias_corrections)
+            torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, denom)
+        else:
+            bias_corrections = [
+                1 - beta1 ** _get_value(step) for step in grouped_state_steps
+            ]
+            step_size = [(_get_value(lr) / bc) * -1 for bc in bias_corrections]
+            torch._foreach_addcdiv_(
+                grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size
+            )
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adamax)
 def adamax(
     params: List[Tensor],
     grads: List[Tensor],
@@ -276,179 +471,3 @@ def adamax(
         has_complex=has_complex,
         capturable=capturable,
     )
-
-
-def _single_tensor_adamax(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_infs: List[Tensor],
-    state_steps: List[Tensor],
-    *,
-    eps: float,
-    beta1: float,
-    beta2: float,
-    lr: float,
-    weight_decay: float,
-    maximize: bool,
-    differentiable: bool,
-    capturable: bool,
-    has_complex: bool,
-):
-    for i, param in enumerate(params):
-        grad = grads[i]
-        grad = grad if not maximize else -grad
-        exp_avg = exp_avgs[i]
-        exp_inf = exp_infs[i]
-        step_t = state_steps[i]
-
-        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch._utils.is_compiling() and capturable:
-            assert (param.is_cuda and step_t.is_cuda) or (
-                param.is_xla and step_t.is_xla
-            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
-
-        # update step
-        step_t += 1
-
-        if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
-
-        if torch.is_complex(param):
-            param = torch.view_as_real(param)
-            grad = torch.view_as_real(grad)
-            exp_avg = torch.view_as_real(exp_avg)
-            exp_inf = torch.view_as_real(exp_inf)
-
-        # Update biased first moment estimate.
-        exp_avg.lerp_(grad, 1 - beta1)
-        # Update the exponentially weighted infinity norm.
-        if not differentiable:
-            torch.maximum(
-                exp_inf.mul_(beta2),
-                grad.abs().add_(eps),
-                out=exp_inf,
-            )
-        else:
-            norm_buf = torch.cat(
-                [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)],
-                0,
-            )
-            exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
-
-        if capturable:
-            # why jump through extra hoops and negate bias_correction? check out #121238
-            # once fixed, we should use bias_correction with addcdiv value=-1 for readability
-            neg_bias_correction = beta1**step_t - 1
-            neg_bias_correction.div_(lr)
-            denom = exp_inf * neg_bias_correction
-            param.addcdiv_(exp_avg, denom)
-        else:
-            bias_correction = 1 - beta1 ** _get_value(step_t)
-            clr = lr / bias_correction
-
-            param.addcdiv_(exp_avg, exp_inf, value=-clr)
-
-
-def _multi_tensor_adamax(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_infs: List[Tensor],
-    state_steps: List[Tensor],
-    *,
-    beta1: float,
-    beta2: float,
-    lr: float,
-    weight_decay: float,
-    eps: float,
-    maximize: bool,
-    differentiable: bool,
-    capturable: bool,
-    has_complex: bool,
-):
-    assert not differentiable, "_foreach ops don't support autograd"
-
-    if len(params) == 0:
-        return
-
-    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if (
-        not torch._utils.is_compiling()
-        and capturable
-        and not all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps))
-    ):
-        raise RuntimeError(
-            "If capturable=True, params and state_steps must be CUDA tensors."
-        )
-
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_infs, state_steps]
-    )
-    for (
-        grouped_params,
-        grouped_grads,
-        grouped_exp_avgs,
-        grouped_exp_infs,
-        grouped_state_steps,
-    ), _ in grouped_tensors.values():
-        if has_complex:
-            _view_as_real(
-                grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs
-            )
-
-        if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
-
-        # Update steps
-        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
-        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
-        # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if grouped_state_steps[0].is_cpu:
-            torch._foreach_add_(
-                grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
-            )
-        else:
-            torch._foreach_add_(grouped_state_steps, 1)
-
-        if weight_decay != 0:
-            if maximize:
-                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
-                torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
-            else:
-                grouped_grads = torch._foreach_add(
-                    grouped_grads, grouped_params, alpha=weight_decay
-                )
-
-        # Update biased first moment estimate.
-        torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
-
-        # Update the exponentially weighted infinity norm.
-        torch._foreach_mul_(grouped_exp_infs, beta2)
-
-        # in this case, we need to introduce a copy of the grads
-        # since one has not been introduced previously
-        if not maximize and weight_decay == 0:
-            grouped_grads = torch._foreach_abs(grouped_grads)
-        else:
-            torch._foreach_abs_(grouped_grads)
-
-        torch._foreach_add_(grouped_grads, eps)
-        torch._foreach_maximum_(grouped_exp_infs, grouped_grads)
-
-        if capturable:
-            bias_corrections = torch._foreach_pow(beta1, grouped_state_steps)
-            # foreach_sub doesn't allow a scalar as the first arg
-            torch._foreach_sub_(bias_corrections, 1)
-            torch._foreach_div_(bias_corrections, lr)
-
-            denom = torch._foreach_mul(grouped_exp_infs, bias_corrections)
-            torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, denom)
-        else:
-            bias_corrections = [
-                1 - beta1 ** _get_value(step) for step in grouped_state_steps
-            ]
-            step_size = [(lr / bc) * -1 for bc in bias_corrections]
-            torch._foreach_addcdiv_(
-                grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size
-            )

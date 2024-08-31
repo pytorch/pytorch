@@ -84,12 +84,6 @@ static void THCPStream_dealloc(THCPStream* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject* THCPStream_get_device(THCPStream* self, void* unused) {
-  HANDLE_TH_ERRORS
-  return THPDevice_New(self->cuda_stream.device());
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* THCPStream_get_cuda_stream(THCPStream* self, void* unused) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(self->cuda_stream.stream());

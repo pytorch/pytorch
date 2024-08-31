@@ -5,8 +5,8 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import collect_defined_kernels
 from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
 from torch.testing._internal.common_device_type import largeTensorTest
-
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
 
 example_kernel = """
 @triton_heuristics.reduction(
@@ -16,7 +16,7 @@ example_kernel = """
     triton_meta={
         'signature': {0: '*fp32', 1: '*fp32', 2: 'i32', 3: 'i32'},
         'device': 0,
-        'device_type': 'cuda',
+        'device_type': 'GPU_TYPE',
         'constants': {},
         'configs': [AttrsDescriptor(divisible_by_16=(0, 1, 2, 3), equal_to_1=(), ids_of_folded_args=(), divisible_by_8=(2, 3))]},
     inductor_meta={
@@ -50,7 +50,9 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
     tmp5 = tmp4 + tmp2
     tl.debug_barrier()
     tl.store(in_out_ptr0 + (x0), tmp5, xmask)
-"""
+""".replace(
+    "GPU_TYPE", GPU_TYPE
+)
 
 
 class TestMetrics(TestCase):
@@ -75,6 +77,7 @@ class TestMetrics(TestCase):
             "INNER", metrics._parse_reduction_hint(kernel_category, example_kernel)
         )
 
+    @config.patch("fx_graph_remote_cache", False)
     def test_atomic_add(self):
         @torch.compile
         def f(lhs, index, rhs):
@@ -93,6 +96,7 @@ class TestMetrics(TestCase):
         self.assertEqual(metrics._count_pattern(kernel_code, "tl.atomic_add"), 1)
 
     @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE)
+    @config.patch("fx_graph_remote_cache", False)
     @config.patch("benchmark_kernel", True)
     def test_kernel_args_num_gb(self):
         @torch.compile

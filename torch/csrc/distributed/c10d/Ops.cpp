@@ -168,7 +168,7 @@ IMPL_BROADCAST(PrivateUse1)
           at::TensorList tensors,                                             \
           const c10::intrusive_ptr<ProcessGroup>& process_group,              \
           const c10::intrusive_ptr<ReduceOp>& reduce_op,                      \
-          const c10::optional<at::Tensor>& sparse_indices,                    \
+          const std::optional<at::Tensor>& sparse_indices,                    \
           int64_t timeout) {                                                  \
     auto tensor_vec = tensors.vec();                                          \
     auto work = process_group->getBackend(c10::DeviceType::DEV) -> allreduce( \
@@ -460,7 +460,7 @@ allreduce_sparse_cuda_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const c10::intrusive_ptr<ReduceOp>& reduce_op,
-    const c10::optional<at::Tensor>& sparse_indices,
+    const std::optional<at::Tensor>& sparse_indices,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
   auto work = process_group->getBackend(c10::DeviceType::CUDA)

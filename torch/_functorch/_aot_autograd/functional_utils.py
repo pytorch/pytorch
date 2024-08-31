@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file contains utilities related to functionalization in AOTAutograd:
 1. converting to/from functional tensors
@@ -5,20 +6,23 @@ This file contains utilities related to functionalization in AOTAutograd:
 3. regenerating/replaying views from their base
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
+from __future__ import annotations
 
+from typing import Optional
 
 import torch
 from torch import Tensor
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
-from .. import config
+
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
@@ -129,6 +133,20 @@ def are_all_mutations_under_no_grad_or_inference_mode(t):
         )
 
 
+def was_inductor_storage_resized(t):
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        if any(was_inductor_storage_resized(getattr(t, attr)) for attr in attrs):
+            raise RuntimeError(
+                f"storage resizing is not supported on tensor subclass: {type(t)}"
+            )
+    elif not isinstance(t, torch.Tensor):
+        return False
+    else:
+        assert isinstance(t, FunctionalTensor)
+        return torch._functionalize_was_inductor_storage_resized(t.elem)
+
+
 # f_arg here is either
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
@@ -167,9 +185,13 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
         # it experiences an data mutation, we pessimistically think that the set_()
         # call is necessary here. We could in theory fix this, but this will
         # hopefully never happen in user code, and is not needed for fsdp.
-        same_storages = StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(
-            arg_after.untyped_storage()
-        )
+        if is_sparse_any(arg):
+            # TODO:add sparse tensors support to functionalization
+            same_storages = False
+        else:
+            same_storages = StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(
+                arg_after.untyped_storage()
+            )
         has_storage_metadata_mutation = maybe_storage_changed and not same_storages
         if check_only_storage_mutation:
             return has_storage_metadata_mutation
@@ -200,10 +222,9 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    # Actual type: Optional[FunctionalTensorMetadataEq]
-    # Can't use it here because it lives inside schemas.py. Importing that class would lead
-    # to an error due to an import cycle.
-    target_functional_tensor=None,
+    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
+    *,
+    replay_views,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -220,39 +241,24 @@ def gen_alias_from_base(
     # In summary, we use the fact that FunctionalTensorWrapper saves the view
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
-    if config.view_replay_for_aliased_outputs and target_functional_tensor is not None:
-        from .schemas import FunctionalTensorMetadataEq
-
-        assert isinstance(target_functional_tensor, FunctionalTensorMetadataEq)
+    if (
+        replay_views
+        and target_functional_tensor is not None
+        and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
+    ):
         functional_tensor = target_functional_tensor.tensor
 
-        try:
-            out = torch._functionalize_apply_view_metas(
-                functional_tensor, aliased_base_tensor
-            )
-        except RuntimeError as e:
-            # NYI for dynamic shapes.
-            #
-            # On functionalization, the ViewMeta lambdas will have symbolic shapes.
-            # When trying to apply those lambdas on concrete tensors, it will fail.
-            #
-            # In order for this to work, we should have a way to replace those
-            # symbolic shapes with concrete numbers.
-            aot_joint_log.info(
-                "could not reconstruct view by re-applying a ViewMeta sequence. "
-                "Fallbacking to reconstruction using as_strided. "
-                "Reason: %s",
-                str(e),
-            )
-        else:
-            # If re-applying the ViewMeta sequence succeeded, there should be no more
-            # problems going forward. We just check we got to the target shape and
-            # patch requires_grad flag.
-            assert out.shape == target_meta_tensor.shape, (
-                "incorrect out shape after application of ViewMeta sequence: "
-                f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
-            )
-            return patch_requires_grad(out)
+        out = torch._functionalize_apply_view_metas(
+            functional_tensor, aliased_base_tensor
+        )
+        # If re-applying the ViewMeta sequence succeeded, there should be no more
+        # problems going forward. We just check we got to the target shape and
+        # patch requires_grad flag.
+        assert out.shape == target_meta_tensor.shape, (
+            "incorrect out shape after application of ViewMeta sequence: "
+            f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
+        )
+        return patch_requires_grad(out)
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
@@ -307,11 +313,38 @@ def gen_alias_from_base(
 def has_same_metadata(t1, t2):
     return (
         definitely_true(sym_eq(t1.size(), t2.size()))
-        and definitely_true(sym_eq(t1.stride(), t2.stride()))
-        and definitely_true(t1.storage_offset() == t2.storage_offset())
+        and definitely_true(t1.layout == t2.layout)
+        and (
+            is_sparse_any(t1)
+            or (
+                definitely_true(sym_eq(t1.stride(), t2.stride()))
+                and definitely_true(t1.storage_offset() == t2.storage_offset())
+            )
+        )
         and t1.is_conj() == t2.is_conj()
         and t1.is_neg() == t2.is_neg()
     )
+
+
+# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
+# after applying all the ViewMeta operations.
+class FunctionalTensorMetadataEq:
+    def __init__(self, tensor: torch.Tensor) -> None:
+        assert torch._is_functional_tensor(tensor)
+        self.tensor = tensor
+
+    def __eq__(self, other: object) -> bool:
+        # If other is None, then it probably means that we weren't able to recreate
+        # the FunctionalTensorMetadataEq. One of this cases is when we update the
+        # view metadata by calling: create_synthetic_base_metadata.
+        if other is None:
+            return True
+
+        # Comparison agains any other type is not implemented.
+        if not isinstance(other, FunctionalTensorMetadataEq):
+            return NotImplemented
+
+        return has_same_metadata(self.tensor, other.tensor)
 
 
 # new_arg and arg here are either:
@@ -368,6 +401,13 @@ def was_tensor_metadata_updated(arg, new_arg):
 
 # Returns the number of detected copy_
 def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+    allowed_mutation_ops = [
+        torch.ops.aten.copy_.default,
+        torch.ops.aten.set_.source_Tensor,
+    ]
+    if hasattr(torch.ops.fsdp, "set_"):
+        allowed_mutation_ops.append(torch.ops.fsdp.set_.default)
+
     placeholders = set()
     mutation_count = 0
     # NB: It would also be nice to verify that the mutations all happen at the
@@ -377,14 +417,15 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target in [
-                torch.ops.aten.copy_.default,
-                torch.ops.aten.set_.source_Tensor,
-            ]:
+            if n.target in allowed_mutation_ops:
                 suffix = True
-                # Can only copy_/set_ into an input, and can only do so once
-                assert n.args[0] in placeholders
-                placeholders.remove(n.args[0])
+                # Can only copy_/set_ into an input
+                # this is mostly a hack to avoid failing XLA tests.
+                # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
+                if "set_buffer_donor_" not in str(n.args[0]):
+                    assert (
+                        n.args[0] in placeholders
+                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                 mutation_count += 1
             else:
                 assert (
@@ -401,8 +442,11 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target is torch.ops.aten.copy_.default:
                 # Can only copy_ into an input, and can only do so once
-                assert n.args[0] in placeholders
-                placeholders.remove(n.args[0])
+                if "set_buffer_donor_" not in str(n.args[0]):
+                    assert (
+                        n.args[0] in placeholders
+                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    placeholders.remove(n.args[0])
                 copy_from_node = n.args[1]
                 # Pre-condition: every node has a "stack_trace" field in its meta,
                 # but copy_() nodes do not (since we manually added them during functionalization).
@@ -418,10 +462,13 @@ def _check_if_mutation_can_be_in_graph(
     mutations_hidden_from_autograd,
     mutations_under_no_grad_or_inference_mode,
     mutates_storage_metadata,
+    mutation_inductor_storage_resize,
     requires_grad,
 ):
     if keep_input_mutations:
-        in_graph = (mutates_data or mutates_storage_metadata) and (
+        in_graph = (
+            mutates_data or mutates_storage_metadata or mutation_inductor_storage_resize
+        ) and (
             (not mutates_metadata and not requires_grad)
             or mutations_hidden_from_autograd
             or mutations_under_no_grad_or_inference_mode
@@ -431,8 +478,17 @@ def _check_if_mutation_can_be_in_graph(
     # See Note [set_() Input Mutations in AOTAutograd]
     # If there was a `set_()`, we require that all mutations were under no_grad,
     # so we can (safely) emit the set_() in the graph at runtime
-    if mutates_storage_metadata:
-        assert (
-            in_graph
-        ), "input tensor encountered a set_(), but had other mutations that prevented us from including it in the graph safely"
+    # resize_() gets the same treatment
+    if mutation_inductor_storage_resize or mutates_storage_metadata:
+        op_name = "resize_" if mutation_inductor_storage_resize else "set_"
+        assert in_graph, f"""\
+Encountered a {op_name} on a graph input, but the input has other mutations that we cannot
+keep in the graph. This is not supported today. Current state:
+  keep_input_mutations={keep_input_mutations}
+  mutates_data={mutates_data}
+  mutates_metadata={mutates_metadata}
+  mutations_hidden_from_autograd={mutations_hidden_from_autograd}
+  mutations_under_no_grad_or_inference_mode={mutations_under_no_grad_or_inference_mode}
+  mutation_inductor_storage_resize={mutation_inductor_storage_resize}
+  requires_grad={requires_grad}"""
     return in_graph

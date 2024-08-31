@@ -51,7 +51,7 @@ class CpuTimer : public Timer {
  public:
   explicit CpuTimer(c10::Device /* unused */) {}
 
-  c10::optional<int64_t> measureDifference(Event start, Event end) override {
+  std::optional<int64_t> measureDifference(Event start, Event end) override {
     int64_t start_time = getTimeRef(start);
     int64_t end_time = getTimeRef(end);
     // If cpu_end_time is not recorded in this iteration,
@@ -61,7 +61,7 @@ class CpuTimer : public Timer {
     // calculate the valid avg_time.
     // In this case, skip calculating the avg_time and return.
     if (end_time < start_time) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     return end_time - start_time;
   }
@@ -499,7 +499,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
         bucket.lengths,
         bucket.sizes_vec,
         variables_for_bucket,
-        c10::nullopt);
+        std::nullopt);
   }
   return gradBuckets;
 }
@@ -646,14 +646,6 @@ void Reducer::autograd_hook(size_t index) {
     first_autograd_hook_called_ = true;
     num_bwd_calls_++;
   }
-  // Ignore if we don't expect to be called.
-  // This may be the case if the user wants to accumulate gradients
-  // for number of iterations before reducing them.
-  if (!expect_autograd_hooks_) {
-    return;
-  }
-
-  grad_ready_order_indices_.push_back(static_cast<int64_t>(index));
 
   // See Note [Skip allreducing local_used_map_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
@@ -679,6 +671,15 @@ void Reducer::autograd_hook(size_t index) {
     numGradHooksTriggeredMap_[index] += 1;
     return;
   }
+
+  // Ignore if we don't expect to be called.
+  // This may be the case if the user wants to accumulate gradients
+  // for number of iterations before reducing them.
+  if (!expect_autograd_hooks_) {
+    return;
+  }
+
+  grad_ready_order_indices_.push_back(static_cast<int64_t>(index));
 
   // If `find_unused_parameters_` is true there may be model parameters that
   // went unused when computing the model output, they won't be part of the
@@ -1654,9 +1655,9 @@ void Reducer::finalize_backward() {
     }
   }
 
-  if (installed_futures_ != c10::nullopt) {
+  if (installed_futures_ != std::nullopt) {
     c10::collectAll(*installed_futures_)->wait();
-    installed_futures_ = c10::nullopt;
+    installed_futures_ = std::nullopt;
   }
 
   // See Note [Skip allreducing local_used_maps_dev]
@@ -2095,7 +2096,7 @@ compute_bucket_assignment_by_size(
     const std::vector<size_t>& bucket_size_limits,
     const std::vector<bool>& expect_sparse_gradient,
     const std::vector<int64_t>& tensor_indices,
-    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
+    const std::optional<std::weak_ptr<c10d::Logger>>& logger) {
   // Either expect_sparse_gradient is not specified or it has as many elements
   // as the vector with tensors.
   TORCH_INTERNAL_ASSERT(
@@ -2220,7 +2221,7 @@ compute_bucket_assignment_by_size(
 void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
-    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
+    const std::optional<std::weak_ptr<c10d::Logger>>& logger) {
   // First verify number of parameters to avoid inconsistent inputs into
   // broadcast which can cause a crash.
   // See https://github.com/pytorch/pytorch/issues/73547
@@ -2365,10 +2366,18 @@ void Reducer::reset_state() {
   // Ensure forward can run despite previous backward not succeeding.
   expect_autograd_hooks_ = false;
   require_finalize_ = false;
+  first_autograd_hook_called_ = false;
 
   // Unset allreduce division factor, as it may change in next backwards pass
   // when running with DDP join mode.
   div_factor_ = kUnsetDivFactor;
+
+  // Reset unused parameter accounting.
+  // See Note [local_used_map_ -> local_used_map_dev copying]
+  if (find_unused_parameters_) {
+    local_used_map_.zero_();
+    local_used_map_reduced_ = false;
+  }
 }
 
 } // namespace c10d

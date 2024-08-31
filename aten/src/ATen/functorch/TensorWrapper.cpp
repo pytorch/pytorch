@@ -81,6 +81,11 @@ static Tensor unsafeMakeTensorWrapper(
   auto result = at::detail::make_tensor<TensorWrapper>(
       key_set, tensor, level, life_handle, is_immutable);
   TORCH_INTERNAL_ASSERT(result.key_set().has(DispatchKey::FuncTorchGradWrapper));
+
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    result.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+
   return result;
 }
 

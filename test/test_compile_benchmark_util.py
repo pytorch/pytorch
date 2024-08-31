@@ -6,8 +6,10 @@ import torch
 import torch._dynamo as torchdynamo
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 
+
 try:
     import tabulate  # noqa: F401  # type: ignore[import]
+
     from torch.utils.benchmark.utils.compile import bench_all
 
     HAS_TABULATE = True
@@ -20,7 +22,7 @@ except ImportError:
 class TestCompileBenchmarkUtil(TestCase):
     def test_training_and_inference(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.Tensor(2, 2))
 

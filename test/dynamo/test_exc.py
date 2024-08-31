@@ -10,7 +10,12 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_device_type import skipIf
-from torch.testing._internal.common_utils import IS_FBCODE, munge_exc, TEST_Z3
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    munge_exc,
+    skipIfWindows,
+    TEST_Z3,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -200,6 +205,10 @@ ReluCompileError:""",
         translation_validation=True,
         translation_validation_no_bisect=True,
     )
+    @skipIfWindows(
+        msg='AssertionError: "tran[551 chars]s1 s2 s3) s0)\n  ==> (<= (+ s1 s2) (+ s0 (* -1[511 chars][0])'  # noqa: PLR0133
+        != 'tran[551 chars]s1 s2) (+ s0 (* -1 s3)))\n  ==> (<= (+ s1 s2) [483 chars][0])"'
+    )
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
 
@@ -215,15 +224,15 @@ translation validation failed.
 
 Model:
   ==> L['shape'][0]: 0
-  ==> L['shape'][1]: 0
-  ==> L['shape'][2]: 0
+  ==> L['shape'][1]: 1
+  ==> L['shape'][2]: 1
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
   ==> s0: 3
   ==> s1: 0
-  ==> s2: 0
-  ==> s3: 0
+  ==> s2: 1
+  ==> s3: 1
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
@@ -236,24 +245,24 @@ Assertions:
   ==> (True)
 
 Target Expressions:
+  ==> (!= (+ s1 s2 s3) s0)
+  ==> (<= (+ s1 s2 s3) s0)
+  ==> (<= (+ s1 s2) (+ s0 (* -1 s3)))
+  ==> (<= (+ s1 s2) s0)
   ==> (<= 0 s1)
   ==> (<= 0 s2)
   ==> (<= 0 s3)
   ==> (<= 2 s0)
-  ==> (== 0 L['shape'][0])
-  ==> (== 0 L['shape'][1])
-  ==> (== 0 L['shape'][2])
+  ==> (<= s1 (+ s0 (* -1 s2)))
   ==> (== 0 L['x'].storage_offset())
-  ==> (== 0 s1)
-  ==> (== 0 s2)
-  ==> (== 0 s3)
   ==> (== 1 L['x'].stride()[0])
+  ==> (== L['shape'][0] s1)
+  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s0)
   ==> (> s0 0)
   ==> (>= 0 s1)
-  ==> (>= 0 s2)
-  ==> (>= 0 s3)
-  ==> (>= 9223372036854775806 s0)
+  ==> (And (<= (+ s1 s2) s0) (<= (* -1 s0) (+ s1 s2)))
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
@@ -287,14 +296,14 @@ Failure occurred while running node:
 Model:
   ==> L['shape'][0]: 1
   ==> L['shape'][1]: 1
-  ==> L['shape'][2]: 2
+  ==> L['shape'][2]: 0
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
   ==> s0: 3
   ==> s1: 1
   ==> s2: 1
-  ==> s3: 2
+  ==> s3: 0
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
@@ -318,10 +327,6 @@ Target Expressions:
   ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s0)
   ==> (> s0 0)
-  ==> (>= 9223372036854775806 s0)
-  ==> (>= 9223372036854775807 s1)
-  ==> (>= 9223372036854775807 s2)
-  ==> (>= 9223372036854775807 s3)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",

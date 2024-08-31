@@ -71,7 +71,7 @@ void normalize_last_dims(
 }  // namespace internal
 
 namespace {
-
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunneeded-internal-declaration")
 bool use_blas_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
@@ -85,6 +85,7 @@ bool use_blas_gemm(
       (ldb >= std::max(int64_t{1}, (transb_ ? n : k))) &&
       (ldc >= std::max(int64_t{1}, m)));
 }
+C10_DIAGNOSTIC_POP()
 
 #ifdef USE_FBGEMM
 fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
@@ -497,10 +498,10 @@ static void gemm_batched_mkl_impl(
 
 template <typename scalar_t>
 using is_blas_library_type = std::integral_constant<bool,
-    std::is_same<scalar_t, double>::value ||
-    std::is_same<scalar_t, float>::value ||
-    std::is_same<scalar_t, c10::complex<double>>::value ||
-    std::is_same<scalar_t, c10::complex<float>>::value>;
+    std::is_same_v<scalar_t, double> ||
+    std::is_same_v<scalar_t, float> ||
+    std::is_same_v<scalar_t, c10::complex<double>> ||
+    std::is_same_v<scalar_t, c10::complex<float>>>;
 
 template <typename scalar_t>
 void gemm_batched_generic(

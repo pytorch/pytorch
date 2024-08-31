@@ -6,8 +6,8 @@
 #include <ATen/native/TensorCompare.h>
 #include <c10/util/Exception.h>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor max_quantized_cpu(const Tensor& self) {
   return std::get<0>(self.reshape({-1}).max(/*dim=*/0));
@@ -47,7 +47,7 @@ Tensor& min_quantized_unary_out(const Tensor& self, Tensor& out) {
 
 std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
     const Tensor& self,
-    c10::optional<bool> stable,
+    std::optional<bool> stable,
     int64_t dim,
     bool descending) {
   auto [sort_int, sort_indicies] =
@@ -58,5 +58,4 @@ std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
       sort_indicies);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

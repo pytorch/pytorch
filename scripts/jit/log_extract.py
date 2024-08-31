@@ -11,6 +11,7 @@ from torch.utils.jit.log_extract import (
     run_nvfuser,
 )
 
+
 """
 Usage:
 1. Run your script and pipe into a log file
