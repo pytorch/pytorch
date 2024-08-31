@@ -1073,6 +1073,9 @@ if(USE_XPU)
       # Linux
       target_link_libraries(torch_xpu PRIVATE
         "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+      target_link_options(torch_xpu PRIVATE "-Wl,-rpath,$ORIGIN")
+      target_link_options(torch_xpu PRIVATE "-Wl,-rpath,$ORIGIN/../../../../")
+      target_link_options(torch_xpu PRIVATE "-Wl,--disable-new-dtags")
     endif()
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
@@ -1491,6 +1494,11 @@ endif()
 
 if(USE_XPU)
   target_link_libraries(torch PUBLIC torch_xpu_library)
+  if(LINUX)
+    target_link_options(torch PRIVATE "-Wl,-rpath,$ORIGIN")
+    target_link_options(torch PRIVATE "-Wl,-rpath,$ORIGIN/../../../../")
+    target_link_options(torch PRIVATE "-Wl,--disable-new-dtags")
+  endif()
 endif()
 
 if(PRINT_CMAKE_DEBUG_INFO)

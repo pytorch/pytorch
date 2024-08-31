@@ -39,6 +39,11 @@ if(NOT BUILD_LIBTORCHLESS)
 
   # ---[ Dependency of c10_xpu
   target_link_libraries(c10_xpu PUBLIC c10 torch::xpurt)
+  if(LINUX)
+    target_link_options(c10_xpu PRIVATE "-Wl,-rpath,$ORIGIN")
+    target_link_options(c10_xpu PRIVATE "-Wl,-rpath,$ORIGIN/../../../../")
+    target_link_options(c10_xpu PRIVATE "-Wl,--disable-new-dtags")
+  endif()
   target_include_directories(
       c10_xpu PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
