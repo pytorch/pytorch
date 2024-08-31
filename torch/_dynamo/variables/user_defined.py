@@ -455,21 +455,33 @@ class UserDefinedClassVariable(UserDefinedVariable):
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(items, self.value)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
+            from .builder import SourcelessBuilder
             fields = dataclasses.fields(self.value)
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
 
-            var_tracker_kwargs = {}
+            default_kwargs = {}
             for field, var_tracker in zip(fields, items):
                 if var_tracker is None:
                     if field.name in kwargs:
                         var_tracker = kwargs[field.name]
                     else:
-                        if not field.init or field.default is dataclasses.MISSING:
+                        if not field.init:
                             continue
-                        var_tracker = SourcelessBuilder.create(tx, field.default)
 
-                    var_tracker_kwargs[field.name] = var_tracker
+                        if not field.default is dataclasses.MISSING:
+                            var_tracker = SourcelessBuilder.create(tx, field.default)
+                        elif not field.default_factory is dataclasses.MISSING:
+                            factory_fn = SourcelessBuilder.create(tx, field.default_factory)
+                            var_tracker = factory_fn.call_function(tx, [], {})
+                        else:
+                            # if we are subclass, the constructor could possibly 
+                            # be missing args
+                            continue
+
+
+                    default_kwargs[field.name] = var_tracker
+            kwargs.update(default_kwargs)
 
             var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
             var.call_method(tx, "__init__", args, kwargs)
@@ -1225,10 +1237,15 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         from dataclasses import fields
 
         args = []
+        kwargs = {}
         for field in fields(self.value):
-            args.append(self.fields[field.name].as_proxy())
+            proxy = self.fields[field.name].as_proxy()
+            if field.kw_only:
+                kwargs[field.name] = proxy
+            else:
+                args.append(proxy)
 
-        return self.python_type()(*args)
+        return self.python_type()(*args, **kwargs)
 
     # NB: This is called during __init__ for a frozen dataclass
     # use this to accumulate the most up-to-date field values
