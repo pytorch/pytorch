@@ -1299,6 +1299,14 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @requires_distributed()
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_side_effect_in_forward_hooks(self):
+        """
+        NOTE(yf225): Status:
+        1. Running forward pre-hook in compiled AC is supported
+        2. Running forward hook in compiled AC is WIP
+
+        We need support for both forward pre-hook and forward hook in AC region, because eager FSDP2 uses it
+        (verified by patching https://gist.github.com/yf225/ae73b47c14f56f2b96ea3bfdfe2ed30c and then running test_train_parity_with_activation_checkpointing unit test).
+        """
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             CheckpointWrapper,
         )
@@ -1315,8 +1323,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         # TODO(yf225): test module forward hook returns None case
         def fwd_hook(state, m, args, outputs):
             state.fwd_hook_call_count += 1
-            # return (outputs[0] * args[0] * 17, outputs[1] * args[1] * 19, outputs[2] * 23)
-            # return outputs
+            return (outputs[0] * args[0] * 17, outputs[1] * args[1] * 19, outputs[2] * 23)
 
         def fn(model, args, state, compiled=False):
             if compiled:
@@ -1333,7 +1340,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 loss = out[2].sum()
                 loss.backward()
                 self.assertEqual(state.fwd_pre_hook_call_count, 2)  # after backward
-                self.assertEqual(state.fwd_hook_call_count, 1)  # after backward. TODO(yf225): forward hook is not called during AC in backward in eager. Really?
+                self.assertEqual(state.fwd_hook_call_count, 2)  # after backward
                 return out, loss
 
         class TestModel(torch.nn.Module):
