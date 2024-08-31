@@ -41,9 +41,9 @@ from torch.utils._triton import has_triton
 
 
 try:
-    from .mock_cache import patch_fbcode, PatchCaches
+    from .mock_cache import global_stats, patch_fbcode, PatchCaches
 except ImportError:
-    from mock_cache import PatchCaches  # @manual
+    from mock_cache import global_stats, patch_fbcode, PatchCaches  # @manual
 
 
 HAS_TRITON = has_triton()
@@ -160,6 +160,7 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
     @requires_triton()
+    @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
@@ -179,7 +180,6 @@ class TestFxGraphCache(TestCase):
 
         with config.patch(
             {
-                "fx_graph_cache": False,
                 "fx_graph_remote_cache": True,
             }
         ), patch.dict(os.environ), PatchCaches():
@@ -190,10 +190,10 @@ class TestFxGraphCache(TestCase):
                     self.assertEqual(fn(a, b), compiled_fn(a, b))
                 reset()
 
-        PatchCaches.report()
-        self.assertEqual(PatchCaches.num_get_hit, 3)
-        self.assertEqual(PatchCaches.num_get_miss, 1)
-        self.assertEqual(PatchCaches.num_put, 1)
+        global_stats.report()
+        self.assertEqual(global_stats.fx_graph.num_get_hit, 3)
+        self.assertEqual(global_stats.fx_graph.num_get_miss, 1)
+        self.assertEqual(global_stats.fx_graph.num_put, 1)
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -793,6 +793,8 @@ class TestAutotuneCache(TestCase):
         torch._dynamo.reset()
         clear_inductor_caches()
 
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
@@ -800,9 +802,6 @@ class TestAutotuneCache(TestCase):
     @config.patch({"max_autotune": True})
     @parametrize("fbcode", (False,) + (True,) * config.is_fbcode())
     def test_autotune_cache(self, fbcode: bool):
-        if not fbcode:
-            self.skipTest("Redis for autotune is currently broken")
-
         class Model(torch.nn.Module):
             def forward(self, x, y, a, b):
                 return x + y, a + b
@@ -819,18 +818,17 @@ class TestAutotuneCache(TestCase):
         with PatchCaches(), patch_fbcode(fbcode):
             f_compiled(x, y, a, b)
 
-            PatchCaches.update()
-            self.assertEqual(PatchCaches.num_get_hit, 0)
-            self.assertEqual(PatchCaches.num_get_miss, 2)
-            self.assertEqual(PatchCaches.num_put, 2)
+            self.assertEqual(global_stats.autotune.num_get_hit, 0)
+            self.assertEqual(global_stats.autotune.num_get_miss, 2)
+            self.assertEqual(global_stats.autotune.num_put, 2)
 
             self.reset()
             f_compiled(x, y, a, b)
 
-        PatchCaches.report()
-        self.assertEqual(PatchCaches.num_get_hit, 2)
-        self.assertEqual(PatchCaches.num_get_miss, 2)
-        self.assertEqual(PatchCaches.num_put, 2)
+        global_stats.report()
+        self.assertEqual(global_stats.autotune.num_get_hit, 2)
+        self.assertEqual(global_stats.autotune.num_get_miss, 2)
+        self.assertEqual(global_stats.autotune.num_put, 2)
 
 
 class TestUtils(TestCase):
