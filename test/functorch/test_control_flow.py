@@ -1210,6 +1210,7 @@ def forward(self, pred_1, x_1):
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
+    @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -1217,10 +1218,11 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["scan_op"] == associative_scan
+            and params["combine_mode"] == "pointwise"
             and params["device"] == torch.device("cpu")
         ),
     )
-    def test_pointwise_scan_simple(self, scan_op, reverse, device):
+    def test_pointwise_scan_simple(self, scan_op, combine_mode, reverse, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1229,10 +1231,16 @@ def forward(self, pred_1, x_1):
 
         def div(x: torch.Tensor, y: torch.Tensor):
             return x / y
+        
+        def scan_op_wrapper(*args, **kwargs):
+            if scan_op == scan and 'combine_mode' in kwargs:
+                del kwargs['combine_mode']
+            return scan_op(*args, **kwargs)
 
         x = torch.randn(3, 10, 2, device=device)
+
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod), (div, None)]:
-            result = scan_op(op, x, dim=0, reverse=reverse)
+            result = scan_op_wrapper(op, x, dim=0, reverse=reverse, combine_mode=combine_mode)
             result_exp = _fake_scan(op, x, dim=0, reverse=reverse)
 
             if op == div and scan_op == associative_scan:
@@ -1246,7 +1254,7 @@ def forward(self, pred_1, x_1):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        cumsum1 = scan_op(add, x, dim=0, reverse=reverse)
+        cumsum1 = scan_op_wrapper(add, x, dim=0, reverse=reverse, combine_mode=combine_mode)
         cumsum_exp = _fake_scan(add, x, dim=0, reverse=reverse)
         if not reverse:
             self.assertEqual(
@@ -1258,46 +1266,11 @@ def forward(self, pred_1, x_1):
             )
         self.assertEqual(cumsum1, cumsum_exp)
 
-    def test_pointwise_scan_simple_graph(self):
-        def add(x: torch.Tensor, y: torch.Tensor):
-            return x + y
-
-        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
-
-        # Check graph
-        from torch._dynamo.testing import EagerAndRecordGraphs
-
-        def f():
-            return scan(add, x, 0, reverse=True)
-
-        backend = EagerAndRecordGraphs()
-        torch.compile(f, backend=backend)()
-        gm = backend.graphs[0]
-
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, L_x_ : torch.Tensor):
-    l_x_ = L_x_
-    elem = torch.flip(l_x_, [0]);  l_x_ = None
-    in_l = torch.ops.aten.slice(elem, 0, 0, 1, 1)
-    x = torch.ops.aten.slice(elem, 0, 1, None, 1);  elem = None
-    slice_3 = torch.ops.aten.slice(x, 0, 0, 1, 1)
-    slice_4 = torch.ops.aten.slice(x, 0, 0, 1, 1)
-    out = slice_3 + slice_4;  slice_3 = slice_4 = out = None
-    child = x.new_empty((1, 10, 2), dtype = torch.float32, device = device(type='cpu'), requires_grad = False);  child = None
-    child_1 = x.new_empty((1, 10, 2), dtype = torch.float32, device = device(type='cpu'), requires_grad = False);  child_1 = None
-    scan_combine_0 = self.scan_combine_0
-    scan = torch.ops.higher_order.scan(scan_combine_0, [x], [in_l], 0);  scan_combine_0 = x = in_l = None
-    elem_1 = scan[0];  scan = None
-    flip_1 = torch.flip(elem_1, [0]);  elem_1 = None
-    return (flip_1,)""",
-        )
-
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
+    @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -1305,10 +1278,11 @@ def forward(self, L_x_ : torch.Tensor):
         unittest.skip,
         lambda params: (
             params["scan_op"] == associative_scan
+            and params["combine_mode"] == "pointwise"
             and params["device"] == torch.device("cpu")
         ),
     )
-    def test_pointwise_scan_dim(self, scan_op, reverse, device):
+    def test_pointwise_scan_dim(self, scan_op, combine_mode, reverse, device):
         import random
 
         def add(x: torch.Tensor, y: torch.Tensor):
@@ -1316,6 +1290,11 @@ def forward(self, L_x_ : torch.Tensor):
 
         def mul(x: torch.Tensor, y: torch.Tensor):
             return x * y
+        
+        def scan_op_wrapper(*args, **kwargs):
+            if scan_op == scan and 'combine_mode' in kwargs:
+                del kwargs['combine_mode']
+            return scan_op(*args, **kwargs)
 
         num_dims = [random.randint(2, 5) for _ in range(10)]
         for num_dim in num_dims:
@@ -1324,7 +1303,7 @@ def forward(self, L_x_ : torch.Tensor):
             x = torch.randn(*shapes, device=device)
 
             for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-                result = scan_op(op, x, rnd_scan_dim, reverse=reverse)
+                result = scan_op_wrapper(op, x, rnd_scan_dim, reverse=reverse, combine_mode=combine_mode)
                 result_exp = _fake_scan(op, x, rnd_scan_dim, reverse=reverse)
                 self.assertEqual(result, result_exp)
                 if not reverse:
@@ -1336,6 +1315,7 @@ def forward(self, L_x_ : torch.Tensor):
     @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -1343,6 +1323,7 @@ def forward(self, L_x_ : torch.Tensor):
         unittest.skip,
         lambda params: (
             params["scan_op"] == associative_scan
+            and params["combine_mode"] == "pointwise"
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "eager"
@@ -1356,26 +1337,31 @@ def forward(self, L_x_ : torch.Tensor):
             params["scan_op"] == scan and params["compile_mode"] != "eager"
         ),
     )
-    def test_pointwise_scan_compile(self, scan_op, reverse, compile_mode, device):
+    def test_pointwise_scan_compile(self, scan_op, combine_mode, reverse, compile_mode, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
         def mul(x: torch.Tensor, y: torch.Tensor):
             return x * y
+        
+        def scan_op_wrapper(*args, **kwargs):
+            if scan_op == scan and 'combine_mode' in kwargs:
+                del kwargs['combine_mode']
+            return scan_op(*args, **kwargs)
 
         x = torch.randn(3, 10, 2, device=device)
         torch.compiler.reset()
         if compile_mode == "compile":
-            scan_fct = torch.compile(scan_op, fullgraph=True, dynamic=False)
+            scan_fct = torch.compile(scan_op_wrapper, fullgraph=True, dynamic=False)
         elif compile_mode == "compile_dynamic_shape":
-            scan_fct = torch.compile(scan_op, fullgraph=True, dynamic=True)
+            scan_fct = torch.compile(scan_op_wrapper, fullgraph=True, dynamic=True)
         elif compile_mode == "eager":
-            scan_fct = torch.compile(scan_op, fullgraph=True, backend="eager")
+            scan_fct = torch.compile(scan_op_wrapper, fullgraph=True, backend="eager")
         else:
             scan_fct = scan
 
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-            result = scan_fct(op, x, 0, reverse=reverse)
+            result = scan_fct(op, x, 0, reverse=reverse, combine_mode=combine_mode)
             result_exp = _fake_scan(op, x, 0, reverse=reverse)
             self.assertEqual(result, result_exp)
             if not reverse:
@@ -1384,7 +1370,7 @@ def forward(self, L_x_ : torch.Tensor):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        cumsum1 = scan_fct(add, x, 0, reverse=reverse)
+        cumsum1 = scan_fct(add, x, 0, reverse=reverse, combine_mode=combine_mode)
         cumsum_exp = _fake_scan(add, x, 0, reverse=reverse)
         if not reverse:
             self.assertEqual(
@@ -1395,61 +1381,269 @@ def forward(self, L_x_ : torch.Tensor):
                 cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
             )
         self.assertEqual(cumsum1, cumsum_exp)
+        
+        
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("scan_op", [associative_scan, scan])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["scan_op"] == associative_scan
+            and params["combine_mode"] == "pointwise"
+            and params["device"] == torch.device("cpu")
+        ),
+    )
+    def test_pointwise_scan_binary_operator(
+        self, scan_op, combine_mode, reverse, device
+    ):
+        def scan_op_wrapper(*args, **kwargs):
+            if scan_op == scan and 'combine_mode' in kwargs:
+                del kwargs['combine_mode']
+            return scan_op(*args, **kwargs)
+        
+        def fct(x, y):
+            A_i, Bu_i = x
+            A_j, Bu_j = y
+            return A_j * A_i, A_j * Bu_i + Bu_j
 
-    def test_scan_RNN(self):
+        torch.compiler.reset()
+        scan1 = torch.compile(scan_op_wrapper, fullgraph=True)
+        scan2 = scan_op_wrapper
+
+        state_dim = 20
+        timesteps = 10
+        projected_inputs = torch.randn(
+            timesteps, state_dim, requires_grad=True, device=device
+        )
+        A = torch.randn(state_dim, requires_grad=True, device=device)
+        elements = (A.repeat((timesteps, 1)), projected_inputs)
+
+        result1 = scan1(
+            fct, elements, 0, combine_mode=combine_mode, reverse=reverse
+        )
+        result2 = scan2(
+            fct, elements, 0, combine_mode=combine_mode, reverse=reverse
+        )
+        expected_result = _fake_scan(fct, elements, 0, reverse=reverse)
+        self.assertEqual(
+            result1,
+            expected_result,
+        )
+        self.assertEqual([r.device.type for r in result1], [device.type] * len(result1))
+        self.assertEqual(
+            result2,
+            expected_result,
+        )
+        self.assertEqual([r.device.type for r in result2], [device.type] * len(result2))
+    
+            
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("scan_op", [associative_scan, scan])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["scan_op"] == associative_scan
+            and params["combine_mode"] == "pointwise"
+            and params["device"] == torch.device("cpu")
+        ),
+    )
+    def test_pointwise_scan_tuple(self, scan_op, combine_mode, reverse, device):
+        def fct(x, y):
+            return (x[0] + y[0], x[1] * y[1])
+        
+        def scan_op_wrapper(*args, **kwargs):
+            if scan_op == scan and 'combine_mode' in kwargs:
+                del kwargs['combine_mode']
+            return scan_op(*args, **kwargs)
+
+        x = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        inp = (x, y)
+
+        result1 = scan_op_wrapper(
+            fct, inp, 0, reverse=reverse, combine_mode=combine_mode
+        )
+        expected_result = _fake_scan(fct, inp, 0, reverse=reverse)
+        self.assertEqual(result1, expected_result)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("scan_op", [associative_scan, scan])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["scan_op"] == associative_scan
+            and params["combine_mode"] == "pointwise"
+            and params["device"] == torch.device("cpu")
+        ),
+    )
+    def test_pointwise_scan_complex_pytree(
+        self, scan_op, combine_mode, reverse, device
+    ):
+        def fct_wrong_pytree(x, y):
+            return {
+                "i": x["i"] * y["j"][0][0],
+                "k": 0.0,
+                "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+            }
+
+        def fct_pointwise(x, y):
+            return {
+                "i": x["i"] * y["i"],
+                "j": (
+                    [x["j"][0][0] * y["j"][0][0]],
+                    [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
+                ),
+            }
+            
+        def scan_op_wrapper(*args, **kwargs):
+            if scan_op == scan and 'combine_mode' in kwargs:
+                del kwargs['combine_mode']
+            return scan_op(*args, **kwargs)
+
+        x = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        z = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+
+        with self.assertRaisesRegex(Exception, r"."):
+            result = scan_op_wrapper(fct_wrong_pytree, inp, 0, combine_mode="generic")
+
+        torch.compiler.reset()
+        scan1 = torch.compile(scan_op_wrapper, fullgraph=True)
+        scan2 = scan_op_wrapper
+
+        result1 = scan1(
+            fct_pointwise, inp, 0, combine_mode=combine_mode, reverse=reverse
+        )
+        result2 = scan2(
+            fct_pointwise, inp, 0, combine_mode=combine_mode, reverse=reverse
+        )
+        expected_result = _fake_scan(fct_pointwise, inp, 0, reverse=reverse)
+        self.assertEqual(result1, expected_result)
+        self.assertEqual(result2, expected_result)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("scan_op", [associative_scan, scan])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of associative_scan and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["scan_op"] == associative_scan
+            and params["device"] == torch.device("cpu")
+        ),
+    )
+    def test_generic_scan_non_pointwise(self, scan_op, reverse, device):
+        def non_pointwise(x: torch.Tensor, y: torch.Tensor):
+            W = torch.diag(torch.ones(2, device=device))
+            return x @ W + y @ W
+
+        x = torch.randn(3, 10, 2, device=device)
+        result_expected = _fake_scan(non_pointwise, x, 0, reverse=reverse)
+        if scan_op == associative_scan:
+            # Expected to fail, as the pointwise combine_mode does not allow non-pointwise operations
+            with self.assertRaisesRegex(Exception, ".*"):
+                out = scan_op(
+                    non_pointwise, x, 0, reverse=reverse, combine_mode="pointwise"
+                )
+        else:
+            out = scan_op(
+                    non_pointwise, x, 0, reverse=reverse, combine_mode="pointwise"
+                )
+            self.assertEqual(out, result_expected)
+
+        result1 = scan_op(
+            non_pointwise, x, 0, reverse=reverse, combine_mode="generic"
+        )
+        self.assertEqual(result1, result_expected)
+        
+        
+        
+        
+        
+        
+        
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_compile_cnt(self, reverse, device):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
         dim = 1
-        device = torch.device("cpu")
 
-        rnn = torch.nn.RNN(
-            input_size=5,
-            hidden_size=7,
-        )
-        rnn = rnn.to(device=device)
-        x = torch.randn(1, 2, 5, device=device)
-        h = torch.randn(1, 2, 7, device=device)
+        torch.compiler.reset()
+        from torch._dynamo.testing import CompileCounter
 
-        new_state_dict = {
-            "weight_ih_l0": torch.ones_like(rnn.weight_ih_l0),
-            "bias_ih_l0": torch.ones_like(rnn.bias_ih_l0),
-            "weight_hh_l0": torch.ones_like(rnn.weight_hh_l0),
-            "bias_hh_l0": torch.ones_like(rnn.bias_hh_l0),
-        }
-        rnn.load_state_dict(new_state_dict)
+        # Tests rely on automatic_dynamic = True
+        with torch._dynamo.config.patch(automatic_dynamic_shapes=True):
+            cnt = CompileCounter()
+            x = torch.randn(3, 2, 5, device=device)
+            torch.compile(scan, backend=cnt)(add, x, dim=dim, reverse=reverse)
+            self.assertEqual(cnt.frame_count, 1)
 
-        def RNN(x: torch.Tensor, y: torch.Tensor):
-            W_ih = torch.ones((5, 7), device=device)
-            b_ih = torch.ones((7), device=device)
-            W_hh = torch.ones((7, 7), device=device)
-            b_hh = torch.ones((7), device=device)
-            c_new = y[0] @ W_ih + b_ih
-            h_new = torch.tanh(c_new + x[1] @ W_hh + b_hh)
-            return (y[0], h_new)
+            x = torch.randn(3, 20, 5, device=device)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim=dim, reverse=reverse)
+            self.assertEqual(cnt.frame_count, 2)
 
-        inp = (
-            torch.concat([torch.zeros_like(x[:, 0:1, :]), x], dim),
-            torch.concat([torch.clone(h[:, 0:1, :]), h], dim),
-        )
+            x = torch.randn(3, 40, 5, device=device)
+            # No recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim=dim, reverse=reverse)
+            self.assertEqual(cnt.frame_count, 2)
 
-        # Without init
-        result = scan(RNN, inp, dim)
-        result_out = result[1][:, 1:, :]
-        expected_result = rnn(
-            torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
-        )
-        expected_result_out = torch.permute(expected_result[0], (1, 0, 2))
-        self.assertEqual(result_out, expected_result_out)
+            x = torch.randn(3, 40, 5, device=device)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim=2, reverse=reverse)
+            self.assertEqual(cnt.frame_count, 3)
 
-        # With init
-        inp = (x, h)
-        init = (torch.zeros_like(x[:, 0:1, :]), torch.clone(h[:, 0:1, :]))
-        result = scan(RNN, inp, dim=dim, init=init)
-        result_out = result[1][:, 1:, :]
-        expected_result = rnn(
-            torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
-        )
-        expected_result_out = torch.permute(expected_result[0], (1, 0, 2))
-        self.assertEqual(result_out, expected_result_out)
+            x = torch.randn(3, 40, 20, device=device)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim=2, reverse=reverse)
+            self.assertEqual(cnt.frame_count, 4)
 
+            x = torch.randn(3, 40, 40, device=device)
+            # No recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim=2, reverse=reverse)
+            self.assertEqual(cnt.frame_count, 4)
+
+            x = torch.randn(3, 60, 40, device=device)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim=1, reverse=reverse)
+            self.assertEqual(cnt.frame_count, 5)
+
+            x = torch.randn(3, 60, 40, device=device)
+            # Recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim=1, reverse=not reverse)
+            self.assertEqual(cnt.frame_count, 6)
+
+            x = torch.randn(3, 60, 40, device=device)
+            # No recompilation
+            torch.compile(scan, backend=cnt)(add, x, dim=1, reverse=not reverse)
+            self.assertEqual(cnt.frame_count, 6)
+            
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
@@ -1549,67 +1743,97 @@ def forward(self, L_x_ : torch.Tensor):
             result_exp_PT = op_pt(x, dim)
             self.assertEqual(result, result_exp_PT)
             self.assertEqual(result_init, result_exp_PT)
+            
+    def test_scan_RNN(self):
+        dim = 1
+        device = torch.device("cpu")
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_compile_cnt(self, reverse, device):
+        rnn = torch.nn.RNN(
+            input_size=5,
+            hidden_size=7,
+        )
+        rnn = rnn.to(device=device)
+        x = torch.randn(1, 2, 5, device=device)
+        h = torch.randn(1, 2, 7, device=device)
+
+        new_state_dict = {
+            "weight_ih_l0": torch.ones_like(rnn.weight_ih_l0),
+            "bias_ih_l0": torch.ones_like(rnn.bias_ih_l0),
+            "weight_hh_l0": torch.ones_like(rnn.weight_hh_l0),
+            "bias_hh_l0": torch.ones_like(rnn.bias_hh_l0),
+        }
+        rnn.load_state_dict(new_state_dict)
+
+        def RNN(x: torch.Tensor, y: torch.Tensor):
+            W_ih = torch.ones((5, 7), device=device)
+            b_ih = torch.ones((7), device=device)
+            W_hh = torch.ones((7, 7), device=device)
+            b_hh = torch.ones((7), device=device)
+            c_new = y[0] @ W_ih + b_ih
+            h_new = torch.tanh(c_new + x[1] @ W_hh + b_hh)
+            return (y[0], h_new)
+
+        inp = (
+            torch.concat([torch.zeros_like(x[:, 0:1, :]), x], dim),
+            torch.concat([torch.clone(h[:, 0:1, :]), h], dim),
+        )
+
+        # Without init
+        result = scan(RNN, inp, dim)
+        result_out = result[1][:, 1:, :]
+        expected_result = rnn(
+            torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
+        )
+        expected_result_out = torch.permute(expected_result[0], (1, 0, 2))
+        self.assertEqual(result_out, expected_result_out)
+
+        # With init
+        inp = (x, h)
+        init = (torch.zeros_like(x[:, 0:1, :]), torch.clone(h[:, 0:1, :]))
+        result = scan(RNN, inp, dim=dim, init=init)
+        result_out = result[1][:, 1:, :]
+        expected_result = rnn(
+            torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
+        )
+        expected_result_out = torch.permute(expected_result[0], (1, 0, 2))
+        self.assertEqual(result_out, expected_result_out)
+        
+    
+    def test_pointwise_scan_simple_graph(self):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        dim = 1
+        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
 
-        torch.compiler.reset()
-        from torch._dynamo.testing import CompileCounter
+        # Check graph
+        from torch._dynamo.testing import EagerAndRecordGraphs
 
-        # Tests rely on automatic_dynamic = True
-        with torch._dynamo.config.patch(automatic_dynamic_shapes=True):
-            cnt = CompileCounter()
-            x = torch.randn(3, 2, 5, device=device)
-            torch.compile(scan, backend=cnt)(add, x, dim=dim, reverse=reverse)
-            self.assertEqual(cnt.frame_count, 1)
+        def f():
+            return scan(add, x, 0, reverse=True)
 
-            x = torch.randn(3, 20, 5, device=device)
-            # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim=dim, reverse=reverse)
-            self.assertEqual(cnt.frame_count, 2)
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend)()
+        gm = backend.graphs[0]
 
-            x = torch.randn(3, 40, 5, device=device)
-            # No recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim=dim, reverse=reverse)
-            self.assertEqual(cnt.frame_count, 2)
-
-            x = torch.randn(3, 40, 5, device=device)
-            # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim=2, reverse=reverse)
-            self.assertEqual(cnt.frame_count, 3)
-
-            x = torch.randn(3, 40, 20, device=device)
-            # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim=2, reverse=reverse)
-            self.assertEqual(cnt.frame_count, 4)
-
-            x = torch.randn(3, 40, 40, device=device)
-            # No recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim=2, reverse=reverse)
-            self.assertEqual(cnt.frame_count, 4)
-
-            x = torch.randn(3, 60, 40, device=device)
-            # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim=1, reverse=reverse)
-            self.assertEqual(cnt.frame_count, 5)
-
-            x = torch.randn(3, 60, 40, device=device)
-            # Recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim=1, reverse=not reverse)
-            self.assertEqual(cnt.frame_count, 6)
-
-            x = torch.randn(3, 60, 40, device=device)
-            # No recompilation
-            torch.compile(scan, backend=cnt)(add, x, dim=1, reverse=not reverse)
-            self.assertEqual(cnt.frame_count, 6)
-
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    elem = torch.flip(l_x_, [0]);  l_x_ = None
+    in_l = torch.ops.aten.slice(elem, 0, 0, 1, 1)
+    x = torch.ops.aten.slice(elem, 0, 1, None, 1);  elem = None
+    slice_3 = torch.ops.aten.slice(x, 0, 0, 1, 1)
+    slice_4 = torch.ops.aten.slice(x, 0, 0, 1, 1)
+    out = slice_3 + slice_4;  slice_3 = slice_4 = out = None
+    child = x.new_empty((1, 10, 2), dtype = torch.float32, device = device(type='cpu'), requires_grad = False);  child = None
+    child_1 = x.new_empty((1, 10, 2), dtype = torch.float32, device = device(type='cpu'), requires_grad = False);  child_1 = None
+    scan_combine_0 = self.scan_combine_0
+    scan = torch.ops.higher_order.scan(scan_combine_0, [x], [in_l], 0);  scan_combine_0 = x = in_l = None
+    elem_1 = scan[0];  scan = None
+    flip_1 = torch.flip(elem_1, [0]);  elem_1 = None
+    return (flip_1,)""",
+        )
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
@@ -4005,6 +4229,13 @@ def forward(self, l_inp_, l_tmp_):
             # This also proves that while_loop doesn't share code obj with cond
             torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, (torch.randn(4, 4),))
             self.assertEqual(cnt.frame_count, 3)
+
+    def test_hop_raises_if_not_overriding_call(self):
+        class WrongHop(torch._ops.HigherOrderOperator):
+            pass
+
+        with self.assertRaisesRegex(TypeError, "WrongHop"):
+            wrong_hop = WrongHop("wrong_hop")
 
 
 _hop_schema_test_schema_types = [

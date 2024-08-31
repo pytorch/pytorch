@@ -994,15 +994,6 @@ class BuiltinVariable(VariableTracker):
             )
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
-        if self.fn is itertools.chain and name == "from_iterable":
-            assert len(args) == 1
-            assert len(kwargs) == 0
-            obj = args[0]
-            items = []
-            for item in obj.unpack_var_sequence(tx):
-                items.extend(item.unpack_var_sequence(tx))
-            return variables.TupleVariable(items)
-
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
@@ -1449,22 +1440,6 @@ class BuiltinVariable(VariableTracker):
                         "zip() has one argument of len differing from others",
                     )
             items = [variables.TupleVariable(list(item)) for item in zip(*unpacked)]
-            return variables.TupleVariable(items)
-
-    def call_enumerate(self, tx: "InstructionTranslator", *args):
-        if len(args) == 1:
-            start = 0
-        else:
-            assert len(args) == 2
-            assert isinstance(args[1], variables.ConstantVariable)
-            start = args[1].as_python_constant()
-        if args[0].has_unpack_var_sequence(tx):
-            items = [
-                variables.TupleVariable(
-                    [variables.ConstantVariable.create(idx), var],
-                )
-                for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
-            ]
             return variables.TupleVariable(items)
 
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
@@ -1941,13 +1916,6 @@ class BuiltinVariable(VariableTracker):
                     reverse=reverse,
                 )
             return variables.ListVariable(items)
-
-    def call_chain(self, tx: "InstructionTranslator", *args):
-        if all(obj.has_unpack_var_sequence(tx) for obj in args):
-            items = []
-            for obj in args:
-                items.extend(obj.unpack_var_sequence(tx))
-            return variables.TupleVariable(items)
 
     def call_islice(self, tx: "InstructionTranslator", iterable, *args):
         if iterable.has_unpack_var_sequence(tx) and all(
