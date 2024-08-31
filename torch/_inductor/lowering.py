@@ -6393,8 +6393,13 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
+def associative_scan(combine_fn: ir.Subgraph, input, dim: int, lifted_args: Tuple[torch.Tensor]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
+
+    if lifted_args != ():
+        raise RuntimeError(
+            "Unable to generate code for associative_scan op, because there are lifted arguments"
+        )
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
