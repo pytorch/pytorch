@@ -231,9 +231,7 @@ def stride_at(index: sympy.Expr, var: sympy.Symbol):
 
 
 @functools.lru_cache
-def simplify_index_in_vec_range(
-    index: sympy.Expr, var: sympy.Expr, vec_length: Optional[int] = None
-):
+def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
     """
     Simplifies the index expression within the range of a vectorized loop.
     Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
@@ -262,7 +260,7 @@ def simplify_index_in_vec_range(
     def visit_indexing_div(divisor):
         nonlocal div_freevar_id
         result = FloorDiv(var, divisor)
-        if vec_length and sympy.gcd(divisor, vec_length) == vec_length:
+        if sympy.gcd(divisor, vec_length) == vec_length:
             result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
             div_freevar_id += 1
         return result
@@ -270,12 +268,10 @@ def simplify_index_in_vec_range(
     def visit_modular_indexing(divisor, modulus):
         nonlocal mod_freevar_id
         result = ModularIndexing(var, divisor, modulus)
-        if vec_length and sympy.gcd(divisor, vec_length) == vec_length:
+        if sympy.gcd(divisor, vec_length) == vec_length:
             result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
             mod_freevar_id += 1
-        elif (
-            vec_length and divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length
-        ):
+        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
             result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
             mod_freevar_id += 1
         return result
@@ -301,8 +297,9 @@ def simplify_index_in_vec_range(
 def stride_at_vec_range(
     index: sympy.Expr, var: sympy.Symbol, vec_length: Optional[int] = None
 ):
-    index_vec_simplified = simplify_index_in_vec_range(index, var, vec_length)
-    return stride_at(index_vec_simplified, var)
+    if vec_length:
+        index = simplify_index_in_vec_range(index, var, vec_length)
+    return stride_at(index, var)
 
 
 class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
