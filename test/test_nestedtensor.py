@@ -7,6 +7,8 @@ import sys
 import unittest
 from functools import partial
 from typing import Optional, Tuple
+import math
+import weakref
 
 import numpy as np
 
@@ -62,6 +64,17 @@ from torch.testing._internal.opinfo.definitions.nested import njt_op_db
 from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
+<<<<<<< HEAD
+=======
+from torch.nested._internal.nested_tensor import (
+    buffer_from_jagged,
+    jagged_from_list,
+    NestedTensor,
+    nested_view_from_values_offsets,
+    ViewNestedFromBuffer,
+)
+from torch.nested._internal.union_find import TensorIntMap, TensorUnionFind
+>>>>>>> 37f50417d92 ([do not review] saving stuff)
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -7365,6 +7378,155 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 )
 
                 self.assertEqual(grads_compile, grads_ref)
+
+
+class TestTensorUnionFind(TestCase):
+    def _get_test_union_find(self):
+        class TestUnionFind(TensorUnionFind):
+            def merge(self, a, b):
+                super().merge(a, b)
+                super().validate_invariants()
+
+        return TestUnionFind()
+
+    def test_basic(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        self.assertIsNot(uf.find(a), uf.find(b))
+        uf.merge(a, b)
+        self.assertIs(uf.find(a), uf.find(b))
+
+    @xfailIfTorchDynamo
+    def test_equiv_tensors(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        self.assertEqual(set(uf.get_equiv_tensors(a)), {a})
+        b = a.clone()
+        c = a.clone()
+        uf.merge(a, b)
+        uf.merge(b, c)
+        canonical = uf.find(a)
+        self.assertEqual(set(uf.get_equiv_tensors(a)), {a, b, c})
+        self.assertIs(canonical, a)
+        del b
+        self.assertEqual(set(uf.get_equiv_tensors(a)), {a, c})
+
+    def test_metadata_merge(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        c = a.clone()
+        uf.merge(a, c)
+        uf.get_metadata(a)["foo"] = "bar"
+        uf.get_metadata(b)["foo"] = "baz"
+        # a is the larger group, so a stays as the canonical
+        # and a's entries are overridden by b's
+        uf.merge(a, b)
+        canonical = uf.find(a)
+        self.assertIs(canonical, a)
+        # See Note [TensorUnionFind: Metadata merging asymmetry]
+        self.assertEqual(uf.get_metadata(a)["foo"], "baz")
+
+    @xfailIfTorchDynamo
+    def test_lifetime(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        canonical = uf.find(a)
+        weak_canonical = weakref.ref(canonical)
+        uf.merge(a, b)
+        del canonical
+        self.assertIsNotNone(weak_canonical())
+        del a, b
+        self.assertIsNone(weak_canonical())
+
+    def test_tensor_int_map_version_counting(self):
+        m = TensorIntMap()
+        a = torch.tensor([1, 2, 3])
+        a_id_0 = m.get_int(a)
+        self.assertIs(m.get_opt_tensor(a_id_0), a)
+        a.add_(1)
+        self.assertIsNone(m.get_opt_tensor(a_id_0))
+        a_id_1 = m.get_int(a)
+        self.assertEqual(a_id_0 + 1, a_id_1)
+        self.assertIs(m.get_opt_tensor(a_id_1), a)
+        del a
+        self.assertIsNone(m.get_opt_tensor(a_id_1))
+
+    def test_union_find_mutate_canonical(self):
+        # See Note [TensorUnionFind: Union find over "versions of tensors"]
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        uf.merge(a, b)
+        self.assertIs(uf.find(a), uf.find(b))
+        # a is canonical
+        self.assertIs(uf.find(a), a)
+        # mutate the canonical
+        a.add_(1)
+
+        # When the canonical is mutated, trying to do any operation on that
+        # union find set produces an error:
+        #
+        # 1) Querying for the canonical
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            uf.find(b)
+        # 2) Merging
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            uf.merge(a, b)
+
+        # To the perspective of the mutated tensor, it will just belong
+        # to a new set where it is still canonical.
+        self.assertIs(uf.find(a), a)
+
+    @xfailIfTorchDynamo
+    def test_union_find_compile(self):
+        # Today, UnionFind APIs should not be used directly when compiling.
+
+        # During fakification, compiler is only aware of the state of the
+        # global union find. Alternatively, we could add a way to track which
+        # union find each tensor belongs to.
+        uf = torch.nested._internal.union_find.get_union_find()
+        from torch.nested._internal.union_find import merge, find
+
+        # You should NOT be calling `find(a) is find(b)` directly when using
+        # the union find in a compiled function. Checking whether two tensors
+        # are in the same set should only be done as part of testing whether
+        # two nested tensors have the same shape, as that would allow us to
+        # make use of ShapeEnv guards.
+        def f(a, b, c, d):
+            merge(b, c)
+            return find(a) is find(d)
+
+        a = torch.tensor([1.], requires_grad=True)
+        b = torch.tensor([1.], requires_grad=True)
+        c = torch.tensor([1.], requires_grad=True)
+        d = torch.tensor([1.], requires_grad=True)
+
+        uf.merge(a, b)
+        uf.merge(c, d)
+        compiled_f = torch.compile(f, fullgraph=True, backend="aot_eager")
+        out1 = compiled_f(a, b, c, d)
+
+        # The state of the union find is properly reflected in the fake world
+        self.assertTrue(out1)
+
+        # This is wrong, we need side effects
+        self.assertFalse(find(a) is find(d))
+
+        a = torch.tensor([1.], requires_grad=True)
+        b = torch.tensor([1.], requires_grad=True)
+        c = torch.tensor([1.], requires_grad=True)
+        d = torch.tensor([1.], requires_grad=True)
+
+        compiled_f(a, b, c, d)
+        out2 = compiled_f(a, b, c, d)
+
+        # This is not correct because we do NOT guard on the state of the union
+        # find.
+        self.assertTrue(out2)
+
 
 
 instantiate_parametrized_tests(TestNestedTensor)

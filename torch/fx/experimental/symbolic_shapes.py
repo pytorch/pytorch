@@ -2361,6 +2361,7 @@ class ShapeEnv:
         self.events: List[ShapeEnvEvent] = (
             [ShapeEnvEvent(ShapeEnv, kwargs=kwargs)] if self.should_record_events else []
         )
+        self.union_find_id_map = dict()
 
         # FakeTensor per-ShapeEnv operation cache. This is used for caching
         # operations that contain symbolic shapes which have guards on the
