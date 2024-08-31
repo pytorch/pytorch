@@ -1,9 +1,9 @@
+# mypy: allow-untyped-defs
 import logging
-from typing import cast, List
+from typing import cast, Sequence
 
 from ...._dynamo.utils import counters
-
-from ... import config, ir
+from ... import config
 from ...codecache import code_hash, get_path
 from ...ir import CUDATemplateBuffer
 from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
@@ -24,9 +24,13 @@ class CUDACPPScheduling(BaseScheduling):
     It handles fusion decisions and CUDA C++ specific template code generation.
     """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: Scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
+
+    @classmethod
+    def get_backend_features(cls, device):
+        return {}
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -73,7 +77,9 @@ class CUDACPPScheduling(BaseScheduling):
         return kernel_name
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a CUDA template, possibly with fused epilogues
@@ -86,19 +92,23 @@ class CUDACPPScheduling(BaseScheduling):
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: CUDATemplateBuffer = cast(CUDATemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[ir.Buffer] = [n.node for n in epilogue_nodes]
-        assert all(
-            isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
-        ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
-        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
+        kernel, render = ctb.make_kernel_render(ctb)
         with kernel:
-            for node in [template_node, *epilogue_nodes]:
-                node.mark_run()
+            template_node.mark_run()
             src_code = render()
 
         with V.set_kernel_handler(kernel):
-            node_schedule = [template_node, *epilogue_nodes]
+            node_schedule = [template_node]
             kernel_name = self.define_kernel(src_code, node_schedule)
-        kernel.call_kernel(kernel_name, ctb, epilogue_ir_nodes)
+
+        # debug printing values of intermediate tensors
+        _, call_args, arg_signatures, _ = kernel.args.python_argdefs()
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, kernel
+        )
+        with debug_printer_manager:
+            kernel.call_kernel(kernel_name, ctb)
+
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()

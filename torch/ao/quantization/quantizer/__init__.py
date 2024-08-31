@@ -9,6 +9,7 @@ from .quantizer import (
     SharedQuantizationSpec,
 )
 
+
 __all__ = [
     "EdgeOrNode",
     "Quantizer",

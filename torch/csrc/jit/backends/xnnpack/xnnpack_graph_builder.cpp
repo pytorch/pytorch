@@ -233,7 +233,7 @@ void XNNGraph::defineAllTensorValues() {
       size_t buffer_idx = 0;
       size_t num_bytes = 0;
       if (val->node()->kind() == prim::Constant) {
-        c10::optional<IValue> constant = val->node()->t(attr::value);
+        std::optional<IValue> constant = val->node()->t(attr::value);
         auto const_val = constant->toIValue().toTensor();
         // Need tensor data to be contiguous for serialization
         auto cont_const_val = const_val.contiguous();

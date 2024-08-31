@@ -4,11 +4,16 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from .api import RendezvousHandler, RendezvousParameters
-from .api import rendezvous_handler_registry as handler_registry
+from .api import (
+    rendezvous_handler_registry as handler_registry,
+    RendezvousHandler,
+    RendezvousParameters,
+)
 from .dynamic_rendezvous import create_handler
 
-__all__ = ['get_rendezvous_handler']
+
+__all__ = ["get_rendezvous_handler"]
+
 
 def _create_static_handler(params: RendezvousParameters) -> RendezvousHandler:
     from . import static_tcp_rendezvous

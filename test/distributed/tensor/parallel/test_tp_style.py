@@ -5,7 +5,6 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-
 from torch.distributed._tensor import (
     distribute_tensor,
     DTensor,
@@ -49,10 +48,8 @@ class TensorParallelStyleTest(DTensorTestBase):
         model = nn.Linear(16, 16, device=self.device_type)
 
         default_col_parallel = ColwiseParallel()
+        colwise_mod = parallelize_module(deepcopy(model), mesh, default_col_parallel)
         with comm_mode:
-            colwise_mod = parallelize_module(
-                deepcopy(model), mesh, default_col_parallel
-            )
             out = colwise_mod(tensor)
             # ensure output shard on the last dim
             self.assertEqual(out.shape, (8, 16 // self.world_size))
@@ -65,10 +62,8 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 1)
 
         sharded_col_parallel = ColwiseParallel(input_layouts=Shard(0))
+        colwise_mod = parallelize_module(deepcopy(model), mesh, sharded_col_parallel)
         with comm_mode:
-            colwise_mod = parallelize_module(
-                deepcopy(model), mesh, sharded_col_parallel
-            )
             out = colwise_mod(tensor)
             # ensure output shard on the last dim
             self.assertEqual(out.shape, (8 * self.world_size, 16 // self.world_size))
@@ -94,10 +89,8 @@ class TensorParallelStyleTest(DTensorTestBase):
         model = nn.Embedding(16, 16, device=self.device_type)
 
         default_col_parallel = ColwiseParallel()
+        colwise_mod = parallelize_module(deepcopy(model), mesh, default_col_parallel)
         with comm_mode:
-            colwise_mod = parallelize_module(
-                deepcopy(model), mesh, default_col_parallel
-            )
             out = colwise_mod(tensor)
             # ensure output shard on the last dim
             self.assertEqual(out.shape, (4, 2, 16 // self.world_size))
@@ -119,10 +112,8 @@ class TensorParallelStyleTest(DTensorTestBase):
         model = nn.Linear(16, 16, device=self.device_type)
 
         default_row_parallel = RowwiseParallel()
+        rowwise_mod = parallelize_module(deepcopy(model), mesh, default_row_parallel)
         with comm_mode:
-            rowwise_mod = parallelize_module(
-                deepcopy(model), mesh, default_row_parallel
-            )
             out = rowwise_mod(tensor)
             # ensure output replicated
             self.assertEqual(out.shape, (8, 16))
@@ -135,10 +126,8 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 1)
 
         sharded_row_parallel = RowwiseParallel(output_layouts=Shard(0))
+        rowwise_mod = parallelize_module(deepcopy(model), mesh, sharded_row_parallel)
         with comm_mode:
-            rowwise_mod = parallelize_module(
-                deepcopy(model), mesh, sharded_row_parallel
-            )
             out = rowwise_mod(tensor)
             # ensure output replicated
             self.assertEqual(out.shape, (8 // self.world_size, 16))
@@ -163,10 +152,10 @@ class TensorParallelStyleTest(DTensorTestBase):
         tensor = torch.arange(8, device=self.device_type).reshape(4, 2)
         model = nn.Embedding(16, 16, device=self.device_type)
 
+        rowwise_mod = parallelize_module(
+            deepcopy(model), mesh, RowwiseParallel(input_layouts=Replicate())
+        )
         with comm_mode:
-            rowwise_mod = parallelize_module(
-                deepcopy(model), mesh, RowwiseParallel(input_layouts=Replicate())
-            )
             out = rowwise_mod(tensor)
             # ensure output shard on the last dim
             self.assertEqual(out.shape, (4, 2, 16))
@@ -177,6 +166,29 @@ class TensorParallelStyleTest(DTensorTestBase):
             out.sum().backward()
             # no comm in bwd
             self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        sharded_row_parallel = RowwiseParallel(
+            input_layouts=Replicate(), output_layouts=Shard(1)
+        )
+
+        rowwise_mod = parallelize_module(deepcopy(model), mesh, sharded_row_parallel)
+
+        inp_indices = torch.arange(8, device=self.device_type)
+        with comm_mode:
+            out = rowwise_mod(inp_indices)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (8, 16 // self.world_size))
+            # reduce scatter in fwd
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.reduce_scatter_tensor], 1
+            )
+            out.sum().backward()
+            # allgather comm in bwd
+            self.assertEqual(comm_mode.get_total_counts(), 2)
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
+            )
 
     @with_comms
     def test_prepare_module_input(self):
@@ -198,7 +210,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
@@ -250,7 +262,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         class TestKwargModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
@@ -278,7 +290,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output.shape, (1 * self.world_size, 8))
 
         class TestKwargOnlyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
@@ -299,6 +311,18 @@ class TensorParallelStyleTest(DTensorTestBase):
             output = test_kwonly_mod(
                 x=torch.randn(1, 8, device=self.device_type),
                 z=torch.ones(1, 8, device=self.device_type),
+            )
+
+        self.assertEqual(comm_mode.get_total_counts(), 2)
+        self.assertEqual(output.shape, (1 * self.world_size, 8))
+
+        # test the case where x is a DTensor
+        x_dt = DTensor.from_local(
+            torch.randn(1, 8, device=self.device_type), mesh, [Shard(0)]
+        )
+        with comm_mode:
+            output = test_kwonly_mod(
+                x=x_dt, z=torch.ones(1, 8, device=self.device_type)
             )
 
         self.assertEqual(comm_mode.get_total_counts(), 2)
@@ -395,6 +419,22 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertIsInstance(sharded_out, DTensor)
             self.assertEqual(sharded_out.placements, (Shard(1),))
             self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # test sharded on non-sequence dim input
+        sharded_batch_input = distribute_tensor(global_input, mesh, [Shard(0)])
+        rmsnorm = RMSNormPython(embedding_dim).to(self.device_type)
+        sp_rmsnorm = parallelize_module(deepcopy(rmsnorm), mesh, SequenceParallel())
+
+        with comm_mode:
+            sharded_out = sp_rmsnorm(sharded_batch_input)
+            grad_out = torch.ones_like(sharded_out)
+            sharded_out.backward(grad_out)
+            self.assertIsInstance(sharded_out, DTensor)
+            # output still sharded on sequence dimension
+            self.assertEqual(sharded_out.placements, (Shard(1),))
+            self.assertEqual(sp_rmsnorm.weight.grad.placements, (_Partial(),))
+            # communication happens in both fwd/bwd to redistribute input
+            self.assertEqual(comm_mode.get_total_counts(), 2)
 
 
 if __name__ == "__main__":

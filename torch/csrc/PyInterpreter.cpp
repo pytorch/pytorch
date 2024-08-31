@@ -12,6 +12,8 @@ using namespace torch;
 using namespace at;
 using namespace c10;
 
+namespace torch::detail {
+
 namespace {
 
 // NB: This is a macro and not a template function (like it was before)
@@ -42,6 +44,7 @@ struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
   std::string name() const override;
 
+  void incref(PyObject* pyobj) const override;
   void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
@@ -62,9 +65,10 @@ struct ConcretePyInterpreterVTable final
       c10::DispatchKey key,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack,
-      bool with_keyset) const override {
+      bool with_keyset,
+      bool with_op) const override {
     torch::impl::dispatch::python_op_registration_trampoline_impl(
-        op, key, keyset, stack, with_keyset);
+        op, key, keyset, stack, with_keyset, with_op);
   }
   void throw_abstract_impl_not_imported_error(
       std::string opname,
@@ -272,29 +276,12 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
   Py_DECREF(pyobj);
 };
 
-py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
-  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
-    // Parse the name into namespace and name (no overload_name)
-    // TODO: put this into the library
-    const auto& schema = op.schema();
-    const auto& qualified_name = op.operator_name().name;
-    const auto& overload_name = schema.overload_name();
-    auto pos = qualified_name.find("::");
-    TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-    // Make me some null terminated strings
-    std::string ns_str = qualified_name.substr(0, pos);
-    const char* ns = ns_str.c_str();
-    const char* func_name = qualified_name.c_str() + pos + strlen("::");
-
-    py::handle torch_api_function =
-        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
-    if (overload_name.empty()) {
-      return torch_api_function.attr("default").ptr();
-    } else {
-      return torch_api_function.attr(overload_name.c_str()).ptr();
-    }
-  });
-}
+void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
+  if (!Py_IsInitialized())
+    return;
+  pybind11::gil_scoped_acquire gil;
+  Py_INCREF(pyobj);
+};
 
 bool isPythonTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
@@ -592,7 +579,7 @@ static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
-  c10::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
+  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
       getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
@@ -620,7 +607,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
     const char* base_attr_name,
     const py::object& obj) {
-  c10::optional<PyObject*> mb_obj =
+  std::optional<PyObject*> mb_obj =
       tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
@@ -831,12 +818,16 @@ c10::Layout ConcretePyInterpreterVTable::layout(
       "torch.ops.prim");
 
   TORCH_CHECK(
-      THPLayout_Check(out.ptr()),
+      THPLayout_Check(out.ptr()) || PyLong_Check(out.ptr()),
       "layout returned invalid type ",
       py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
       ", expected Layout");
 
-  return toLayout(out.ptr());
+  if (THPLayout_Check(out.ptr())) {
+    return toLayout(out.ptr());
+  } else {
+    return c10::Layout(py::cast<int64_t>(out));
+  }
 }
 
 int64_t ConcretePyInterpreterVTable::numel(const c10::TensorImpl* self) const {
@@ -952,20 +943,46 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
-PyInterpreterHolder self_interpreter;
-
-} // anonymous namespace
-
-c10::impl::PyInterpreter* getPyInterpreter() {
-  return self_interpreter.get();
-}
-
-bool isMainPyInterpreter() {
-  return self_interpreter.is_main_interpreter();
-}
-
 std::string ConcretePyInterpreterVTable::name() const {
   std::stringstream ss;
   ss << getPyInterpreter();
   return ss.str();
+}
+
+PyInterpreterHolder self_interpreter;
+
+} // anonymous namespace
+
+py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
+  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
+    // Parse the name into namespace and name (no overload_name)
+    // TODO: put this into the library
+    const auto& schema = op.schema();
+    const auto& qualified_name = op.operator_name().name;
+    const auto& overload_name = schema.overload_name();
+    auto pos = qualified_name.find("::");
+    TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
+    // Make me some null terminated strings
+    std::string ns_str = qualified_name.substr(0, pos);
+    const char* ns = ns_str.c_str();
+    const char* func_name = qualified_name.c_str() + pos + strlen("::");
+
+    py::handle torch_api_function =
+        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+    if (overload_name.empty()) {
+      return torch_api_function.attr("default").ptr();
+    } else {
+      return torch_api_function.attr(overload_name.c_str()).ptr();
+    }
+  });
+}
+
+} // namespace torch::detail
+
+c10::impl::PyInterpreter* getPyInterpreter() {
+  return torch::detail::self_interpreter.get();
+}
+
+bool isMainPyInterpreter() {
+  return torch::detail::self_interpreter.is_main_interpreter();
 }

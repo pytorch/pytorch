@@ -66,6 +66,12 @@ def is_sdpa_error(func, idx, e):
         and "Devices" in repr(e)
     ):
         return True
+    if (
+        func is aten._scaled_dot_product_cudnn_attention.default
+        and idx in (6, 7)
+        and "Devices" in repr(e)
+    ):
+        return True
     return False
 
 
@@ -77,6 +83,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         check_strides=True,
         check_aliasing=True,
     ):
+        super().__init__()
         self.ignore_op_fn = (
             ignore_op_fn if ignore_op_fn is not None else lambda fn: False
         )

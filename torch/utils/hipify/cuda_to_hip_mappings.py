@@ -1,7 +1,4 @@
 import collections
-import os
-import re
-import subprocess
 
 from .constants import (API_BLAS, API_C10, API_CAFFE2, API_DRIVER, API_FFT,
                         API_PYTORCH, API_RAND, API_ROCTX, API_RTC, API_RUNTIME,
@@ -26,40 +23,6 @@ Each of the entries in these maps translates a CUDA string to a tuple containing
 ROCm/HIP string, a type and API annotation and - optionally - an annotation if it is not
 supported in ROCm/HIP yet.
 """
-
-# We need to know the ROCm version so we can conditionalize some of the mappings later.
-# As of ROCm 5.0, the version is found in rocm_version.h header file under /opt/rocm/include.
-rocm_path = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH') or "/opt/rocm"
-try:
-    rocm_path = subprocess.check_output(["hipconfig", "--rocmpath"]).decode("utf-8")
-except subprocess.CalledProcessError:
-    print(f"Warning: hipconfig --rocmpath failed, assuming {rocm_path}")
-except (FileNotFoundError, PermissionError, NotADirectoryError):
-    # Do not print warning. This is okay. This file can also be imported for non-ROCm builds.
-    pass
-
-rocm_version = (0, 0, 0)
-rocm_version_h = f"{rocm_path}/include/rocm-core/rocm_version.h"
-if not os.path.isfile(rocm_version_h):
-    rocm_version_h = f"{rocm_path}/include/rocm_version.h"
-
-# The file could be missing due to 1) ROCm version < 5.2, or 2) no ROCm install.
-if os.path.isfile(rocm_version_h):
-    RE_MAJOR = re.compile(r"#define\s+ROCM_VERSION_MAJOR\s+(\d+)")
-    RE_MINOR = re.compile(r"#define\s+ROCM_VERSION_MINOR\s+(\d+)")
-    RE_PATCH = re.compile(r"#define\s+ROCM_VERSION_PATCH\s+(\d+)")
-    major, minor, patch = 0, 0, 0
-    for line in open(rocm_version_h):
-        match = RE_MAJOR.search(line)
-        if match:
-            major = int(match.group(1))
-        match = RE_MINOR.search(line)
-        if match:
-            minor = int(match.group(1))
-        match = RE_PATCH.search(line)
-        if match:
-            patch = int(match.group(1))
-    rocm_version = (major, minor, patch)
 
 # List of math functions that should be replaced inside device code only.
 MATH_TRANSPILATIONS = collections.OrderedDict(
@@ -574,6 +537,8 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ("CUuuid", ("hipUUID", CONV_TYPE, API_RUNTIME)),
         ("cudaGraph_t", ("hipGraph_t", CONV_TYPE, API_RAND)),
         ("cudaGraphExec_t", ("hipGraphExec_t", CONV_TYPE, API_RAND)),
+        ("__nv_bfloat16", ("__hip_bfloat16", CONV_TYPE, API_RUNTIME)),
+        ("__nv_bfloat162", ("__hip_bfloat162", CONV_TYPE, API_RUNTIME)),
     ]
 )
 
@@ -643,7 +608,11 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("thrust/system/cuda", ("thrust/system/hip", CONV_INCLUDE, API_BLAS)),
         ("cub/util_allocator.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/block/block_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+        ("cub/block/block_raking_layout.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/cub.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+        ("cub/config.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+        ("cub/util_ptx.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+        ("cub/util_type.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_run_length_encode.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/block/block_load.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/block/block_store.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
@@ -652,6 +621,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_select.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+        ("nvtx3/nvtx3.hpp", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
         ("nvToolsExt.h", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
         ("nvml.h", ("rocm_smi/rocm_smi.h", CONV_INCLUDE, API_ROCMSMI)),
     ]
@@ -4196,6 +4166,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaGraphLaunch", ("hipGraphLaunch", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphGetNodes", ("hipGraphGetNodes", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphDebugDotPrint", ("hipGraphDebugDotPrint", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDebugDotFlagsVerbose", ("hipGraphDebugDotFlagsVerbose", CONV_NUMERIC_LITERAL, API_RUNTIME)),
         ("cudaGraphRetainUserObject", ("hipGraphRetainUserObject", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphUserObjectMove", ("hipGraphUserObjectMove", CONV_TYPE, API_RUNTIME)),
         ("cudaUserObject_t", ("hipUserObject_t", CONV_TYPE, API_RUNTIME)),
@@ -7300,20 +7271,19 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         (
             "cublasComputeType_t",
-            ("hipblasComputeType_t" if rocm_version >= (6, 0, 0) else "hipblasLtComputeType_t",
-                CONV_MATH_FUNC, API_BLAS)
+            ("hipblasComputeType_t", CONV_MATH_FUNC, API_BLAS)
         ),
         (
             "CUBLAS_COMPUTE_32I",
-            ("HIPBLAS_COMPUTE_32I" if rocm_version >= (6, 0, 0) else "HIPBLASLT_COMPUTE_I32", CONV_MATH_FUNC, API_BLAS)
+            ("HIPBLAS_COMPUTE_32I", CONV_MATH_FUNC, API_BLAS)
         ),
         (
             "CUBLAS_COMPUTE_32F",
-            ("HIPBLAS_COMPUTE_32F" if rocm_version >= (6, 0, 0) else "HIPBLASLT_COMPUTE_F32", CONV_MATH_FUNC, API_BLAS)
+            ("HIPBLAS_COMPUTE_32F", CONV_MATH_FUNC, API_BLAS)
         ),
         (
             "CUBLAS_COMPUTE_64F",
-            ("HIPBLAS_COMPUTE_64F" if rocm_version >= (6, 0, 0) else "HIPBLASLT_COMPUTE_F64", CONV_MATH_FUNC, API_BLAS)
+            ("HIPBLAS_COMPUTE_64F", CONV_MATH_FUNC, API_BLAS)
         ),
         ("cublasLtEpilogue_t", ("hipblasLtEpilogue_t", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_EPILOGUE_DEFAULT", ("HIPBLASLT_EPILOGUE_DEFAULT", CONV_MATH_FUNC, API_BLAS)),
@@ -7766,14 +7736,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
                 HIP_UNSUPPORTED,
             ),
         ),
-        (
-            "cuComplex",
-            ("hipComplex" if rocm_version >= (6, 0, 0) else "hipblasComplex", CONV_TYPE, API_BLAS)
-        ),
-        (
-            "cuDoubleComplex",
-            ("hipDoubleComplex" if rocm_version >= (6, 0, 0) else "hipblasDoubleComplex", CONV_TYPE, API_BLAS),
-        ),
+        ("cuComplex", ("hipComplex", CONV_TYPE, API_BLAS)),
+        ("cuDoubleComplex", ("hipDoubleComplex", CONV_TYPE, API_BLAS)),
         ("cufftResult_t", ("hipfftResult_t", CONV_TYPE, API_FFT)),
         ("cufftResult", ("hipfftResult", CONV_TYPE, API_FFT)),
         ("CUFFT_SUCCESS", ("HIPFFT_SUCCESS", CONV_NUMERIC_LITERAL, API_FFT)),
@@ -7950,10 +7914,17 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cub::BLOCK_STORE_WARP_TRANSPOSE", ("hipcub::BLOCK_STORE_WARP_TRANSPOSE", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BLOCK_LOAD_DIRECT", ("hipcub::BLOCK_LOAD_DIRECT", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BLOCK_STORE_DIRECT", ("hipcub::BLOCK_STORE_DIRECT", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        (
+            "cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY",
+            ("hipcub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY", CONV_SPECIAL_FUNC, API_RUNTIME)
+        ),
         ("cub::BlockReduce", ("hipcub::BlockReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BlockScan", ("hipcub::BlockScan", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BlockLoad", ("hipcub::BlockLoad", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BlockStore", ("hipcub::BlockStore", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::BlockRakingLayout", ("hipcub::BlockRakingLayout", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::Uninitialized", ("hipcub::Uninitialized", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::RowMajorTid", ("hipcub::RowMajorTid", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::CachingDeviceAllocator", ("hipcub::CachingDeviceAllocator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::CountingInputIterator", ("hipcub::CountingInputIterator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceRadixSort", ("hipcub::DeviceRadixSort", CONV_SPECIAL_FUNC, API_RUNTIME)),
@@ -7967,9 +7938,15 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cub::Max", ("hipcub::Max", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::Min", ("hipcub::Min", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::Sum", ("hipcub::Sum", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::Log2", ("hipcub::Log2", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::LaneId", ("hipcub::LaneId", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::WarpMask", ("hipcub::WarpMask", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::ShuffleIndex", ("hipcub::ShuffleIndex", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::ShuffleDown", ("hipcub::ShuffleDown", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::ArgIndexInputIterator", ("hipcub::ArgIndexInputIterator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::TransformInputIterator", ("hipcub::TransformInputIterator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::WarpReduce", ("hipcub::WarpReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::CTA_SYNC", ("hipcub::CTA_SYNC", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("nvtxMark", ("roctxMark", CONV_OTHER, API_ROCTX)),
         ("nvtxMarkA", ("roctxMarkA", CONV_OTHER, API_ROCTX)),
         ("nvtxRangePushA", ("roctxRangePushA", CONV_OTHER, API_ROCTX)),

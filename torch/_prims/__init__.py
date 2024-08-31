@@ -1,17 +1,16 @@
-import contextlib
-import itertools
+# mypy: allow-untyped-defs
 import operator
-import weakref
 from enum import Enum
 from functools import partial, reduce
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Type, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Type, Union
 
 import torch
-
 import torch._prims_common as utils
 import torch.library
-from torch import sym_float, Tensor, TypedStorage
+from torch import sym_float, Tensor
 from torch._C import _get_default_device
+from torch._higher_order_ops.effects import new_token_tensor
+from torch._library.utils import is_functional_schema
 from torch._prims.debug_prims import register_debug_prims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
@@ -32,6 +31,7 @@ from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
@@ -271,13 +271,13 @@ def _make_prim(
     impl_aten: Callable,
     doc: str,
     tags: Optional[Sequence[torch.Tag]] = None,
+    use_old_custom_ops_api: bool = False,
+    register_conj_neg_fallthrough: bool = False,
 ):
     """
     Creates a primitive operation.
 
     """
-
-    prim.define(schema, tags=torch.Tag.pt2_compliant_tag)
 
     def _prim_impl(*args, **kwargs):
         # always run the meta function because aten implementation will
@@ -302,14 +302,52 @@ def _make_prim(
             return _prim_impl(*args, **kwargs)
 
     name = schema.split("(")[0]
-    prim_impl.impl(name, _prim_impl)
-    prim_autograd_impl.impl(name, _autograd_impl)
-    prim_meta_impl.impl(name, meta)
+    schema = schema[len(name) :]
+
+    # register non-functional ops with old custom ops API
+    cpp_schema = torch._C.parse_schema(name + schema)
+    if use_old_custom_ops_api or not is_functional_schema(cpp_schema):
+        prim.define(name + schema, tags=torch.Tag.pt2_compliant_tag)
+        prim_impl.impl(name, _prim_impl)
+        prim_autograd_impl.impl(name, _autograd_impl)
+        prim_meta_impl.impl(name, meta)
+    else:
+        mutates_args = []
+        for arg in cpp_schema.arguments:
+            if arg.alias_info is not None and arg.alias_info.is_write:
+                mutates_args.append(arg.name)
+        prim_def = torch.library.custom_op(
+            "prims::" + name,
+            _prim_impl,
+            mutates_args=tuple(mutates_args),
+            schema=schema,
+        )
+        prim_def.register_fake(meta)
+
+        # all view ops get conj/neg fallthroughs
+        if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Conjugate")
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Negative")
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
     if tags:
         _prim._tags = tags
+    elif aten_packet := getattr(torch.ops.aten, name, None):
+        overload_tags = [
+            getattr(aten_packet, overload).tags for overload in aten_packet.overloads()
+        ]
+        tags_intersection = set(overload_tags[0])
+        tags_intersection.intersection_update(*overload_tags[1:])
+
+        # dont inadvertently add to prim ops
+        tags_intersection.discard(torch.Tag.core)
+        # causes errors with python ref executor tests, none of the
+        # data dependent pytorch ops actually decompose to prims
+        tags_intersection.discard(torch.Tag.data_dependent_output)
+
+        # iter over first tags for determinism
+        _prim._tags = tuple(t for t in overload_tags[0] if t in tags_intersection)
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
@@ -670,6 +708,7 @@ clone = _make_prim(
     impl_aten=torch.clone,
     doc="Returns the copy of a tensor",
     return_type=RETURN_TYPE.NEW,
+    register_conj_neg_fallthrough=True,
 )
 
 digamma = _make_elementwise_unary_prim(
@@ -752,7 +791,7 @@ floor = _make_elementwise_unary_prim(
 )
 
 imag = _make_prim(
-    schema="imag(Tensor self) -> Tensor",
+    schema="imag(Tensor(a) self) -> Tensor(a)",
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
@@ -805,7 +844,7 @@ log10 = _make_elementwise_unary_prim(
 )
 
 real = _make_prim(
-    schema="real(Tensor self) -> Tensor",
+    schema="real(Tensor(a) self) -> Tensor(a)",
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
@@ -1366,7 +1405,10 @@ def _collapse_view_helper(
             continue
 
         length = length * shape[idx]
-        stride = min(stride, strides[idx])
+        if guard_size_oblivious(stride < strides[idx]):
+            stride = stride
+        else:
+            stride = strides[idx]
 
         if (
             guard_size_oblivious(a.numel() > 0)
@@ -1795,7 +1837,7 @@ _view_of_doc = """
     """
 
 view_of = _make_prim(
-    schema="view_of(Tensor(a) a) -> Tensor",
+    schema="view_of(Tensor(a) a) -> Tensor(a)",
     meta=_view_of_meta,
     impl_aten=_view_of_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1816,7 +1858,7 @@ _view_element_type_doc = """
     """
 
 view_element_type = _make_prim(
-    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor",
+    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor(a)",
     meta=_view_element_type_meta,
     impl_aten=_view_element_type_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -2233,6 +2275,7 @@ copy_to = _make_prim(
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_copy_to_doc,
+    register_conj_neg_fallthrough=True,
 )
 
 
@@ -2316,7 +2359,7 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     )
 
 
-def _var_reduction_meta(inp, dims, *, correction):
+def _var_reduction_meta(inp, dims, correction):
     if utils.is_complex_dtype(inp.dtype):
         output_dtype = utils.corresponding_real_dtype(inp.dtype)
     else:
@@ -2363,7 +2406,7 @@ def _make_reduction_prim(name: str, impl_aten, doc):
 def _make_var_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, float correction, ScalarType? output_dtype=None) -> Tensor",
+        schema=f"{name}(Tensor inp, int[]? dims, float? correction=1, *, ScalarType? output_dtype=None) -> Tensor",
         meta=_var_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,
@@ -2401,6 +2444,8 @@ def _prod_aten(
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
     if dims is not None:
+        if len(dims) == 0:
+            return inp.clone()
         for d in sorted(dims, reverse=True):
             assert d >= 0
             inp = torch.prod(inp, d, dtype=dtype)
@@ -2415,9 +2460,15 @@ prod = _make_reduction_prim(
     doc=_prod_doc,
 )
 
+
+# torch.var, but correction is not kwarg-only
+def torch_var(input, dim=None, correction=1, **kwargs):
+    return torch.var(input, dim=dim, correction=correction, **kwargs)
+
+
 var = _make_var_reduction_prim(
     name="var",
-    impl_aten=torch.var,
+    impl_aten=torch_var,
     doc=_var_doc,
 )
 
@@ -3033,7 +3084,7 @@ frexp = _make_prim(
 
 
 def _make_token_aten() -> TensorLikeType:
-    return torch.empty(0)
+    return new_token_tensor()
 
 
 _make_token = _make_prim(

@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
+
 import click
 import numpy as np
-import torch
 from operator_inp_utils import OperatorInputsLoader
 
+import torch
 from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.decomposition import decompositions
 from torch._inductor.lowering import lowerings
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.utils import gen_gm_and_inputs
 from torch.utils._pytree import tree_map_only
+
 
 aten = torch.ops.aten
 
@@ -35,13 +38,11 @@ def compute_speedups(
         # interleave the runs to handle frequency scaling and load changes
         for m, model in enumerate(models):
             if device == "cuda":
-                import triton
-
                 model(*example_inputs)
 
-                # do_bench() clears L2 cache to hide the latency of CPU launch time
+                # benchmarker.benchmark_gpu() clears L2 cache to hide the latency of CPU launch time
                 # along with cuda synchronization
-                timings[rep, m] = triton.testing.do_bench(
+                timings[rep, m] = benchmarker.benchmark_gpu(
                     lambda: model(*example_inputs)
                 )
             else:

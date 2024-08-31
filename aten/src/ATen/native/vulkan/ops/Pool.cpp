@@ -232,7 +232,7 @@ Tensor avg_pool2d(
     const IntArrayRef padding_arg,
     const bool ceil_mode,
     const bool /* count_include_pad */,
-    const c10::optional<int64_t> /* divisor_override */) {
+    const std::optional<int64_t> /* divisor_override */) {
   return pool2d(
       self_arg,
       kernel_arg,

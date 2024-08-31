@@ -1,5 +1,7 @@
 #include <c10/util/irange.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
+#include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
@@ -92,6 +94,10 @@ class TCPServer {
       std::unique_ptr<BackgroundThread>&& daemon)
       : port_{port}, daemon_{std::move(daemon)} {}
 
+  std::string repr() const {
+    return fmt::format("TCPServer(port={})", port_);
+  }
+
  private:
   std::uint16_t port_;
   std::unique_ptr<BackgroundThread> daemon_;
@@ -152,19 +158,35 @@ class TCPClient {
  public:
   static std::unique_ptr<TCPClient> connect(
       const SocketAddress& addr,
-      const TCPStoreOptions& opts);
+      const TCPStoreOptions& opts,
+      std::shared_ptr<Backoff> backoff);
 
-  void sendRaw(uint8_t* data, size_t lenght) {
-    tcputil::sendBytes(socket_.handle(), data, lenght);
+  void sendRaw(uint8_t* data, size_t length) {
+    try {
+      tcputil::sendBytes(socket_.handle(), data, length);
+    } catch (const std::exception& e) {
+      C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
 
   std::vector<std::uint8_t> receiveBits() {
-    return tcputil::recvVector<std::uint8_t>(socket_.handle());
+    try {
+      return tcputil::recvVector<std::uint8_t>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING("recvVector failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
 
   template <typename T>
   T receiveValue() {
-    return tcputil::recvValue<T>(socket_.handle());
+    try {
+      return tcputil::recvValue<T>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING("recvValue failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
   template <typename T>
   bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
@@ -177,16 +199,24 @@ class TCPClient {
 
   explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
 
+  std::string repr() const {
+    return fmt::format("TCPClient({})", socket_.repr());
+  }
+
  private:
   Socket socket_;
 };
 
 std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
-    const TCPStoreOptions& opts) {
-  auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
+    const TCPStoreOptions& opts,
+    std::shared_ptr<Backoff> backoff) {
   Socket socket = Socket::connect(
-      addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
+      addr.host,
+      addr.port,
+      SocketOptions{}
+          .connect_timeout(opts.timeout)
+          .connect_backoff(std::move(backoff)));
 
   return std::make_unique<TCPClient>(std::move(socket));
 }
@@ -268,7 +298,7 @@ using detail::Socket;
 TCPStore::TCPStore(
     const std::string& masterAddr,
     std::uint16_t masterPort,
-    c10::optional<int> numWorkers,
+    std::optional<int> numWorkers,
     bool isServer,
     const std::chrono::milliseconds& timeout,
     bool waitWorkers)
@@ -277,8 +307,8 @@ TCPStore::TCPStore(
           TCPStoreOptions{
               masterPort,
               isServer,
-              numWorkers ? c10::optional<std::size_t>(*numWorkers)
-                         : c10::nullopt,
+              numWorkers ? std::optional<std::size_t>(*numWorkers)
+                         : std::nullopt,
               waitWorkers,
               timeout}} {}
 
@@ -291,6 +321,17 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     TORCH_CHECK(
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "use_libuv was requested but PyTorch was build without libuv support");
+
+    if (opts.masterListenFd.has_value()) {
+      // TODO(xilunwu): support this init method after testing
+      constexpr auto* msg =
+          "The libuv TCPStore backend does not support initialization with an listen fd. "
+          "Please switch to the legacy TCPStore by setting environment variable USE_LIBUV "
+          "to \"0\".";
+      C10D_ERROR(msg);
+      C10_THROW_ERROR(NotImplementedError, msg);
+      return;
+    }
   }
 
   Socket::initialize();
@@ -324,22 +365,53 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     addr_.port = opts.port;
   }
 
-  if (numWorkers_.has_value()) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> distrib(1, *numWorkers_);
-    // TODO (xilunwu): this wait logic may be removed after fixing read_offset
-    // stagger connecting to the store when there are too many ranks to
-    // avoid causing a DDoS
-    std::this_thread::sleep_for(std::chrono::milliseconds(distrib(gen)));
-  }
+  // Try connecting several times -- if the server listen backlog is full it may
+  // fail on the first send in validate.
+  auto deadline = std::chrono::steady_clock::now() + opts.timeout;
+  auto backoff = std::make_shared<ExponentialBackoffWithJitter>();
 
-  client_ = detail::TCPClient::connect(addr_, opts);
-  // TCP connection established
-  C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
+  auto retry = 0;
+  do {
+    try {
+      client_ = detail::TCPClient::connect(addr_, opts, backoff);
+      // TCP connection established
+      C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
 
-  // client's first query for validation
-  validate();
+      // client's first query for validation
+      validate();
+
+      // ping to verify network connectivity
+      ping();
+
+      // success
+      break;
+    } catch (const c10::DistNetworkError& ex) {
+      if (deadline < std::chrono::steady_clock::now()) {
+        C10D_ERROR(
+            "TCP client failed to connect/validate to host {}:{} - timed out (try={}, timeout={}ms): {}",
+            addr_.host,
+            addr_.port,
+            retry,
+            opts.timeout.count(),
+            ex.what());
+        throw;
+      }
+
+      auto delayDuration = backoff->nextBackoff();
+
+      C10D_WARNING(
+          "TCP client failed to connect/validate to host {}:{} - retrying (try={}, timeout={}ms, delay={}ms): {}",
+          addr_.host,
+          addr_.port,
+          retry,
+          opts.timeout.count(),
+          delayDuration.count(),
+          ex.what());
+
+      std::this_thread::sleep_for(delayDuration);
+      retry += 1;
+    }
+  } while (true);
 
   if (opts.waitWorkers) {
     waitForWorkers();
@@ -350,7 +422,7 @@ TCPStore::~TCPStore() = default;
 
 void TCPStore::waitForWorkers() {
   detail::timing_guard tguard(clientCounters_["waitForWorkers"]);
-  if (numWorkers_ == c10::nullopt) {
+  if (numWorkers_ == std::nullopt) {
     return;
   }
 
@@ -391,6 +463,19 @@ void TCPStore::validate() {
   detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
   buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
   buffer.flush();
+}
+
+void TCPStore::ping() {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+  detail::SendBuffer buffer(*client_, detail::QueryType::PING);
+
+  uint32_t nonce = getpid();
+  buffer.appendValue<std::uint32_t>(nonce);
+  buffer.flush();
+
+  uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
+  TORCH_INTERNAL_ASSERT(
+      nonce == returnedNonce, "Ping failed, invalid nonce returned");
 }
 
 void TCPStore::_splitSet(
@@ -556,7 +641,12 @@ void TCPStore::doWait(
       TORCH_CHECK(false, "wait_canceled response is expected");
     }
   }
-  C10_THROW_ERROR(DistStoreError, "Socket Timeout");
+  C10_THROW_ERROR(
+      DistStoreError,
+      fmt::format(
+          "wait timeout after {}ms, keys: {}",
+          timeout.count(),
+          fmt::join(keys, ", ")));
 }
 
 void TCPStore::append(
@@ -625,6 +715,12 @@ TCPStore::collectClientCounters() const noexcept {
     res[kv.first] = kv.second.observe();
   }
   return res;
+}
+
+std::string TCPStore::repr() const {
+  auto clientRepr = client_ ? client_->repr() : "<nullptr>";
+  auto serverRepr = server_ ? server_->repr() : "<nullptr>";
+  return fmt::format("TCPStore(client={}, server={})", clientRepr, serverRepr);
 }
 
 } // namespace c10d

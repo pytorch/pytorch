@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import argparse
 import copy
 from collections import defaultdict
@@ -39,7 +40,8 @@ class _SplitterSettingBase:
         self,
         min_acc_module_size=DEFAULT_MIN_ACC_MODULE_SIZE,
         skip_fusion=DEFAULT_SKIP_FUSION,
-        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR
+        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR,
+        max_acc_splits: int = -1,
     ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
@@ -48,6 +50,13 @@ class _SplitterSettingBase:
             required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
+        )
+        parser.add_argument(
+            "--max-acc-splits",
+            "--max_acc_splits",
+            required=False,
+            type=int,
+            help="Enforce a maximum number of split subgraphs.",
         )
         parser.add_argument(
             "--skip-fusion",
@@ -76,6 +85,7 @@ class _SplitterSettingBase:
         self.min_acc_module_size: int = args.min_acc_module_size if args.min_acc_module_size else min_acc_module_size
         self.skip_fusion: bool = args.skip_fusion if args.skip_fusion else skip_fusion
         self.allow_non_tensor: bool = args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
+        self.max_acc_splits: int = max_acc_splits
 
 
 @compatibility(is_backward_compatible=False)
@@ -102,6 +112,7 @@ class FxNetAccNodesFinder:
         self.module = module
         self.operator_support = operator_support
         self.allow_non_tensor = allow_non_tensor
+        self.acc_nodes: NodeSet = set()
 
     def reduce_acc_nodes_non_tensor_input_helper(
         self, cpu_worklist: NodeList
@@ -188,7 +199,7 @@ class FxNetSplitterInternalError(Exception):
 class Subgraph:
     is_acc: bool
     nodes: NodeList
-
+    device_ordinal: Optional[int] = None
 
 @compatibility(is_backward_compatible=False)
 class SplitResult(NamedTuple):
@@ -339,6 +350,8 @@ class _SplitterBase:
         self._node_submodule_map: Dict[str, str] = {}
         self._return_tuple = return_tuple
 
+        self.tags: List[str] = []
+
     # ===============================================================
     # Helpers for ctor and initial state
     # ===============================================================
@@ -431,6 +444,7 @@ class _SplitterBase:
 
         drawer = CustomDrawer(mod, "node_support", ignore_getattr=True)
         dot_graph = drawer.get_main_dot_graph()
+        # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
         dot_graph.write_raw("node_support.dot")
 
     def node_support_preview(self, dump_graph: bool = False):
@@ -526,6 +540,7 @@ class _SplitterBase:
             )
             dot_graphs = drawer.get_all_dot_graphs()
             for name, dot_graph in dot_graphs.items():
+                # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
                 dot_graph.write_raw(f"{name}.dot")
 
         max_qps: float = self.PCIe_BW
@@ -836,7 +851,7 @@ class _SplitterBase:
         return result
 
     def tag(self, subgraphs: List[Subgraph]):
-        self.tags: List[str] = []
+        self.tags = []
         for subgraph in subgraphs:
             tag = f"_run_on_acc_{len(self.tags)}" if subgraph.is_acc else f"{self.non_acc_submodule_name}{len(self.tags)}"
             self.tags.append(tag)
@@ -853,7 +868,7 @@ class _SplitterBase:
             for node in self.module.graph.nodes:
                 if hasattr(node, "tag"):
                     del node.tag
-        return split_module
+        return split_module  # type: ignore[return-value]
 
     def __call__(self) -> torch.fx.GraphModule:
         subgraphs = self.put_nodes_into_subgraphs()
@@ -869,5 +884,15 @@ class _SplitterBase:
         submodule_names = []
         for name, mod in split_module.named_children():
             submodule_names.append(name)
+        if (
+            self.settings.max_acc_splits > 0
+            and len(submodule_names) > self.settings.max_acc_splits
+        ):
+            raise ValueError(
+                "Cannot fulfill max_acc_splits limit. "
+                "This may cause split fragmentation and "
+                "result in performance issues."
+            )
+
         submodule_inputs = generate_inputs_for_submodules(split_module, self.sample_input, submodule_names)
         return SplitResult(split_module, submodule_inputs, self.non_acc_submodule_name)

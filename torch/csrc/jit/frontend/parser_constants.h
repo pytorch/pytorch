@@ -1,7 +1,5 @@
 #pragma once
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|~";
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

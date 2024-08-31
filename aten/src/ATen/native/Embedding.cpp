@@ -88,7 +88,7 @@ Tensor embedding_sparse_backward(
   Tensor indices = indices_;
   Tensor grad = grad_;
   if (padding_idx != -1) {
-    c10::List<c10::optional<Tensor>> c({indices != padding_idx});
+    c10::List<std::optional<Tensor>> c({indices != padding_idx});
     indices = indices.index(c);
     grad = grad.index(c);
   }

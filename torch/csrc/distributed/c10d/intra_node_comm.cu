@@ -132,6 +132,8 @@ struct P2pState {
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
 };
 
+static_assert(sizeof(P2pState) <= kP2pStateSize);
+
 template <uint32_t kWorldSize, bool kAligned>
 static __global__ void oneShotAllReduceKernel(
     at::BFloat16* input,
@@ -174,7 +176,10 @@ static __global__ void oneShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      streamLoad128(vals[ii], &srcs[ii][i]);
+      // Make sure the values in `vals` are order by rank so that the reduction
+      // results are consistent across ranks.
+      int srcRank = (ii + kWorldSize - rank) % kWorldSize;
+      streamLoad128(vals[srcRank], &srcs[ii][i]);
     }
 
     bf16x8 sums;
@@ -232,7 +237,10 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      streamLoad128(vals[ii], &srcs[ii][N_start + i]);
+      // Make sure the values in `vals` are order by rank so that the reduction
+      // results are consistent across ranks.
+      int srcRank = (ii + kWorldSize - rank) % kWorldSize;
+      streamLoad128(vals[srcRank], &srcs[ii][N_start + i]);
     }
 
     bf16x8 sums;
@@ -436,13 +444,18 @@ static inline size_t alignUp(uint32_t a, uint32_t b) {
   return divUp(a, b) * b;
 }
 
-static void checkInput(const at::Tensor& input, size_t rank) {
+static void checkInput(const at::Tensor& input, int deviceIdx) {
   TORCH_CHECK(
       input.dtype() == at::kBFloat16,
       "oneShotAllReduce only supports bf16 for now");
   TORCH_CHECK(input.is_non_overlapping_and_dense());
   TORCH_CHECK(input.device().is_cuda());
-  TORCH_CHECK(static_cast<size_t>(input.get_device()) == rank);
+  TORCH_CHECK(
+      input.get_device() == deviceIdx,
+      "IntraNodeComm: expect input to be on device ",
+      deviceIdx,
+      ", got device ",
+      input.get_device());
 }
 
 static void getLaunchConfig(
@@ -502,9 +515,10 @@ void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank) {
 at::Tensor IntraNodeComm::oneShotAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank_);
+  checkInput(input, deviceIdx_);
 
-  const size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
+  const size_t numelPerWarp =
+      kBytesPerThread / input.element_size() * kWarpSize;
   const size_t N_aligned = alignUp(input.numel(), numelPerWarp);
   const bool isAligned = (N_aligned == static_cast<size_t>(input.numel()));
   TORCH_CHECK(N_aligned <= bufferSize_ / input.element_size());
@@ -521,7 +535,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
   const bool fuseInputCopy = isAligned && blocks.x < kMaxAllReduceBlocks;
   if (!fuseInputCopy) {
     AT_CUDA_CHECK(cudaMemcpyAsync(
-        buffers_[rank_],
+        symmetricMemory_->get_buffer_ptrs()[rank_],
         input.data_ptr(),
         input.numel() * input.element_size(),
         cudaMemcpyDeviceToDevice,
@@ -565,7 +579,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
 at::Tensor IntraNodeComm::twoShotAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank_);
+  checkInput(input, deviceIdx_);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), worldSize_ * numelPerWarp);
@@ -581,7 +595,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_[rank_],
+      symmetricMemory_->get_buffer_ptrs()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -620,7 +634,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
 at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank_);
+  checkInput(input, deviceIdx_);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), numelPerWarp);
@@ -631,7 +645,7 @@ at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_[rank_],
+      symmetricMemory_->get_buffer_ptrs()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -732,7 +746,8 @@ static __global__ void barrierKernel(
   }
 }
 
-void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
+void IntraNodeComm::barrier(std::optional<std::vector<int64_t>> ranks) {
+  barrierReady_.block(at::cuda::getCurrentCUDAStream());
   if (!ranks.has_value()) {
     ranks = std::vector<int64_t>(worldSize_);
     std::iota(ranks->begin(), ranks->end(), 0);
@@ -745,44 +760,15 @@ void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
   barrierKernel<<<1, kWarpSize, 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<P2pState**>(p2pStatesDev_), mask, rank_, worldSize_);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+  barrierReady_.record();
 }
 
-void IntraNodeComm::put(const at::Tensor& tensor, int64_t offset) {
-  TORCH_CHECK(
-      tensor.is_non_overlapping_and_dense(),
-      "IntraNodeComm::put(): tensor must be non-overlapping and dense");
-  size_t sz = tensor.numel() * tensor.element_size();
-  TORCH_CHECK(
-      offset + sz <= bufferSize_,
-      "IntraNodeComm::put(): offset + tensor size exceeded "
-      "p2p buffer size");
-  // This results in "Memcpy PtoP" which does not use SMs for copying
-  AT_CUDA_CHECK(cudaMemcpyAsync(
-      static_cast<char*>(buffers_[rank_]) + offset,
-      static_cast<char*>(tensor.data_ptr()),
-      sz,
-      cudaMemcpyDeviceToDevice,
-      at::cuda::getCurrentCUDAStream()));
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-}
-
-void IntraNodeComm::get(size_t rank, at::Tensor tensor, int64_t offset) {
-  TORCH_CHECK(
-      tensor.is_non_overlapping_and_dense(),
-      "IntraNodeComm::get(): tensor must be non-overlapping and dense");
-  size_t sz = tensor.numel() * tensor.element_size();
-  TORCH_CHECK(
-      offset + sz <= bufferSize_,
-      "IntraNodeComm::get(): offset + tensor size exceeded "
-      "p2p buffer size");
-  // This results in "Memcpy PtoP" which does not use SMs for copying
-  AT_CUDA_CHECK(cudaMemcpyAsync(
-      static_cast<char*>(tensor.data_ptr()),
-      static_cast<char*>(buffers_[rank]) + offset,
-      sz,
-      cudaMemcpyDeviceToDevice,
-      at::cuda::getCurrentCUDAStream()));
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+at::Tensor IntraNodeComm::getBuffer(
+    size_t rank,
+    const std::vector<int64_t>& sizes,
+    c10::ScalarType dtype,
+    int64_t storageOffset) {
+  return symmetricMemory_->get_buffer(rank, sizes, dtype, storageOffset);
 }
 
 } // namespace intra_node_comm

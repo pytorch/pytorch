@@ -10,9 +10,9 @@
 #include <ATen/ops/_fused_sgd.h>
 #include <ATen/ops/_fused_sgd_native.h>
 #endif
-namespace at {
 
-namespace native {
+
+namespace at::native {
 
 
 void _fused_sgd_kernel_cpu_(
@@ -26,8 +26,8 @@ void _fused_sgd_kernel_cpu_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   const float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   const float* found_inf_ptr =
@@ -39,7 +39,7 @@ void _fused_sgd_kernel_cpu_(
   TORCH_CHECK(grads.size() == n_tensors);
   bool no_momentum_buffer = momentum == 0.0;
   if (no_momentum_buffer) {
-    TORCH_CHECK(momentum_buffer_list.size() == 0);
+    TORCH_CHECK(momentum_buffer_list.empty());
   } else {
     TORCH_CHECK(momentum_buffer_list.size() == n_tensors);
   }
@@ -71,8 +71,8 @@ void _fused_sgd_kernel_cpu_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
     _fused_sgd_kernel_cpu_(
         params, grads, momentum_buffer_list, weight_decay,
         momentum, lr.item<double>(), dampening, nesterov,
@@ -82,5 +82,4 @@ void _fused_sgd_kernel_cpu_(
 
 DEFINE_DISPATCH(fused_sgd_stub);
 
-}
 }

@@ -604,7 +604,7 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         class TheModule(torch.jit.ScriptModule):
             __constants__ = submodule_constants
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = nn_module(*constructor_args)
 

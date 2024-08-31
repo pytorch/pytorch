@@ -165,9 +165,7 @@ sycl::event deconvolution(
   bool is_channels_last_suggested = use_channels_last_for_conv(src, weight, /*is_transposed=*/true);
 
   // create usr_md for tensors, and md for conv primitive
-  dnnl::memory::desc src_md, weight_md, dst_md;
-
-  std::tie(src_md, weight_md, dst_md) =
+  auto [src_md, weight_md, dst_md] =
       deconv_get_plain_md(src, weight, dst, groups, is_channels_last_suggested);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
@@ -186,7 +184,7 @@ sycl::event deconvolution(
   dnnl::post_ops po = attr.extract_post_ops(dst);
   pattr.set_post_ops(po);
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
         pattr.set_deterministic(true);
   #endif
 
@@ -227,7 +225,7 @@ sycl::event deconvolution(
 
   size_t scratchpad_size = deconv_fwd_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_m = make_onednn_memory(
       deconv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
@@ -255,8 +253,7 @@ sycl::event deconvolution_backward_data(
   bool is_channels_last_suggested =
       use_channels_last_for_conv(diff_dst, weight, /*is_transposed=*/true);
   // create memory desc
-  dnnl::memory::desc src_md, weight_md, dst_md;
-  std::tie(src_md, weight_md, dst_md) =
+  auto [src_md, weight_md, dst_md] =
       deconv_get_plain_md(
           diff_src, weight, diff_dst, groups, is_channels_last_suggested);
 
@@ -269,7 +266,7 @@ sycl::event deconvolution_backward_data(
   dnnl::primitive_attr pattr;
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
         pattr.set_deterministic(true);
   #endif
 
@@ -314,7 +311,7 @@ sycl::event deconvolution_backward_data(
   std::unordered_map<int, dnnl::memory> args;
   size_t scratchpad_size = deconv_backward_data_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, diff_dst.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, diff_dst.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       deconv_backward_data_pd.scratchpad_desc(),
       engine,
@@ -350,8 +347,7 @@ sycl::event deconvolution_backward_weights(
       use_channels_last_for_conv(src, diff_dst, /*is_transposed=*/true);
 
   // create memory desc
-  dnnl::memory::desc src_md, weight_md, dst_md;
-  std::tie(src_md, weight_md, dst_md) = deconv_get_plain_md(
+  auto [src_md, weight_md, dst_md] = deconv_get_plain_md(
           src, diff_weight, diff_dst, groups, is_channels_last_suggested);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
@@ -366,7 +362,7 @@ sycl::event deconvolution_backward_weights(
   dnnl::primitive_attr pattr;
 
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
         pattr.set_deterministic(true);
   #endif
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
@@ -419,7 +415,7 @@ sycl::event deconvolution_backward_weights(
 
   size_t scratchpad_size = deconv_bwd_w_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_m = make_onednn_memory(
       deconv_bwd_w_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});

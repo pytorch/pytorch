@@ -245,7 +245,7 @@ at::Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv) {
  * taking each texel and arranging them along the x axis.
  */
 at::Tensor rearrange_bias(
-    const c10::optional<Tensor>& bias_in,
+    const std::optional<Tensor>& bias_in,
     const at::Tensor& weight_in,
     bool tconv) {
   // If optional is empty, just return zeros
@@ -543,7 +543,7 @@ vTensor pack_weights(
 }
 
 vTensor pack_biases(
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& weight,
     const bool transposed,
     const bool quantized) {
@@ -629,7 +629,7 @@ bool weight_valid(const Tensor& weight, const bool quantized) {
 }
 
 bool bias_valid(
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const Tensor& weight,
     const bool transposed,
     const bool quantized) {
@@ -656,7 +656,7 @@ bool bias_valid(
 
 bool available(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
@@ -664,8 +664,8 @@ bool available(
     const bool quantized,
     const IntArrayRef /* output_padding */,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   if (!weight_valid(weight, quantized)) {
     return false;
   }
@@ -765,7 +765,7 @@ static inline std::vector<int64_t> get_conv_transpose_output_size(
 Tensor convolution(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
@@ -790,7 +790,7 @@ Tensor convolution(
 Tensor quantized_convolution(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
@@ -865,7 +865,7 @@ vTensor pack_weights_using_width_packing(const Tensor& weight_arg) {
 Tensor run_conv1d_context_impl(
     const Tensor& input_arg,
     const Tensor& weight_arg,
-    const c10::optional<Tensor>& bias_arg_opt,
+    const std::optional<Tensor>& bias_arg_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -962,7 +962,7 @@ Tensor run_conv1d_context_impl(
 
 Conv2dPackedContext::Conv2dPackedContext(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
     const IntArrayRef padding_arg,
     const IntArrayRef dilation_arg,
@@ -970,8 +970,8 @@ Conv2dPackedContext::Conv2dPackedContext(
     const bool quantized,
     const IntArrayRef output_padding_arg,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max)
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max)
     : unpacked_{c10::AnyType::get()} {
   const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
   const auto padding = expand_param_if_needed(padding_arg, "padding", 2);
@@ -1058,13 +1058,13 @@ Conv2dPackedContext Conv2dPackedContext::pack(c10::impl::GenericList unpacked) {
 
 c10::intrusive_ptr<Conv2dPackedContext> create_conv2d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
       weight,
       bias,
@@ -1081,14 +1081,14 @@ c10::intrusive_ptr<Conv2dPackedContext> create_conv2d_context(
 
 c10::intrusive_ptr<Conv2dPackedContext> create_tconv2d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& output_padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
       weight,
       bias,
@@ -1105,13 +1105,13 @@ c10::intrusive_ptr<Conv2dPackedContext> create_tconv2d_context(
 
 c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
       weight,
       bias,
@@ -1128,14 +1128,14 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
 
 c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& output_padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
       weight,
       bias,
@@ -1294,7 +1294,7 @@ Tensor run_qconv2d_context(
 Tensor quantized_conv2d(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -1321,15 +1321,15 @@ Conv2dOpContext::Conv2dOpContext(Conv2dPackedContext conv_context)
 
 Conv2dOpContext Conv2dOpContext::create(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
     const IntArrayRef padding_arg,
     const IntArrayRef dilation_arg,
     const bool transposed,
     const IntArrayRef output_padding_arg,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   return Conv2dOpContext{Conv2dPackedContext(
       weight,
       bias,
@@ -1367,13 +1367,13 @@ Conv2dOpContext::State Conv2dOpContext::unpack() const {
 
 c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dOpContext>(Conv2dOpContext::create(
       std::move(weight),
       std::move(bias),
@@ -1395,7 +1395,7 @@ Tensor conv2d_clamp_run(
 
 Conv1dPackedContext::Conv1dPackedContext(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
     const IntArrayRef padding_arg,
     const IntArrayRef dilation_arg,
@@ -1435,7 +1435,7 @@ Conv1dPackedContext Conv1dPackedContext::pack(c10::impl::GenericList unpacked) {
 
 c10::intrusive_ptr<Conv1dPackedContext> create_conv1d_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
@@ -1447,7 +1447,7 @@ c10::intrusive_ptr<Conv1dPackedContext> create_conv1d_context(
 Tensor convolution1d(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
@@ -1464,7 +1464,7 @@ Tensor run_conv1d_context(
     const c10::intrusive_ptr<Conv1dPackedContext>& context) {
   const Tensor weight =
       context->get_val(Conv1dPackedContext::Packed::Weight).toTensor();
-  const c10::optional<Tensor>& bias_opt =
+  const std::optional<Tensor>& bias_opt =
       context->get_val(Conv1dPackedContext::Packed::Bias).toTensor();
   const auto stride =
       context->get_val(Conv1dPackedContext::Packed::Stride).toIntVector();
