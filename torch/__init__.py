@@ -2206,6 +2206,8 @@ class _TorchCompileInductorWrapper:
             # Workaround: turn off CUPTI teardown when using CUDA Graphs.
             os.environ["TEARDOWN_CUPTI"] = "0"
 
+        # Used to check if we can use the same compiler_fn previously defined.
+        # Check extra_state.cpp lookup
         self.backend_hash = _dict_hash(self.config)
 
     def __eq__(self, other):
@@ -2287,6 +2289,9 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+
+        # Used to check if we can use the same compiler_fn previously defined.
+        # Check extra_state.cpp lookup
         self.backend_hash = _dict_hash(
             {"compiler_name": self.compiler_name, **self.kwargs}
         )
