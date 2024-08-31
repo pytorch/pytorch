@@ -182,15 +182,18 @@ std::vector<at::Tensor> foreach_tensor_lerp_scalarlist_cuda(
       "foreach_tensor_lerp_scalarlist_cuda",
       [&]() {
         using opmath_t = typename at::opmath_type<scalar_t>;
-        multi_tensor_apply<3, opmath_t>(
-            tensor_lists,
-            scalars,
-            TernaryOpScalarListFunctor<
-                scalar_t,
-                /* depth */ 3,
-                /* r_args_depth */ 2,
-                /* res_arg_index */ 2>(),
-            LerpFunctor<opmath_t>());
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<3, opmath_t>(
+              tensor_lists,
+              scalars,
+              TernaryOpScalarListFunctor<
+                  scalar_t,
+                  /* depth */ 3,
+                  /* r_args_depth */ 2,
+                  /* res_arg_index */ 2,
+                  large_kernel_arg>(),
+              LerpFunctor<opmath_t>());
+        });
       });
 
   return tensor_lists[2];
@@ -216,15 +219,18 @@ void foreach_tensor_lerp_scalarlist_cuda_(
       "foreach_tensor_lerp_scalarlist_cuda_",
       [&]() {
         using opmath_t = typename at::opmath_type<scalar_t>;
-        multi_tensor_apply<2, opmath_t>(
-            tensor_lists,
-            scalars,
-            TernaryOpScalarListFunctor<
-                scalar_t,
-                /* depth */ 2,
-                /* r_args_depth */ 2,
-                /* res_arg_index */ 0>(),
-            LerpFunctor<opmath_t>());
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<2, opmath_t>(
+              tensor_lists,
+              scalars,
+              TernaryOpScalarListFunctor<
+                  scalar_t,
+                  /* depth */ 2,
+                  /* r_args_depth */ 2,
+                  /* res_arg_index */ 0,
+                  large_kernel_arg>(),
+              LerpFunctor<opmath_t>());
+        });
       });
 }
 } // namespace at::native
