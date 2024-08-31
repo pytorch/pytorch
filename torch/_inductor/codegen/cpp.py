@@ -3375,13 +3375,10 @@ class TilingSelect:
                         for _node in sub_block.graph.nodes:
                             if _node.target in ["index_expr", "load", "store"]:
                                 # get the index and replace prefix from z to x
+                                arg_idx = 1 if _node.target == "index_expr" else 2
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
-                                )[
-                                    _node.args[
-                                        1 if _node.target == "index_expr" else 2
-                                    ].args[0]
-                                ]
+                                )[_node.args[arg_idx].args[0]]
                                 if _is_valid_indices(itervars, tiling_indices):
                                     stride = _try_get_stride(
                                         index, itervars, tiling_factor, tiling_indices
@@ -3781,7 +3778,11 @@ class CppKernelProxy(CppKernel):
                 )
                 main_loop.set_kernel(vec_kernel)
                 main_loop.simd_vec = True
-                if could_masked_vec and (tail_loop.size - tail_loop.offset) >= 4:
+                if (
+                    config.cpp.enable_loop_tail_vec
+                    and could_masked_vec
+                    and (tail_loop.size - tail_loop.offset) >= 4
+                ):
                     tail_loop.steps = tail_loop.size - tail_loop.offset
                     masked_vec_kernel = codegen_kernel(
                         CppVecKernel,
@@ -3821,7 +3822,7 @@ class CppKernelProxy(CppKernel):
                 )
                 inner_main_loop.set_kernel(tile2d_kernel)
 
-                if could_masked_vec:
+                if config.cpp.enable_loop_tail_vec and could_masked_vec:
                     (
                         inner_main_loop_of_outer_tail_loop,
                         inner_tail_loop_of_outer_tail_loop,
@@ -4286,7 +4287,9 @@ class CppScheduling(BaseScheduling):
             iter_vars = new_index_vars.copy()
             divisor_var = iter_vars.pop(split_idx + 1)
             iter_vars[split_idx] = split_number * iter_vars[split_idx] + divisor_var
-            body = ir.LoopBody(body, [iter_vars, []], var_ranges)
+            body = ir.LoopBody(
+                body, [iter_vars, reduce_vars], var_ranges, new_index_vars, reduce_vars
+            )
             nonlocal extra_indexing_constraints
             if not extra_indexing_constraints:
                 extra_indexing_constraints = (

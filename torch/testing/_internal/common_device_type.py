@@ -750,12 +750,16 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     # Replace your privateuse1 backend name with 'privateuse1'
     if is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
-        except_for = [
-            "privateuse1" if x == privateuse1_backend_name else x for x in except_for
-        ]
-        only_for = [
-            "privateuse1" if x == privateuse1_backend_name else x for x in only_for
-        ]
+        except_for = (
+            ["privateuse1" if x == privateuse1_backend_name else x for x in except_for]
+            if except_for is not None
+            else None
+        )
+        only_for = (
+            ["privateuse1" if x == privateuse1_backend_name else x for x in only_for]
+            if only_for is not None
+            else None
+        )
 
     if except_for:
         device_type_test_bases = filter(
@@ -1885,24 +1889,6 @@ def skipXLA(fn):
 
 def skipMPS(fn):
     return skipMPSIf(True, "test doesn't work on MPS backend")(fn)
-
-
-def skipMPSVersionIfLessThan(major: int, minor: int):
-    def dec_fn(fn):
-        @wraps(fn)
-        def wrap_fn(self, *args, **kwargs):
-            if self.device_type == "mps":
-                if not torch.backends.mps.is_macos_or_newer(major, minor):
-                    reason = (
-                        f"MPS test is skipped for MacOS versions < {major}.{minor} "
-                    )
-                    raise unittest.SkipTest(reason)
-
-            return fn(self, *args, **kwargs)
-
-        return wrap_fn
-
-    return dec_fn
 
 
 def skipHPU(fn):
