@@ -3249,6 +3249,7 @@ MOD_INLINELIST = [
     "torch.random",
     "torch.sparse",
     "torch.testing",
+    "torch.nested._internal.union_find",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",

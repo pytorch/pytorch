@@ -437,6 +437,7 @@ def process_inputs(
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
 ) -> FakifiedFlatArgs:
+    fake_mode.shape_env.union_find_id_map = dict()
     with fake_mode:
 
         def convert(idx, x):
