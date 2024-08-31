@@ -2176,9 +2176,9 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
 
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 5, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 5, requires_grad=True, dtype=torch.float64)
         nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
         # TODO: Switch to public API when it exists
         nt2, _ = jagged_from_list([a, b, c], nt.offsets())
