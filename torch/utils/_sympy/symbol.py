@@ -76,6 +76,7 @@ prefix_str = {
     SymT.VIEW: "view",
     SymT.HALIDE: "h",
 }
+prefix_to_symt = {prefix: symt for symt, prefix in prefix_str.items()}
 
 
 def make_symbol(prefix: SymT, idx: int, **kwargs) -> sympy.Symbol:

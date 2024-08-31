@@ -118,7 +118,7 @@ class IterationRangesRoot(IterationRanges):
         self,
         name: str,
         numel: sympy.Expr,
-        # TODO: this is probably SymTy.INDEX and SymTy.RINDEX
+        # TODO: this is probably SymTy.INDEX and SymTy.R0_INDEX
         prefix: str,
         index: int,
         kernel: SIMDKernel,
@@ -365,23 +365,24 @@ class SIMDKernel(Kernel):
     def initialize_range_tree(self, pid_cache):
         no_r_dim = not self.inside_reduction or self.numels[-1] == 1
 
-        prefixes = "zyxr"
+        # TODO: add r1 for tiled reductions.
+        prefixes = ["z","y","x","r0_"]
         active_prefixes = prefixes[-len(self.numels) :]
 
-        grid_dims = "xyz"
+        grid_dims = ["x","y","z"]
         if self.no_x_dim:
-            tensor_dims = "r"
+            tensor_dims = ["r0_"]
         elif no_r_dim:
-            tensor_dims = "xyz"
+            tensor_dims = ["x","y","z"]
         else:
-            tensor_dims = "xyzr"
+            tensor_dims = ["x","y","z","r0_"]
 
-        tensor_dims = "".join(p for p in tensor_dims if p in active_prefixes)
+        tensor_dims = [p for p in tensor_dims if p in active_prefixes]
 
         for i, prefix in enumerate(active_prefixes):
             is_reduction = prefix_is_reduction(prefix)
-            tensor_dim = tensor_dims.find(prefix) if prefix in tensor_dims else None
-            grid_dim = None if is_reduction else grid_dims.find(prefix)
+            tensor_dim = tensor_dims.index(prefix) if prefix in tensor_dims else None
+            grid_dim = None if is_reduction else grid_dims.index(prefix)
             index = i if grid_dim is None else grid_dim
             self.range_trees.append(
                 IterationRangesRoot(

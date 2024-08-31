@@ -437,7 +437,7 @@ class ComboKernel(Kernel):
         This code stomps on the passed-in values by writing an constant to the top of the kernel.
 
         In a kernel like:
-        def KERNEL_NAME(in_ptr0, in_ptr1, out_ptr2, xnumel, rnumel, XBLOCK : tl.constexpr, RBLOCK : tl.constexpr):
+        def KERNEL_NAME(in_ptr0, in_ptr1, out_ptr2, xnumel, rnumel, XBLOCK : tl.constexpr, R0_BLOCK : tl.constexpr):
 
         We would add
         xnumel = 4096
@@ -463,7 +463,8 @@ class ComboKernel(Kernel):
                     continue
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK_{num}: tl.constexpr = {val}")
-                uniquify_block_sizes.append("RBLOCK")
+                code.writeline(f"R0_BLOCK_{num}: tl.constexpr = {val}")
+                uniquify_block_sizes.append("R0_BLOCK")
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")

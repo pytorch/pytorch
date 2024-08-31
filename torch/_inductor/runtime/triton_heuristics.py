@@ -274,7 +274,7 @@ class CachingAutotuner(KernelInterface):
                 ):
                     assert len(self.size_hints) == 2
                     xblock = triton_config.kwargs.get("XBLOCK", 1)
-                    rblock = triton_config.kwargs["RBLOCK"]
+                    rblock = triton_config.kwargs["R0_BLOCK"]
                     total_block = (self.size_hints[0] + xblock - 1) // xblock
                     nreg = getattr(compiled_binary, "n_regs", None)
                     if nreg is None:
@@ -288,7 +288,7 @@ class CachingAutotuner(KernelInterface):
                     # the theoretical occupancy, we need run 2048 threads on each
                     # SM. So each thread should use no more than 65536 / 2048
                     # = 32 registers. In cases where occupancy matters, and each
-                    # thread uses too many registers, reduce RBLOCK to reduce
+                    # thread uses too many registers, reduce R0_BLOCK to reduce
                     # the register usage.
                     # For kernel https://gist.github.com/shunting314/e4cccc031fe30d378b9b23c08c238cbd
                     # from PLBartForCausalLM, latency improve from
@@ -324,12 +324,12 @@ class CachingAutotuner(KernelInterface):
                         # no need to improve occupancy
                         continue
                     new_config = copy.deepcopy(triton_config)
-                    new_config.kwargs["RBLOCK"] = rblock // 2
+                    new_config.kwargs["R0_BLOCK"] = rblock // 2
                     if new_config in seen_configs:
                         continue
                     seen_configs.add(new_config)
                     log.debug(
-                        "Dynamically scale down RBLOCK from TritonConfig(%s) and get a new TritonConfig(%s)",
+                        "Dynamically scale down R0_BLOCK from TritonConfig(%s) and get a new TritonConfig(%s)",
                         triton_config,
                         new_config,
                     )
@@ -809,8 +809,8 @@ class CachingAutotuner(KernelInterface):
 
         assert not (
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
-            and "RBLOCK" in launcher.config.kwargs
-        ), "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have RBLOCK"
+            and "R0_BLOCK" in launcher.config.kwargs
+        ), "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
         start_time = time.time_ns()
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
@@ -1420,10 +1420,10 @@ def triton_config_reduction(
             break
         r = r // 2
 
-    cfg = {"XBLOCK": x, "RBLOCK": r}
+    cfg = {"XBLOCK": x, "R0_BLOCK": r}
     check_config(cfg, xnumel=size_hints[0])
     assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"
-    assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
+    assert r <= TRITON_MAX_BLOCK["R0_"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1451,10 +1451,10 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     while y < size_hints[1] and conditional_product(x, y, r) < target:
         y *= 2
 
-    cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
+    cfg = {"XBLOCK": x, "YBLOCK": y, "R0_BLOCK": r}
     num_warps = _num_warps(conditional_product(x, y, r) // 256, min_num_warps=1)
     check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
-    assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
+    assert r <= TRITON_MAX_BLOCK["R0_"], f"increase TRITON_MAX_BLOCK['R0_'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1582,31 +1582,31 @@ def _reduction_configs(
     rnumel = size_hints[-1]
 
     register_intensive = False
-    MAX_RBLOCK = 2048
+    MAX_R0_BLOCK = 2048
     if (
         size_hints[0] >= 1024
         and inductor_meta.get("num_load", 0) + inductor_meta.get("num_reduction", 0)
         >= 10
     ):
-        # A heuristics to reduce RBLOCK if a kernel potentially need many registers.
+        # A heuristics to reduce R0_BLOCK if a kernel potentially need many registers.
         # Consider load and reduction since load need move data into registers and
         # reduction needs an accumulator.
         #
         # The magic numbers are a bit arbitrary.
         #
-        # We cannot rely on dynamically scaling down RBLOCK later, since sometimes
+        # We cannot rely on dynamically scaling down R0_BLOCK later, since sometimes
         # triton makes it to use less registers with worse perf. Check:
         # https://github.com/pytorch/pytorch/issues/126463
         #
         # The heuristic is a very simple one since registers can be reused. But
         # hopefully it can be a good enough indicator.
-        MAX_RBLOCK = 1024
+        MAX_R0_BLOCK = 1024
         register_intensive = True
 
     contiguous_config = triton_config_reduction(
         size_hints,
         1,
-        (rnumel if 256 <= rnumel < MAX_RBLOCK else MAX_RBLOCK),
+        (rnumel if 256 <= rnumel < MAX_R0_BLOCK else MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
     outer_config = triton_config_reduction(
@@ -1615,7 +1615,7 @@ def _reduction_configs(
     tiny_config = triton_config_reduction(
         size_hints,
         2 * (256 // rnumel) if rnumel <= 256 else 1,
-        min(rnumel, MAX_RBLOCK),
+        min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
@@ -1634,7 +1634,7 @@ def _reduction_configs(
         tiny_config,
         triton_config_reduction(size_hints, 64, 64),
         triton_config_reduction(size_hints, 8, 512),
-        # halve the XBLOCK/RBLOCK compared to outer_config
+        # halve the XBLOCK/R0_BLOCK compared to outer_config
         # TODO: this may only be beneficial when each iteration of the reduction
         # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
         triton_config_reduction(size_hints, 64, 4, num_warps=8),
@@ -1702,8 +1702,8 @@ def persistent_reduction(
             )
         ]
     for c in configs:
-        # we don't need RBLOCK for persistent reduction
-        c.kwargs.pop("RBLOCK")
+        # we don't need R0_BLOCK for persistent reduction
+        c.kwargs.pop("R0_BLOCK")
 
     if disable_pointwise_autotuning(inductor_meta):
         configs = configs[:1]
@@ -1737,11 +1737,11 @@ def split_scan(
 
     configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
 
-    # Fixup configs to enforce the minimum RBLOCK size
+    # Fixup configs to enforce the minimum R0_BLOCK size
     min_rblock = inductor_meta.get("min_split_scan_rblock", 256)
     for cfg in configs:
-        if cfg.kwargs["RBLOCK"] < min_rblock:
-            cfg.kwargs["RBLOCK"] = min_rblock
+        if cfg.kwargs["R0_BLOCK"] < min_rblock:
+            cfg.kwargs["R0_BLOCK"] = min_rblock
 
     return cached_autotune(
         size_hints,
@@ -1866,7 +1866,7 @@ def grid(*numels):
 def split_scan_grid(xnumel, rnumel):
     def grid_fn(meta):
         assert meta.get("XBLOCK", 1) == 1
-        return (ceildiv(rnumel, meta.get("RBLOCK", 1)), xnumel, 1)
+        return (ceildiv(rnumel, meta.get("R0_BLOCK", 1)), xnumel, 1)
 
     grid_fn_str = f"split_scan_grid({xnumel}, {rnumel})"
     setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
