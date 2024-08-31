@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import sys
 import warnings
 from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
@@ -6,9 +7,10 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.device_mesh import DeviceMesh
-from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
+from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
+
 
 try:
     from torch.utils._cxx_pytree import tree_map_only
@@ -590,8 +592,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return ["elem"], None
 
     def tolist(self):
-        self.trigger_wait()
-        return self.elem.tolist()
+        return self.trigger_wait().tolist()
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
@@ -600,18 +601,18 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __repr__(self):
-        self.trigger_wait()
-        return f"AsyncCollectiveTensor({self.elem})"
+        return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
         if not self.completed:
-            wait_tensor(self.elem)
+            out = wait_tensor(self.elem)
             self.completed = True
-        return self.elem
+            return out
+        else:
+            return self.elem
 
     def wait(self) -> torch.Tensor:
-        wait_tensor(self.elem)
-        return self.elem
+        return wait_tensor(self.elem)
 
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
@@ -631,7 +632,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
             if not is_view_op:
-                e.trigger_wait()
+                return e.trigger_wait()
             return e.elem
 
         def wrap(e: torch.Tensor):
@@ -767,7 +768,9 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
             warnings.warn(
                 "The combination of ranks + tag as process group "
                 "identifier has been deprecated. Please switch to "
-                "using ProcessGroup, DeviceMesh, or group name instead."
+                "using ProcessGroup, DeviceMesh, or group name instead.",
+                FutureWarning,
+                stacklevel=3,
             )
         return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
     else:
@@ -803,10 +806,7 @@ def _are_we_tracing() -> bool:
         is not None
     ):
         return True
-    mode = get_innermost_proxy_mode()
-    if mode is None:
-        return False
-    return mode.tracer is not None
+    return get_proxy_mode() is not None
 
 
 def _maybe_wrap_tensor(self) -> torch.Tensor:
@@ -895,6 +895,12 @@ def _all_to_all_single_meta(
         return input.new_empty(out_size)
 
 
+def _all_gather_into_tensor_out_native_meta(input, group_size, group_name, *, out):
+    shape = list(input.size())
+    shape[0] *= group_size
+    return input.new_empty(shape)
+
+
 def _all_gather_into_tensor_native_meta(input, group_size, group_name):
     shape = list(input.size())
     shape[0] *= group_size
@@ -933,6 +939,9 @@ if not torch._running_with_deploy():
     lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
     lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
     lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    lib_impl.impl(
+        "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
+    )
     lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
     lib_impl.impl(
         "all_gather_into_tensor_coalesced",
@@ -948,6 +957,10 @@ if not torch._running_with_deploy():
     lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
     lib_impl.impl("broadcast", _broadcast_meta, "Meta")
     lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+
+    # mark these ops has side effect so that they won't be removed by DCE
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
 
     # Register legacy ops for backward compatibility
     # TODO(yifu): remove these in functional collective beta release
@@ -1122,6 +1135,7 @@ from torch.distributed.distributed_c10d import (
     all_to_all_single as legacy_all_to_all_single,
     reduce_scatter_tensor as legacy_reducescatter,
 )
+
 
 # This dict should contain sets of functions that dynamo is allowed to remap.
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.

@@ -358,12 +358,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // Do not call this directly, use ProcessGroup::setGroupName instead.
-  void setGroupName(const std::string& name) {
-    pg_name_ = name;
+  void setGroupUid(const std::string& pg_uid) {
+    pg_uid_ = pg_uid;
   }
 
-  const std::string& getGroupName() const {
-    return pg_name_;
+  const std::string& getGroupUid() const {
+    return pg_uid_;
   }
 
   void setGroupDesc(const std::string& desc) {
@@ -375,7 +375,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // See similar functions in ProcessGroup.hpp for context.
-  c10::optional<at::Device> getBoundDeviceId() const {
+  std::optional<at::Device> getBoundDeviceId() const {
     return bound_device_id_;
   }
 
@@ -386,7 +386,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backends may perform
   }
 
-  void setBoundDeviceId(c10::optional<at::Device> device) {
+  void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
@@ -405,12 +405,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
-  std::string pg_name_;
+  std::string pg_uid_;
   std::string pg_desc_;
 
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
 
-  c10::optional<at::Device> bound_device_id_;
+  std::optional<at::Device> bound_device_id_;
 };
 
 } // namespace c10d

@@ -1,7 +1,7 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import enum
 import functools
@@ -26,20 +26,22 @@ from typing import (
     TypeVar,
 )
 
-import torch
+from torch._C._dynamo.eval_frame import set_context_frame  # noqa: F401
 from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary
+
 
 log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    import sympy
+
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-
-    import sympy
+    import torch
 
 
 """
@@ -79,8 +81,8 @@ class TraceId(NamedTuple):
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
-    LOCAL_NN_MODULE = 2
-    GLOBAL_NN_MODULE = 3
+    LOCAL_SPECIALIZED_NN_MODULE = 2
+    GLOBAL_SPECIALIZED_NN_MODULE = 3
     CONSTANT = 4
     RANDOM_VALUE = 5
     SHAPE_ENV = 6
@@ -89,25 +91,46 @@ class GuardSource(enum.Enum):
     BACKWARD_STATE = 9
     EPHEMERAL = 10
     SYNTHETIC_LOCAL = 11
+    LOCAL_UNSPECIALIZED_NN_MODULE = 12
+    GLOBAL_UNSPECIALIZED_NN_MODULE = 13
+    LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 14
+    GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 15
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
-    def is_nn_module(self) -> bool:
+    def is_specialized_nn_module(self) -> bool:
         return (
             self
             in (
-                GuardSource.GLOBAL_NN_MODULE,
-                GuardSource.LOCAL_NN_MODULE,
+                GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+                GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             )
+            # TODO (anijain2305) - Investigate why is_fsdp_module required.
             or self.is_fsdp_module()
+        )
+
+    def is_unspecialized_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+        )
+
+    def is_unspecialized_builtin_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
     def is_local(self):
         return self in (
             GuardSource.LOCAL,
-            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
 
@@ -174,7 +197,7 @@ class Guard:
     def sort_key(self):
         # Put the duplicate input guards at the end. The duplicate guards have
         # two sources while guard.name only considers one source.
-        from ._dynamo.guards import GuardBuilder
+        from torch._dynamo.guards import GuardBuilder
 
         is_duplicate_input = (
             isinstance(self.create_fn, functools.partial)
@@ -262,8 +285,8 @@ class Guard:
                 log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
 
-    def is_nn_module(self):
-        return self.source.is_nn_module()
+    def is_specialized_nn_module(self):
+        return self.source.is_specialized_nn_module()
 
     def is_fsdp_module(self):
         return self.source.is_fsdp_module()
@@ -273,7 +296,7 @@ class Guard:
 
     def set_export_info(self, guard_type, guarded_class, code_list, obj_weakref):
         if not self.guard_types:
-            self.guard_types = list()
+            self.guard_types = []
 
         self.guard_types.append(guard_type)
 
@@ -288,10 +311,15 @@ class Guard:
         else:
             self.code_list.extend(code_list)
 
-        assert self.obj_weakref in (
-            obj_weakref,
-            None,
-        ), "Guarded object must be identical, or None"
+        # Some objects are ephemeral, e.g., list[slice(1, 2)]. If we have
+        # multiple guards on the same object, the weakref can die between the
+        # invocation of set_export_info calls. So a dead weakref is also
+        # acceptable.
+        assert (
+            self.obj_weakref in (obj_weakref, None)
+            or callable(self.obj_weakref)
+            and self.obj_weakref() is None
+        ), "Guarded object must be identical, None or ephemeral (dead weakref)"
         self.obj_weakref = obj_weakref
 
 
@@ -340,12 +368,10 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 
 class Checkpointable(Generic[T]):
     @abstractmethod
-    def copy_graphstate(self) -> T:
-        ...
+    def copy_graphstate(self) -> T: ...
 
     @abstractmethod
-    def restore_graphstate(self, state: T):
-        ...
+    def restore_graphstate(self, state: T): ...
 
 
 class GuardsCheckpointState:
@@ -397,7 +423,7 @@ class ModuleContextCheckpointState:
 
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.nn_modules: Dict[str, Any] = {}
 
     def copy_graphstate(self):
@@ -446,7 +472,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         "autocast_cache_enabled",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.global_state: Dict[str, Tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
@@ -514,7 +540,7 @@ class GuardsSet:
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: List[GuardEnvExpr] = []
 
@@ -627,7 +653,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[List[Optional[List[int]]]] = None
+        self.output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -756,6 +782,15 @@ def compile_context(context: Optional[CompileContext]):
     try:
         yield context
     finally:
+        if context is not None:
+            if context.compile_id is not None:
+                set_context_frame(
+                    (
+                        context.compile_id.frame_id,
+                        context.compile_id.frame_compile_id,
+                        context.attempt,
+                    )
+                )
         _TLS.compile_context = old_context
 
 
@@ -810,8 +845,8 @@ class Source:
             raise NotImplementedError
         return Guard(self, fn)
 
-    def is_nn_module(self) -> bool:
-        return self.guard_source().is_nn_module()
+    def is_specialized_nn_module(self) -> bool:
+        return self.guard_source().is_specialized_nn_module()
 
     def subguards_allowed(self):
         """True if you can guard on attributes of this"""

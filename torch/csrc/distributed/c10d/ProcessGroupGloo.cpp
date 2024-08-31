@@ -199,6 +199,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
+    default:
       break;
   }
 
@@ -262,6 +263,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
+    default:
       break;
   }
 
@@ -479,7 +481,7 @@ void returnFutureWithOutput(
 
 inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors) {
+    const std::optional<std::vector<at::Tensor>>& inputTensors) {
   auto recordingFunction =
       std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
   if (recordingFunction->isActive()) {
@@ -498,7 +500,8 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
               profilingTitle,
               c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
         };
-    recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(before_handler);
+    recordFunctionBeforeCallback_ =
+        at::wrapPropagateTLSState(std::move(before_handler));
     std::function<void()> end_handler = [recordingFunction]() {
       recordingFunction->end();
     };
@@ -511,7 +514,7 @@ ProcessGroupGloo::AsyncWork::AsyncWork(
     OpType opType,
     uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors)
+    const std::optional<std::vector<at::Tensor>>& inputTensors)
     // Profiler: Pass nullptr as profilingTitle to parent constructor to
     // replace default profiler implementation with async version that reports
     // correct timestamps for work that is asynchronously executed.
@@ -547,7 +550,7 @@ ProcessGroupGloo::SendWork::SendWork(
           -1,
           OpType::SEND,
           "gloo:send",
-          c10::optional<std::vector<at::Tensor>>({tensor})),
+          std::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
       buffer_(std::move(buffer)),
       seq_(seq) {}
@@ -588,7 +591,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
           -1,
           opType,
           profilingTitle,
-          c10::optional<std::vector<at::Tensor>>({tensor})),
+          std::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
       buffer_(std::move(buffer)),
       srcRank_(-1),
@@ -599,7 +602,7 @@ uint64_t ProcessGroupGloo::RecvWork::getSequencenumber() const {
 }
 
 int ProcessGroupGloo::RecvWork::sourceRank() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::timed_mutex> lock(mutex_);
   return srcRank_;
 }
 
@@ -2424,8 +2427,8 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
             OpType::SCATTER,
             seq,
             "gloo:scatter",
-            !inputs.empty() ? c10::optional<std::vector<at::Tensor>>(inputs[0])
-                            : c10::nullopt),
+            !inputs.empty() ? std::optional<std::vector<at::Tensor>>(inputs[0])
+                            : std::nullopt),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2620,7 +2623,7 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
             OpType::ALLTOALL,
             seq,
             "gloo:all_to_all",
-            c10::optional<std::vector<at::Tensor>>({inputTensor})),
+            std::optional<std::vector<at::Tensor>>({inputTensor})),
         context(context),
         outputTensor(outputTensor),
         inputTensor(inputTensor),
@@ -2888,7 +2891,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
             OpType::BARRIER,
             seq,
             "gloo:barrier",
-            c10::nullopt),
+            std::nullopt),
         context(context),
         priorWork(std::move(priorWork)),
         tag(tag) {}

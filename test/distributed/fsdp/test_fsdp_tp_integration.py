@@ -37,6 +37,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     RMSNormPython,
 )
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -50,7 +51,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = torch.nn.Linear(5, 8)
         self.relu = torch.nn.ReLU()
@@ -201,7 +202,7 @@ class TestTPFSDPIntegration(FSDPTest):
         all_grads_as_flattened = torch.cat(
             [torch.empty_like(local_grads_as_flattened) for _ in range(fsdp_pg.size())]
         ).contiguous()
-        dist._all_gather_base(
+        dist.all_gather_into_tensor(
             all_grads_as_flattened, local_grads_as_flattened, group=fsdp_pg
         )
         if not uses_tp:
@@ -358,7 +359,7 @@ class TestTPFSDPIntegration(FSDPTest):
         )
 
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mlp = MLPModule("cuda")
                 self.mlp_norm = RMSNormPython(10)
@@ -387,11 +388,16 @@ class TestTPFSDPIntegration(FSDPTest):
             fsdp_2d_model(torch.rand(2, 10).cuda(self.rank)).sum().backward()
 
         funcol = torch.ops.c10d_functional
+        c10d_ops = torch.ops.c10d
         comm_counts = comm_mode.get_comm_counts()
-        self.assertEqual(comm_mode.get_total_counts(), 5)
+        self.assertEqual(comm_mode.get_total_counts(), 7)
+        # TP comms
         self.assertEqual(comm_counts[funcol.reduce_scatter_tensor], 2)
         self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 2)
         self.assertEqual(comm_counts[funcol.all_reduce], 1)
+        # FSDP comms
+        self.assertEqual(comm_counts[c10d_ops._allgather_base_], 1)
+        self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 1)
 
         grads = [p.grad for p in fsdp_2d_model.parameters() if p.grad is not None]
 
@@ -410,7 +416,7 @@ class TestTPFSDPIntegration(FSDPTest):
         torch.manual_seed(mesh_2d.get_rank())
 
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 replicated_dt = DTensor.from_local(
                     torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
@@ -419,7 +425,7 @@ class TestTPFSDPIntegration(FSDPTest):
                     torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
                 )
                 self.param = torch.nn.Parameter(replicated_dt)
-                self.register_buffer("buf", replicated_buffer_dt)
+                self.buf = torch.nn.Buffer(replicated_buffer_dt)
 
             def forward(self, x):
                 return self.param + self.buffer + 1

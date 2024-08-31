@@ -31,49 +31,9 @@ Tensor index_select_backward_hack(const Tensor& grad, IntArrayRef self_sizes, in
   return at::zeros(self_sizes, grad.options()).index_add(dim, index, grad);
 }
 
-static optional<std::tuple<Tensor,int64_t>> unwrap(const Tensor& tensor) {
-  auto* wrapped = maybeGetTensorWrapper(tensor);
-  if (wrapped) {
-    if (wrapped->level().has_value()) {
-      return std::make_tuple(wrapped->value(), *wrapped->level());
-    }
-    return unwrap(wrapped->value());
-  }
-  auto* batched = maybeGetBatchedImpl(tensor);
-  if (batched) {
-    return std::make_tuple(batched->value(), batched->level());
-  }
-  return nullopt;
-}
-
-static bool can_perform_inplace(const Tensor& a, const Tensor& b) {
-  // TODO: generalize this to more transforms
-  auto a_ = unwrap(a);
-  auto b_ = unwrap(b);
-  if (!a_.has_value() && b_.has_value()) {
-    return false;
-  }
-  if (!a_.has_value() && !b_.has_value()) {
-    return true;
-  }
-  if (a_.has_value() && !b_.has_value()) {
-    return true;
-  }
-  TORCH_INTERNAL_ASSERT(a_.has_value() && b_.has_value());
-
-  // If b has any wrapper that a does not, then we cannot do a.inplace_(b)
-  if (std::get<1>(*a_) < std::get<1>(*b_)) {
-    return false;
-  }
-  if (std::get<1>(*a_) > std::get<1>(*b_)) {
-    return can_perform_inplace(std::get<0>(*a_), b);
-  }
-  return can_perform_inplace(std::get<0>(*a_), std::get<0>(*b_));
-}
-
 // TODO: linear is pretty important for performance, but I'm not sure how to work
 // around the in-place.
-Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor linear_hack(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
@@ -123,8 +83,8 @@ static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64
 Tensor binary_cross_entropy_with_logits_hack(
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    const c10::optional<Tensor>& pos_weight_opt,
+    const std::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& pos_weight_opt,
     int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);

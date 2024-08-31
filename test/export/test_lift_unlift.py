@@ -16,7 +16,6 @@ from torch.export.exported_program import (
     OutputSpec,
     TensorArgument,
 )
-
 from torch.export.graph_signature import CustomObjArgument
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -30,7 +29,7 @@ from torch.testing._internal.common_utils import (
 
 
 class GraphBuilder:
-    def __init__(self):
+    def __init__(self) -> None:
         self.graph = torch.fx.Graph()
         self.nodes = {}
         self.values = {}
@@ -355,7 +354,7 @@ class TestLift(TestCase):
 
     def test_unlift_nonpersistent_buffer(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.register_buffer(
                     "non_persistent_buf", torch.zeros(1), persistent=False
@@ -396,17 +395,19 @@ class ConstantAttrMapTest(TestCase):
         constant_attr_map = ConstantAttrMap()
         const_obj = torch.classes._TorchScriptTesting._Foo(10, 20)
         const_tensor = torch.ones(2, 3)
-        constant_attr_map[const_obj] = "foo.bar"
-        constant_attr_map[const_tensor] = "foo.bar.baz"
+        constant_attr_map.add(const_obj, "foo.bar")
+        constant_attr_map.add(const_tensor, "foo.bar.baz")
         self.assertEqual(len(constant_attr_map), 2)
         self.assertEqual(list(constant_attr_map), [const_obj, const_tensor])
         self.assertEqual(list(constant_attr_map.keys()), [const_obj, const_tensor])
-        self.assertEqual(list(constant_attr_map.values()), ["foo.bar", "foo.bar.baz"])
-        self.assertEqual(constant_attr_map[const_obj], "foo.bar")
-        self.assertEqual(constant_attr_map[const_tensor], "foo.bar.baz")
+        self.assertEqual(
+            list(constant_attr_map.values()), [["foo.bar"], ["foo.bar.baz"]]
+        )
+        self.assertEqual(constant_attr_map[const_obj], ["foo.bar"])
+        self.assertEqual(constant_attr_map[const_tensor], ["foo.bar.baz"])
         self.assertTrue(const_obj in constant_attr_map)
         with self.assertRaises(TypeError):
-            constant_attr_map[1] = "foo.bar"
+            constant_attr_map.add(1, "foo.bar")
 
         del constant_attr_map[const_obj]
         self.assertEqual(len(constant_attr_map), 1)

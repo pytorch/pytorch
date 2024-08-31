@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 15.
 
 Note [ONNX operators that are added/updated in opset 15]
@@ -30,13 +31,13 @@ import functools
 import torch
 from torch import _C
 from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import jit_utils, registration
+
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=15)
 
 
 @_onnx_symbolic("aten::__is_")
-@_beartype.beartype
 def aten__is_(g: jit_utils.GraphContext, self, other):
     if symbolic_helper._is_none(other):
         if isinstance(self.type(), _C.OptionalType):
@@ -49,13 +50,11 @@ def aten__is_(g: jit_utils.GraphContext, self, other):
 
 @_onnx_symbolic("aten::__isnot_")
 @opset9.wrap_logical_op_with_negation  # type: ignore[has-type]
-@_beartype.beartype
 def aten__isnot_(g: jit_utils.GraphContext, self, other):
     return aten__is_(g, self, other)
 
 
 @_onnx_symbolic("aten::bernoulli")
-@_beartype.beartype
 def bernoulli(g: jit_utils.GraphContext, input, p=None, generator=None, out=None):
     if out is not None and not symbolic_helper._is_none(out):
         symbolic_helper._unimplemented(
@@ -71,7 +70,6 @@ def bernoulli(g: jit_utils.GraphContext, input, p=None, generator=None, out=None
 
 
 @_onnx_symbolic("prim::unchecked_cast")
-@_beartype.beartype
 def prim_unchecked_cast(g: jit_utils.GraphContext, self):
     # exists to refine the type of the Value
     # if x is Optional[Tensor], unchecked_cast will cast

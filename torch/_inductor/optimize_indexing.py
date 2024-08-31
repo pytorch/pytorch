@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import math
 
 import sympy
 
 import torch
 from torch.utils._sympy.value_ranges import ValueRanges
+
 from .ir import LoopBody
 from .utils import dominated_nodes
 
@@ -27,7 +29,7 @@ def val_expressable_in_32_bits(val):
         iinfo = torch.iinfo(torch.int32)
         return val <= iinfo.max and val >= iinfo.min
 
-    raise Exception(f"Unexpected value {val}")  # noqa: TRY002
+    raise TypeError(f"Unexpected value {val}")
 
 
 def range_expressable_in_32_bits(range):

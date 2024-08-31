@@ -4,7 +4,6 @@ import unittest
 
 import torch
 import torch.fx
-
 from torch.testing._internal.common_utils import TestCase
 
 

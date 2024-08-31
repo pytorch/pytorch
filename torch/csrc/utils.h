@@ -206,7 +206,7 @@ bool maybeThrowBackCompatKeepdimWarn(char* func);
 
 // NB: This is in torch/csrc/cuda/utils.cpp, for whatever reason
 #ifdef USE_CUDA
-std::vector<c10::optional<at::cuda::CUDAStream>>
+std::vector<std::optional<at::cuda::CUDAStream>>
 THPUtils_PySequence_to_CUDAStreamList(PyObject* obj);
 #endif
 

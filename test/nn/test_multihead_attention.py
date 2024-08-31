@@ -6,7 +6,6 @@ import unittest.mock as mock
 
 import torch
 import torch.nn as nn
-
 from torch.nn import MultiheadAttention
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -21,6 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_NUMPY,
     TEST_WITH_CROSSREF,
 )
+
 
 if TEST_NUMPY:
     import numpy as np

@@ -15,10 +15,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <tuple>
-
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   TORCH_CHECK(self.dim() == 3, "batch1 must be a 3D tensor");
@@ -95,7 +92,7 @@ static Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
       mat2_ptr->get_storage_offsets().data_ptr<int64_t>();
   auto opt2 = mat2_ptr->get_nested_sizes().options();
 
-  int64_t N = self_sizes.size();
+  int64_t N = static_cast<int64_t>(self_sizes.size());
   int64_t n_heads = self_sizes[0][0];
 
   // viewed metadata for self
@@ -320,7 +317,7 @@ Tensor& matmul_out_nested(
   //       if an accessor is provided in the future, can replace this
   std::vector<int64_t> sizes;
   for (int64_t i = 0; i < function_result_ptr->dim(); i++) {
-    c10::optional<int64_t> opt_size = function_result_ptr->opt_size(i);
+    std::optional<int64_t> opt_size = function_result_ptr->opt_size(i);
     if (opt_size.has_value()) {
       sizes.push_back(*opt_size);
     } else {
@@ -332,5 +329,4 @@ Tensor& matmul_out_nested(
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

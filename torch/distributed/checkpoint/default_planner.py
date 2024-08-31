@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import dataclasses
@@ -25,6 +26,7 @@ from torch.distributed.checkpoint.metadata import (
     MetadataIndex,
     STATE_DICT_TYPE,
     STORAGE_TYPES,
+    StorageMeta,
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import (
@@ -43,6 +45,9 @@ from torch.distributed.checkpoint.planner_helpers import (
     _init_state_dict,
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
+
+from . import _version
+
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -66,11 +71,12 @@ class DefaultSavePlanner(SavePlanner):
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
         dedup_replicated_tensors: Optional[bool] = None,
+        dedup_save_to_lowest_rank: bool = False,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.mappings = {}
-
+        self.dedup_save_to_lowest_rank = dedup_save_to_lowest_rank
         if dedup_replicated_tensors is not None:
             logger.warning(
                 "DefaultSavePlanner's `dedup_replicated_tensors` argument is being "
@@ -78,7 +84,12 @@ class DefaultSavePlanner(SavePlanner):
                 "from your call."
             )
 
-    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        storage_meta: Optional[StorageMeta] = None,
+        is_coordinator: bool = False,
+    ) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
         if self.flatten_sharded_tensors:
@@ -97,7 +108,7 @@ class DefaultSavePlanner(SavePlanner):
     def create_global_plan(
         self, all_plans: List[SavePlan]
     ) -> Tuple[List[SavePlan], Metadata]:
-        all_plans = dedup_save_plans(all_plans)
+        all_plans = dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
 
         global_plan, metadata = create_default_global_save_plan(all_plans)
 
@@ -147,6 +158,7 @@ class DefaultLoadPlanner(LoadPlanner):
 
     flatten_state_dict: Handle state_dict with nested dicts
     flatten_sharded_tensors: For FSDP in 2D parallel mode
+    allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in the checkpoint.
     """
 
     original_state_dict: STATE_DICT_TYPE
@@ -156,17 +168,19 @@ class DefaultLoadPlanner(LoadPlanner):
         self,
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
+        allow_partial_load: bool = False,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
+        self.allow_partial_load = allow_partial_load
 
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         _init_state_dict(state_dict)
         self.original_state_dict = state_dict
@@ -182,7 +196,43 @@ class DefaultLoadPlanner(LoadPlanner):
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> LoadPlan:
-        return create_default_local_load_plan(self.state_dict, self.metadata)
+        assert self.metadata is not None
+        if self.flatten_state_dict:
+            # To support checkpoints that are saved before v2.4, we have to
+            # differentiate if the missing keys are due to old checkpoints.
+            # The contracts are:
+            # 1. There are 3 cases when we found a missing key.
+            #    1.1 Actual missing key, but allow_partial_load is False
+            #    1.2 Actual missing key, but allow_partial load is True
+            #    1.3 Old checkpoint, but allow_partial_load is False
+            #    1.4 Old checkpoint, but allow_partial_load is True
+            # 2. If we found a missing key, we first convert the keys back to
+            #    the key format of v2.3
+            # 3. If the previous missing keys are in the v2.3 keys, we assume
+            #    this is a old checkpoint.
+            # 4. Pass the state_dict to `create_default_local_load_plan()`,
+            #    which has the logic to check missing for allow_partial_load.
+            # So for 1.2 and 1.4 cases, we delegate allow_partial_load check to
+            # `create_default_local_load_plan()`. The logic here is to determine
+            # whether the checkpoint belong to 2.3 (or before) or 2.4 (or after).
+            current_keys = set(self.state_dict.keys())
+            load_keys = set(self.metadata.state_dict_metadata.keys())
+            missing_keys = load_keys - current_keys
+            if missing_keys:
+                _version._derived_version = "2_3"
+                old_state_dict, old_mappings = flatten_state_dict(
+                    self.original_state_dict
+                )
+                old_keys = set(old_state_dict.keys())
+                if old_keys & missing_keys:
+                    self.state_dict, self.mappings = old_state_dict, old_mappings
+                # _derived_version is only used by flatten_state_dict now.
+                # Set it back to None so that later we can save to a new version.
+                _version._derived_version = None
+
+        return create_default_local_load_plan(
+            self.state_dict, self.metadata, not self.allow_partial_load
+        )
 
     def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return create_default_global_load_plan(global_plan)
@@ -195,10 +245,12 @@ class DefaultLoadPlanner(LoadPlanner):
             set_element(
                 self.original_state_dict,
                 self.mappings[read_item.dest_index.fqn],
-                torch.load(value),
+                torch.load(value, weights_only=False),
             )
         else:
-            self.state_dict[read_item.dest_index.fqn] = torch.load(value)
+            self.state_dict[read_item.dest_index.fqn] = torch.load(
+                value, weights_only=False
+            )
 
     def resolve_tensor(self, read_item: ReadItem):
         tensor = self.lookup_tensor(read_item.dest_index)
@@ -246,7 +298,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         for unflattened_key in planner_data:
             if unflattened_keys:
                 unflattened_keys.append(
-                    ".".join([unflattened_keys[-1], unflattened_key])
+                    ".".join([unflattened_keys[-1], str(unflattened_key)])
                 )
 
             else:
@@ -260,10 +312,11 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         assert not state_dict
+        assert metadata is not None
 
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
@@ -281,8 +334,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
 
 def create_default_local_load_plan(
-    state_dict: Dict[str, Any],
-    metadata: Metadata,
+    state_dict: Dict[str, Any], metadata: Metadata, strict: bool = True
 ) -> LoadPlan:
     requests = []
     """
@@ -296,6 +348,13 @@ def create_default_local_load_plan(
     """
 
     for fqn, obj in state_dict.items():
+        # ignore state_dict keys which do not exist in `state_dict` if strict=False
+        if fqn not in metadata.state_dict_metadata:
+            if strict:
+                raise RuntimeError(f"Missing key in checkpoint state_dict: {fqn}.")
+            else:
+                continue
+
         md = metadata.state_dict_metadata[fqn]
         # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
@@ -338,7 +397,10 @@ def create_default_local_save_plan(
         if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_write_items(fqn, obj)
-        elif isinstance(obj, (torch.Tensor)) or is_coordinator:
+        else:
+            # For the plain tensor and non-tensor values, add the request for all
+            # the ranks. Coordinator will decides whether to deduplicate the
+            # values based on the keys.
             requests += _create_write_items(fqn, obj)
 
     return SavePlan(requests)

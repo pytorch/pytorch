@@ -1,14 +1,15 @@
+# mypy: allow-untyped-defs
 import bisect
 import itertools
 import math
-
 from collections import defaultdict, namedtuple
 from operator import attrgetter
-
 from typing import Any, Dict, List, Optional, Tuple
+from typing_extensions import deprecated
 
 import torch
 from torch.autograd import DeviceType
+
 
 __all__ = [
     "EventList",
@@ -319,6 +320,7 @@ class EventList(list):
                 str(event.node_id),
                 str(event.device_type),
                 str(event.is_legacy),
+                str(event.is_user_annotation),
             ]
             if group_by_input_shapes:
                 key.append(str(event.input_shapes))
@@ -415,6 +417,10 @@ class FormattedTimesMixin:
         return 0.0 if self.count == 0 else 1.0 * self.device_time_total / self.count  # type: ignore[attr-defined]
 
     @property
+    @deprecated(
+        "`cuda_time` is deprecated, please use `device_time` instead.",
+        category=FutureWarning,
+    )
     def cuda_time(self):  # To be deprecated
         return self.device_time
 
@@ -462,6 +468,8 @@ class FunctionEvent(FormattedTimesMixin):
         flops=None,
         trace_name=None,
         concrete_inputs=None,
+        kwinputs=None,
+        is_user_annotation=False,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -476,6 +484,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cpu_parent: Optional[FunctionEvent] = None
         self.input_shapes: Tuple[int, ...] = input_shapes
         self.concrete_inputs: List[Any] = concrete_inputs
+        self.kwinputs: Dict[str, Any] = kwinputs
         self.stack: List = stack
         self.scope: int = scope
         self.use_device: Optional[str] = use_device
@@ -491,6 +500,7 @@ class FunctionEvent(FormattedTimesMixin):
         )
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
+        self.is_user_annotation: Optional[bool] = is_user_annotation
 
     def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU
@@ -538,8 +548,12 @@ class FunctionEvent(FormattedTimesMixin):
         )
 
     @property
+    @deprecated(
+        "`self_cuda_memory_usage` is deprecated. Use `self_device_memory_usage` instead.",
+        category=FutureWarning,
+    )
     def self_cuda_memory_usage(self):  # To be deprecated
-        self.self_device_memory_usage
+        return self.self_device_memory_usage
 
     @property
     def cpu_time_total(self):
@@ -570,12 +584,20 @@ class FunctionEvent(FormattedTimesMixin):
                 # each legacy cpu events has a single (fake) kernel
                 return sum(kinfo.duration for kinfo in self.kernels)
         else:
-            assert self.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]
+            assert self.device_type in [
+                DeviceType.CUDA,
+                DeviceType.PrivateUse1,
+                DeviceType.MTIA,
+            ]
             return self.time_range.elapsed_us()
 
     @property
+    @deprecated(
+        "`cuda_time_total` is deprecated. Use `device_time_total` instead.",
+        category=FutureWarning,
+    )
     def cuda_time_total(self):  # To be deprecated
-        self.device_time_total
+        return self.device_time_total
 
     @property
     def self_device_time_total(self):
@@ -583,15 +605,23 @@ class FunctionEvent(FormattedTimesMixin):
             return 0
         if self.device_type == DeviceType.CPU:
             return self.device_time_total - sum(
-                [child.device_time_total for child in self.cpu_children]
+                child.device_time_total for child in self.cpu_children
             )
         else:
-            assert self.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]
+            assert self.device_type in [
+                DeviceType.CUDA,
+                DeviceType.PrivateUse1,
+                DeviceType.MTIA,
+            ]
             return self.device_time_total
 
     @property
+    @deprecated(
+        "`self_cuda_time_total` is deprecated. Use `self_device_time_total` instead.",
+        category=FutureWarning,
+    )
     def self_cuda_time_total(self):  # To be deprecated
-        self.self_device_time_total
+        return self.self_device_time_total
 
     @property
     def key(self):
@@ -614,7 +644,7 @@ class FunctionEvent(FormattedTimesMixin):
 class FunctionEventAvg(FormattedTimesMixin):
     """Used to average stats over multiple FunctionEvent objects."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.key: Optional[str] = None
         self.count: int = 0
         self.node_id: int = 0
@@ -655,6 +685,7 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.device_type = other.device_type
             self.is_legacy = other.is_legacy
             self.use_device = other.use_device
+            self.is_user_annotation = other.is_user_annotation
 
         assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
@@ -877,7 +908,6 @@ def _build_table(
     row_format_lst = [""]
     header_sep_lst = [""]
     line_length_lst = [-SPACING_SIZE]
-    MAX_STACK_ENTRY = 5
 
     def add_column(padding, text_dir=">"):
         row_format_lst[0] += (
@@ -944,7 +974,15 @@ def _build_table(
         if evt.device_type == DeviceType.CPU and evt.is_legacy:
             # in legacy profiler, kernel info is stored in cpu events
             sum_self_device_time_total += evt.self_device_time_total
-        elif evt.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]:
+        elif (
+            evt.device_type
+            in [
+                DeviceType.CUDA,
+                DeviceType.PrivateUse1,
+                DeviceType.MTIA,
+            ]
+            and not evt.is_user_annotation
+        ):
             # in kineto profiler, there're events with the correct device type (e.g. CUDA)
             sum_self_device_time_total += evt.self_device_time_total
 
@@ -1043,7 +1081,7 @@ def _build_table(
 
         if has_stack:
             empty_headers = [""] * (len(headers) - 1)
-            for entry in evt.stack[1:MAX_STACK_ENTRY]:
+            for entry in evt.stack[1:]:
                 append(
                     row_format.format(
                         *(empty_headers + [trim_path(entry, src_column_width)])

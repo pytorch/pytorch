@@ -55,7 +55,7 @@ class ModelArgs:
 transformer_configs = {
     "Mixtral-8x7B-v0.1": dict(
         block_size=32768,
-        n_layer=32,
+        n_layer=16,
         n_head=32,
         n_local_heads=8,
         dim=4096,

@@ -1,14 +1,16 @@
+# mypy: allow-untyped-defs
 import copy
+import warnings
 from itertools import chain
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
-from torch.export.unflatten import _assign_attr, _AttrKind
+from torch.export.unflatten import _assign_attr, _AttrKind, _recursive_getattr
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from ._remove_effect_tokens_pass import _remove_effect_tokens
 
+from ._remove_effect_tokens_pass import _remove_effect_tokens
 from .exported_program import (
     ExportedProgram,
     ExportGraphSignature,
@@ -22,7 +24,7 @@ def _check_input_constraints_pre_hook(self, *args, **kwargs):
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(args)
 
     if received_spec != self._in_spec:
-        raise ValueError(  # noqa: TRY200
+        raise ValueError(  # noqa: B904
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{self._in_spec}\n"
             "but actually got inputs with tree spec of: \n"
@@ -85,6 +87,7 @@ def _insert_copy_for_mutations(
     assert len(outputs) == len(mutated_outputs)
 
     user_output_nodes = []
+    return_nodes_to_copy = {}
     for return_node, mutated_node_name in zip(outputs, mutated_outputs):
         if mutated_node_name is None:
             user_output_nodes.append(return_node)
@@ -100,13 +103,19 @@ def _insert_copy_for_mutations(
             )
 
         with gm.graph.inserting_before(output_node):
-            _ = gm.graph.call_function(
+            copy_node = gm.graph.call_function(
                 torch.ops.aten.copy_.default, (mutated_node, return_node)
             )
+            return_nodes_to_copy[return_node] = copy_node
 
+    output_args = [
+        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
+        for node in user_output_nodes
+    ]
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
-        new_output = gm.graph.output(tuple(user_output_nodes))
+        new_output = gm.graph.output(tuple(output_args))
+        new_output.meta.update(output_node.meta)
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
 
@@ -114,22 +123,26 @@ def _insert_copy_for_mutations(
 def _get_codegen(
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
+    forward_arg_names: Optional[List[str]] = None,
 ) -> _PyTreeCodeGen:
     """
     Create the codegen for the graph module based on the in/out specs
     """
-    if (
-        in_spec.type == tuple
-        and in_spec.num_children == 2
-        and in_spec.children_specs[0].type == tuple
-        and in_spec.children_specs[1].type == dict
-    ):
-        # if in_spec contains the args (tuple) and kwargs (dict)
-        names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
-        # add kwarg names
-        names.extend(in_spec.children_specs[1].context)
+    if forward_arg_names:
+        names = forward_arg_names
     else:
-        names = [f"arg_{i}" for i in range(in_spec.num_children)]
+        if (
+            in_spec.type == tuple
+            and in_spec.num_children == 2
+            and in_spec.children_specs[0].type == tuple
+            and in_spec.children_specs[1].type == dict
+        ):
+            # if in_spec contains the args (tuple) and kwargs (dict)
+            names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
+            # add kwarg names
+            names.extend(in_spec.children_specs[1].context)
+        else:
+            names = [f"arg_{i}" for i in range(in_spec.num_children)]
 
     return _PyTreeCodeGen(
         _PyTreeInfo(
@@ -148,6 +161,7 @@ def _unlift(
     out_spec: Optional[pytree.TreeSpec],
     state_dict: Dict[str, Any],
     constants: Dict[str, Any],
+    forward_arg_names: Optional[List[str]] = None,
 ):
     """
     Args:
@@ -170,9 +184,8 @@ def _unlift(
     _insert_copy_for_mutations(
         gm, mutated_outputs, unlifted_name_to_node, input_name_to_node
     )
-    gm.graph._codegen = _get_codegen(in_spec, out_spec)
+    gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()
-    gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
 
@@ -252,12 +265,39 @@ def _create_stateful_graph_module(
         plain_graph_module.graph,
         range_constraints=range_constraints,
     )
+
     stateful_gm.register_forward_pre_hook(
         _check_input_constraints_pre_hook, with_kwargs=True
     )
 
     if graph_signature is None:
         return stateful_gm
+
+    # Fix up lifted tensor constants.
+    # fx.GraphModule() constructor silently turns a constant attribute of plain_graph_module
+    # into a buffer in stateful_gm and creates an inconsistency with graph_signature.
+    # We fix this by de-registering these buffers in lifted_tensor_constants
+    # and call _assign_attr(attr_kind=CONSTANT) to register them as constants.
+    for constant_fqn in graph_signature.lifted_tensor_constants:
+        # Sometimes, the constant can require gradient, this is probably a bug in user code,
+        # e.g. `self.const = torch.randn(2, 2, requires_grad=True)`.
+        # We call detach on the constant_val since they're tensor contants and we don't need to
+        # compute their gradients anyway.
+        # Users should properly register it as parameter if they want it to require gradient.
+        buffer = stateful_gm.get_buffer(constant_fqn)
+        if buffer.requires_grad:
+            warnings.warn(
+                f"A model attribute `{constant_fqn}` requires gradient. "
+                f"but it's not properly registered as a parameter. "
+                f"torch.export will detach it and treat it as a constant tensor "
+                f"but please register it as parameter instead."
+            )
+            buffer = buffer.detach()
+        *prefix, field = constant_fqn.rsplit(".")
+        submod = _recursive_getattr(stateful_gm, prefix)
+        delattr(submod, field)
+        _assign_attr(buffer, stateful_gm, constant_fqn, attr_kind=_AttrKind.CONSTANT)
+
     # Fix up non-persistent buffers. torch.fx does not distinguish between
     # persistent and non-persistent buffers, so we must restore that distinction
     # here.
@@ -277,24 +317,30 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
     ep = _remove_effect_tokens(ep)
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
+    forward_arg_names = ep.graph_module.meta.get("forward_arg_names")
 
     lifted_inputs: List[Optional[str]] = [
-        in_spec.target
-        if in_spec.kind
-        in (
-            InputKind.BUFFER,
-            InputKind.CONSTANT_TENSOR,
-            InputKind.PARAMETER,
-            InputKind.CUSTOM_OBJ,
+        (
+            in_spec.target
+            if in_spec.kind
+            in (
+                InputKind.BUFFER,
+                InputKind.CONSTANT_TENSOR,
+                InputKind.PARAMETER,
+                InputKind.CUSTOM_OBJ,
+            )
+            else None
         )
-        else None
         for in_spec in ep.graph_signature.input_specs
     ]
 
     mutated_outputs: List[Optional[str]] = [
-        out_spec.target
-        if out_spec.kind in (OutputKind.BUFFER_MUTATION, OutputKind.USER_INPUT_MUTATION)
-        else None
+        (
+            out_spec.target
+            if out_spec.kind
+            in (OutputKind.BUFFER_MUTATION, OutputKind.USER_INPUT_MUTATION)
+            else None
+        )
         for out_spec in ep.graph_signature.output_specs
     ]
 
@@ -306,6 +352,7 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         ep.call_spec.out_spec,
         ep.state_dict,
         ep.constants,
+        forward_arg_names=forward_arg_names,
     )
     unlift_gm = _create_stateful_graph_module(
         new_gm, ep.range_constraints, ep.graph_signature

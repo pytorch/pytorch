@@ -28,7 +28,7 @@ SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
 }
 
 // base, sizes, strides
-static c10::optional<
+static std::optional<
     std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>>
 normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
   // Look for a SymNode to dispatch on
@@ -56,7 +56,7 @@ normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
     // Couldn't find.  Tell the caller to do the normal computation
     // Alternately, if everything is hinted, we want the normal computation
     // too
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Populate the SymNode array
   std::vector<SymNode> size_nodes;
@@ -69,7 +69,7 @@ normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
   for (const auto& s : strides) {
     stride_nodes.emplace_back(s.wrap_node(base));
   }
-  return c10::make_optional(
+  return std::make_optional(
       std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
           std::move(base), std::move(size_nodes), std::move(stride_nodes)));
 }
