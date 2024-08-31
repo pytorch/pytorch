@@ -162,7 +162,12 @@ def run_functionalized_fw_and_collect_metadata(
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
         mode = FunctionalTensorMode(_allow_token_discovery=True)
+
         with disable_above, mode:
+            if fake_mode := detect_fake_mode():
+                # TODO(soulitzer): Why is this necessary?
+                fake_mode.reset_union_find()
+
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
@@ -172,7 +177,8 @@ def run_functionalized_fw_and_collect_metadata(
             if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
                 shape_env.pending_fresh_unbacked_symbols.clear()
                 fake_mode.epoch += 1
-                fake_mode.reset_nt_tensor_id_counter()
+                print("reset when reusing FakeMode in aot autograd")
+                fake_mode.reset_union_find()
 
         if prior_autocast_states != _get_autocast_states():
             raise RuntimeError(

@@ -55,7 +55,7 @@ from torch.fx.experimental.recording import (
     replay_shape_env_events,
     shape_env_check_state_equal
 )
-from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.fx.experimental.sym_node import SymNode, SymTypes, NestedIntNode
 from torch._logging import trace_structured, structured
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
@@ -2361,7 +2361,6 @@ class ShapeEnv:
         self.events: List[ShapeEnvEvent] = (
             [ShapeEnvEvent(ShapeEnv, kwargs=kwargs)] if self.should_record_events else []
         )
-        self.union_find_id_map = dict()
 
         # FakeTensor per-ShapeEnv operation cache. This is used for caching
         # operations that contain symbolic shapes which have guards on the
@@ -3198,12 +3197,12 @@ class ShapeEnv:
                 hint=hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
                 metafy_fn=metafy_fn,
-                nested_int=mb_nested_int,
+                nested_int_desc=mb_nested_int_desc,
             )
-            for i, (sym, hint, mb_nested_int) in enumerate(zip(size, ex_size, custom_size_strides.size))
+            for i, (sym, hint, mb_nested_int_desc) in enumerate(zip(size, ex_size, custom_size_strides.size))
         ]
         sym_stride = []
-        for i, (stride_expr, mb_nested_int) in enumerate(zip(stride, custom_size_strides.stride)):
+        for i, (stride_expr, mb_nested_int_desc) in enumerate(zip(stride, custom_size_strides.stride)):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
@@ -3212,7 +3211,7 @@ class ShapeEnv:
                 hint=ex_stride[i],
                 source=TensorPropertySource(source, TensorProperty.STRIDE, i),
                 metafy_fn=metafy_fn,
-                nested_int=mb_nested_int,
+                nested_int_desc=mb_nested_int_desc,
             ))
         sym_storage_offset = self.create_symintnode(
             self.create_symbol(
@@ -3235,7 +3234,7 @@ class ShapeEnv:
             hint: Optional[int],
             source: Optional[Source] = None,
             metafy_fn: Optional[Callable] = None,
-            nested_int: Optional[MetaNestedIntDesc] = None,
+            nested_int_desc: Optional[MetaNestedIntDesc] = None,
     ):
         """Create a SymInt value from a symbolic expression
 
@@ -3263,26 +3262,44 @@ class ShapeEnv:
             if hint is not None:
                 assert int(sym) == hint
             out = int(sym)
-        elif is_nested_int(hint):
-            # See Note [Recursive fakification]
-            fake_vec = metafy_fn(
-                nested_int.tensor,
-                torch._dynamo.source.SymNodePropertySource(source, "get_tensor"),
-            )
+
+        elif isinstance(hint, torch.SymInt):
+            # Only used for NJT
+            from torch.nested._internal.nested_tensor import create_nested_symint
+            from torch._subclasses.fake_tensor import FakeTensor
+
+            assert isinstance(hint.node, NestedIntNode)
+
             coeff = hint.node.nested_int_coeff()
-            nested_int = SymInt(
-                SymNode(
-                    sym, self, int,
-                    # The hint is a non-symbolic nested int with FakeTensor as its tensor.
-                    # if for_hint is specified, we go through normal path even though
-                    # we passed in a FakeTensor - can we do this cleaner?
-                    torch.nested._internal.nested_tensor.get_nested_symint(fake_vec, coeff=coeff, for_hint=True),
-                    fx_node=fx_node,
+
+            if nested_int_desc is not None:
+                # We are fakifying the outer size of a NJT.
+                # See Note [Recursive fakification]
+                assert metafy_fn is not None
+                assert not isinstance(hint.node.get_tensor(), FakeTensor)
+
+                fake_tensor = metafy_fn(
+                    nested_int_desc.tensor,
+                    # TODO(soulitzer): think about guards more
+                    torch._dynamo.source.SymNodePropertySource(source, "get_tensor"),
                 )
-            )
+                hint = create_nested_symint(fake_tensor.fake_mode.fake_union_find, fake_tensor, coeff=coeff)
+            else:
+                # This is confusing, we are calling back into this function.
+                # Which is the more higher-level one?
+                # The hint's tensor is already Fake
+                assert metafy_fn is None
+                assert isinstance(hint.node.get_tensor(), FakeTensor)
+                fake_tensor = hint.node.get_tensor()
+
+            nested_int = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+
             if coeff == 1:
-                # We only query for the nested int if the coefficient is 1.
-                fake_vec.set_nested_int(nested_int)
+                # We only need to memoize the nested int if the coeff is 1.
+                # If someone ends up asking for non-1 coeff, we'll just compute
+                # it on the fly.
+                fake_tensor.nested_int_memo = nested_int
+
             return nested_int
         else:
             # How can this occur? When we mark_unbacked, we end up with a real

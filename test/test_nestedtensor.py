@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     markDynamoStrictTest,
     NestedTensorTestCase,
+    TestCase,
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
@@ -64,8 +65,6 @@ from torch.testing._internal.opinfo.definitions.nested import njt_op_db
 from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
-<<<<<<< HEAD
-=======
 from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
@@ -74,7 +73,6 @@ from torch.nested._internal.nested_tensor import (
     ViewNestedFromBuffer,
 )
 from torch.nested._internal.union_find import TensorIntMap, TensorUnionFind
->>>>>>> 37f50417d92 ([do not review] saving stuff)
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.

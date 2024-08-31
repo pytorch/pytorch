@@ -11,19 +11,24 @@ from torch.nested._internal import union_find
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
-_tensor_id_counter = 0
-_tensor_symint_registry = WeakTensorKeyDictionary()
-
-
-def get_nested_symint(tensor, coeff=1, for_hint=False):
-    if isinstance(tensor, torch._subclasses.functional_tensor.FunctionalTensor):
-        tensor = torch._from_functional_tensor(tensor.elem)
-        return get_nested_symint(tensor, coeff=coeff)
-    if (isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor)) and not for_hint:
-        return tensor.get_nested_int()
-    uf = union_find.get_union_find()
+def create_nested_symint(uf, tensor, *, coeff=1):
     t_id = uf._tensor_int_map.get_int(tensor)
-    return torch.SymInt(NestedIntNode(t_id, tensor, coeff))
+    print(f"create_nested_symint: t_id={t_id}")
+    return torch.SymInt(NestedIntNode(t_id, tensor, coeff=coeff))
+
+
+def get_nested_symint(tensor, *, coeff=1):
+    print(f"get_nested_symint: tensor={id(tensor)}")
+    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+
+    # NB: Only FakeTensor is associated with a memo
+    tensor = mb_unwrap_functional_tensor(tensor)
+    if isinstance(tensor, FakeTensor):
+        return tensor.get_nested_int(coeff=coeff)
+
+    uf = union_find.get_union_find()
+    return create_nested_symint(uf, tensor, coeff=coeff)
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -258,18 +263,9 @@ class NestedTensor(torch.Tensor):
             metadata_cache["min_seqlen"] = min_seqlen_tensor
         if max_seqlen_tensor is not None:
             metadata_cache["max_seqlen"] = max_seqlen_tensor
-        ragged_idx = meta["ragged_idx"]
-<<<<<<< HEAD
 
-        # Alternatively, we could make it the caller's responsibility to
-        # cache it. But this heuristic seems simple enough.
+        ragged_idx = meta["ragged_idx"]
         ragged_source = offsets if lengths is None else lengths
-        if isinstance(ragged_source, FakeTensor):
-            ragged_size = outer_size[ragged_idx]
-            ragged_source.nested_int_memo = ragged_size
-=======
-        ragged_source = offsets if lengths is None else lengths
->>>>>>> a2eb5343c4e ([do not review] Saving more things)
 
         return NestedTensor(
             values,

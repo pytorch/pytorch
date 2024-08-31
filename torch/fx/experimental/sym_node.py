@@ -557,7 +557,9 @@ def _ge(lhs, rhs) -> bool:
 
 
 class NestedIntNode:
-    def __init__(self, t_id, tensor, coeff):
+    def __init__(self, t_id, tensor, *, coeff):
+        # t_id is using for naming
+        # TODO(soulitzer): let's just look up t_id everytime we need to?
         self.t_id = t_id  # useful for keeping track of the version
         self.tensor = tensor
         self.coeff = coeff
@@ -604,7 +606,7 @@ class NestedIntNode:
             other = other.constant_int()
         else:
             raise ValueError(f"unsupported: {type(other)}")
-        return NestedIntNode(self.t_id, self.tensor, self.coeff * other)
+        return NestedIntNode(self.t_id, self.tensor, coeff=self.coeff * other)
 
     def eq(self, other) -> "SymNode":
         return torch._C._get_constant_bool_symnode(_eq(self, other))

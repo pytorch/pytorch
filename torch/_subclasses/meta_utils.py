@@ -200,10 +200,11 @@ class MetaTensorDescriber:
             from torch.fx.experimental.sym_node import NestedIntNode
 
             if isinstance(x, torch.SymInt):
+                # TODO(soulitzer): investigate why sometimes we fail this assert
                 assert isinstance(x.node, NestedIntNode)
                 return MetaNestedIntDesc(
                     tensor=self.describe_tensor(x.node.get_tensor()),
-                    # Maybe we should not hardcode this
+                    # TODO(soulitzer): Maybe we should not hardcode this
                     attr="offsets",
                 )
             return None
@@ -212,7 +213,7 @@ class MetaTensorDescriber:
             stride=tuple(process(x) for x in t.stride()),
         )
 
-    def describe_storage(self, s: torch.UntypedStorage):
+    def describe_storage(self, s: torch.UntypedStorage, *, trace: bool = False):
         return MetaStorageDesc(
             id=self.get_storage_id(s),
             size=s.size(),
@@ -253,6 +254,8 @@ class MetaTensorDescriber:
             cached_metadata = uf.get_metadata(t)
             cached_max = cached_metadata.get("_max_seqlen", None)
             cached_min = cached_metadata.get("_min_seqlen", None)
+            # preemptively make a symbolic nested int for this tensor
+            # for now, still keep it ephemeral source?
 
         storage = None
         # NB: For compatibility, I default this to zero, as sometimes people
@@ -364,11 +367,6 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
-            nested_int=(
-                _tensor_symint_registry[t].node.nested_int()
-                if t in _tensor_symint_registry
-                else None
-            ),
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -566,7 +564,6 @@ class MetaTensorDesc:
         "functorch_stack",
         "autograd_meta_from",
         "data",
-        "nested_int",
     ]
 
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
@@ -848,31 +845,90 @@ class MetaConverter:
                 return (t.size, t.stride, t.storage_offset)
 
         def handle_union_find(t_descr, t_fake):
-            # print(shape_env)
             if shape_env is None:
+                # TODO(soulitzer): Can this happen? maybe add an assert?
                 return
-                # breakpoint()
-            union_find_id = t_descr.union_find_id
-            weak_prev = shape_env.union_find_id_map.get(union_find_id)
-            # Replicate the union find structure in the fake world
-            if weak_prev is None:
-                shape_env.union_find_id_map[union_find_id] = weakref.ref(t_fake)
-            else:
-                # Just use the global union_find is okay?
-                uf = torch.nested._internal.union_find.get_union_find()
-                if weak_prev() is not None:
-                    # TODO: when is this None?
-                    uf.merge(weak_prev(), t_fake)
+            uf = t_fake.fake_mode.fake_union_find
+            # Use an existing union find on real tensors as scaffolding to build
+            # the fake union find.
+            t = uf._tensor_int_map.get_opt_tensor(t_descr.union_find_id)
+            assert t is not None
+            uf.merge(t, t_fake)
 
-            # Replicate the metadata
-            uf = torch.nested._internal.union_find.get_union_find()
+            # It's possible that we may have not fakified the canonical tensor
+            # We need to preemptively fakify the canonical tensor to ensure that
+            # calling uf.find(t_fake) will always return a FakeTensor.
+            # The issue is that someone might legitimently fakify it later,
+            # and then our thing is wrong because we don't have the right
+            # src or symbolic context.
+            # This seems annoying to do, so let's just ban this case for now.
+            # This means that user must always trigger the fakification
+            # of the canonical tensor first.
+            # Let's say the user has a couple different tensors, and pass in
+            # one of them. This is too hard. Let's just create a brand new
+            # The other strategy is that compile doesn't actually preserve
+            # canonical tensor, we must somehow be able to make a different
+            # tensor canonical.
+            # Also what is annoying is that as more tensors are fakified
+            # the canonical tensor may change, because we'd merging?
+            # Actually it would not right because we want to favor the
+            # one with the shorter chain, and the newly fakified one is a single
+            # tensor. It would change at n==2. but, this doesn't matter because
+            # We don't actually want to expose find(a) as a public API
+            # we want to expose find(a) == find(b) as a public API.
+            # In that sense, it is okay to have a canonical that is non-fake?
+            # We can do whatever we want within the custom op, including
+            # callinf uf.find(a) which returns a real tensor, and then#
+            # So the alternative to all of this, is
+            # 1. we don't actually have the copy as scaffolding
+            #    instead, we record the union_find_id onto the fake tensor desc
+            #    so... okay, I mean we can still fork, and rely on the
+            #    fake_union_find that we have#
+            #    I don't want to have to replay too many merge calls.
+            #    The scaffolding strategy means exactly N merges
+            #    the fresh union find strategy requires that potentially N merges
+            #    because at time step k, we may need to merge with any of the
+            #    existing tensors. n^2
+            #    I don't think we should be too worried about operations on
+            #    real tensors happening.
+            #    .find() is not a public API. users cannot get at the canonical.#
+            #    they can only query that two tensors
+            #    so handle union find needs some additional state to figu
+
+            # It's enough to just fakify the canonical tensor because it
+            # does not change.
+            # canonical = uf.find(t_fake)
+            from torch._subclasses.fake_tensor import FakeTensor
+
+            if not isinstance(canonical, FakeTensor):
+                # This assumes the callback always creates a FakeTensor
+                canonical_fake = self.meta_tensor(
+                    t,
+                    shape_env,
+                    callback,
+                    source=src,
+                    symbolic_context=(
+                        None
+                        if symbolic_context is None
+                        # Would be cool not to hard code this!
+                        else symbolic_context.inner_contexts["_offsets"]
+                    )
+                )
+                uf._tensor_int_map.replace(canonical, canonical_fake)
+
             cached_metadata = uf.get_metadata(t_fake)
-            # TODO: we could instead use the hint to make this a real symint
-            # but should not be necessary for NestedTensors
+
+            # We didn't even need to rely on the descr to record the min/max
+            # because we can access the metadata directly from the union find
+            # TODO(soulitzer): check the guards here
             if t_descr.cached_max is not None:
                 import sympy
+
+                assert cached_metadata.get("_max_seqlen", None) is not None
                 src = torch._dynamo.source.UnionFindMetadataSource(source, "_max_seqlen")
-                ret = shape_env.create_symintnode(
+                # TODO(soulitzer): think about how we can refactor the existing
+                # workaround logic.
+                cached_metadata["_max_seqlen"] = shape_env.create_symintnode(
                     sym=shape_env.create_symbol(
                         val=t_descr.cached_max,
                         source=src,
@@ -880,10 +936,10 @@ class MetaConverter:
                     hint=t_descr.cached_max,
                     source=src,
                 )
-                cached_metadata["_max_seqlen"] = ret
             if t_descr.cached_min is not None:
-                # TODO:
                 import sympy
+
+                assert cached_metadata.get("_min_seqlen", None) is not None
                 cached_metadata["_min_seqlen"] = shape_env.create_symintnode(
                     sym=sympy.Integer(t_descr.cached_min),
                     hint=t_descr.cached_min,
@@ -971,7 +1027,9 @@ class MetaConverter:
                     inner_tensors[attr] = new_empty_tensor
 
                 for attr, inner_t in t.attrs.items():
-                    handle_union_find(inner_t, transformed_tensors_dict[attr])
+                    if inner_t.union_find_id is not None:
+                    # TODO(soulitzer): we go into this path for ALL subclasses
+                        handle_union_find(inner_t, inner_tensors[attr])
 
                 return t.type.__tensor_unflatten__(
                     inner_tensors, t.ctx, outer_size, outer_stride
@@ -1697,14 +1755,15 @@ class MetaConverter:
                 r._is_param = True
 
             # See Note: [Creating symbolic nested int]
-            if t.nested_int is not None:
+            if t.union_find_id is not None:
                 r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
-                    nt_tensor_id=t.nested_int
+                    fake_tensor=r,
                 )
 
             self.set_tensor_memo(t, r)
 
-            handle_union_find(t, r)
+            if t.union_find_id is not None:
+                handle_union_find(t, r)
 
         return self.get_tensor_memo(t)
 
@@ -1797,4 +1856,4 @@ class MetaConverter:
         return r
 
 
-import torch._prims_common as utils
+import torch._prims_common as util

@@ -352,7 +352,6 @@ class FakeTensorConverter:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         if type(t) is torch.nn.Parameter:
             assert not make_constant
-        maybe_constant_t = t if make_constant else None
 
         def mk_fake_tensor(make_meta_t: Callable[[], object]) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
@@ -362,10 +361,6 @@ class FakeTensorConverter:
             # invariant is that make_meta_t only calls factories
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
-            if t_descr is not None:
-                maybe_memo = self.tensor_memo.get(t_descr.id)
-                if maybe_memo is not None:
-                    return maybe_memo
             with no_dispatch():
                 return FakeTensor(
                     fake_mode,
@@ -894,7 +889,7 @@ class FakeTensor(Tensor):
     ) -> torch.SymInt:
         if self.nested_int_memo is None:
             self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(
-                nt_tensor_id=None
+                fake_tensor=self,
             )
         return self.nested_int_memo * coeff
 
@@ -920,23 +915,6 @@ class FakeTensor(Tensor):
             torch._check(s >= 2)
             out.append(s)
         return out
-
-    def get_nested_int(self):
-        if self._nested_int_memo_vc != self._version:
-            self._nested_int_memo = None
-
-        if not self._nested_int_memo:
-            # We only reach here for intermediate offsets?
-            # we never look up nested int with coeff.
-            self._nested_int_memo = self.fake_mode.shape_env.create_unbacked_symint()
-            self._nested_int_memo_vc = self._version
-
-        return self._nested_int_memo
-
-    def set_nested_int(self, val):
-        self._nested_int_memo = val
-        self._nested_int_memo_vc = self._version
-
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
 
@@ -1121,8 +1099,7 @@ class FakeTensorMode(TorchDispatchMode):
     # The initial count is set to the current eager tensor_id_counter value
     # upon initialization, and every time you retrace using the same fake tensor
     # mode, you should reset the counter to the initial count.
-    nt_tensor_id_counter: int = -1
-    nt_tensor_id_initial_count: int = -1
+    fake_union_find: Any
 
     def __init__(
         self,
@@ -1212,15 +1189,21 @@ class FakeTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FAKE
 
-        import torch.nested._internal.nested_tensor
+        from torch.nested._internal.union_find import get_union_find
 
-        self.nt_tensor_id_initial_count = (
-            torch.nested._internal.nested_tensor._tensor_id_counter
-        )
-        self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+        self.fake_union_find = get_union_find().copy()
 
-    def reset_nt_tensor_id_counter(self) -> None:
-        self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+    def reset_union_find(self) -> None:
+        print("FakeMode.reset_union_find")
+        # resets it to the current eager state
+        # we probably actually want to reset it to what the eager state originally
+        # was when this fake mode was creted, but that requires another copy
+        # unless we do something smarter like copy on write
+        # For now we just assume that the eager state has not been modified.
+        # TODO(soulitzer): maybe think harder about this
+        from torch.nested._internal.union_find import get_union_find
+
+        self.fake_union_find = get_union_find().copy()
 
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be
@@ -2174,20 +2157,20 @@ class FakeTensorMode(TorchDispatchMode):
         return tree_map(wrap, r)
 
     def create_symbolic_nested_int(
-        self, *, nt_tensor_id: Optional[int] = None
+        self, fake_tensor: torch.Tensor
     ) -> torch.SymInt:
         # See Note: [Creating symbolic nested int]
         # Returned nested int always has coeff=1; multiply the result by coeff if needed
-        import torch.nested._internal.nested_tensor
+        from torch.nested._internal.nested_tensor import create_nested_symint
 
-        if nt_tensor_id is None:
-            nt_tensor_id = self.nt_tensor_id_counter
-            assert self.enter_stack, "should only called while FakeTensorMode is active"
-            self.nt_tensor_id_counter += 1
-        hint = torch._C._get_nested_int(nt_tensor_id, 1)
+        # TODO(soulitzer): can this assertion be brought back?
+        # assert self.enter_stack, "should only called while FakeTensorMode is active"
+        assert self.shape_env is not None
+
+        hint = create_nested_symint(self.fake_union_find, fake_tensor, coeff=1)
 
         src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
-        assert self.shape_env is not None
+
         ret = self.shape_env.create_symintnode(
             sym=self.shape_env.create_symbol(
                 val=hint,
@@ -2196,6 +2179,8 @@ class FakeTensorMode(TorchDispatchMode):
             hint=hint,
             source=src,
         )
+        # TODO(soulitzer): Why is this place responsible for doing this?
+        fake_tensor.nested_int_memo = ret
         return ret
 
     _cpp_meta_supports_symint = ordered_set(
