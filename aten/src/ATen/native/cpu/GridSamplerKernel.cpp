@@ -736,7 +736,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
   const int64_t inp_sC;
   const ComputeLocation<scalar_t, padding, align_corners> compute_H;
   const ComputeLocation<scalar_t, padding, align_corners> compute_W;
-  const bool must_in_bound = padding != GridSamplerPadding::Zeros;
+  const bool must_in_bound = (padding != GridSamplerPadding::Zeros) &&
+                             (padding != GridSamplerPadding::Constant);
 
   ApplyGridSample(const TensorAccessor<const scalar_t, 4>& input)
     : inp_H(input.size(2))
@@ -844,7 +845,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   const int64_t inp_sC;
   const ComputeLocation<scalar_t, padding, align_corners> compute_H;
   const ComputeLocation<scalar_t, padding, align_corners> compute_W;
-  const bool must_in_bound = padding != GridSamplerPadding::Zeros;
+  const bool must_in_bound = (padding != GridSamplerPadding::Zeros) &&
+                             (padding != GridSamplerPadding::Constant);
 
   // constant used in cubic convolution
   // could be -0.5 or -0.75, use the same value in UpSampleBicubic2d.h
