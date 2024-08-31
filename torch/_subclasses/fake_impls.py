@@ -27,7 +27,7 @@ from torch._subclasses.fake_tensor import (
 )
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._stats import count_label
-
+from torch.utils._sympy.value_ranges import bound_sympy
 
 pytree = torch.utils._pytree
 
@@ -455,9 +455,23 @@ def masked_select(fake_mode, func, self, mask):
         has_free_symbols,
     )
 
+    # If num elements is expressed symbolically, calculate
+    # the concrete value based on upper bounds. Otherwise,
+    # we can set max val directly.
     if not has_free_symbols(self.numel()):
-        if self.numel() > 2:
-            maxval = int(self.numel())
+        num_elements = int(self.numel())
+    else:
+        if len(self.shape) != 0:
+            num_elements = 1
+            for size in self.shape:
+                if isinstance(size, int):
+                    num_elements *= size
+                elif isinstance(size, torch.SymInt):
+                    sym_node = size.node
+                    sym_range = bound_sympy(sym_node.expr, sym_node.shape_env.var_to_range)
+                    num_elements *= int(sym_range.upper)
+    if num_elements > 2:
+        maxval = num_elements
 
     _constrain_range_for_size(nnz, max=maxval)
 
