@@ -2,11 +2,9 @@
 import functools
 import itertools
 import unittest
-
 from functools import partial
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -14,7 +12,6 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
-
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     ShapeEnv,
@@ -24,12 +21,12 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_list,
     jagged_from_tensor_and_lengths,
     nested_view_from_values_offsets,
-    NestedTensor,
 )
 from torch.nested._internal import union_find
 from torch.nested._internal.union_find import get_max_seqlen
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    NestedTensorTestCase,
     parametrize,
     subtest,
 )
@@ -39,6 +36,11 @@ from torch.testing._internal.two_tensor import TwoTensor
 
 def traceable_subclass(c):
     return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
+
+
+def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
+    actual_recompiles = _recompiles_for_inputs(fn, inputs1, inputs2)
+    self.assertEqual(actual_recompiles, expected_recompiles)
 
 
 def get_jagged_tensor(nested_size, offsets, requires_grad=True):
@@ -261,12 +263,135 @@ class ScaledTensor(torch.Tensor):
         return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
 
 
+class OptionalScaledTensor(torch.Tensor):
+    def __new__(
+        cls,
+        data,
+        scale,
+        *,
+        constant: int = 0,
+    ):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.size(),
+            strides=data.stride(),
+            storage_offset=data.storage_offset(),
+            dtype=data.dtype,
+            layout=data.layout,
+            requires_grad=data.requires_grad,
+            device=data.device,
+        )
+
+    def __init__(self, data: torch.Tensor, scale, constant: int = 0):
+        self._data = data
+        self._scale = scale
+        self._constant = constant
+
+    def __tensor_flatten__(self):
+        ctx = {"_constant": self._constant}
+        if self._scale is not None:
+            return ["_data", "_scale"], ctx
+        else:
+            return ["_data"], ctx
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        return OptionalScaledTensor(
+            inner_tensors["_data"],
+            inner_tensors["_scale"] if "_scale" in inner_tensors else None,
+            constant=metadata["_constant"],
+        )
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        scaled_tensor = args[0]
+        out = func(scaled_tensor._data, *args[1:], **kwargs)
+        if scaled_tensor._scale is not None:
+            out = out * scaled_tensor._scale
+        return OptionalScaledTensor(
+            out, scaled_tensor._scale, constant=scaled_tensor._constant
+        )
+
+    def __repr__(self):
+        return (
+            f"OptionalScaledTensor({self._data.__repr__()}\n{self._scale.__repr__()})"
+        )
+
+
+class CtxSubclassTensor(torch.Tensor):
+    """
+    Class used to verify guarding on the subclass metadata
+    """
+
+    @staticmethod
+    def __new__(cls, a, constant):
+        shape = a.shape
+        kwargs = {}
+        kwargs["strides"] = a.stride()
+        kwargs["storage_offset"] = a.storage_offset()
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+        return out
+
+    def __init__(self, a, constant):
+        self.a = a
+        self.constant = constant
+
+    def __repr__(self):
+        a_repr = repr(self.a)
+        return f"CtxSubclassTensor({a_repr})"
+
+    def __tensor_flatten__(self):
+        return ["a"], (self.constant,)
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, sizes, strides):
+        constant = meta[0]
+        a = inner_tensors["a"]
+        return CtxSubclassTensor(a, constant)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        from torch.utils._python_dispatch import return_and_correct_aliasing
+
+        if kwargs is None:
+            kwargs = {}
+        biggest_constant = max(
+            [
+                x.constant
+                for x in pytree.tree_flatten(args)[0]
+                if isinstance(x, CtxSubclassTensor)
+            ]
+        )
+        args_a = pytree.tree_map(
+            lambda x: x.a if isinstance(x, CtxSubclassTensor) else x, args
+        )
+        kwargs_a = pytree.tree_map(
+            lambda x: x.a if isinstance(x, CtxSubclassTensor) else x, kwargs
+        )
+        out_a = func(*args_a, **kwargs_a)
+        out = pytree.tree_map(
+            lambda x: CtxSubclassTensor(x, biggest_constant)
+            if isinstance(x, torch.Tensor)
+            else x,
+            out_a,
+        )
+
+        if func == torch.ops.aten.mul.Tensor:
+            out = out + out.constant
+
+        return return_and_correct_aliasing(func, args, kwargs, out)
+
+
 def func(a):
     return a.sin()
 
 
 class EagerRecordGraphAndInputs:
-    def __init__(self):
+    def __init__(self) -> None:
         self.graphs = []
         self.example_inputs = []
 
@@ -313,6 +438,9 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def tearDownClass(cls):
         cls._exit_stack.close()
 
+    def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
+        _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles)
+
     def test_no_call_to_new(self):
         class BadNewTorchFunction(torch.Tensor):
             def __new__(cls, *args, **kwargs):
@@ -336,6 +464,41 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
             res = fn(input)
             self.assertIsInstance(res, BadNewTorchFunction)
+
+    def test_no_torch_function_recompiles(self):
+        class NJT:
+            def __repr__(self):
+                return f"NJT(shape={self.shape})"
+
+            def __init__(self, values, offsets):
+                self._values = values
+                self._offsets = offsets
+
+            def sin(self):
+                return torch.sin(self)
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                if func == torch.sin:
+                    self = args[0]
+                    return NJT(func(self._values), self._offsets)
+                raise AssertionError("should not get here")
+
+        values1 = torch.randn(10, 3, 4, requires_grad=True)
+        values2 = torch.randn(10, 3, 4, requires_grad=True)
+        offsets = torch.tensor([0, 3, 10])
+        njt1 = NJT(values1, offsets)
+        njt2 = NJT(values2, offsets)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return torch.sin(x)
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            f(njt1)
+            f(njt2)
 
     def test_base_torch_function_tracing(self):
         def fn(x):
@@ -436,6 +599,43 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, LocalSubclass)
 
+    def test_torch_function_list_args(self):
+        HANDLED_FUNCTIONS = {}
+
+        class MyClass:
+            def __init__(self, foo):
+                self.foo = foo
+
+            @classmethod
+            def __torch_function__(
+                cls,
+                func,
+                types,
+                args=(),
+                kwargs=None,
+            ):
+                if kwargs is None:
+                    kwargs = {}
+                if func not in HANDLED_FUNCTIONS or not all(  # noqa: C419
+                    [  # noqa: C419
+                        issubclass(t, (torch.Tensor, MyClass)) for t in types
+                    ]
+                ):
+                    return NotImplemented
+                return HANDLED_FUNCTIONS[func](*args, **kwargs)
+
+        def _stack(input, dim=0, *, out=None):
+            return MyClass(sum([x.foo for x in input]))
+
+        HANDLED_FUNCTIONS[torch.stack] = _stack
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(v0, v1):
+            return torch.stack([v0, v1])
+
+        ret = fn(MyClass(1), MyClass(1))
+        self.assertEqual(ret.foo, 2)
+
     @parametrize(
         "comparison",
         [
@@ -535,7 +735,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_user_overidden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._ndim = 10
 
             @classmethod
@@ -763,18 +963,20 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(len(backend.example_inputs), 1)
 
-        expected = """\
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[3, 4]"):
         l_x_ = L_x_
 
-        add_ = l_x_.add_(1.0)
-        relu_ = torch.relu_(l_x_);  l_x_ = None
-        add = add_ + relu_;  add_ = relu_ = None
+        add_: "f32[3, 4]" = l_x_.add_(1.0)
+        relu_: "f32[3, 4]" = torch.relu_(l_x_);  l_x_ = None
+        add: "f32[3, 4]" = add_ + relu_;  add_ = relu_ = None
         return (add,)
-"""
-        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
-        self.assertEqual(actual, expected)
+""",
+        )
 
         ff = torch.func.functionalize(f)
         ff_out = ff(x_clone)
@@ -784,7 +986,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 2)
         self.assertEqual(len(backend.example_inputs), 2)
         actual = normalize_gm(backend.graphs[1].print_readable(print_output=False))
-        self.assertEqual(actual, expected)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        add_: "f32[3, 4]" = l_x_.add_(1.0)
+        relu_: "f32[3, 4]" = torch.relu_(l_x_);  l_x_ = None
+        add: "f32[3, 4]" = add_ + relu_;  add_ = relu_ = None
+        return (add,)
+""",
+        )
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
         # Cannot re-use the version from AOTAutograd, since that uses python functional tensors.
@@ -814,7 +1028,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 3)
         self.assertEqual(len(backend.example_inputs), 3)
         actual = normalize_gm(backend.graphs[2].print_readable(print_output=False))
-        self.assertEqual(actual, expected)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        add_: "f32[3, 4]" = l_x_.add_(1.0)
+        relu_: "f32[3, 4]" = torch.relu_(l_x_);  l_x_ = None
+        add: "f32[3, 4]" = add_ + relu_;  add_ = relu_ = None
+        return (add,)
+""",
+        )
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
         self.assertEqual(f_out, ff_out)
@@ -846,34 +1072,57 @@ class GraphModule(torch.nn.Module):
             actual = normalize_gm(
                 backend.graphs[exp_n_graph - 1].print_readable(print_output=False)
             )
-            self.assertExpectedInline(actual, exp_graph)
+            self.assertExpectedInline(actual, exp_graph, skip=1)
 
         t = torch.randn([3, 4])
         t_clone = t.clone()
         t_clone2 = t.clone()
         f(t)
 
-        expected_graph = """\
+        check_count_and_graph(
+            1,
+            2,
+            1,
+            """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[3, 4]"):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        getitem = wrap[0];  wrap = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
-            add_ = l_x_.add_(1.0);  l_x_ = None
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
-"""
-        check_count_and_graph(1, 2, 1, expected_graph)
+""",
+        )
 
         ff = torch.func.functionalize(f)
         ff_out = ff(t_clone)
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(2, 4, 2, expected_graph)
+        check_count_and_graph(
+            2,
+            4,
+            2,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem: "f32[3, 4]" = wrap[0];  wrap = None
+        return (getitem,)
+
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
+            return (add_,)
+""",
+        )
 
         try:
             x = torch._to_functional_tensor(t_clone2)
@@ -884,7 +1133,26 @@ class GraphModule(torch.nn.Module):
             torch._disable_functionalization()
 
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(3, 6, 3, expected_graph)
+        check_count_and_graph(
+            3,
+            6,
+            3,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem: "f32[3, 4]" = wrap[0];  wrap = None
+        return (getitem,)
+
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
+            return (add_,)
+""",
+        )
 
     def test_has_torch_function(self):
         class MyTensor:
@@ -998,7 +1266,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=backend)
         def fn(x):
-            if x.shape[0] < 10:
+            if x.shape[0] < 13:
                 return torch.mul(x, x)
             else:
                 return torch.div(x, x)
@@ -1024,7 +1292,7 @@ class GraphModule(torch.nn.Module):
             "\n".join(guards),
             """\
 Eq(2*s1, s0)
-2*s1 < 10
+2*s1 < 13
 s1 > 3""",
         )
 
@@ -1061,6 +1329,26 @@ s1 > 3""",
         sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
         self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
 
+    def test_recompiles_with_optional_inner_tensor(self):
+        def f(x):
+            return x + 1
+
+        # sub1 does not have the optional tensor specified while sub2 does
+        sub1 = OptionalScaledTensor(torch.randn(2, 4), None)
+        sub2 = OptionalScaledTensor(torch.randn(2, 4), torch.randn(2, 4))
+
+        # sanity check; don't recompile for same input
+        self.assertFalse(_recompiles_for_inputs(f, (sub1,), (sub1,), dynamic=True))
+        self.assertFalse(_recompiles_for_inputs(f, (sub2,), (sub2,), dynamic=True))
+
+        # these should recompile; optional tensor changes between specified and unspecified
+        self.assertTrue(_recompiles_for_inputs(f, (sub1,), (sub2,), dynamic=True))
+        self.assertTrue(_recompiles_for_inputs(f, (sub2,), (sub1,), dynamic=True))
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+        self.assertEqual(f(sub1)._data, f_compiled(sub1)._data)
+        self.assertEqual(f(sub2)._data, f_compiled(sub2)._data)
+
     def test_torch_dispatch_subclass_guard_recompile(self):
         x = torch.ones(2, 2)
         x_two = TwoTensor(x.clone(), x.clone())
@@ -1082,6 +1370,64 @@ s1 > 3""",
         ref = fn(x)
         res = fn_opt(x)
         self.assertEqual(ref, res)
+
+    def test_tensor_subclass_ctx_guards(self):
+        x = CtxSubclassTensor(torch.ones(2), 3)
+        x2 = CtxSubclassTensor(torch.ones(2), 3)
+        x3 = CtxSubclassTensor(torch.ones(2), 4)
+        _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
+        _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
+
+    def test_tensor_subclass_ctx_recursive_guards(self):
+        x0 = torch.ones(2, 2)
+        x1 = CtxSubclassTensor(x0.clone(), 2)
+        x2 = CtxSubclassTensor(x0.clone(), 3)
+        tt0 = TwoTensor(x0.clone(), x1)
+        tt1 = TwoTensor(x0.clone(), x2)
+
+        _check_recompiles(self, lambda x: x * x, (tt0,), (tt1,), True)
+
+    def test_tensor_subclass_ctx_custom_guards_override(self):
+        class CtxSubclassTensorCustomGuardFn(CtxSubclassTensor):
+            @classmethod
+            def __metadata_guard__(cls, orig_data, other):
+                return orig_data[0] <= other[0]
+
+        x = CtxSubclassTensorCustomGuardFn(torch.ones(2), 2)
+        x2 = CtxSubclassTensorCustomGuardFn(torch.ones(2), 3)
+        x3 = CtxSubclassTensorCustomGuardFn(torch.ones(2), 1)
+        _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
+        _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
+
+    def test_tensor_subclass_ctx_custom_guards_error_arg_num(self):
+        import torch._dynamo.exc
+
+        class CtxSubclassTensorCustomGuardFn(CtxSubclassTensor):
+            @classmethod
+            def __metadata_guard__(cls, y):
+                # Shouldn't reach here
+                return False
+
+        x = CtxSubclassTensorCustomGuardFn(torch.ones(2), 3)
+        self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Tensor subclass method __metadata_guard__ must take exactly two subclass metadata arguments",
+            lambda: torch.compile(lambda x: x * x)(x),
+        )
+
+    def test_tensor_subclass_ctx_custom_guards_error_not_classmethod(self):
+        import torch._dynamo.exc
+
+        class CtxSubclassTensorCustomGuardFn(CtxSubclassTensor):
+            def __metadata_guard__(self, x, y):
+                return False
+
+        x = CtxSubclassTensorCustomGuardFn(torch.ones(2), 3)
+        self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Tensor subclass method __metadata_guard__ must be a classmethod",
+            lambda: torch.compile(lambda x: x * x)(x),
+        )
 
     def test_torch_function_subclass_survives_into_aot_autograd(self):
         # If you have a tensor subclass that relies on dispatch into the same op
@@ -1151,6 +1497,9 @@ s1 > 3""",
         s = SubTensor(torch.randn(3, 10))
         f(s)
 
+    # Guard validation upsets the guard
+    # https://github.com/pytorch/pytorch/issues/129936
+    @unittest.expectedFailure
     def test_recompile_with_symbool_inputs(self):
         def f(pred: bool):
             if pred:
@@ -1191,13 +1540,13 @@ s1 > 3""",
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        ones = torch.ones([3, 4])
+        ones: "f32[3, 4]" = torch.ones([3, 4])
         return (ones,)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        ones = torch.ones([4, 3])
+        ones: "f32[4, 3]" = torch.ones([4, 3])
         return (ones,)
 """
         test_recompilation(
@@ -1279,16 +1628,26 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
 
+        @torch.compile(backend="eager", fullgraph=True)
+        def g(x):
+            typ = type(Foo())
+            typ.__base__
+            return typ.__base__
+
+        self.assertEqual(g(torch.randn(1)), Multistreamable)
+
     @parametrize("dynamic", [False, True])
     def test_subclass_views(self, dynamic):
-        def _get_views(t):
+        def _get_views(t):  # returns (view: Tensor, expects_raises_false)
             # Note that any closed-over SymInts will be symbolicized during fake-ification.
-            yield t.narrow(dim=-1, start=3, length=8)
-            yield t.split(5, -1)
-            yield t.split_with_sizes([9, 6], -1)
-            yield t.unsqueeze(-1).expand(4, 15, 10)
-            yield t.select(-1, 6)
-            yield t[2:3, 5:9]
+            yield t.narrow(dim=-1, start=3, length=8), False
+            yield t.split(5, -1)[2], False
+            yield t.split_with_sizes([9, 6], -1)[1], False
+            yield t.unsqueeze(-1).expand(4, 15, 10), False
+            yield t.select(-1, 6), False
+            # https://github.com/pytorch/pytorch/issues/128649
+            yield t[2:3, 5:9], dynamic
+            yield t.view(-1, 15), False
 
         def f(x):
             return x * 2
@@ -1299,16 +1658,60 @@ class GraphModule(torch.nn.Module):
 
         # Take a view of a subclass to pass as input.
         t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
-        for view in _get_views(t):
+        for view, expects_raises in _get_views(t):
+            torch._dynamo.reset()
             out_ref = f(view)
-            out_test = compiled_f(view)
-            self.assertEqual(out_ref, out_test)
+            if expects_raises:
+                with self.assertRaises(AssertionError):
+                    out_test = compiled_f(view)
+            else:
+                out_test = compiled_f(view)
+                self.assertEqual(out_ref, out_test)
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_with_subclass_desugaring(self):
+        from typing import Any, Callable, Dict, List, Optional
+
+        from torch._dynamo.decorators import mark_static_address
+        from torch._inductor.compile_fx import compile_fx
+        from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+        from torch._inductor.utils import BoxedBool
+
+        x_inner = torch.ones(4)
+        x = TwoTensor(x_inner, x_inner)
+        mark_static_address(x, guard=False)
+
+        def inner_compile(
+            gm: torch.fx.GraphModule,
+            example_inputs: List[torch.Tensor],
+            cudagraphs: Optional[BoxedBool] = None,
+            static_input_idxs: Optional[List[int]] = None,
+            is_backward: bool = False,
+            graph_id: Optional[int] = None,
+            cpp_wrapper: bool = False,
+            aot_mode: bool = False,
+            is_inference: bool = False,
+            boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
+            user_visible_outputs: Optional[Dict[str, None]] = None,
+            layout_opt: Optional[bool] = None,
+            extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
+        ):
+            self.assertEqual(static_input_idxs, [1, 2])
+            return gm
+
+        compiler = functools.partial(compile_fx, inner_compile=inner_compile)
+
+        @torch.compile(backend=compiler)
+        def fn(t0, t1, t2):
+            return t0 + t1 + t2 + 2
+
+        fn(torch.ones(4), x, torch.ones(4))
 
 
 instantiate_parametrized_tests(SubclassTests)
 
 
-class TestNestedTensor(torch._dynamo.test_case.TestCase):
+class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
     def _get_jagged_tensor(self, nested_size, offsets, requires_grad=True):
         return get_jagged_tensor(nested_size, offsets, requires_grad)
 
@@ -1326,8 +1729,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         return jagged_from_tensor_and_lengths(values_tensor, starts, lengths)
 
     def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
-        actual_recompiles = _recompiles_for_inputs(fn, inputs1, inputs2)
-        self.assertEqual(actual_recompiles, expected_recompiles)
+        _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles)
 
     def test_unary_does_not_recompile(self):
         nt1, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
@@ -1363,6 +1765,416 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
+    def _validate_compile(self, fn, arg_fn):
+        def _gen_grad_outputs(out_val):
+            if isinstance(out_val, (list, tuple)):
+                return tuple(torch.ones_like(c) for c in out_val)
+            else:
+                return (torch.ones_like(out_val),)
+
+        with self.branch_nested_state():
+            from torch.nested._internal.nested_tensor import _tensor_symint_registry
+
+            # Validate that compilation does not modify eager state
+            registry_before = list(_tensor_symint_registry.items())
+            count_before = torch.nested._internal.nested_tensor._tensor_id_counter
+
+            guards_exported = []
+            guards_failed = []
+
+            def append_guard_export(guards):
+                for g in guards:
+                    if g.code_list is not None:
+                        guards_exported.append(g.code_list[0])
+
+            def append_guard_fail(guards):
+                guards_failed.extend(guards)
+
+            compiled = torch._dynamo.optimize(
+                nopython=True,
+                backend="aot_eager",
+                guard_export_fn=append_guard_export,
+                guard_fail_fn=append_guard_fail,
+            )(fn)
+            registry_after = list(_tensor_symint_registry.items())
+            count_after = torch.nested._internal.nested_tensor._tensor_id_counter
+            self.assertEqual(registry_before, registry_after)
+            self.assertEqual(count_before, count_after)
+
+            args = arg_fn()
+            compile_out = compiled(*args)
+            compile_grads = []
+            g_args = [arg for arg in args if arg.requires_grad]
+            if len(g_args) > 0:
+                compile_grad_outputs = _gen_grad_outputs(compile_out)
+                compile_grads = torch.autograd.grad(
+                    compile_out, inputs=g_args, grad_outputs=compile_grad_outputs
+                )
+
+        with self.branch_nested_state():
+            args = arg_fn()
+            ref_out = fn(*args)
+            ref_grads = []
+            g_args = [arg for arg in args if arg.requires_grad]
+            if len(g_args) > 0:
+                ref_grad_outputs = _gen_grad_outputs(ref_out)
+                ref_grads = torch.autograd.grad(
+                    ref_out, inputs=g_args, grad_outputs=ref_grad_outputs
+                )
+
+        # Validate correctness forward
+        if isinstance(compile_out, (list, tuple)):
+            # TODO: Fix assertEqual() to support NJTs so this isn't necessary
+            self.assertEqual(len(compile_out), len(ref_out))
+            for c, r in zip(compile_out, ref_out):
+                self.assertEqualIgnoringNestedInts(c, r)
+        else:
+            self.assertEqualIgnoringNestedInts(compile_out, ref_out)
+
+        # Validate correctness backward
+        for compile_grad, ref_grad in zip(compile_grads, ref_grads):
+            self.assertEqualIgnoringNestedInts(compile_grad, ref_grad)
+
+        return guards_exported, guards_failed
+
+    # Note: [What kind of guards are involved in nested tensor compilation]
+    #
+    # Until we implement UnionFind, dynamic shapes guards are not involved.
+    # we rely only on dynamo's tensor aliasing guards.
+    #
+    # This is possible because dynamo able to generate tensor aliasing guards
+    # not only for the outer tensor, but also for the inner tensor.
+    #
+    # The case where dynamic shapes guards would eventually come into play is
+    # when my inputs are (1) two non-aliased tensors, but (2) declared as
+    # equal using a "trust me assert equal" API.
+
+    # Note: [Compiling nested tensor global state]
+    #
+    # Today there are two pieces of global eager state that NJTs deals with:
+    # - tensor_id_counter: a global counter that assigns unique ids to tensors
+    # - tensor_symint_registry: maps tensor to nested int
+    #   - this is used in eager only (we should get rid of this because it is
+    #     not necessary to cache nested int in eager)
+    #   - during tracing, we DO need to cache nested int, but we do so on
+    #     the FakeTensor.
+    #
+    # Ideally we would like to satisfy the following:
+    # - (1) The eager state is not mutated during tracing
+    # - (2) Running the compiled function should mutate the eager state in the
+    #       same way that running the eager function would
+    #       (a) The global counter should be incremented
+    #       (b) The registry is updated in the same way
+    #
+    # Today we can satisfy (1) and (2a) but cannot satisfy (2b)
+    #
+    # Today, (1) is satisfied because we maintain a separate counter during
+    # tracing, and cache nested int on FakeTensor instead of relying on
+    # tensor_symint_registry.
+    #
+    # (2) is cannot be completely satisfied because we trace away the
+    # side-effectful operations (which we can fix this by wrapping the
+    # side-effectful operations in a custom op, and threading through effect
+    # tokens.) The current plan is to do that in the UnionFind impl.
+    #
+    # Interestingly, despite this, the state is mutated in a way that is somewhat
+    # close to what we want, e.g. if I construct a nested tensor using an
+    # offsets in the compiled region and return it, AOTAutograd runtime wrapper
+    # must rewrap the inner->inner graph outputs back into subclass. This
+    # triggers the eager logic to run, updating the counter and registry.
+    #
+    # Notably however, compile differs in two ways from eager:
+    # (1) The order in which the offsets are assigned ids is differnet
+    #     the registry would be set in the order the offsets are returned
+    #     which is not necessarily the same order as they were constructed.
+    # (2) If a NestedTensor is not returned, then the AOTAutograd wrapping
+    #     logic will not be triggered.
+    #
+    # I claim that correctness is not affected by these differences today.
+    # e.g. there is never the case where two distinct offsets silently share
+    # the same id.
+    #
+    # (1) is clearly not a problem, and (2) should only be a problem if
+    # the nested int is returned on its own, without the corresponding NJT
+    # being returned. This is not a problem in the current implementation
+    # because returning only a shape is not supported!
+
+    # Note: [Creating symbolic nested int]
+    #
+    # We must create a symbolic nested int when we construct a nested tensor
+    # from a tensor. There are two main cases:
+    #
+    # 1. The offsets has NOT been used to construct a NJT
+    #    - Create a new plain nested int with current val of fake nt id counter
+    #    - Increment the fake nt id counter
+    #    - Create a new symint with plain nested int as hint
+    # 2. The offsets HAS been used to construct a NJT
+    #    - Create a new symint with plain nested int as hint
+    #
+    # More details on case 2:
+    # - During fakification of the offsets, we check the eager registry, and
+    #   if the tensor HAS been used to construct a NJT,
+    #   we create a symint, with the existing nested int as hint, and cache
+    #   it on to the FakeTensor.
+    #
+    # [ Always use ephemeral source ]
+    #
+    # We create the new symint ALWAYS with ephemeral source whether that is
+    # in case (1) or (2) even though we could've had a proper source for case (2).
+    # Using a proper source would enable a few more (edge) cases, but since
+    # we plan to handle things more holistically in the future anyway, we don't
+    # bother doing so today.
+    #
+    # Using an ephemeral source has some consequences. But we are happy if
+    # - We do not silently miss recompiles, e.g. we guard when necessary.
+    #   We know that this is true, because dynamo guards alone are already
+    #   sufficient.
+    # - We are not producing errors for the cases we care about
+    #
+    # The main case we care about is when we guard that two shapes are equal.
+    # In this case, the replacements logic would simplify away the ephemeral
+    # symbol, and there is no error produced.
+    # The unsupported case is when we guard that two shapes are not equal, in
+    # which, we will try and fail to generate a guard.
+
+    #
+    # Case 1: in-graph construction where the offsets are passed as inputs
+    #
+    def test_in_graph_construction_from_input(self):
+        # The offsets is passed as an input
+        def fn(values, offsets):
+            return torch.nested.nested_tensor_from_jagged(values * 2, offsets) * 2
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
+        # Do not specialize on the offsets
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            different_offsets = torch.tensor([0, 1, 5, 10], dtype=torch.int64)
+            self._validate_compile(fn, arg_fn=lambda: (values, different_offsets))
+
+    def test_in_graph_construction_from_input_2(self):
+        # Construct two NJTs, both are passed as inputs
+        def fn(values, offsets1, offsets2):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets1)
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets2)
+            return nt2, nt1
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        offsets2 = torch.tensor([0, 1, 4, 10], dtype=torch.int64)
+        # 1. Offsets are different
+        guards_exported, guards_failed = self._validate_compile(
+            fn, arg_fn=lambda: (values, offsets, offsets2)
+        )
+        self.assertEqual(len(guards_failed), 0)
+        self.assertNotIn("L['offsets1'] is L['offsets2']", guards_exported)
+
+        # TODO
+        # 2. Offsets are the same
+        new_guards_exported, _ = self._validate_compile(
+            fn, arg_fn=lambda: (values, offsets, offsets)
+        )
+        self.assertTrue(any("Duplicate tensors found" in g for g in guards_failed))
+        self.assertIn("L['offsets1'] is L['offsets2']", new_guards_exported)
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            offsets3 = offsets.clone()
+            self._validate_compile(fn, arg_fn=lambda: (values, offsets3, offsets3))
+
+        # Do a binary op
+        def fn(values, offsets, offsets2):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets2)
+            return nt1 * nt2
+
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets, offsets))
+
+    def test_in_graph_construction_from_input_4(self):
+        # The offsets is taken from an NJT input
+        def fn(nt, other_values):
+            nt2 = torch.nested.nested_tensor_from_jagged(other_values, nt.offsets())
+            return nt + nt2
+
+        values = torch.randn(9, 5, requires_grad=True)
+        other_values = torch.randn(9, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 9], dtype=torch.int64)
+
+        def arg_fn(values=values, other_values=other_values, offsets=offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt, other_values
+
+        self._validate_compile(fn, arg_fn=arg_fn)
+
+        # Do not specialize on the offsets
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            different_offsets = offsets.clone()
+
+            def arg_fn(
+                values=values, other_values=other_values, offsets=different_offsets
+            ):
+                nt = torch.nested.nested_tensor_from_jagged(values, different_offsets)
+                return nt, other_values
+
+            self._validate_compile(fn, arg_fn=arg_fn)
+
+    def test_in_graph_construction_from_input_5(self):
+        # Construct from lengths instead of offsets
+        def fn(values, lengths):
+            nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
+            return nt.sin()
+
+        values = torch.randn(9, 5, requires_grad=True)
+        lengths = torch.tensor([2, 4, 3])
+        self._validate_compile(fn, arg_fn=lambda: (values, lengths))
+
+    #
+    # Case 2: in-graph construction where offsets are graph intermediates
+    #
+    def test_in_graph_construction_from_intermediate(self):
+        # offsets is an intermediate computed from lengths
+        def fn(values, lengths):
+            offsets = torch.cat([lengths.new_zeros(1), lengths.cumsum(0)])
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return (nt * nt2).sin()
+
+        values = torch.randn(9, 5, requires_grad=True)
+        lengths = torch.tensor([2, 4, 3])
+        self._validate_compile(fn, arg_fn=lambda: (values, lengths))
+
+        # Do not specialize on the lengths
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            different_lengths = lengths.clone()
+            self._validate_compile(fn, arg_fn=lambda: (values, different_lengths))
+
+    def test_in_graph_construction_from_intermediate_2(self):
+        def fn(values, offsets):
+            return torch.nested.nested_tensor_from_jagged(values * 2, offsets.clone())
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
+    def test_in_graph_construction_from_intermediate_3(self):
+        # Note that due to CSE, clone is not necessarily called twice!
+        def fn(values, offsets):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets.clone())
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets.clone())
+            return nt2, nt1
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
+    def test_in_graph_construction_from_intermediate_4(self):
+        # Shared intermediate (should be same as case #1)
+        def fn(values):
+            offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            values2 = torch.ones_like(values)
+            nt2 = torch.nested.nested_tensor_from_jagged(values2, offsets)
+            return nt * nt2
+
+        values = torch.randn(10, 5).requires_grad_(True)
+        self._validate_compile(fn, arg_fn=lambda: (values,))
+
+    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
+    @unittest.expectedFailure
+    def test_in_graph_construction_from_intermediate_5(self):
+        # non-shared intermediate
+        def fn(values):
+            offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            values2 = torch.ones_like(values)
+            nt2 = torch.nested.nested_tensor_from_jagged(values2, offsets.clone())
+            if nt2.shape[1] != nt.shape[1]:
+                return nt * 2
+            else:
+                return nt * 3
+
+        values = torch.randn(10, 5).requires_grad_(True)
+        self._validate_compile(fn, arg_fn=lambda: (values,))
+
+    #
+    # Case 3: in-graph construction where offsets are both direct graph inputs
+    #         and passed in as part of an NJT's offsets.
+    #
+    def test_in_graph_construction_mixed(self):
+        def fn(nt, values, offsets):
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt * nt2
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+
+        def arg_fn(values=values, offsets=offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt, values, offsets
+
+        self._validate_compile(fn, arg_fn)
+
+    # See Note: [Creating symbolic nested int]
+    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
+    @unittest.expectedFailure
+    def test_in_graph_construction_mixed_2(self):
+        def fn(nt, values, offsets, nt2):
+            # Intermediate offsets has ephemeral source
+            intermediate_nt = torch.nested.nested_tensor_from_jagged(
+                values, offsets.clone()
+            )
+            # This creates a dynamic shapes neq guard
+            if nt2.shape[1] != intermediate_nt.shape[1]:
+                # We should always go here.
+                nt = nt * 2
+            return nt
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        offsets2 = torch.tensor([0, 1, 4, 10], dtype=torch.int64)
+
+        def arg_fn(values=values, offsets=offsets, offsets2=offsets2):
+            # Values is shared, but it shouldn't matter
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets2)
+            return nt, values, offsets, nt2
+
+        self._validate_compile(fn, arg_fn)
+
+    def test_in_graph_construction_mixed_3(self):
+        # More involved mixed case
+        def fn(nt, values, offsets):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets)
+            return nt1 + nt2 + nt
+
+        values = torch.randn(9, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 9], dtype=torch.int64)
+
+        def arg_fn(values=values, offsets=offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt, values, offsets
+
+        self._validate_compile(fn, arg_fn)
+
+    def test_return_shape(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+
+        def fn(nt):
+            return (nt * 2).shape
+
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled(nt)
+
+    def test_inference_tensor(self):
+        with torch.inference_mode():
+            nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+
+        def fn(n):
+            return n * 2
+
+        torch.compile(fn, backend="eager")(nt)
     # TODO: also implement min_seqlen
     def test_max_seqlen(self):
         a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64)
@@ -1503,6 +2315,25 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
         torch.compile(fn, fullgraph=True, backend="aot_eager")(nt)
 
+    # The test here: nn.Parameters that are secretly subclasses
+    # have a metaclass that overrides __isinstance__,
+    # that dynamo needs to respect when it inlines the if statement.
+    def test_param_subclass_isinstance_input(self):
+        x_inner = torch.randn(16, 16, requires_grad=True)
+        x = torch.nn.Parameter(TwoTensor(x_inner, x_inner))
+        m = torch.nn.Linear(16, 16)
+        m.weight = x
+
+        def fn():
+            if isinstance(m.weight, torch.nn.Parameter):
+                return m.weight + 1
+            else:
+                return m.weight + 2
+
+        out_ref = fn()
+        out_test = torch.compile(fn, backend="aot_eager")()
+        self.assertEqual(out_ref, out_test)
+
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()
 
@@ -1531,17 +2362,29 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
             # varies based on the type of view
             guard_str = "\n".join(guards)
-            if (
-                isinstance(nt_view._base, NestedTensor)
-                or nt_view_name == "subclass_dense"
-            ):
-                self.assertExpectedInline(guard_str, """Eq(s2 - 1, s0)""")
-            elif nt_view_name.startswith("base_is_nt_False_"):
-                # TODO: this is a "do I need to resize storage" guard,
-                # probably don't actually want to see this
-                self.assertExpectedInline(guard_str, """8*s1*s4 <= 8*s0*s1""")
+            if nt_view_name == "subclass_dense":
+                self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
+            elif nt_view_name == "dense_subclass_dense_subclass":
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s5 - 1, s2)
+Eq(s12 - 1, s7)
+Eq(s11, s9)""",
+                )
+            elif nt_view_name.startswith("base_is_nt_True"):
+                self.assertExpectedInline(
+                    guard_str,
+                    """Eq(s3 - 1, s0)""",
+                )
             else:
-                self.assertExpectedInline(guard_str, """""")
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s4 - 1, s1)
+Eq(s13 - 1, s8)
+Eq(s12, s10)""",
+                )
             return gm
 
         torch._dynamo.reset()

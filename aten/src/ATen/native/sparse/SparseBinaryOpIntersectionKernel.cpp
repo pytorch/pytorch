@@ -119,7 +119,7 @@ struct CPUValueSelectionIntersectionKernel {
   }
 };
 
-using OptTensor = c10::optional<Tensor>;
+using OptTensor = std::optional<Tensor>;
 
 void mul_sparse_sparse_out_cpu_kernel(
     Tensor& result,
@@ -135,7 +135,7 @@ void sparse_mask_intersection_out_cpu_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y,
-    const OptTensor& x_hash_opt = c10::nullopt) {
+    const OptTensor& x_hash_opt = std::nullopt) {
   using CPUValueRhsProjKernel = CPUValueSelectionIntersectionKernel<RhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, CPUValueRhsProjKernel>(
       result, x, y, x_hash_opt
@@ -150,7 +150,7 @@ void sparse_mask_projection_out_cpu_kernel(
     bool accumulate_matches) {
   using CPUValueLhsProjKernel = CPUValueSelectionIntersectionKernel<LhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, CPUValueLhsProjKernel>(
-      result, x, y, x_hash_opt, c10::nullopt, accumulate_matches
+      result, x, y, x_hash_opt, std::nullopt, accumulate_matches
   );
 }
 

@@ -47,7 +47,7 @@ mobile::Module parse_mobile_module(
   return parse_and_initialize_mobile_module(
       static_cast<char*>(data),
       size,
-      /*device=*/c10::nullopt,
+      /*device=*/std::nullopt,
       /*extra_files=*/nullptr,
       should_copy_tensor_memory);
 }
@@ -239,13 +239,13 @@ TEST(FlatbufferTest, ExtraFiles) {
   module->_save_for_mobile(ss, extra_files, true, /*use_flatbuffer=*/true);
 
   loaded_extra_files["metadata.json"] = "";
-  auto mobile_module = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+  auto mobile_module = _load_for_mobile(ss, std::nullopt, loaded_extra_files);
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
 
   // load it twice using the same stream
-  auto mobile_module2 = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+  auto mobile_module2 = _load_for_mobile(ss, std::nullopt, loaded_extra_files);
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
@@ -256,7 +256,7 @@ TEST(FlatbufferTest, ExtraFiles) {
       loaded_extra_files_without_explicit_entries;
   auto mobile_module3 = _load_for_mobile(
       ss,
-      c10::nullopt,
+      std::nullopt,
       loaded_extra_files_without_explicit_entries,
       MobileModuleLoadOptions::PARSE_ALL_EXTRA_FILE_MAPS);
 
@@ -761,11 +761,11 @@ TEST(FlatbufferTest, FindWrongMethodName) {
   )");
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(m, options);
-  ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
+  ASSERT_TRUE(bc.find_method("forward") == std::nullopt);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
-  ASSERT_TRUE(bc2.find_method("forward") == c10::nullopt);
+  ASSERT_TRUE(bc2.find_method("forward") == std::nullopt);
 }
 
 TEST(FlatbufferTest, FindAndRunMethod) {
@@ -788,7 +788,7 @@ TEST(FlatbufferTest, FindAndRunMethod) {
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
     auto method = bc.find_method("add_it");
-    AT_ASSERT(method != c10::nullopt);
+    AT_ASSERT(method != std::nullopt);
     res = (*method)(std::move(bcinputs));
   }
 
@@ -802,7 +802,7 @@ TEST(FlatbufferTest, FindAndRunMethod) {
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
     auto method = bc2.find_method("add_it");
-    AT_ASSERT(method != c10::nullopt);
+    AT_ASSERT(method != std::nullopt);
     res = (*method)(std::move(bcinputs));
   }
 

@@ -1,4 +1,5 @@
 #include <torch/csrc/dynamo/init.h>
+#include <torch/csrc/dynamo/utils.h>
 
 #include <pybind11/stl_bind.h>
 #include <torch/csrc/Exceptions.h>
@@ -44,6 +45,11 @@ void initDynamoBindings(PyObject* torch) {
     throw python_error();
   }
 
+  PyObject* utils = torch_c_dynamo_utils_init();
+  if (utils == nullptr || PyModule_AddObject(dynamo, "utils", utils) != 0) {
+    throw python_error();
+  }
+
   PyObject* guards = torch_c_dynamo_guards_init();
   if (guards == nullptr || PyModule_AddObject(dynamo, "guards", guards) != 0) {
     throw python_error();
@@ -60,6 +66,7 @@ void initDynamoBindings(PyObject* torch) {
   py::class_<CacheEntry>(m, "_CacheEntry")
       .def_readonly("check_fn", &CacheEntry::check_fn)
       .def_readonly("code", &CacheEntry::code)
+      .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_property_readonly("next", &CacheEntry::next);
 
   py::class_<ExtraState>(m, "_ExtraState")

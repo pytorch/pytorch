@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 from abc import ABC, abstractmethod
 from typing import Any, List, Tuple
@@ -16,6 +17,7 @@ from torch._C._functorch import (
     TransformType,
 )
 from torch.autograd.forward_ad import _set_fwd_grad_enabled
+
 
 """
 This file contains the functorch integration with PyDispatcher.

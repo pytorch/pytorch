@@ -3,16 +3,17 @@
 # This backend is maintained by ONNX team. To direct issues
 # to the right people, please tag related GitHub issues with `module: onnx`.
 #
-# Maintainers' Github IDs: wschin, thiagocrepaldi, BowenBao, abock
+# Maintainers' Github IDs: wschin, xadupre
 from torch.onnx._internal.onnxruntime import (
     is_onnxrt_backend_supported,
     torch_compile_backend,
 )
+
 from .registry import register_backend
 
 
 def has_onnxruntime():
-    # FIXME(abock): update test/dynamo/test_backends.py to call is_onnxrt_backend_supported()
+    # FIXME: update test/dynamo/test_backends.py to call is_onnxrt_backend_supported()
     return is_onnxrt_backend_supported()
 
 

@@ -25,7 +25,8 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       int rank,
       c10d::OpType opType,
       uint64_t seq)
-      : WorkNCCL(device, rank, opType, seq), simulateError_(simulate_error) {}
+      : WorkNCCL("0", "default_pg", device, rank, opType, seq),
+        simulateError_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors() override {
     if (simulateError_) {
@@ -69,7 +70,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
-        device, simulateError_, rank, opType, seq_);
+        device, simulateError_, rank, opType, seqCollective_);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -96,7 +97,7 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       int rank,
       c10d::OpType opType,
       uint64_t seq)
-      : WorkNCCL(device, rank, opType, seq),
+      : WorkNCCL("0", "default_pg", device, rank, opType, seq),
         setTimedoutError_(set_timedout_error) {}
 
  private:
@@ -131,7 +132,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
-        device, setTimedoutError_, rank, opType, seq_);
+        device, setTimedoutError_, rank, opType, seqCollective_);
   }
 
   void setTimedoutError() {
@@ -179,7 +180,7 @@ class ProcessGroupNCCLNoHeartbeatCaught
       : ProcessGroupNCCLTimedOutErrors(store, rank, size, opts),
         hasMonitorThreadCaughtError_(false) {}
 
-  std::mutex& getWatchdogMutex() {
+  std::timed_mutex& getWatchdogMutex() {
     return workMetaListMutex_;
   }
 
@@ -389,6 +390,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
       setenv("TORCH_NCCL_DEBUG_INFO_TEMP_FILE", tempFilename.c_str(), 1) == 0);
   // Enable nccl flight recorder.
   ASSERT_TRUE(setenv("TORCH_NCCL_TRACE_BUFFER_SIZE", "10", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_DUMP_ON_TIMEOUT[0].c_str(), "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   // Set a long watchdog timeout, so that we have enough time to lock the
   // watchdog and let the heartbeat monitor thread to kick in.
@@ -411,7 +413,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   work = pg.allreduce(tensors_);
   {
     // Now run all reduce with errors.
-    std::lock_guard<std::mutex> lock(pg.getWatchdogMutex());
+    std::lock_guard<std::timed_mutex> lock(pg.getWatchdogMutex());
     LOG(INFO) << "Lock watchdog thread.";
     // Wait long enough before monitor thread throws exceptions.
     std::this_thread::sleep_for(

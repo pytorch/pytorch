@@ -3,14 +3,10 @@
 
 #include <ATen/Tensor.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 Tensor copy_to_host(const Tensor& input);
 
-}
-} // namespace native
-} // namespace at
+} // namespace at::native::metal
 
 #endif

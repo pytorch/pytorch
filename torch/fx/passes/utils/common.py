@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Dict, Tuple
 
 from torch.fx._compatibility import compatibility

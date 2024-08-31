@@ -31,6 +31,8 @@ static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
 // for testing purposes.
 static std::vector<std::string> TEST_INTRA_NODE_COMM = {"TEST_INTRA_NODE_COMM"};
 
+static int intraNodeCommIdx = 0;
+
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA Functions
 ////////////////////////////////////////////////////////////////////////////////
@@ -207,35 +209,19 @@ IntraNodeComm::IntraNodeComm(
     c10::intrusive_ptr<c10d::Store> store,
     size_t rank,
     size_t worldSize,
-    c10::optional<size_t> bufferSize)
+    std::optional<size_t> bufferSize)
     : store_(std::move(store)),
       rank_(rank),
       worldSize_(worldSize),
-      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize) {
-  rendezvous();
-}
+      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize),
+      barrierReady_(at::cuda::CUDAEvent()) {}
 
 IntraNodeComm::~IntraNodeComm() {
   if (!isInitialized_) {
     return;
   }
-  // Intentionally releasing resources without synchronizing devices. The
-  // teardown logic is safe for propoerly sync'd user program. We don't want
-  // improperly sync'd user program to hang here.
-  for (size_t r = 0; r < worldSize_; ++r) {
-    if (r == rank_) {
-      continue;
-    }
-    AT_CUDA_CHECK(cudaIpcCloseMemHandle(p2pStates_[r]));
-    AT_CUDA_CHECK(cudaIpcCloseMemHandle(buffers_[r]));
-  }
-  AT_CUDA_CHECK(cudaFree(p2pStates_[rank_]));
-  AT_CUDA_CHECK(cudaFree(buffers_[rank_]));
-  if (topoInfo_ != nullptr) {
-    AT_CUDA_CHECK(cudaFree(topoInfo_));
-  }
-  AT_CUDA_CHECK(cudaFree(p2pStatesDev_));
-  AT_CUDA_CHECK(cudaFree(buffersDev_));
+  auto allocator = get_allocator(c10::DeviceType::CUDA);
+  allocator->free(symmetricMemoryPtr_);
 }
 
 bool IntraNodeComm::isEnabled() {
@@ -289,13 +275,13 @@ bool IntraNodeComm::rendezvous() {
     return true;
   }
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  if (!isIntraNodeCommSupported() || !isEnabled() || worldSize_ < 2 ||
+  if (!isIntraNodeCommSupported() || worldSize_ < 2 ||
       worldSize_ > kMaxDevices) {
     return false;
   }
 
-  auto deviceIdx = at::cuda::current_device();
-  c10::cuda::CUDAGuard guard(deviceIdx);
+  deviceIdx_ = at::cuda::current_device();
+  c10::cuda::CUDAGuard guard(deviceIdx_);
 
   // First hand shake: exchange hostname and device bus ID
   struct DevInfo {
@@ -306,7 +292,7 @@ bool IntraNodeComm::rendezvous() {
   DevInfo devInfo{};
   gethostname(devInfo.hostname, sizeof(devInfo.hostname));
   cudaDeviceProp prop{};
-  AT_CUDA_CHECK(cudaGetDeviceProperties(&prop, deviceIdx));
+  AT_CUDA_CHECK(cudaGetDeviceProperties(&prop, deviceIdx_));
   snprintf(
       devInfo.busId,
       sizeof(devInfo.busId),
@@ -345,83 +331,19 @@ bool IntraNodeComm::rendezvous() {
   // Detect topology
   Topology topology = detectTopology(nvlMesh, worldSize_);
 
-  // Initialize p2p state
-  auto p2pState = initP2pState();
-
-  // Allocate buffer
-  void* buffer = nullptr;
-  AT_CUDA_CHECK(cudaMalloc(&buffer, bufferSize_));
-
-  // Second handshake: exchange topology and CUDA IPC handles
-  struct IpcInfo {
-    NvlMesh nvlMesh;
-    Topology topology;
-    cudaIpcMemHandle_t p2pStateHandle, bufferHandle;
-  };
-
-  // Make p2p state and buffer available for IPC
-  cudaIpcMemHandle_t p2pStateHandle, bufferHandle;
-  AT_CUDA_CHECK(cudaIpcGetMemHandle(&p2pStateHandle, p2pState));
-  AT_CUDA_CHECK(cudaIpcGetMemHandle(&bufferHandle, buffer));
-
-  IpcInfo ipcInfo{
-      .nvlMesh = nvlMesh,
-      .topology = topology,
-      .p2pStateHandle = p2pStateHandle,
-      .bufferHandle = bufferHandle};
-
-  auto peerIpcInfos =
-      storeAllGather(store_, "handshake-1", rank_, worldSize_, ipcInfo);
-
-  for (const auto& info : peerIpcInfos) {
-    if (!isSame(info.nvlMesh, peerIpcInfos.front().nvlMesh) ||
-        info.topology != peerIpcInfos.front().topology) {
-      LOG(WARNING) << "Aborting IntraNodeComm::rendezvous because some "
-                      "participants are observing different topologies ("
-                   << int(info.topology) << " and " << int(topology) << ")";
-      AT_CUDA_CHECK(cudaFree(p2pState));
-      AT_CUDA_CHECK(cudaFree(buffer));
-      return false;
-    }
-  }
-
-  std::array<void*, kMaxDevices> p2pStates = {}, buffers = {};
-  for (size_t r = 0; r < peerIpcInfos.size(); ++r) {
-    if (r == rank_) {
-      p2pStates[r] = p2pState;
-      buffers[r] = buffer;
-    } else {
-      AT_CUDA_CHECK(cudaIpcOpenMemHandle(
-          &p2pStates[r],
-          peerIpcInfos[r].p2pStateHandle,
-          cudaIpcMemLazyEnablePeerAccess));
-      AT_CUDA_CHECK(cudaIpcOpenMemHandle(
-          &buffers[r],
-          peerIpcInfos[r].bufferHandle,
-          cudaIpcMemLazyEnablePeerAccess));
-    }
-  }
-  void* p2pStatesDev = nullptr;
-  AT_CUDA_CHECK(cudaMalloc(&p2pStatesDev, sizeof(p2pStates)));
-  AT_CUDA_CHECK(cudaMemcpy(
-      p2pStatesDev,
-      p2pStates.data(),
-      sizeof(p2pStates),
-      cudaMemcpyHostToDevice));
-
-  void* buffersDev = nullptr;
-  AT_CUDA_CHECK(cudaMalloc(&buffersDev, sizeof(buffers)));
-  AT_CUDA_CHECK(cudaMemcpy(
-      buffersDev, buffers.data(), sizeof(buffers), cudaMemcpyHostToDevice));
+  auto groupName = "IntraNodeComm" + std::to_string(intraNodeCommIdx++);
+  set_group_info(groupName, rank_, worldSize_, store_);
+  auto allocator = get_allocator(c10::DeviceType::CUDA);
+  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, groupName);
+  symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_);
+  TORCH_CHECK(symmetricMemory_->get_signal_pad_size() >= kP2pStateSize);
 
   void* topoInfo = initTopoInfo(topology, nvlMesh, rank_);
 
   isInitialized_ = true;
   topology_ = topology;
-  std::copy(p2pStates.begin(), p2pStates.end(), p2pStates_.begin());
-  std::copy(buffers.begin(), buffers.end(), buffers_.begin());
-  p2pStatesDev_ = p2pStatesDev;
-  buffersDev_ = buffersDev;
+  p2pStatesDev_ = symmetricMemory_->get_signal_pad_ptrs_dev();
+  buffersDev_ = symmetricMemory_->get_buffer_ptrs_dev();
   topoInfo_ = topoInfo;
   return true;
 #endif

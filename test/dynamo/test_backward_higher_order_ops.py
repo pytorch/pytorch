@@ -4,7 +4,6 @@
 import functools
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
@@ -129,13 +128,13 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_ : list):
         l_inputs_ = L_inputs_
 
-        getitem = l_inputs_[0];  l_inputs_ = None
+        getitem: "f32[s0]" = l_inputs_[0];  l_inputs_ = None
 
-        new_grad = torch.clone(getitem)
+        new_grad: "f32[s0]" = torch.clone(getitem)
 
-        result = getitem * getitem;  getitem = None
+        result: "f32[s0]" = getitem * getitem;  getitem = None
 
-        new_grad_1 = torch.clone(result);  result = None
+        new_grad_1: "f32[s0]" = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
 """,
             )
@@ -169,7 +168,7 @@ class GraphModule(torch.nn.Module):
             y = torch.tensor([0.5, 0.5], requires_grad=True)
 
             class MyObj:
-                def __init__(self):
+                def __init__(self) -> None:
                     self.counter = 0
 
             obj = MyObj()
@@ -192,17 +191,20 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list):
+    def forward(self, L_inputs_ : list, L_hooks_0_keywords_fn_keywords_obj_counter: "Sym(s1)"):
         l_inputs_ = L_inputs_
+        l_hooks_0_keywords_fn_keywords_obj_counter = L_hooks_0_keywords_fn_keywords_obj_counter
 
-        getitem = l_inputs_[0];  l_inputs_ = None
+        getitem: "f32[s0]" = l_inputs_[0];  l_inputs_ = None
 
-        new_grad = torch.clone(getitem)
+        new_grad: "f32[s0]" = torch.clone(getitem)
 
-        result = getitem * getitem;  getitem = None
+        add: "Sym(s1 + 1)" = l_hooks_0_keywords_fn_keywords_obj_counter + 1;  l_hooks_0_keywords_fn_keywords_obj_counter = None
 
-        new_grad_1 = torch.clone(result);  result = None
-        return (new_grad, new_grad_1)
+        result: "f32[s0]" = getitem * getitem;  getitem = None
+
+        new_grad_1: "f32[s0]" = torch.clone(result);  result = None
+        return (new_grad, new_grad_1, add)
 """,
             )
 

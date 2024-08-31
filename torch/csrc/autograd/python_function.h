@@ -10,7 +10,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <c10/core/DeviceGuard.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <memory>
 #include <optional>
@@ -35,7 +35,7 @@ struct PyNode : public Node {
       const std::vector<bool>& is_variable_input);
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list compiled_apply(
+  variable_list defer_to_dynamo(
       variable_list&& inputs,
       std::optional<PyObject*> compiler);
 

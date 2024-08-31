@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 #include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/cpu/BinaryOps.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
@@ -160,9 +161,9 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   Tensor qy = at::native::empty_affine_quantized(
       qa_contig.sizes(),
       kQUInt8,
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       scale,
       zero_point,
       qa.suggest_memory_format());
@@ -308,9 +309,9 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   Tensor qy = at::native::empty_affine_quantized(
       at::infer_size_dimvector(qa_contig.sizes(), qb_contig.sizes()),
       qa.scalar_type(),
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       scale,
       zero_point,
       qa_mem_format);
@@ -418,7 +419,7 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
          .memory_format(qa.suggest_memory_format()),
       scale,
       zero_point,
-      c10::nullopt);
+      std::nullopt);
   return _add_out<ReLUFused>(qc, qa, qb);
 }
 
@@ -500,7 +501,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 
 }  // namespace
 
-static Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
+Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
   return qadd<false>(std::move(qa), std::move(qb), scale, zero_point);
 }
 

@@ -6,4 +6,4 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Testing pytorch docs"
 
 cd docs
-make doctest
+TERM=vt100 make doctest

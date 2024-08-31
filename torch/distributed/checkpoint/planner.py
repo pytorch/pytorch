@@ -7,12 +7,12 @@ from functools import reduce
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
-
-from .metadata import (
+from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,
     MetadataIndex,
     STATE_DICT_TYPE,
+    StorageMeta,
     TensorProperties,
 )
 
@@ -142,9 +142,14 @@ class SavePlanner(abc.ABC):
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultSavePlanner):
-    >>>     def set_up_planner(self, state_dict, is_coordinator):
+    >>>     def set_up_planner(
+    >>>         self,
+    >>>         state_dict: STATE_DICT_TYPE,
+    >>>         storage_meta: Optional[StorageMeta],
+    >>>         is_coordinator: bool,
+    >>>     ) -> None:
     >>>         # prefix all keys with `foo_``
-    >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, storage_meta, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
 
@@ -164,18 +169,20 @@ class SavePlanner(abc.ABC):
     Using the global planning step to make central decisions that can't be made individually by each rank
 
     >>> # xdoctest: +SKIP("undefined vars")
-    >>> from itertools import islice
+    >>> from itertools import zip_longest
     >>> from dataclasses import replace
     >>> class DDPLoadBalancingPlanner(DefaultSavePlanner):
     >>>     # This uses the default local plan behavior of having all non-sharded writes in rank 0
     >>>     # This sample doesn't handle ShardedTensors
     >>>     def create_global_plan(self, all_plans):
-    >>>         def chunk(it, size):
-    >>>             it = iter(it)
-    >>>         return list(iter(lambda: tuple(islice(it, size)), ()))
+    >>>         iters = [iter(all_plans[0].items)] * len(all_plans)
+    >>>         items_per_rank = [
+    >>>             [item for item in items if item is not None]
+    >>>             for items in zip(*zip_longest(*iters), strict=True)
+    >>>         ]
     >>>         all_plans = [
-    >>>             replace(plan, items=items) for plan, items in
-    >>>                 zip(all_plans, chunk(all_plans[0].items, len(all_plans)))
+    >>>             replace(plan, items=items)
+    >>>             for plan, items in zip(all_plans, items_per_rank, strict=True)
     >>>         ]
     >>>         return super().create_global_plan(all_plans)
 
@@ -197,7 +204,12 @@ class SavePlanner(abc.ABC):
     """
 
     @abc.abstractmethod
-    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        storage_meta: Optional[StorageMeta] = None,
+        is_coordinator: bool = False,
+    ) -> None:
         """
         Initialize this planner to save ``state_dict``.
 
@@ -205,7 +217,6 @@ class SavePlanner(abc.ABC):
 
         This is called on all ranks.
         """
-        pass
 
     @abc.abstractmethod
     def create_local_plan(self) -> SavePlan:
@@ -217,7 +228,6 @@ class SavePlanner(abc.ABC):
 
         This is called on all ranks.
         """
-        pass
 
     @abc.abstractmethod
     def create_global_plan(
@@ -228,7 +238,6 @@ class SavePlanner(abc.ABC):
 
         This is called on the coordinator rank only.
         """
-        pass
 
     @abc.abstractmethod
     def finish_plan(self, new_plan: SavePlan) -> SavePlan:
@@ -237,7 +246,6 @@ class SavePlanner(abc.ABC):
 
         This is called on all ranks.
         """
-        pass
 
     @abc.abstractmethod
     def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
@@ -258,7 +266,6 @@ class SavePlanner(abc.ABC):
         When returning tensors, they can be on any device or format, they can be views too.
         It's the storage layer responsibility to figure out how to save them.
         """
-        pass
 
 
 class LoadPlanner:
@@ -299,7 +306,12 @@ class LoadPlanner:
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultLoadPlanner):
-    >>>     def set_up_planner(self, state_dict, metadata, is_coordinator):
+    >>>     def set_up_planner(
+    >>>         self,
+    >>>         state_dict: STATE_DICT_TYPE,
+    >>>         metadata: Metadata,
+    >>>         is_coordinator: bool,
+    >>>     ) -> None:
     >>>         self.original_state_dict = state_dict
     >>>         state_dict = {"foo_" + k: v for k, v in state_dict.items()}
     >>>
@@ -315,7 +327,7 @@ class LoadPlanner:
     >>>
     >>>     def load_bytes(self, read_item, value):
     >>>         # Remove the "foo_" prefix
-    >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value)
+    >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value, weights_only=False)
 
 
     Modifying resolve_tensor and commit_tensor to handle load time transformation.
@@ -334,15 +346,14 @@ class LoadPlanner:
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         """
         Initialize this instance to load data into ``state_dict``.
 
         . N.B. This is called on every rank.
         """
-        pass
 
     @abc.abstractmethod
     def create_local_plan(self) -> LoadPlan:
@@ -351,7 +362,6 @@ class LoadPlanner:
 
         . N.B. This is called on every rank.
         """
-        pass
 
     @abc.abstractmethod
     def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
@@ -360,12 +370,10 @@ class LoadPlanner:
 
         . N.B. This is called on the coordinator rank only
         """
-        pass
 
     @abc.abstractmethod
     def finish_plan(self, central_plan: LoadPlan) -> LoadPlan:
         """Accept the plan from coordinator and return final LoadPlan."""
-        pass
 
     @abc.abstractmethod
     def load_bytes(self, read_item: ReadItem, value: io.BytesIO) -> None:
@@ -377,7 +385,6 @@ class LoadPlanner:
         The contents of ``value`` are defined by the SavePlanner used to produce
         the checkpoint being loaded.
         """
-        pass
 
     def resolve_bytes(self, read_item: ReadItem) -> io.BytesIO:
         """
@@ -396,7 +403,6 @@ class LoadPlanner:
         If, for any reason, that's not possible, the planner can use the ``commit_tensor`` method to copy the data
         back to the one in state_dict.
         """
-        pass
 
     @abc.abstractmethod
     def commit_tensor(self, read_item: ReadItem, tensor: torch.Tensor) -> None:
@@ -409,4 +415,3 @@ class LoadPlanner:
 
         The contents of tensor will follow its device synchronization model.
         """
-        pass

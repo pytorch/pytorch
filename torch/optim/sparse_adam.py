@@ -1,14 +1,27 @@
+# mypy: allow-untyped-defs
+from typing import List, Tuple, Union
+
 import torch
+from torch import Tensor
+
 from . import _functional as F
-from .optimizer import _maximize_doc, Optimizer
+from .optimizer import _maximize_doc, Optimizer, ParamsT
+
 
 __all__ = ["SparseAdam"]
 
 
 class SparseAdam(Optimizer):
     def __init__(
-        self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, maximize: bool = False
+        self,
+        params: ParamsT,
+        lr: Union[float, Tensor] = 1e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        maximize: bool = False,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 < lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < eps:
@@ -56,13 +69,11 @@ class SparseAdam(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_avg_sqs = []
-            state_steps = []
-            eps = group["eps"]
-            lr = group["lr"]
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_avg_sqs: List[Tensor] = []
+            state_steps: List[int] = []
             beta1, beta2 = group["betas"]
             maximize = group.get("maximize", False)
 
@@ -103,10 +114,10 @@ class SparseAdam(Optimizer):
                 exp_avgs,
                 exp_avg_sqs,
                 state_steps,
+                eps=group["eps"],
                 beta1=beta1,
                 beta2=beta2,
                 lr=group["lr"],
-                eps=group["eps"],
                 maximize=maximize,
             )
 
@@ -161,7 +172,7 @@ SparseAdam.__doc__ = rf"""SparseAdam implements a masked version of the Adam alg
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
+        lr (float, Tensor, optional): learning rate (default: 1e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve

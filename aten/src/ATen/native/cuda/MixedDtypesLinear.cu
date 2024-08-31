@@ -196,8 +196,8 @@ mixed_dtypes_linear_dispatch_bias_activation(
 Tensor
 _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
                      const Tensor& scale,
-                     const c10::optional<Tensor>& bias_opt,
-                     const c10::optional<c10::string_view> activation_opt) {
+                     const std::optional<Tensor>& bias_opt,
+                     const std::optional<c10::string_view> activation_opt) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
   AT_ERROR("_mixed_dtypes_linear: not compiled for this platform");
   return Tensor{};

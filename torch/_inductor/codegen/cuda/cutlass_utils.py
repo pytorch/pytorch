@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import os
 import sys
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional
@@ -10,11 +10,12 @@ from typing import Any, List, Optional
 import sympy
 
 import torch
-from ...config import cuda as inductor_cuda_config
-from ...ir import Layout
 
+from ... import config
+from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from .cuda_env import get_cuda_arch, get_cuda_version
+
 
 log = logging.getLogger(__name__)
 
@@ -48,12 +49,15 @@ def _gen_cutlass_file(
 
 @functools.lru_cache(None)
 def try_import_cutlass() -> bool:
+    if config.is_fbcode():
+        return True
+
     # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
     cutlass_py_full_path = os.path.abspath(
-        os.path.join(inductor_cuda_config.cutlass_dir, "python/cutlass_library")
+        os.path.join(config.cuda.cutlass_dir, "python/cutlass_library")
     )
     tmp_cutlass_py_full_path = os.path.abspath(
         os.path.join(cache_dir(), "torch_cutlass_library")
@@ -153,7 +157,7 @@ def _gen_ops_cached(arch, version) -> List[Any]:
             arch,
             version,
         )
-        return list()
+        return []
     arch = _normalize_cuda_arch(arch)
     args = CUTLASSArgs(architectures=arch, cuda_version=version)
     manifest = cutlass_manifest.Manifest(args)
@@ -293,12 +297,29 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     def is_static_int(number):
         return isinstance(number, (int, sympy.Integer))
 
-    if is_static_int(size[-1]) and is_static_int(offset):
+    try:
+        contiguous_dim = inductor_layout.stride.index(1)
+    except ValueError:
+        # No dim with stride 1 found, return 1
+        return 1
+    if (
+        is_static_int(size[contiguous_dim])
+        and is_static_int(offset)
+        and all(is_static_int(s) for s in inductor_layout.stride)
+    ):
         alignments = get_alignments(dtype)
         for alignment in alignments:
-            if int(size[-1]) % alignment == 0 and int(offset) % alignment == 0:
+            if (
+                int(size[contiguous_dim]) % alignment != 0
+                or int(offset) % alignment != 0
+            ):
+                continue
+            if all(
+                (dim == contiguous_dim)
+                or (inductor_layout.stride[dim] % alignment == 0)
+                for dim in range(len(size))
+            ):
                 return alignment
-
     return 1
 
 

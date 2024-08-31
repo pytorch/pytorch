@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This file establishes the public comptime interface to Dynamo.
 # This allows Dynamo users to execute arbitrary Python code while
 # Dynamo is symbolically evaluating their original programs.
@@ -7,6 +8,7 @@
 
 import builtins
 import dis
+import time
 import traceback
 from typing import Optional, Union
 
@@ -14,7 +16,9 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .exc import unimplemented
+from .variables import NewCellVariable
 from .variables.constant import ConstantVariable
+from .variables.misc import ClosureVariable
 from .variables.tensor import SymNodeVariable
 
 
@@ -29,7 +33,7 @@ class ComptimeVar:
     actual data in the Tensor is.)
     """
 
-    def __init__(self, v):
+    def __init__(self, v) -> None:
         self.__variable = v
 
     def as_proxy(self):
@@ -125,9 +129,8 @@ class ComptimeVar:
         """
         return self.__variable
 
-    def __repr__(self):
-        # TODO: The default repr is pretty bad, do better
-        return repr(self.__variable)
+    def __repr__(self) -> str:
+        return self.__variable.debug_repr()
 
     # TODO: API for adding a custom guard
 
@@ -139,7 +142,7 @@ class ComptimeContext:
     file a feature request at https://github.com/pytorch/pytorch/
     """
 
-    def __init__(self, tx):
+    def __init__(self, tx) -> None:
         self.__tx = tx
 
     def get_local(self, name: str, *, stacklevel=0) -> ComptimeVar:
@@ -147,7 +150,20 @@ class ComptimeContext:
         Retrieve the compile-time known information about a local.
         """
         tx = self.__get_tx(stacklevel)
-        return ComptimeVar(tx.symbolic_locals[name])
+
+        # This is analogous to LOAD_DEREF
+        if hasattr(tx, "closure_cells") and name in tx.closure_cells:
+            cell = tx.closure_cells[name]
+            if isinstance(cell, ClosureVariable):
+                return ComptimeVar(tx.output.root_tx.symbolic_locals[cell.name])
+            else:
+                return ComptimeVar(tx.output.side_effects.load_cell(cell))
+        else:
+            r = tx.symbolic_locals[name]
+            if isinstance(r, NewCellVariable):
+                return ComptimeVar(tx.output.side_effects.load_cell(r))
+            else:
+                return ComptimeVar(r)
 
     def graph_break(self, msg="ComptimeContext.graph_break"):
         """
@@ -188,6 +204,9 @@ class ComptimeContext:
             tx = tx.parent
         return tx
 
+    def print(self, val, *, file=None):
+        print(repr(val), file=file)
+
     def print_disas(self, *, file=None, stacklevel=0):
         """
         Print the current series of opcodes being executed (not including
@@ -214,10 +233,9 @@ class ComptimeContext:
 
         NB: Stack grows downwards in our print
         """
-        # TODO: improve printing
         tx = self.__get_tx(stacklevel)
         for s in tx.stack:
-            print(f"- {s}", file=file)
+            print(f"- {s.debug_repr()}", file=file)
 
     def print_locals(self, *, file=None, stacklevel=0):
         """
@@ -225,10 +243,9 @@ class ComptimeContext:
         By default this view is very limited; you can get more information
         about any individual local using get_local().
         """
-        # TODO: improve by improving the VariableTracker printing
         tx = self.__get_tx(stacklevel)
         for k, v in tx.symbolic_locals.items():
-            print(f"{k} = {v}", file=file)
+            print(f"{k} = {v.debug_repr()}", file=file)
 
     def print_bt(self, *, file=None, stacklevel=0):
         """
@@ -272,18 +289,25 @@ class ComptimeContext:
         """
         return self.__tx
 
+    def sleep(self, sec):
+        time.sleep(sec)
+
 
 class _Comptime:
     @staticmethod
-    def __call__(fn):
-        """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
-        return
+    def __call__(fn, fallback_fn=lambda: None):
+        """fn gets called at compile time in TorchDynamo, calls fallback_fn otherwise"""
+        fallback_fn()
 
     # Convenience wrappers that are more compact to use
 
     @staticmethod
     def graph_break():
         comptime(lambda ctx: ctx.graph_break())
+
+    @staticmethod
+    def print(e):
+        comptime(lambda ctx: ctx.print(ctx.get_local("e")), lambda: print(e))
 
     @staticmethod
     def print_graph():
@@ -368,6 +392,10 @@ class _Comptime:
             builtins.breakpoint()
 
         comptime(inner)
+
+    @staticmethod
+    def sleep(sec):
+        comptime(lambda ctx: ctx.sleep(ctx.get_local("sec").as_python_constant()))
 
 
 comptime = _Comptime()

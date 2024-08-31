@@ -9,11 +9,12 @@ from typing import Dict, List
 
 import common
 import pandas as pd
-import torch
-import torch.nn as nn
 import torchtext
 from torchtext.functional import to_tensor
 from tqdm import tqdm
+
+import torch
+import torch.nn as nn
 
 
 XLMR_BASE = torchtext.models.XLMR_BASE_ENCODER
