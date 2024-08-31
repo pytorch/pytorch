@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 
 #ifdef _WIN32
@@ -39,6 +38,11 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 // Use -2 to represent unset state of env vars
 #define C10D_ENV_NOT_SET -2
 
+#define WARN_ENV_VAR_ONCE(deprecated_env, new_env)                        \
+  TORCH_WARN_ONCE(                                                        \
+      "Environment variable " + deprecated_env + " is deprecated; use " + \
+      new_env + " instead");
+
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
@@ -67,7 +71,8 @@ inline void assertSameType(
       const std::string expected = type.toString();
       const std::string actual = tensors[i].toString();
       throw std::invalid_argument(
-          fmt::format("mixed types ({} and {})", expected, actual));
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "mixed types (" + expected + " and " + actual + ")");
     }
   }
 }
@@ -102,9 +107,7 @@ inline std::string getCvarString(
     if (val == nullptr) {
       continue;
     } else if (i) {
-      TORCH_WARN(
-          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
-          " instead");
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     ret = val;
@@ -129,9 +132,7 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
     if (val == nullptr) {
       continue;
     } else if (i) {
-      TORCH_WARN(
-          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
-          " instead");
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     try {
@@ -160,9 +161,7 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
     if (val_ == nullptr) {
       continue;
     } else if (i) {
-      TORCH_WARN(
-          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
-          " instead");
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     std::string val = std::string(val_);
@@ -195,7 +194,8 @@ inline void assertSameSizes(
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
       throw std::invalid_argument(
-          fmt::format("mixed sizes ({} and {})", expected, actual));
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "mixed sizes (" + expected + " and " + actual + ")");
     }
   }
 }
@@ -213,14 +213,18 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
     if (!tensors[i].options().type_equal(options)) {
       const auto expected = toString(options);
       const auto actual = toString(tensors[i].options());
-      throw std::invalid_argument(fmt::format(
-          "argument contains mixed types ({} and {})", expected, actual));
+      throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "argument contains mixed types (" + expected + " and " + actual +
+          ")");
     }
     if (!tensors[i].sizes().equals(sizes)) {
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
-      throw std::invalid_argument(fmt::format(
-          "argument contains mixed types ({} and {})", expected, actual));
+      throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "argument contains mixed types (" + expected + " and " + actual +
+          ")");
     }
   }
 }
@@ -436,7 +440,7 @@ inline at::Tensor newLikeFlat(
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
   return at::empty_strided(
-      sizes, strides, t.options().memory_format(c10::nullopt));
+      sizes, strides, t.options().memory_format(std::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -641,7 +645,7 @@ void sendBytes(
     SYSCHECK_ERR_RETURN_NEG1(
         bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
+      C10_THROW_ERROR(DistNetworkError, "failed to send, sent 0 bytes");
     }
 
     bytesToSend -= bytesSent;
@@ -663,7 +667,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
+      C10_THROW_ERROR(DistNetworkError, "failed to recv, got 0 bytes");
     }
 
     bytesToReceive -= bytesReceived;

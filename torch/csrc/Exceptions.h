@@ -15,11 +15,11 @@
 #include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/pybind.h>
 
-#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
+#if defined(USE_DISTRIBUTED)
 #include <torch/csrc/distributed/c10d/exception.h>
 #endif
 
-static inline void PyErr_SetString(PyObject* type, const std::string& message) {
+inline void PyErr_SetString(PyObject* type, const std::string& message) {
   PyErr_SetString(type, message.c_str());
 }
 /// NOTE [ Conversion Cpp Python Warning ]
@@ -165,6 +165,9 @@ struct python_error : public std::exception {
     other.value = nullptr;
     other.traceback = nullptr;
   }
+
+  python_error& operator=(const python_error& other) = delete;
+  python_error& operator=(python_error&& other) = delete;
 
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~python_error() override {

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import os
 import shutil
 import sys
@@ -7,12 +8,17 @@ from subprocess import check_call
 from tempfile import TemporaryDirectory
 from typing import Optional
 
+
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
 
-def read_triton_pin(rocm_hash: bool = False) -> str:
-    triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
+def read_triton_pin(device: str = "cuda") -> str:
+    triton_file = "triton.txt"
+    if device == "rocm":
+        triton_file = "triton-rocm.txt"
+    elif device == "xpu":
+        triton_file = "triton-xpu.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
         return f.read().strip()
 
@@ -44,12 +50,31 @@ def patch_init_py(
         f.write(orig)
 
 
+# TODO: remove patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
+def patch_setup_py(path: Path) -> None:
+    with open(path) as f:
+        orig = f.read()
+    try:
+        orig = check_and_replace(
+            orig,
+            "https://tritonlang.blob.core.windows.net/llvm-builds/",
+            "https://oaitriton.blob.core.windows.net/public/llvm-builds/",
+        )
+        with open(path, "w") as f:
+            f.write(orig)
+    except RuntimeError as e:
+        print(
+            f"Applying patch_setup_py() for llvm-build package failed: {e}.",
+            "If you are trying to build a newer version of Triton, you can ignore this.",
+        )
+
+
 def build_triton(
     *,
     version: str,
     commit_hash: str,
     build_conda: bool = False,
-    build_rocm: bool = False,
+    device: str = "cuda",
     py_version: Optional[str] = None,
     release: bool = False,
 ) -> Path:
@@ -69,11 +94,14 @@ def build_triton(
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
         triton_repo = "https://github.com/openai/triton"
-        if build_rocm:
+        if device == "rocm":
             triton_pkg_name = "pytorch-triton-rocm"
+        elif device == "xpu":
+            triton_pkg_name = "pytorch-triton-xpu"
+            triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"
         else:
             triton_pkg_name = "pytorch-triton"
-        check_call(["git", "clone", triton_repo], cwd=tmpdir)
+        check_call(["git", "clone", triton_repo, "triton"], cwd=tmpdir)
         if release:
             ver, rev, patch = version.split(".")
             check_call(
@@ -81,6 +109,9 @@ def build_triton(
             )
         else:
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
+
+        # TODO: remove this and patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
+        patch_setup_py(triton_pythondir / "setup.py")
 
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
@@ -140,7 +171,7 @@ def build_triton(
             expected_version=None,
         )
 
-        if build_rocm:
+        if device == "rocm":
             check_call(
                 [f"{SCRIPT_DIR}/amd/package_triton_wheel.sh"],
                 cwd=triton_basedir,
@@ -155,12 +186,12 @@ def build_triton(
         whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
         shutil.copy(whl_path, Path.cwd())
 
-        if build_rocm:
+        if device == "rocm":
             check_call(
-                [f"{SCRIPT_DIR}/amd/patch_triton_wheel.sh"],
+                [f"{SCRIPT_DIR}/amd/patch_triton_wheel.sh", Path.cwd()],
                 cwd=triton_basedir,
-                shell=True,
             )
+
         return Path.cwd() / whl_path.name
 
 
@@ -170,17 +201,19 @@ def main() -> None:
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--release", action="store_true")
     parser.add_argument("--build-conda", action="store_true")
-    parser.add_argument("--build-rocm", action="store_true")
+    parser.add_argument(
+        "--device", type=str, default="cuda", choices=["cuda", "rocm", "xpu"]
+    )
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
 
     build_triton(
-        build_rocm=args.build_rocm,
+        device=args.device,
         commit_hash=args.commit_hash
         if args.commit_hash
-        else read_triton_pin(args.build_rocm),
+        else read_triton_pin(args.device),
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,

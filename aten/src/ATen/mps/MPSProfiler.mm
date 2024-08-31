@@ -765,6 +765,41 @@ void MPSProfiler::handleIntSignal(int signal) {
 struct sigaction MPSProfiler::currentSigint {};
 struct sigaction MPSProfiler::previousSigint {};
 
+bool MPSProfiler::isCapturing() const {
+  return [captureManager isCapturing];
+}
+
+bool MPSProfiler::isCaptureEnabled() const {
+  if (captureManager == nil) {
+    captureManager = [MTLCaptureManager sharedCaptureManager];
+  }
+  static bool isEnabled = [this]() {
+    return [captureManager supportsDestination:MTLCaptureDestinationGPUTraceDocument];
+  }();
+  return isEnabled;
+}
+
+void MPSProfiler::startCapture(const std::string& name, MPSStream* stream) {
+  if (captureManager == nil) {
+    captureManager = [MTLCaptureManager sharedCaptureManager];
+  }
+  NSError* err = nil;
+  NSString* fname = [NSString stringWithFormat:@"%04d-%s.gputrace", captureCount++, name.c_str()];
+  MTLCaptureDescriptor* captureDescriptor = [MTLCaptureDescriptor new];
+  captureDescriptor.captureObject = stream ? (id)stream->commandQueue() : (id)MPSDevice::getInstance()->device();
+  captureDescriptor.destination = MTLCaptureDestinationGPUTraceDocument;
+  captureDescriptor.outputURL = [NSURL fileURLWithPath:fname];
+  auto rc = [captureManager startCaptureWithDescriptor:captureDescriptor error:&err];
+  TORCH_CHECK(rc, "Failed to start capture of ", [fname UTF8String], " error ", [[err description] UTF8String]);
+}
+
+void MPSProfiler::stopCapture(MPSStream* stream) {
+  if (stream) {
+    stream->synchronize(SyncType::COMMIT);
+  }
+  [captureManager stopCapture];
+}
+
 } // namespace Profiler
 
 Profiler::MPSProfiler& getMPSProfiler() {

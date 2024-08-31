@@ -1,8 +1,9 @@
 import os
 import sys
 
-import torch.cuda
 from setuptools import setup
+
+import torch.cuda
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.utils.cpp_extension import (
     BuildExtension,
@@ -11,6 +12,7 @@ from torch.utils.cpp_extension import (
     CUDAExtension,
     ROCM_HOME,
 )
+
 
 if sys.platform == "win32":
     vc_version = os.getenv("VCToolsVersion", "")
@@ -108,4 +110,9 @@ setup(
     ext_modules=ext_modules,
     include_dirs="self_compiler_include_dirs_test",
     cmdclass={"build_ext": BuildExtension.with_options(use_ninja=USE_NINJA)},
+    entry_points={
+        "torch.backends": [
+            "device_backend = torch_test_cpp_extension:_autoload",
+        ],
+    },
 )

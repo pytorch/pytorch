@@ -9,22 +9,22 @@ namespace at::native {
 
 using namespace mps;
 
-Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::optional<Tensor>& bias_opt) {
+Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::optional<Tensor>& bias_opt) {
   // wT = transpose(weight);
   // y=x*wT+b
 
   auto weight = (weight_arg.dim() == 1) ? weight_arg.view({1, weight_arg.size(0)}) : weight_arg;
 
-  TORCH_CHECK(supportedFloatingType(input), "MPS device does not support linear for non-float inputs");
+  TORCH_CHECK(supportedFloatingOrComplexType(input), "MPS device does not support linear for non-float inputs");
   TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
-  TORCH_CHECK(supportedFloatingType(weight_arg), "MPS device does not support linear for non-float weights");
+  TORCH_CHECK(supportedFloatingOrComplexType(weight_arg), "MPS device does not support linear for non-float weights");
   TORCH_CHECK(weight_arg.is_mps(), "Tensor for argument weight is on ", weight_arg.device(), " but expected on mps");
 
   const Tensor& bias = *(at::borrow_from_optional_tensor(bias_opt));
   const bool is_bias_defined = bias.defined();
   if (is_bias_defined) {
     TORCH_CHECK(bias.is_mps(), "Tensor for argument bias is on ", bias.device(), " but expected on mps");
-    TORCH_CHECK(supportedFloatingType(bias), "MPS device does not support linear for non-float bias");
+    TORCH_CHECK(supportedFloatingOrComplexType(bias), "MPS device does not support linear for non-float bias");
   }
 
   auto input_size = input.sizes();
@@ -48,7 +48,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
   }
 
   Tensor output =
-      at::empty(output_size, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, input.suggest_memory_format());
+      at::empty(output_size, input.scalar_type(), std::nullopt, kMPS, std::nullopt, input.suggest_memory_format());
 
   if (output.numel() == 0) {
     return output;
@@ -128,11 +128,12 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
 
 static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
   TORCH_CHECK(grad_output.is_mps(), "mps_linear_backward: grad_output needs to be mps layout");
-  TORCH_CHECK(weight.device().is_mps() && supportedFloatingType(weight),
+  TORCH_CHECK(weight.device().is_mps() && supportedFloatingOrComplexType(weight),
               "mps_linear_backward: unsupported weights data type: ",
               weight.scalar_type());
 
-  TORCH_CHECK(supportedFloatingType(grad_output), "MPS device does not support linear backward for non-float inputs");
+  TORCH_CHECK(supportedFloatingOrComplexType(grad_output),
+              "MPS device does not support linear backward for non-float inputs");
 
   const Tensor weight_reshaped = weight.is_contiguous() ? weight : weight.contiguous();
 
@@ -144,7 +145,7 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
   };
 
   Tensor output = at::empty(
-      input_size, grad_output.scalar_type(), c10::nullopt, kMPS, c10::nullopt, grad_output.suggest_memory_format());
+      input_size, grad_output.scalar_type(), std::nullopt, kMPS, std::nullopt, grad_output.suggest_memory_format());
   TORCH_CHECK(output.is_mps());
   if (grad_output.numel() == 0) {
     return output;
@@ -193,7 +194,8 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   TORCH_CHECK(grad_output.is_mps() && input.is_mps(),
               "_mps_linear_backward: grad_output and input needs to be mps layout");
 
-  TORCH_CHECK(supportedFloatingType(grad_output), "MPS device does not support linear backward for non-float inputs");
+  TORCH_CHECK(supportedFloatingOrComplexType(grad_output),
+              "MPS device does not support linear backward for non-float inputs");
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -213,15 +215,15 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
 
   Tensor output = at::empty({grad_output_reshaped.size(1), input_reshaped.size(1)},
                             grad_output.scalar_type(),
-                            c10::nullopt,
+                            std::nullopt,
                             kMPS,
-                            c10::nullopt,
+                            std::nullopt,
                             grad_output.suggest_memory_format());
   Tensor bias = at::empty({grad_output_reshaped.size(1)},
                           grad_output.scalar_type(),
-                          c10::nullopt,
+                          std::nullopt,
                           kMPS,
-                          c10::nullopt,
+                          std::nullopt,
                           grad_output.suggest_memory_format());
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(bias.is_mps());
@@ -234,7 +236,7 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "mps_linear_backward_weights:" + to_string(bias_defined) + ":" +
+    string key = "mps_linear_backward_weights:" + std::to_string(bias_defined) + ":" +
         getTensorsStringKey({input_reshaped, weight, grad_output_reshaped});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_reshaped);

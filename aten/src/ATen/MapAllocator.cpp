@@ -275,7 +275,9 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
 
     struct stat file_stat{};
     if (fstat(fd, &file_stat) == -1) {
+#ifndef STRIP_ERROR_MESSAGES
       int last_err = errno;
+#endif
       if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
         ::close(fd);
       }
@@ -289,7 +291,9 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
             TORCH_CHECK(false, "unable to resize file <", filename_, "> to the right size: ", strerror(errno), " (", errno, ")");
           }
           if (fstat(fd, &file_stat) == -1 || file_stat.st_size < static_cast<int64_t>(size)) {
+#ifndef STRIP_ERROR_MESSAGES
             int last_err = errno;
+#endif
             ::close(fd);
             TORCH_CHECK(false, "unable to stretch file <", filename_, "> to the right size: ", strerror(last_err), " (", last_err, ")");
           }
@@ -298,7 +302,9 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
  */
 #ifndef __APPLE__
           if ((write(fd, "", 1)) != 1) /* note that the string "" contains the '\0' byte ... */ {
+#ifndef STRIP_ERROR_MESSAGES
             int last_err = errno;
+#endif
             ::close(fd);
             TORCH_CHECK(false, "unable to write to file <", filename_, ">: ", strerror(last_err), " (", last_err, ")");
           }

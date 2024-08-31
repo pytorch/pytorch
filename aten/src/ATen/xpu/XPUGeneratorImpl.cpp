@@ -104,10 +104,10 @@ c10::intrusive_ptr<c10::TensorImpl> XPUGeneratorImpl::get_state() const {
   auto state_tensor = at::detail::empty_cpu(
       {static_cast<int64_t>(total_size)},
       ScalarType::Byte,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt);
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   auto offset = this->philox_offset_per_thread();

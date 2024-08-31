@@ -16,7 +16,7 @@ namespace c10 {
 class DataPtr;
 
 /**
- * Flags defining the behavior of events.
+ * Note [Flags defining the behavior of events]
  *
  * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
  * BACKEND_DEFAULT is what a particular backend would select if no
@@ -223,7 +223,10 @@ struct C10_API DeviceGuardImplInterface {
   /**
    * Fetch the elapsed time between two recorded events.
    */
-  virtual double elapsedTime(void* /*event1*/, void* /*event2*/) const {
+  virtual double elapsedTime(
+      void* /*event1*/,
+      void* /*event2*/,
+      const DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Backend doesn't support elapsedTime.");
   }
 

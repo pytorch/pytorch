@@ -12,8 +12,8 @@ using namespace api::utils;
 void _check_layer_norm_inputs(
     const at::Tensor& input,
     IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight /* optional */,
-    const c10::optional<Tensor>& bias /* optional */) {
+    const std::optional<Tensor>& weight /* optional */,
+    const std::optional<Tensor>& bias /* optional */) {
   const auto normalized_ndim = normalized_shape.size();
   TORCH_CHECK(
       normalized_ndim >= 1,
@@ -55,8 +55,8 @@ void _check_layer_norm_inputs(
 std::tuple<Tensor, Tensor, Tensor> native_layer_norm(
     const at::Tensor& input_arg,
     IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     double eps) {
   _check_layer_norm_inputs(input_arg, normalized_shape, weight_opt, bias_opt);
 

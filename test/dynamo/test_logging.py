@@ -3,7 +3,6 @@ import contextlib
 import functools
 import logging
 import os
-import re
 import unittest.mock
 
 import torch
@@ -11,9 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
 from torch._dynamo.testing import skipIfNotPy311
-
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
@@ -25,6 +22,7 @@ from torch.testing._internal.logging_utils import (
     make_logging_test,
     make_settings_test,
 )
+
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
@@ -190,6 +188,15 @@ due to:
 Traceback (most recent call last):
   File "test_logging.py", line N, in throw
     raise AssertionError
+torch._inductor.exc.LoweringException: AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
 torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
 LoweringException: AssertionError:
   target: aten.round.default
@@ -205,7 +212,7 @@ LoweringException: AssertionError:
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.Linear(1024, 1024),
@@ -469,24 +476,6 @@ LoweringException: AssertionError:
 
         self.assertTrue(found_funcname)
 
-    @make_logging_test(graph_sizes=True)
-    def test_graph_sizes_dynamic(self, records):
-        def fn(a, b):
-            return a @ b
-
-        fn_opt = torch._dynamo.optimize("eager", dynamic=False)(fn)
-        fn_opt(torch.randn(10, 20), torch.randn(20, 30))
-
-        fn_opt2 = torch._dynamo.optimize("eager", dynamic=True)(fn)
-        fn_opt2(torch.randn(5, 10), torch.randn(10, 15))
-
-        self.assertEqual(len(records), 2)
-        self.assertNotIn("concrete", records[0].getMessage())
-        lines = records[1].getMessage().split("\n")
-        for line in lines:
-            if "concrete" in line:
-                self.assertIsNotNone(re.search(r"\(concrete\): \(\d+, \d+\)", line))
-
     def test_invalid_artifact_flag(self):
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
@@ -633,16 +622,25 @@ print("arf")
         record_str = "\n".join(r.getMessage() for r in records)
 
         self.assertIn(
-            """\
-L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):""",
+            """L['zs'][0] == 3.0""",
             record_str,
         )
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):\n\
-    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):""",
+            "len(L['ys']) == 2",
             record_str,
         )
+
+    @make_logging_test(cudagraph_static_inputs=True)
+    def test_cudagraph_static_inputs(self, records):
+        @torch.compile(mode="reduce-overhead")
+        def fn(x):
+            return x + 1
+
+        x = torch.ones(2, 2)
+        torch._dynamo.mark_static_address(x)
+        fn(x)
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 4)
 
     @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
@@ -699,17 +697,22 @@ exclusions = {
     "fusion",
     "overlap",
     "aot_graphs",
+    "aot_graphs_effects",
     "post_grad_graphs",
     "compiled_autograd",
     "compiled_autograd_verbose",
     "recompiles",
     "recompiles_verbose",
     "graph_breaks",
+    "graph",
+    "graph_code",
+    "graph_sizes",
     "ddp_graphs",
     "perf_hints",
     "not_implemented",
     "trace_source",
     "trace_call",
+    "trace_bytecode",
     "custom_format_test_artifact",
     "onnx",
     "onnx_diagnostics",
@@ -717,6 +720,9 @@ exclusions = {
     "verbose_guards",
     "sym_node",
     "export",
+    "trace_shape_events",
+    "cudagraph_static_inputs",
+    "benchmarking",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

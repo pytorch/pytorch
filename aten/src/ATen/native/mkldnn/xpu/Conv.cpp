@@ -6,7 +6,7 @@
 #include <ATen/ops/neg.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <torch/library.h>
@@ -563,7 +563,7 @@ Tensor _convolution(
 Tensor convolution_overrideable(
     const Tensor& input_r,
     const Tensor& weight_r,
-    const c10::optional<at::Tensor>& bias_r_opt,
+    const std::optional<at::Tensor>& bias_r_opt,
     IntArrayRef stride_,
     IntArrayRef padding_,
     IntArrayRef dilation_,

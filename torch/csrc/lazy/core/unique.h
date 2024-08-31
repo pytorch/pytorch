@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <functional>
 #include <set>
@@ -49,7 +49,7 @@ class Unique {
   }
 
  private:
-  c10::optional<T> value_;
+  std::optional<T> value_;
 };
 
 } // namespace lazy

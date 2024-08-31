@@ -376,7 +376,7 @@ Python enums can be used in TorchScript without any extra annotation or code:
 
 After an enum is defined, it can be used in both TorchScript and Python interchangeably
 like any other TorchScript type. The type of the values of an enum must be ``int``,
-``float``, or ``str``. All values must be of the same type; heterogenous types for enum
+``float``, or ``str``. All values must be of the same type; heterogeneous types for enum
 values are not supported.
 
 

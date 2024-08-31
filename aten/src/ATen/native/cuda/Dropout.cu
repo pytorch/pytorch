@@ -366,7 +366,7 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p){
 }
 
 std::tuple<Tensor,Tensor>
-native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
+native_dropout_cuda(const Tensor& self, double p, std::optional<bool> train){
   // short-cut for train == false
   if (train.has_value() && !train.value()) {
     return std::make_tuple(self.clone(), at::ones_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value)));
@@ -380,14 +380,14 @@ native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
     return std::tuple<Tensor,Tensor>(ret, mask);
   }
 
-  auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(std::nullopt, cuda::detail::getDefaultCUDAGenerator());
   double p1m = 1. - p;
   return dropout_cuda<bool>(gen, self, p1m);
 }
 
 // TODO: _fused_dropout_cuda is to be removed, see PR #63937
 std::tuple<Tensor,Tensor>
-fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
+fused_dropout_cuda(const Tensor& self, double p, std::optional<Generator> gen_){
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   return dropout_cuda<uint8_t>(gen, self, p);
 }

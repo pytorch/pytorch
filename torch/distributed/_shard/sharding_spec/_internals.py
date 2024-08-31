@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Optional, Tuple
 
 from torch.distributed._shard.metadata import ShardMetadata
@@ -85,8 +86,8 @@ def validate_non_overlapping_shards_metadata(shards: List[ShardMetadata]):
     for dim in range(len(shards[0].shard_offsets)):
         for i in range(1, len(shards)):
             if (
-                shards[i].shard_offsets[dim] != shards[0].shard_offsets[dim] or
-                shards[i].shard_sizes[dim] != shards[0].shard_sizes[dim]
+                shards[i].shard_offsets[dim] != shards[0].shard_offsets[dim]
+                or shards[i].shard_sizes[dim] != shards[0].shard_sizes[dim]
             ):
                 sharded_dims.append(dim)
                 break
@@ -107,7 +108,7 @@ def validate_non_overlapping_shards_metadata(shards: List[ShardMetadata]):
         pair = _find_nd_overlapping_shards(shards, sharded_dims)
 
     if pair:
-        raise ValueError(f'Shards {shards[pair[0]]} and {shards[pair[1]]} overlap')
+        raise ValueError(f"Shards {shards[pair[0]]} and {shards[pair[1]]} overlap")
 
 
 def check_tensor(shards_metadata, tensor_dims) -> None:
@@ -129,7 +130,9 @@ def check_tensor(shards_metadata, tensor_dims) -> None:
     tensor_rank = len(tensor_dims)
     shards_rank = len(shards_metadata[0].shard_offsets)
     if tensor_rank != shards_rank:
-        raise ValueError(f'Rank of tensor is {tensor_rank}, but shards rank is {shards_rank}')
+        raise ValueError(
+            f"Rank of tensor is {tensor_rank}, but shards rank is {shards_rank}"
+        )
 
     total_shard_volume = 0
     for shard in shards_metadata:
@@ -138,8 +141,9 @@ def check_tensor(shards_metadata, tensor_dims) -> None:
             shard_volume *= shard_length
             if shard.shard_offsets[i] + shard.shard_sizes[i] > tensor_dims[i]:
                 raise ValueError(
-                    f'Shard offset {shard.shard_offsets[i]} and length '
-                    f'{shard.shard_sizes[i]} exceeds tensor dim: {tensor_dims[i]} for shard {shard}')
+                    f"Shard offset {shard.shard_offsets[i]} and length "
+                    f"{shard.shard_sizes[i]} exceeds tensor dim: {tensor_dims[i]} for shard {shard}"
+                )
         total_shard_volume += shard_volume
 
     tensor_volume = 1
@@ -149,9 +153,11 @@ def check_tensor(shards_metadata, tensor_dims) -> None:
     if total_shard_volume != tensor_volume:
         # TODO: Can we improve this error message to point out the gaps?
         raise ValueError(
-            f'Total volume of shards: {total_shard_volume} '
-            f'does not match tensor volume: {tensor_volume}, in other words '
-            f'all the individual shards do not cover the entire tensor')
+            f"Total volume of shards: {total_shard_volume} "
+            f"does not match tensor volume: {tensor_volume}, in other words "
+            f"all the individual shards do not cover the entire tensor"
+        )
+
 
 def get_split_size(dim_size, chunks):
     """
@@ -165,6 +171,7 @@ def get_split_size(dim_size, chunks):
         An int indicating the split size to use.
     """
     return (dim_size + chunks - 1) // chunks
+
 
 def get_chunked_dim_size(dim_size, split_size, idx):
     """
@@ -180,6 +187,7 @@ def get_chunked_dim_size(dim_size, split_size, idx):
         An int indicating the dim size of the chunk.
     """
     return max(min(dim_size, split_size * (idx + 1)) - split_size * idx, 0)
+
 
 def get_chunk_sharding_params(sharding_dim_size, world_size, spec, rank):
     """

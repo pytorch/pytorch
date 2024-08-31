@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import abc
 import faulthandler
 import itertools
 import logging
@@ -38,6 +39,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
+    run_tests,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
@@ -168,6 +170,10 @@ def import_transformers_or_skip():
         return wrapper
 
     return decorator
+
+
+def at_least_x_gpu(x):
+    return torch.cuda.is_available() and torch.cuda.device_count() >= x
 
 
 def skip_if_lt_x_gpu(x):
@@ -355,7 +361,7 @@ def create_tcp_store(
     timeout=timedelta(minutes=5),
     wait_for_workers=True,
     jit_class=False,
-    use_libuv=False
+    use_libuv=True,
 ):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
@@ -542,7 +548,11 @@ class MultiProcessTestCase(TestCase):
     # Constructor patches current instance test method to
     # assume the role of the main process and join its subprocesses,
     # or run the underlying test function.
-    def __init__(self, method_name: str = "runTest") -> None:
+    def __init__(self, method_name: str = "runTest", methodName: str = "runTest") -> None:
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
         fn = getattr(self, method_name)
         setattr(self, method_name, self.join_or_run(fn))
@@ -578,6 +588,9 @@ class MultiProcessTestCase(TestCase):
                 target=self.__class__._run,
                 name="process " + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, child_conn),
+                kwargs={
+                    "fake_pg": getattr(self, "fake_pg", False),
+                }
             )
             process.start()
             logger.info("Started process %s with pid %s", rank, process.pid)
@@ -623,7 +636,7 @@ class MultiProcessTestCase(TestCase):
                 return
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -865,7 +878,9 @@ def run_subtests(
         # Map keyword to chosen value
         subtest_kwargs = dict(zip(subtest_config_keys, values))
         with cls_inst.subTest(**subtest_kwargs):
+            torch._dynamo.reset()
             test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+            torch._dynamo.reset()
         c10d.barrier()
 
 
@@ -986,10 +1001,14 @@ class MultiThreadedTestCase(TestCase):
 
         return types.MethodType(wrapper, self)
 
-    def __init__(self, method_name: str = "runTest") -> None:
+    def __init__(self, method_name: str = "runTest", methodName: str = "runTest") -> None:
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
-        test_fn = getattr(self, method_name, None)
-        setattr(self, method_name, self.join_or_run(test_fn))
+        fn = getattr(self, method_name)
+        setattr(self, method_name, self.join_or_run(fn))
 
     def perThreadSetUp(self):
         # super().setUp()  # TestCase.setUp() calls torch.manual_seed()
@@ -1039,7 +1058,7 @@ class MultiThreadedTestCase(TestCase):
             self.threads.append(t)
 
     @classmethod
-    def _run(cls, test_name, rank, world_size):
+    def _run(cls, test_name, rank, world_size, **kwargs):
         self = cls(test_name)
         self.rank = rank
 
@@ -1207,14 +1226,24 @@ class SaveForwardInputsModel(nn.Module):
         return self.c2(self.c1(x))
 
 @contextmanager
-def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
+def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    torch.cuda.set_device(rank)
+    if not fake_pg:
+        torch.cuda.set_device(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
     if init_pg:
-        c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+        if fake_pg:
+            store = torch.testing._internal.distributed.fake_pg.FakeStore()
+            c10d.init_process_group(
+                backend="fake",
+                world_size=world_size,
+                rank=rank,
+                store=store,
+            )
+        else:
+            c10d.init_process_group("nccl", rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1284,9 +1313,110 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         return torch.cuda.device_count()
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
+
+
+class MultiProcContinousTest(TestCase):
+    # Class variables:
+    # number of test processes
+    world_size: int = 2
+    # rank of the current process
+    rank: int = -1  # unset state
+    # Rendezvous file
+    rdvz_file: Optional[str] = None
+
+    @classmethod
+    @abc.abstractmethod
+    def backend_str(cls) -> str:
+        """
+        ProcessGroup backend str.
+        To be customized by sub test classes, e.g. "nccl".
+        Here we raise error.
+        """
+        raise NotImplementedError("Please implement backend_str in your test class")
+
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        """
+        ProcessGroup init options.
+        To be customized by sub test classes, e.g. ProcessGroupNCCLOpTest
+        Here we return None.
+        """
+        return None
+
+    @classmethod
+    def setUpClass(cls):
+        """
+        Class-scope test fixture. Run once for entire test class, before any test starts.
+        Set up the process group.
+        """
+        super().setUpClass()
+        if not 0 <= cls.rank < cls.world_size:
+            raise RuntimeError(
+                "Rank must be set and in the range of 0 to world_size. "
+                f"World size: {cls.world_size} Rank: {cls.rank}"
+            )
+        if cls.rdvz_file:
+            store = c10d.FileStore(cls.rdvz_file, cls.world_size)
+        else:
+            # torchrun takes care of rendezvous
+            store = None
+        opts = cls.opts()
+        backend = cls.backend_str()
+        print(f"Testing {backend=}")
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            backend=backend,
+            world_size=cls.world_size,
+            rank=cls.rank,
+            store=store,
+            pg_options=opts,
+        )
+        cls.pg = c10d.distributed_c10d._get_default_group()
+        print(f"Rank {cls.rank} setup complete")
+
+    @classmethod
+    def tearDownClass(cls):
+        """
+        Class-scope test fixture. Run once for entire test class, after all tests finish.
+        Tear down the process group.
+        """
+        c10d.destroy_process_group()
+        super().tearDownClass()
+        # Clear up the rendezvous file
+        if cls.rdvz_file:
+            try:
+                os.remove(cls.rdvz_file)
+            except OSError:
+                pass
+        print(f"Rank {cls.rank} teardown complete")
+
+    @classmethod
+    def run_rank(
+        cls,
+        rank: int,
+        world_size: int,
+        rdvz_file: Optional[str] = None,
+    ):
+        """
+        This is an entry point for each rank to run the tests in `MultiProcContinousTest`.
+        In this entry point, we set the class variables for the test class.
+        Then we run all tests.
+
+        Note:
+        - This helper only works for a subclass of `MultiProcContinousTest`.
+
+        Example:
+        - See `test_c10d_ops_nccl.py`.
+        """
+        # set class variables for the test class
+        cls.rank = rank
+        cls.world_size = world_size
+        cls.rdvz_file = rdvz_file
+        # Launch tests via `common_utils` infra
+        run_tests()

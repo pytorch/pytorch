@@ -9,8 +9,8 @@
 #include <vector>
 
 #include <c10/core/Stream.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
+#include <optional>
 
 namespace torch::autograd {
 
@@ -27,8 +27,8 @@ struct InputBuffer {
   TORCH_API void add(
       size_t pos,
       Variable&& var,
-      const c10::optional<c10::Stream>& opt_producer_stream,
-      const c10::optional<c10::Stream>& opt_consumer_stream);
+      const std::optional<c10::Stream>& opt_producer_stream,
+      const std::optional<c10::Stream>& opt_consumer_stream);
 
   at::Device device() const;
 

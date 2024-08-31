@@ -727,3 +727,11 @@ and C++ backtrace whenever this symbol was created.
 ``TORCHDYNAMO_EXTENDED_DEBUG_CPP`` - provides extended debug information (C++ backtrace)
 for all extended debug settings as well as errors. For example, set this to "1". The C++
 backtrace is slow and very spammy so it is not included by default with extended debugging.
+
+Cold Start Timing and Cache Corruption Debugging
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In order to measure the cold start compilation time or debug a cache corruption,
+it is possible pass ``TORCHINDUCTOR_FORCE_DISABLE_CACHES=1`` or set
+``torch._inductor.config.force_disable_caches = True`` which will override any
+other caching config option and disable all compile time caching.

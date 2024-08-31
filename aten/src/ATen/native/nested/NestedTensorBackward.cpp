@@ -13,8 +13,9 @@
 #include <ATen/native/layer_norm.h>
 #include <c10/core/DeviceType.h>
 
-namespace at {
-namespace native {
+#include <utility>
+
+namespace at::native {
 
 // See Note [nested tensor matmul] in NestedTensorMath.cpp
 std::tuple<Tensor, Tensor> matmul_backward_nested(
@@ -162,6 +163,7 @@ Tensor _nested_select_backward_symint(
   const Tensor& grad,
   const Tensor& nested_self,
   int64_t dim,
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   c10::SymInt index) {
   auto nt_self = get_nested_tensor_impl(nested_self);
   const Tensor& self_buffer = nt_self->get_buffer();
@@ -169,7 +171,7 @@ Tensor _nested_select_backward_symint(
   const Tensor& self_grad_buffer = self_buffer.new_zeros(self_buffer.sizes());
 
   auto nt_grad = wrap_buffer(self_grad_buffer, self_sizes);
-  nt_grad.select_symint(dim, index).copy_(grad);
+  nt_grad.select_symint(dim, std::move(index)).copy_(grad);
 
   return nt_grad;
 }
@@ -197,8 +199,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
     IntArrayRef normalized_shape,
     const Tensor& mean,
     const Tensor& rstd,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /*{ optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /*{ optional */,
     std::array<bool, 3> grad_input_mask) {
   // For NestedTensors weight and bias are non nested.
   auto* nt_impl_grad = get_nested_tensor_impl(grad);
@@ -219,53 +221,54 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   Tensor dbeta;
   auto input_buffer = nt_impl_input->get_buffer();
   auto grad_buffer = nt_impl_grad->get_buffer();
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (grad_input_mask[0]) {
     dInput = at::native::empty_like(
         input_buffer,
-        c10::nullopt /* dtype */,
-        c10::nullopt /* layout */,
-        c10::nullopt /* device */,
-        c10::nullopt /* pin_memory */,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
         at::MemoryFormat::Contiguous);
   } else {
     dInput = at::native::zeros_like(
         input_buffer,
-        c10::nullopt /* dtype */,
-        c10::nullopt /* layout */,
-        c10::nullopt /* device */,
-        c10::nullopt /* pin_memory */,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
         at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
     dgamma = M > 0 ? at::native::empty_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          at::MemoryFormat::Contiguous)
                    : at::native::zeros_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
     dbeta = M > 0 ? at::native::empty_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         at::MemoryFormat::Contiguous)
                   : at::native::zeros_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         at::MemoryFormat::Contiguous);
   }
   if (M > 0) {
@@ -286,5 +289,4 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
       wrap_buffer(dInput, sizes), std::move(dgamma), std::move(dbeta));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

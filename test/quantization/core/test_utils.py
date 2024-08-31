@@ -19,7 +19,7 @@ class TestUtils(TestCase):
 
     def test_get_fqn_to_example_inputs_simple(self):
         class Sub(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 5)
                 self.linear2 = torch.nn.Linear(5, 5)
@@ -30,7 +30,7 @@ class TestUtils(TestCase):
                 return x
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 5)
                 self.linear2 = torch.nn.Linear(5, 5)
@@ -57,7 +57,7 @@ class TestUtils(TestCase):
         """ Test that we can get example inputs for functions with default keyword arguments
         """
         class Sub(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 5)
                 self.linear2 = torch.nn.Linear(5, 5)
@@ -68,7 +68,7 @@ class TestUtils(TestCase):
                 return x
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 5)
                 self.linear2 = torch.nn.Linear(5, 5)
@@ -98,7 +98,7 @@ class TestUtils(TestCase):
         """ Test that we can record complex example inputs such as lists and dicts
         """
         class Sub(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 5)
                 self.linear2 = torch.nn.Linear(5, 5)
@@ -109,7 +109,7 @@ class TestUtils(TestCase):
                 return x
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 5)
                 self.linear2 = torch.nn.Linear(5, 5)
