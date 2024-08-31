@@ -70,6 +70,9 @@ RUN cd ~/ \
 RUN yum install -y cmake3 && \
     ln -s /usr/bin/cmake3 /usr/bin/cmake
 
+#install ninja
+RUN yum install -y ninja-build
+
 FROM base as openssl
 # Install openssl (this must precede `build python` step)
 # (In order to have a proper SSL module, Python is compiled
