@@ -55,10 +55,10 @@ def scan(
     input: pytree.PyTree,
     dim: int,
     reverse: bool = False,
-    init: pytree.PyTree = [],  # noqa: B006
+    init: pytree.PyTree = None,
 ) -> torch.Tensor:
     r"""
-    Performs an inclusive scan with an associative pointwise combine function.
+    Performs an inclusive scan with a combine function.
 
     .. warning::
         `torch.scan` is a prototype feature in PyTorch. It currently
@@ -66,29 +66,42 @@ def scan(
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
-    This operator requires runtime code generation and so requires support for
-    ``torch.compile``. Further, only CUDA device codegen is supported at the moment.
-
     Args:
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
-            This function must be pure, pointwise, and satisfy the associative property.
+            This function must be pure, i.e., no lifted arguments are supported at the moment.
         input (torch.Tensor): The input tensor, or nested pytree of tensors.
         dim (int): the dimension to scan over
-        reverse (bool): A boolean stating if the scan should be reversed with respect to the dimension.
-        init (torch.Tensor): The inital scan carry, a tensor, or nested pytree of tensors.
-            The tensors are expected to have the same shape as the output tensors of ``combine_fn``
+        reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
+        init (torch.Tensor): The inital scan carry, a tensor, or nested pytree of tensors that
+            represents the first output of the scan, default ``None``. The ``init`` is expected to have the
+            same pytree structure and shape as the output tensors of ``combine_fn``.
+            In case the ``init`` is ``None``, the first element of input is used as ``init``.
+
 
     Example::
 
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
+        # Usage without the usage of ``init``
         cumsum = scan(add, x, dim)
+        # This produces the output
+        cumsum = [x0, add(x0, x1), add(x1, x2)]
+
+        # Usage with the usage of ``init``
+        cumsum = scan(add, x, dim, init=i0)
+        # This produces the output
+        cumsum = [i0, add(i0, x0), add(x0, x1)]
+
 
     """
     assert callable(combine_fn), "combine_fn must be a callable, but got {combine_fn}"
     assert isinstance(dim, int), "dim must be an int, but got {type(dim)}"
+
+    # TODO: Support closures/nn_modules in order to be able represent RNNs with scan
+    # TODO: Support _inductor lowering
+    # TODO: Support Autograd
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
@@ -100,6 +113,8 @@ def scan(
             return torch.compile(_scan_op_wrapper, backend="eager", fullgraph=True)(
                 combine_fn, input, dim=dim, reverse=reverse, init=init
             )
+
+    init = [] if init is None else init
 
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_input, spec_input = pytree.tree_flatten(input)
@@ -191,23 +206,16 @@ class ScanOp(HigherOrderOperator):
 scan_op = ScanOp()
 
 
-def generic_scan(operator, elems_flat, elems_init_flat, dim=0):
-    def combine(a, b, dim):
-        return torch.concatenate([a, b], dim=dim)
-
-    cmb = functools.partial(combine, dim=dim)
-
-    def _scan(elems, elems_init):
-        """Perform scan on `elems`."""
-        num_elems = elems[0].shape[dim]
-
+def generic_scan(operator, input, init, dim=0):
+    def _scan(input, init):
+        """Perform scan on `elems` using `elems_init."""
+        num_elems = input[0].shape[dim]
         ind = 0
-        xs = elems_init
+        out = init
 
-        # Approach with concatenate
-        # outs = xs
-
-        # Approach without concatenation
+        # Pre-alocate
+        # outs -> Output matrix
+        # idxs -> Index matrix for scatter_
         outs, idxs = zip(
             *[
                 (
@@ -220,38 +228,36 @@ def generic_scan(operator, elems_flat, elems_init_flat, dim=0):
                     ),
                     torch.ones_like(e, dtype=torch.int64),
                 )
-                for i, e in enumerate(elems_init)
+                for i, e in enumerate(init)
             ]
         )
 
-        # Approach with concatenate
-        # outs = list(safe_map(cmb, outs, xs))
+        def store_out_in_outs(out, ind):
+            # Store the intermediate out in the outs matrix
+            for o, x, idx in zip(outs, out, idxs):
+                o.scatter_(dim, idx * ind, x)
 
-        # Approach without concatenation
-        for o, x, idx in zip(outs, xs, idxs):
-            o.scatter_(dim, idx * ind, x)
+        # Store the inits in the outs matrix.
+        # These are the first elements of the scan outputs
+        store_out_in_outs(out, ind)
 
         while ind < num_elems:
-            xs = operator(
-                *xs,
-                *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems],
+            out = operator(
+                *out,
+                *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in input],
             )
 
-            # Approach with concatenate
-            # outs = list(safe_map(cmb, outs, xs))
-
-            # Approach without concatenation
-            for o, x, idx in zip(outs, xs, idxs):
-                o.scatter_(dim, idx * (ind + 1), x)
+            # Store the inits in the outs matrix.
+            store_out_in_outs(out, ind + 1)
 
             ind += 1
 
         return outs
 
-    if len(elems_flat) == 0:
+    if len(input) == 0:
         return []
 
-    scans = _scan(elems_flat, elems_init_flat)
+    scans = _scan(input, init)
     return scans
 
 
@@ -333,10 +339,7 @@ def scan_proxy_mode(mode, combine_fn, input, init, dim):
 @scan_op.py_impl(FakeTensorMode)
 def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, init, dim):
     with mode:
-        if len(init) > 0:
-            return [x.clone() for x in init]
-        else:
-            return combine_fn(*input, *input)
+        return combine_fn(*input, *input)
 
 
 @scan_op.py_functionalize_impl

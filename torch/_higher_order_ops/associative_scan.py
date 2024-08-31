@@ -87,7 +87,7 @@ def associative_scan(
     combine_mode: str = "pointwise",
 ) -> torch.Tensor:
     r"""
-    Performs an inclusive scan with an associative pointwise combine function.
+    Performs an inclusive scan with an associative combine function.
 
     .. warning::
         `torch.associative_scan` is a prototype feature in PyTorch. It currently
@@ -101,12 +101,13 @@ def associative_scan(
     Args:
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
-            This function must be pure, pointwise, and satisfy the associative property.
+            This function must be pure, i.e., no lifted arguments are supported at the moment,
+            and satisfy the associative property.
         input (torch.Tensor): The input tensor, or nested pytree of tensors.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
-        reverse (bool): A boolean stating if the scan should be reversed with respect to the dimension.
-        combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``.
+        reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
+        combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``, default ``pointwise``.
             If ``combine_mode=pointwise``, ``combine_fn`` must be pure, may only contain pointwise operations
             and ``input`` must be CUDA tensors.
             In all other cases ``combine_mode=generic`` should be used.
