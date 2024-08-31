@@ -86,13 +86,15 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
 PyObject* lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    const PyObject* backend) {
+    PyObject* backend) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
-    bool valid = backend == Py_False || cache_entry.backend == backend;
+
+    bool valid = backend == Py_False ||
+        PyObject_RichCompareBool(cache_entry.backend, backend, Py_EQ);
     if (valid) {
       try {
         // TODO(anijain2305) - Clean this up when enable_cpp_guard_manager is

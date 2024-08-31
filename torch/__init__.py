@@ -2171,6 +2171,20 @@ from torch._linalg_utils import (  # type: ignore[misc]
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
+def _dict_hash(config):
+    hashable_items = []
+    for key, val in config.items():
+        try:
+            hashable_val = hash(val)
+            hashable_items.append((key, val))
+        except TypeError:
+            # Skip if either the key or the value is unhashable
+            continue
+    return hash(tuple(sorted(hashable_items)))
+
+    return hash(tuple(sorted(config.items())))
+
+
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
@@ -2191,6 +2205,8 @@ class _TorchCompileInductorWrapper:
             #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
             # Workaround: turn off CUPTI teardown when using CUDA Graphs.
             os.environ["TEARDOWN_CUPTI"] = "0"
+
+        self.backend_hash = _dict_hash(self.config)
 
     def __eq__(self, other):
         return (
@@ -2271,6 +2287,9 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        self.backend_hash = _dict_hash(
+            {"compiler_name": self.compiler_name, **self.kwargs}
+        )
 
     def __eq__(self, other):
         return (
