@@ -1939,6 +1939,56 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             else:
                 self.assertFalse(evt.is_user_annotation)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_dynamic_toggle(self):
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p:
+            with torch.profiler.record_function("test_user_annotation"):
+                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                torch.add(x, y)
+
+        self.assertTrue(any("aten" in e.name for e in p.events()))
+
+        self.assertTrue(any("cuda" in e.name for e in p.events()))
+
+        self.assertTrue(any("kernel" in e.name for e in p.events()))
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p1:
+            p1.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
+            with torch.profiler.record_function("test_user_annotation"):
+                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                torch.add(x, y)
+
+        self.assertTrue(any("aten" in e.name for e in p1.events()))
+
+        self.assertTrue(all("cuda" not in e.name for e in p1.events()))
+
+        self.assertTrue(all("kernel" not in e.name for e in p1.events()))
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p2:
+            p2.toggle_collection_dynamic(
+                False, [ProfilerActivity.CUDA, ProfilerActivity.CPU]
+            )
+            with torch.profiler.record_function("test_user_annotation"):
+                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                torch.add(x, y)
+        self.assertTrue(len(p2.events()) == 0)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_lazy_build_tree(self):
+        with profile() as p:
+            self.payload()
+
+        stats = p._stats()
+        # Test that the tree is not built
+        self.assertEqual(stats.function_events_build_tree_call_duration_us, 0)
+        self.assertEqual(stats.number_of_events, 0)
+
+        # Test that the tree is built on demand
+        p.events()
+        self.assertGreater(stats.function_events_build_tree_call_duration_us, 0)
+        self.assertGreater(stats.number_of_events, 0)
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:

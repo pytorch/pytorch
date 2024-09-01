@@ -552,7 +552,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   if (input.sym_numel() == 0) {
     Tensor reserve = at::empty({0}, input.options().dtype(kByte));
     auto options = input.options().dtype(
-        at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
+        at::toAccumulateType(input.scalar_type(), input.device().type()));
     auto save_mean = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
     auto save_invstd = at::empty_symint(c10::SymIntArrayRef({std::move(num_features)}), options);
 
