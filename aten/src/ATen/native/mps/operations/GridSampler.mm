@@ -135,6 +135,14 @@ Tensor grid_sampler_2d_mps(const Tensor& input,
         .clone()
         .to("mps");
   }
+  if (static_cast<GridSamplerPadding>(padding_mode) == GridSamplerPadding::Constant) {
+    TORCH_WARN_ONCE("MPS: Constant padding mode is not supported. ",
+                    "Falling back on CPU. This may have performance implications.");
+
+    return at::grid_sampler_2d(input.to("cpu"), grid.to("cpu"), interpolation_mode, padding_mode, align_corners)
+        .clone()
+        .to("mps");
+  }
 
   auto in_size = input.sizes();
   auto grid_size = grid.sizes();
