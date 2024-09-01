@@ -154,27 +154,43 @@ namespace {
                   *out_ptr_NCDHW = static_cast<scalar_t>(0);
                   if (within_bounds_3d(iz_tnw, iy_tnw, ix_tnw, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW += inp_ptr_NC[iz_tnw * inp_sD + iy_tnw * inp_sH + ix_tnw * inp_sW] * tnw;
+                  } else {
+                    *out_ptr_NCDHW += static_cast<scalar_t>(value.value_or(0)) * tnw;
                   }
                   if (within_bounds_3d(iz_tne, iy_tne, ix_tne, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW += inp_ptr_NC[iz_tne * inp_sD + iy_tne * inp_sH + ix_tne * inp_sW] * tne;
+                  } else {
+                    *out_ptr_NCDHW += static_cast<scalar_t>(value.value_or(0)) * tne;
                   }
                   if (within_bounds_3d(iz_tsw, iy_tsw, ix_tsw, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW += inp_ptr_NC[iz_tsw * inp_sD + iy_tsw * inp_sH + ix_tsw * inp_sW] * tsw;
+                  } else {
+                    *out_ptr_NCDHW += static_cast<scalar_t>(value.value_or(0)) * tsw;
                   }
                   if (within_bounds_3d(iz_tse, iy_tse, ix_tse, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW += inp_ptr_NC[iz_tse * inp_sD + iy_tse * inp_sH + ix_tse * inp_sW] * tse;
+                  } else {
+                    *out_ptr_NCDHW += static_cast<scalar_t>(value.value_or(0)) * tse;
                   }
                   if (within_bounds_3d(iz_bnw, iy_bnw, ix_bnw, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW += inp_ptr_NC[iz_bnw * inp_sD + iy_bnw * inp_sH + ix_bnw * inp_sW] * bnw;
+                  } else {
+                    *out_ptr_NCDHW += static_cast<scalar_t>(value.value_or(0)) * bnw;
                   }
                   if (within_bounds_3d(iz_bne, iy_bne, ix_bne, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW += inp_ptr_NC[iz_bne * inp_sD + iy_bne * inp_sH + ix_bne * inp_sW] * bne;
+                  } else {
+                    *out_ptr_NCDHW += static_cast<scalar_t>(value.value_or(0)) * bne;
                   }
                   if (within_bounds_3d(iz_bsw, iy_bsw, ix_bsw, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW += inp_ptr_NC[iz_bsw * inp_sD + iy_bsw * inp_sH + ix_bsw * inp_sW] * bsw;
+                  } else {
+                    *out_ptr_NCDHW += static_cast<scalar_t>(value.value_or(0)) * bsw;
                   }
                   if (within_bounds_3d(iz_bse, iy_bse, ix_bse, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW += inp_ptr_NC[iz_bse * inp_sD + iy_bse * inp_sH + ix_bse * inp_sW] * bse;
+                  } else {
+                    *out_ptr_NCDHW += static_cast<scalar_t>(value.value_or(0)) * bse;
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
@@ -189,7 +205,7 @@ namespace {
                   if (within_bounds_3d(iz_nearest, iy_nearest, ix_nearest, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW = inp_ptr_NC[iz_nearest * inp_sD + iy_nearest * inp_sH + ix_nearest * inp_sW];
                   } else {
-                    *out_ptr_NCDHW = static_cast<scalar_t>(0);
+                    *out_ptr_NCDHW = static_cast<scalar_t>(value.value_or(0.));
                   }
                 }
               }
@@ -541,37 +557,18 @@ static Tensor _grid_sampler_2d_cpu_quantized(
           for (int64_t c = 0; c < C;
                ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
             double res = 0;
-            bool any_within_bounds = false;
-
-            if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
-              res += inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw;
-              any_within_bounds = true;
-            } else {
-              res += zero_point * nw;
-            }
-            if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
-              res += inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW] * ne;
-              any_within_bounds = true;
-            } else {
-              res += zero_point * ne;
-            }
-            if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
-              res += inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW] * sw;
-              any_within_bounds = true;
-            } else {
-              res += zero_point * sw;
-            }
-            if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
-              res += inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se;
-              any_within_bounds = true;
-            } else {
-              res += zero_point * se;
-            }
-
-            if (!any_within_bounds && padding_mode == GridSamplerPadding::Constant) {
-              res = quantized_value;
-            }
-
+            res += within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)
+                ? inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw
+                : quantized_value * nw;
+            res += within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)
+                ? inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW] * ne
+                : quantized_value * ne;
+            res += within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)
+                ? inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW] * sw
+                : quantized_value * sw;
+            res += within_bounds_2d(iy_se, ix_se, inp_H, inp_W)
+                ? inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se
+                : quantized_value * se;
             *out_ptr_NCHW = std::nearbyint(res);
           }
         }
@@ -662,27 +659,26 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
             scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
             for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
               auto res = static_cast<scalar_t>(0);
-              bool any_within_bounds = false;
 
               if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
                 res += inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw;
-                any_within_bounds = true;
+              } else {
+                res += static_cast<scalar_t>(value.value_or(0.)) * nw;
               }
               if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
                 res += inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW] * ne;
-                any_within_bounds = true;
+              } else {
+                res += static_cast<scalar_t>(value.value_or(0.)) * ne;
               }
               if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
                 res += inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW] * sw;
-                any_within_bounds = true;
+              } else {
+                res += static_cast<scalar_t>(value.value_or(0.)) * sw;
               }
               if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
                 res += inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se;
-                any_within_bounds = true;
-              }
-
-              if (!any_within_bounds && padding_mode == GridSamplerPadding::Constant) {
-                res = static_cast<scalar_t>(value.value_or(0.));
+              } else {
+                res += static_cast<scalar_t>(value.value_or(0.)) * se;
               }
 
               *out_ptr_NCHW = res;
