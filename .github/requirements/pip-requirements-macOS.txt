@@ -18,7 +18,7 @@ pytest-rerunfailures==10.3
 pytest-flakefinder==1.1.0
 scipy==1.10.1
 sympy==1.12.1 ; python_version == "3.8"
-sympy>=1.13.0 ; python_version >= "3.9"
+sympy==1.13.1 ; python_version >= "3.9"
 unittest-xml-reporting<=3.2.0,>=2.0.0
 xdoctest==1.1.0
 filelock==3.6.0
