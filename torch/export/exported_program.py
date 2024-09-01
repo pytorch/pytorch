@@ -83,6 +83,14 @@ class ModuleCallSignature:
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
 
+    def replace_all_uses_with(self, original_node, new_node):
+        for i in self.inputs:
+            if i.name == original_node.name:
+                i.name = new_node.name
+        for o in self.outputs:
+            if o.name == original_node.name:
+                o.name = new_node.name
+
 
 @dataclasses.dataclass
 class ModuleCallEntry:
@@ -655,7 +663,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
     return gm, new_graph_signature
 
 
-def _common_getitem_elimination_pass(gm: torch.fx.GraphModule, graph_signature):
+def _common_getitem_elimination_pass(
+    gm: torch.fx.GraphModule, graph_signature, module_call_graph
+):
     with gm._set_replace_hook(graph_signature.get_replace_hook()):
         for module in gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
@@ -663,12 +673,17 @@ def _common_getitem_elimination_pass(gm: torch.fx.GraphModule, graph_signature):
 
             node_id: Dict[torch.fx.Node, str] = {}
             getitems: Dict[str, torch.fx.Node] = {}
-            for node in module.graph.nodes:
+            for node in list(module.graph.nodes):
                 if node.op == "call_function" and node.target == operator.getitem:
                     source, idx = node.args
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:
                         node.replace_all_uses_with(getitems[new_id])
+                        for entry in module_call_graph:
+                            if entry.signature is not None:
+                                entry.signature.replace_all_uses_with(
+                                    node, getitems[new_id]
+                                )
                         module.graph.erase_node(node)
                     else:
                         getitems[new_id] = node
@@ -751,7 +766,9 @@ class ExportedProgram:
         if isinstance(root, torch.fx.GraphModule):
             self._graph_module.meta.update(root.meta)
 
-        _common_getitem_elimination_pass(self._graph_module, graph_signature)
+        _common_getitem_elimination_pass(
+            self._graph_module, graph_signature, module_call_graph
+        )
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: Dict[str, Any] = state_dict
         self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
