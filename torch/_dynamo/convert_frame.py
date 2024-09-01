@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+import contextlib
 import cProfile
 import dis
 import functools
@@ -206,10 +207,16 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
+
+            exit_stack = contextlib.ExitStack()
+            exit_stack.enter_context(
+                torch.fx._symbolic_trace._maybe_revert_all_patches()
+            )
             try:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
+                exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
                 torch.use_deterministic_algorithms(

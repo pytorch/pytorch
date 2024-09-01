@@ -12,6 +12,7 @@ import enum
 import functools
 import importlib
 import inspect
+import itertools
 import linecache
 import logging
 import multiprocessing
@@ -2992,9 +2993,11 @@ def _builtin_function_ids() -> Dict[int, str]:
             if not k.startswith("_") and callable(v)
         }
     )
+    rv.update({id(v): f"itertools.{v.__name__}" for v in (itertools.islice,)})
     rv.update(
         {
             id(cast): "typing.cast",
+            id(functools.reduce): "functools.reduce",
             id(copy.deepcopy): "copy.deepcopy",
         }
     )
@@ -3240,6 +3243,8 @@ MOD_INLINELIST = [
     "torch.distributions",
     "torch.export._tree_utils",
     "torch.fx._pytree",
+    "torch.fx._symbolic_trace",
+    "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.overrides",
