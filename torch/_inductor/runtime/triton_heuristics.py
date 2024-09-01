@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import builtins
 import copy
 import functools
@@ -14,7 +16,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 
@@ -45,7 +47,8 @@ from .runtime_utils import (
 
 
 if TYPE_CHECKING:
-    from ..remote_cache import RemoteCacheBackend
+    from ..remote_cache import JsonDataTy, RemoteCache
+
 
 try:
     import triton
@@ -1037,7 +1040,7 @@ def load_cached_autotuning(
     return matching_configs[0]
 
 
-def should_use_remote_autotune_cache(inductor_meta):
+def _should_use_remote_autotune_cache(inductor_meta):
     if inductor_meta.get("autotune_remote_cache") is not None:
         return inductor_meta.get("autotune_remote_cache")
     if not inductor_meta.get("is_fbcode"):
@@ -1095,14 +1098,16 @@ def cached_autotune(
 
         local_cache = None
         cache_filename = None
-        remote_cache: Optional[RemoteCacheBackend] = None
+        remote_cache: Optional[
+            Union[RemoteCache[JsonDataTy], RemoteCache[object]]
+        ] = None
         remote_cache_key = None
         best_config = None
         if not inductor_meta.get("force_disable_caches", False):
             if inductor_meta.get("autotune_local_cache", True):
                 local_cache = LocalAutotuneCache()
                 cache_filename = os.path.splitext(filename)[0] + ".best_config"
-            if should_use_remote_autotune_cache(inductor_meta):
+            if _should_use_remote_autotune_cache(inductor_meta):
                 backend_hash = inductor_meta.get("backend_hash", None)
                 if backend_hash is not None:
                     key = backend_hash + configs_hash + "autotune-best-config-v2"
@@ -1111,16 +1116,14 @@ def cached_autotune(
                     try:
                         if inductor_meta.get("is_fbcode"):
                             from torch._inductor.fb.remote_cache import (
-                                FbRemoteAutotuneCacheBackend,
+                                FbRemoteAutotuneCache,
                             )
 
-                            remote_cache = FbRemoteAutotuneCacheBackend(key)
+                            remote_cache = FbRemoteAutotuneCache(key)
                         else:
-                            from torch._inductor.remote_cache import (
-                                RedisRemoteCacheBackend,
-                            )
+                            from torch._inductor.remote_cache import RemoteAutotuneCache
 
-                            remote_cache = RedisRemoteCacheBackend(key)
+                            remote_cache = RemoteAutotuneCache(key)
                     except Exception:
                         remote_cache = None
                         log.warning("Unable to create a remote cache", exc_info=True)
