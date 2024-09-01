@@ -116,7 +116,7 @@ def associative_scan(
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
         lifted_args (Tuple of tensors): A tuple of lifted parameters from the global scope.
             This parameter will be populated internally.
-
+            Note: lifted arguments are currently only supported for ``combine_mode=generic`
 
     Example::
 
