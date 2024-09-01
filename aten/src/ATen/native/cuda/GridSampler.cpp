@@ -24,7 +24,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
   auto output = at::empty(
       {in_size[0], in_size[1], grid_size[1], grid_size[2]}, input.options());
   launch_grid_sampler_2d_forward_kernel(
-      output, input, grid, interpolation_mode, padding_mode, align_corners);
+      output, input, grid, interpolation_mode, padding_mode, align_corners, value.value_or(0.));
   return output;
 }
 
@@ -37,7 +37,7 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
       {in_size[0], in_size[1], grid_size[1], grid_size[2], grid_size[3]},
       input.options());
   launch_grid_sampler_3d_forward_kernel(
-      output, input, grid, interpolation_mode, padding_mode, align_corners);
+      output, input, grid, interpolation_mode, padding_mode, align_corners, value.value_or(0.));
   return output;
 }
 
