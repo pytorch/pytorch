@@ -50,6 +50,7 @@ namespace at::native { namespace {
  *      //           from the beginning of this slice.
  *      //      iii. `len` as the number of valid locations in the vectors.
  *      //           (There might not be enough near boundary.)
+ *      //      iiii. 'value' as the default value for out-of-bound locations.
  *      for (const auto n : c10::irange(input_accessor.size(0))) {
  *        grid_sample_2d_grid_slice_iterator(
  *          grid_accessor[n],
@@ -57,7 +58,7 @@ namespace at::native { namespace {
  *              const Vectorized<scalar_t>& grid_y,
  *              int64_t spatial_offset, int64_t len) {
  *            grid_sample.forward(out_accessor[n], input_accessor[n],
- *                                spatial_offset, grid_x, grid_y, len);
+ *                                spatial_offset, grid_x, grid_y, len, value);
  *          });
  *      }
  *
@@ -103,8 +104,8 @@ namespace at::native { namespace {
  *          // Applies grid sampling (forward) procedure:
  *          //   1. computes interpolation locations from grid values `grid_x`
  *          //      and `grid_y`,
- *          //   2. interpolates output values using the locations and input
- *          //      data in `inp_slice`, and
+ *          //   2. interpolates output values using the locations, input data
+ *          //      in `inp_slice`, and default value `value`, and
  *          //   3. writes the first `len` values in the interpolated vector to
  *          //      `out_slice` with spatial offset being `offset`.
  *          //
@@ -116,7 +117,7 @@ namespace at::native { namespace {
  *          void forward(TensorAccessor<scalar_t, 3>& out_slice,
  *                       const TensorAccessor<scalar_t, 3>& inp_slice,
  *                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
- *                       int64_t len) const;
+ *                       int64_t len, const double value) const;
  *
  *          // Applies grid sampling (backward) procedure. Arguments semantics
  *          // and strategy are similar to those of `forward`, with the
