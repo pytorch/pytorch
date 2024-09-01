@@ -2163,10 +2163,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         ):
             raise UserError(  # noqa: B904
                 UserErrorType.CONSTRAINT_VIOLATION,
-                "Tried to use data-dependent value in the subsequent computation. "
-                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
-                "You will need to explicitly give hint to the compiler. Please take a look at "
-                f"torch._check OR torch._check_is_size APIs.  {cause}",
+                str(cause),
                 case_name="constrain_as_size_example",
             )
         elif isinstance(cause, ValueRangeError):
