@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     ops,
     PYTORCH_CUDA_MEMCHECK,
+    skipCPUIf,
     skipCUDAIf,
     skipCUDAIfRocm,
     skipMeta,
@@ -238,7 +239,7 @@ def get_op_name(layout):
 
 # Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
-def convert_dense_to_nested_tensor(values):
+def convert_dense_to_nested_tensor_legacy(values):
     offsets = torch.arange(
         0, values.shape[0] * values.shape[1] + 1, values.shape[1], device=values.device
     )
@@ -251,7 +252,7 @@ def convert_dense_to_nested_tensor(values):
 
 # Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
-def convert_jagged_to_nested_tensor(
+def convert_jagged_to_nested_tensor_legacy(
     values: torch.Tensor, offsets: torch.Tensor, max_length: int
 ) -> torch.Tensor:
     metadata_cache = {"max_seqlen": max_length, "min_seqlen": 1}
@@ -261,8 +262,31 @@ def convert_jagged_to_nested_tensor(
 
 # Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
-def convert_nt_to_jagged(nt):
+def convert_nt_to_jagged_legacy(nt):
     return buffer_from_jagged(nt)
+
+
+# Helper function for test_dummy_mha_with_nt
+@torch.fx.wrap
+def convert_dense_to_nested_tensor(values):
+    nt = torch.nested.as_nested_tensor(values, layout=torch.jagged)
+    return nt
+
+
+# Helper function for test_dummy_mha_with_nt
+@torch.fx.wrap
+def convert_jagged_to_nested_tensor(
+    values: torch.Tensor, offsets: torch.Tensor, max_length: int
+) -> torch.Tensor:
+    nt = torch.nested.nested_tensor_from_jagged(
+        values, offsets, lengths=None, min_seqlen=1, max_seqlen=max_length
+    )
+    return nt
+
+
+# Helper function for test_dummy_mha_with_nt
+def convert_nt_to_jagged(nt):
+    return nt.values()
 
 
 @markDynamoStrictTest
@@ -556,16 +580,9 @@ class TestNestedTensor(NestedTensorTestCase):
         nested_namespace_result = torch.nested.to_padded_tensor(nt, 4)
         self.assertEqual(result, nested_namespace_result)
 
-    @parametrize(
-        "layout",
-        [torch.strided, torch.jagged],
-        name_fn=lambda l: f"_with_{layout_name(l)}_layout",
-    )
-    def test_to(self, layout):
+    def test_to(self):
         ntensors = 4
-        nt = random_nt_from_dims(
-            (7, None, 10), torch.device("cpu"), torch.float32, layout=layout
-        )
+        nt = random_nt(torch.device("cpu"), torch.float32, ntensors, (4, 4))
 
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, t.to(t, non_blocking=non_blocking))
@@ -639,15 +656,6 @@ class TestNestedTensor(NestedTensorTestCase):
                     )
                     self.assertIs(torch.int32, nt2.to(dtype=torch.int32).dtype)
                     self.assertEqual(nt2.device, nt2.to(dtype=torch.int32).device)
-
-        # Jagged <-> strided
-        new_layout = torch.jagged if layout == torch.strided else torch.strided
-        new_layout_nt = torch.ops.aten._to_copy(nt, layout=new_layout)
-        self.assertIs(new_layout_nt.layout, new_layout)
-        self.assertEqual(new_layout_nt.device, nt.device)
-        self.assertEqual(new_layout_nt.size(2), nt.size(2))
-        self.assertEqual(new_layout_nt.unbind(), nt.unbind())
-        self.assertNotEqual(new_layout_nt.data_ptr(), nt.data_ptr())
 
     def test_copy_(self):
         ntensors = 4
@@ -2508,6 +2516,53 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             lambda: nt1.reshape(2, -1, -1, 2, 2),
         )
 
+    def test_nested_masked_select(self, device):
+        t = torch.randn([3, 3], device=device)
+        mask = torch.tensor([False], device=device)
+
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), torch.tensor([], device=device))
+        self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 0], device=device))
+
+        mask = torch.tensor([[False], [False], [True]], device=device)
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t[-1], atol=0.1, rtol=0.1)
+        self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 3], device=device))
+
+        mask = torch.tensor(
+            [[False, False, True], [True, False, True], [False, False, True]],
+            device=device,
+        )
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t.masked_select(mask))
+        self.assertEqual(njt.offsets(), torch.tensor([0, 1, 3, 4], device=device))
+
+        t = torch.randn([2, 3, 3, 1], device=device)
+        mask = torch.tensor(
+            [
+                [
+                    [[True], [False], [True]],
+                    [[True], [False], [True]],
+                    [[True], [False], [True]],
+                ],
+                [
+                    [[False], [True], [True]],
+                    [[False], [True], [True]],
+                    [[True], [True], [True]],
+                ],
+            ],
+            device=device,
+        )
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t.masked_select(mask))
+        self.assertEqual(
+            njt.offsets(),
+            torch.tensor(
+                [0, 1, 1, 2, 3, 3, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13],
+                device=device,
+            ),
+        )
+
     @dtypes(torch.float, torch.float16, torch.double)
     def test_narrow(self, device, dtype):
         nt = random_nt_from_dims([5, None, None, None], device=device, dtype=dtype)
@@ -4296,6 +4351,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             include_list_of_lists=False,
             include_requires_grad=components_require_grad,
             include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
         )
         reduce_dim = 1  # ragged
 
@@ -4515,6 +4571,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             include_list_of_lists=False,
             include_requires_grad=components_require_grad,
             include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
         )
 
         for tensor_list in tensor_lists:
@@ -5893,6 +5950,22 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertFalse(clone.is_contiguous())
         check_nt_equality(detached, transposed)
 
+    def test_to_dtype(self, device):
+        nt = random_nt_from_dims(
+            [2, None, 3], device, torch.float32, layout=torch.jagged
+        )
+        nt_after = nt.to(torch.float64)
+        self.assertEqual(torch.float32, nt.dtype)
+        self.assertEqual(torch.float64, nt_after.dtype)
+        self.assertEqual(torch.float64, nt_after.values().dtype)
+        self.assertEqual(torch.int64, nt_after.offsets().dtype)
+
+        noncontiguous_nt = nt.transpose(1, 2)
+        noncontiguous_nt_after = noncontiguous_nt.to(torch.bfloat16)
+        self.assertEqual(torch.bfloat16, noncontiguous_nt_after.dtype)
+        self.assertEqual(torch.bfloat16, noncontiguous_nt_after.values().dtype)
+        self.assertEqual(torch.int64, noncontiguous_nt_after.offsets().dtype)
+
     def test_to_copy(self, device):
         nt = torch.nested.nested_tensor(
             [
@@ -6535,6 +6608,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
             nt32 = convert_jagged_to_nested_tensor(values32, offsets, max_length=16)
@@ -6606,6 +6680,38 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad)
         self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Platform doesn't support flash or mem-efficient attention",
+    )
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @skipIfTorchDynamo()
+    def test_sdpa_flop_counter(self, device):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        def get_flops(nt):
+            flop_counter = FlopCounterMode(display=False)
+            with flop_counter:
+                ret = torch.nn.functional.scaled_dot_product_attention(nt, nt, nt)
+                ret.values().sum().backward()
+            return flop_counter.get_total_flops()
+
+        values = torch.randn(
+            (8 * 16, 4, 16), requires_grad=True, device=device, dtype=torch.float16
+        )
+        offsets = torch.arange(0, 8 * 16 + 1, 16, device=device, dtype=torch.int32)
+        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+
+        values_meta = torch.randn(
+            (8 * 16, 4, 16), requires_grad=True, device="meta", dtype=torch.float16
+        )
+        offsets_meta = torch.arange(0, 8 * 16 + 1, 16, device="meta", dtype=torch.int32)
+        nt_meta = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+
+        self.assertEqual(get_flops(nt), get_flops(nt_meta))
+
     @skipIfTorchDynamo()
     def test_nested_tensor_activation_checkpoint(self, device):
         values = torch.randn(
@@ -6643,11 +6749,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @skipIfTorchDynamo("compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    def test_dummy_mha_with_nt(self, device):
+    @parametrize("use_legacy_api", [True, False])
+    @skipCPUIf(True, "SPDA Math NT fallback causes failure: see issue #133644")
+    def test_dummy_mha_with_nt(self, device, use_legacy_api):
         bs = 3
         d1 = 2
         d2 = 4
-        d3 = 6
+        d3 = 16
         n_heads = 2
         d_head = d3 // n_heads
         max_length_1 = 10
@@ -6655,36 +6763,59 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         torch.manual_seed(0)
 
         class mha(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self, use_legacy_api) -> None:
                 super().__init__()
                 torch.manual_seed(0)
                 self.linear = torch.nn.Linear(d2, d3, device=device)
+                self.use_legacy_api = use_legacy_api
 
             def forward(self, query, value, offsets):
                 value = self.linear(value)
-                key = convert_jagged_to_nested_tensor(value, offsets, max_length_1)
-                value = convert_jagged_to_nested_tensor(value, offsets, max_length_2)
-                query = convert_dense_to_nested_tensor(query)
+                if self.use_legacy_api:
+                    key = convert_jagged_to_nested_tensor_legacy(
+                        value, offsets, max_length_1
+                    )
+                    value = convert_jagged_to_nested_tensor_legacy(
+                        value, offsets, max_length_2
+                    )
+                    query = convert_dense_to_nested_tensor_legacy(query)
+                else:
+                    key = convert_jagged_to_nested_tensor(value, offsets, max_length_1)
+                    value = convert_jagged_to_nested_tensor(
+                        value, offsets, max_length_2
+                    )
+                    query = convert_dense_to_nested_tensor(query)
                 q = query.view(bs, -1, n_heads, d_head).transpose(1, 2)
                 k = key.view(bs, -1, n_heads, d_head).transpose(1, 2)
                 v = value.view(bs, -1, n_heads, d_head).transpose(1, 2)
-                attn_output = torch.nn.functional.scaled_dot_product_attention(
-                    q,
-                    k,
-                    v,
-                    attn_mask=None,
-                    dropout_p=0.0,
-                    is_causal=False,
-                )
+
+                with torch.nn.attention.sdpa_kernel(
+                    [
+                        torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                        torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+                    ]
+                ):
+                    attn_output = torch.nn.functional.scaled_dot_product_attention(
+                        q,
+                        k,
+                        v,
+                        attn_mask=None,
+                        dropout_p=0.0,
+                        is_causal=False,
+                    )
                 attn_output = attn_output.transpose(1, 2)
-                attn_output = convert_nt_to_jagged(attn_output)
+                if self.use_legacy_api:
+                    attn_output = convert_nt_to_jagged_legacy(attn_output)
+                else:
+                    attn_output = convert_nt_to_jagged(attn_output)
                 return attn_output, key._max_seqlen, value._max_seqlen
 
         query = torch.rand(bs, d1, d3, device=device)
-        value = torch.rand(6, d2, requires_grad=True, device=device)
-        offsets = torch.tensor([0, 2, 3, 6], device=device)
+        value = torch.rand(30, d2, requires_grad=True, device=device)
+        # total_length must > than max_length otherwise flash_attn backwark will fail
+        offsets = torch.tensor([0, 2, 3, 30], device=device)
 
-        m = mha()
+        m = mha(use_legacy_api)
         symbolic_traced: torch.fx.GraphModule = torch.fx.symbolic_trace(m)
         m = torch.compile(symbolic_traced)
         attn_output, cached_key_max_seqlen, cached_value_max_seqlen = m(
@@ -6702,7 +6833,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(cached_value_max_seqlen, max_length_2)
 
         # check if the output is numerically equivalent with the eager mode
-        m_eager = mha()
+        m_eager = mha(use_legacy_api)
+
         value.grad = None
         attn_output_eager, _, _ = m_eager(query, value, offsets)
         attn_output_eager.sum().backward()
@@ -6992,40 +7124,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         expected_grad.unbind()[1].add_(1.0)
         torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
-    def test_layout_conversion(self, device):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 4, device=device),
-                torch.randn(5, 4, device=device),
-                torch.randn(3, 4, device=device),
-            ],
-            layout=torch.jagged,
-        )
-        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
-        self.assertEqual(strided_nt.unbind(), nt.unbind())
-        self.assertEqual(strided_nt.data_ptr(), nt.data_ptr())
-
-        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
-        self.assertEqual(jagged_nt.unbind(), nt.unbind())
-        self.assertEqual(jagged_nt.data_ptr(), nt.data_ptr())
-
-    def test_layout_conversion_backward(self, device):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 4, device=device),
-                torch.randn(5, 4, device=device),
-                torch.randn(3, 4, device=device),
-            ],
-            layout=torch.jagged,
-            requires_grad=True,
-        )
-        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
-        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
-
-        jagged_nt.backward(torch.ones_like(jagged_nt))
-        expected_grad = torch.ones_like(nt)
-        torch._dynamo.disable(self.assertEqual)(expected_grad, nt.grad)
-
 
 FORWARD_FAILURES = {
     # === BEGIN NotImplementedError SECTION ===
@@ -7122,6 +7220,24 @@ BACKWARD_FAILURES = {
     "sinc",
     "special.i1",
     "special.i1e",
+    # clone() on a "non-contiguous with holes" NJT allocates a new offsets -> new nested int
+    # RuntimeError: Function CloneBackward0 returned an invalid gradient at index 0 -
+    # got [3, j29, 5] but expected shape compatible with [3, j28, 5]
+    "clone",
+    # Calling into torch.ops.aten.size directly
+    "masked_select",
+}
+
+COMPILE_FORWARD_FAILURES = {
+    *FORWARD_FAILURES,
+    # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
+    # data-dependent error in torch.compile
+    "clone",
+}
+
+COMPARE_TENSOR_COMPONENT_EQUALITY = {
+    # masked_select is expected to output a different shape
+    "masked_select",
 }
 
 
@@ -7183,7 +7299,8 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads, grads_ref)
 
-    @withXFails(FORWARD_FAILURES)
+    @withXFails(COMPILE_FORWARD_FAILURES)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_compile_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
@@ -7201,13 +7318,17 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = f(sample.input, *sample.args, **sample.kwargs)
             out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
 
-            self.assertEqual(out_compile, out_ref)
+            if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                self.assertEqualIgnoringNestedInts(out_compile, out_ref)
+            else:
+                self.assertEqual(out_compile, out_ref)
 
     @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
     )
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_compile_backward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
             torch.compiler.reset()

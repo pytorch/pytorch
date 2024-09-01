@@ -51,7 +51,6 @@ from ..utils import (
 )
 from ..virtualized import ops, OpsWrapper, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
-from .debug_utils import DebugPrinterManager
 from .multi_kernel import MultiKernel
 
 
@@ -398,7 +397,6 @@ class SIMDKernel(Kernel):
         Hook called right before codegen with every index that will be
         used in the fused kernel.
         """
-        pass
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         prior = self.inside_reduction
@@ -1066,13 +1064,10 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
-        current_loop_writes: OrderedSet[str] = OrderedSet()
-
+        done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        current_loop_reduced_writes: OrderedSet[str] = OrderedSet()
-        current_loop_has_writes = False
-        done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
+        not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1085,10 +1080,8 @@ class SIMDScheduling(BaseScheduling):
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
         def schedule_node_in_loop(n):
-            nonlocal current_loop_has_writes
             done.add(n)
             node_schedule.append(n)
-            current_loop_has_writes = True
             # A scan is modelled as a reduction in the scheduler but has a
             # full sized output that can be used inside the loop body
             if (
@@ -1097,44 +1090,32 @@ class SIMDScheduling(BaseScheduling):
                 and isinstance(n.node, ir.ComputedBuffer)
                 and not isinstance(n.node.data, ir.Scan)
             ):
-                current_loop_reduced_writes.add(n.get_name())
+                not_ready_yet_nodes.add(n.get_name())
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
-            nonlocal current_loop_has_writes
-            if current_loop_has_writes:
-                # flush out any other runnable nodes to reduce number of loops
-                for other_node in nodes[index + 1 :]:
-                    if (
-                        node not in done
-                        and fits_in_main_body(other_node)
-                        and not (current_loop_reduced_writes & other_node.ancestors)
-                    ):
-                        schedule_node_in_loop(node)
-
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
             else:
                 node_schedule.append(DisableReduction)
             yield
             node_schedule.append(EnableReduction)
-            current_loop_reduced_writes.clear()
-            current_loop_has_writes = False
+            not_ready_yet_nodes.clear()
+
+        def requires_closing_previous_reduction(node, node_schedule):
+            if rnumel == 1:
+                return False
+            if not not_ready_yet_nodes & node.ancestors:
+                return False
+            assert node_schedule and not isinstance(
+                node_schedule[-1], (EnableReduction, DisableReduction)
+            )
+            return bool(not_ready_yet_nodes)
 
         for index, node in enumerate(nodes):
             if node in done:
                 continue
             done.add(node)
-
-            def requires_closing_previous_reduction(node, node_schedule):
-                if rnumel == 1:
-                    return False
-                if not current_loop_reduced_writes & node.ancestors:
-                    return False
-                assert node_schedule and not isinstance(
-                    node_schedule[-1], (EnableReduction, DisableReduction)
-                )
-                return bool(current_loop_reduced_writes)
 
             if fits_in_main_body(node):
                 if requires_closing_previous_reduction(node, node_schedule):
@@ -1396,25 +1377,16 @@ class SIMDScheduling(BaseScheduling):
 
         self.codegen_comment(node_schedule)
 
-        # debug printing values of intermediate tensors
-        # Note: MultiKernel debug printing is not supported for now
-        enable_debug_printer = (
-            config.aot_inductor.debug_intermediate_value_printer
-            and not isinstance(final_kernel, MultiKernel)
-        )
-        _, call_args, _, arg_types = (
+        _, call_args, arg_signatures, _ = (
             final_kernel.args.python_argdefs()
             if not isinstance(final_kernel, MultiKernel)
-            else None,
-            [],
-            None,
-            None,
+            else [None, [], None, None]
         )
-        call_args: List[str]
-        arg_types: Optional[List[type]]
-        with DebugPrinterManager(
-            enable_debug_printer, call_args, kernel_name, final_kernel, arg_types
-        ):
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, final_kernel
+        )
+        with debug_printer_manager:
             final_kernel.call_kernel(final_kernel.kernel_name)
 
         if config.nan_asserts:
@@ -1540,11 +1512,12 @@ class SIMDScheduling(BaseScheduling):
         self.codegen_comment(node_schedule)
 
         # debug printing values of intermediate tensors
-        enable_debug_printer = config.aot_inductor.debug_intermediate_value_printer
-        _, call_args, _, arg_types = kernel.args.python_argdefs()
-        with DebugPrinterManager(
-            enable_debug_printer, call_args, kernel_name, kernel, arg_types
-        ):
+        _, call_args, arg_signatures, _ = kernel.args.python_argdefs()
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, kernel
+        )
+        with debug_printer_manager:
             kernel.call_kernel(kernel_name, template_node.node)
 
         V.graph.removed_buffers |= kernel.removed_buffers
@@ -1773,6 +1746,28 @@ class SIMDScheduling(BaseScheduling):
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
+
+        # Optionally, prefer tiling into as many dimensions as possible.
+        if config.triton.prefer_nd_tiling:
+            # Get candidate tilings from the node ranges.
+            node_ranges = [
+                node.get_ranges()[0]
+                for node in EnableReduction.filter(node_schedule)
+                if isinstance(node, scheduler.SchedulerNode)
+            ]
+            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
+            for node_range in node_ranges:
+                # Collapse leading dims, to fit in the maximum dimensionality.
+                num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
+                first_trailing_dim = num_leading_dims + 1
+                collapsed_leading_dim = sympy_product(node_range[:first_trailing_dim])
+                tiling = [collapsed_leading_dim] + list(node_range[first_trailing_dim:])
+                new_tilings.add(tuple(tiling))
+
+            # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
+            # Since this is a stable sort, ties are broken by schedule order.
+            ranked_new_tilings = sorted(new_tilings, key=len, reverse=True)
+            ranked_tilings = ranked_new_tilings + ranked_tilings
 
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)

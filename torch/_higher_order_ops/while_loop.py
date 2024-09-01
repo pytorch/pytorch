@@ -56,9 +56,6 @@ class WhileLoopOp(HigherOrderOperator):
 
 
 while_loop_op = WhileLoopOp()
-# Override while_loop_op.__module__ to "torch.ops.higher_order" so that in the generated
-# graph module, while_loop node's target is correctedly printed as torch.ops.higher_order.while_loop
-while_loop_op.__module__ = "torch.ops.higher_order"
 
 
 def while_loop(cond_fn, body_fn, carried_inputs):

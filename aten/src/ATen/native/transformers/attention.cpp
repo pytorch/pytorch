@@ -19,7 +19,6 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
-#include <type_traits>
 #include <limits>
 #include <utility>
 
@@ -70,6 +69,9 @@
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
+#include <ATen/ops/_safe_softmax.h>
+#include <ATen/ops/_safe_softmax_native.h>
+#include <ATen/ops/all.h>
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
@@ -529,7 +531,6 @@ std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& att
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
-    // TODO Use the max type of the input and output
     return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
@@ -641,6 +642,17 @@ std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
 
 } // namespace
 
+Tensor _safe_softmax(
+    const Tensor& self,
+    int64_t dim,
+    std::optional<ScalarType> dtype) {
+  auto out = at::softmax(self, dim, dtype);
+  const auto neg_inf = at::scalar_tensor(-std::numeric_limits<float>::infinity(), at::TensorOptions().dtype(out.dtype()).device(out.device()));
+  const auto masked = self.eq(neg_inf);
+  const auto masked_rows = all(masked, dim, true);
+  const auto zero = at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device()));
+  return at::where(masked_rows, zero, out);
+}
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.
@@ -725,7 +737,8 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::math:
-      if (query_.device().type() == DeviceType::MPS && dropout_p == 0.0
+      if ((!GradMode::is_enabled() || (!query_.requires_grad() && !key.requires_grad() && !value.requires_grad()))
+          && query_.device().type() == DeviceType::MPS && dropout_p == 0.0
           && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()
           && !query_.is_nested() && !key.is_nested() && !value.is_nested()) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
@@ -745,7 +758,7 @@ Tensor scaled_dot_product_attention(
           attn_mask,
           dropout_p,
           is_causal,
-          c10::nullopt, /*dropout_mask*/
+          std::nullopt, /*dropout_mask*/
           scale,
           enable_gqa));
     default:
@@ -827,7 +840,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn.add_(*attn_mask);
       }
     }
-    attn = at::softmax(attn, -1);
+    attn = at::_safe_softmax(attn, -1);
     if (dropout_p > 0.0) {
       if (dropout_mask.has_value()) {
         // In order to validate the correctness of the fused kernels, we need to
@@ -857,7 +870,6 @@ _scaled_dot_product_flash_attention_cpu(
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(2);
   int64_t num_head = query.size(1);
-  int64_t headSize = query.size(3);
 
   TORCH_CHECK(c10::isFloatingType(dtype),
     "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, FP16, but got ", dtype, " instead.");
@@ -875,7 +887,7 @@ _scaled_dot_product_flash_attention_cpu(
           (attn_mask.value().dim() == 2 || attn_mask.value().dim() == 4),
     "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}");
 
-  at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
+  at::Tensor output = at::empty_like(query, query.options()).transpose(1, 2);
   const auto accumulate_dtype = toOpMathType(dtype);
   at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
       query.options().dtype(accumulate_dtype));
