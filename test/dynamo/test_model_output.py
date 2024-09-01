@@ -6,6 +6,8 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import TEST_HPU, TestCase
 
 
 try:
@@ -238,9 +240,34 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(inp).attentions, opt_fn(inp).attentions)
 
     @maybe_skip
-    def test_HF_bert_model_output(self):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    def test_none(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                return CausalLMOutputWithPast(loss=None, logits=x)[0]
 
+        model = Model()
+        opt_model = torch.compile(model, backend="eager", fullgraph=True)
+        x = torch.randn(1, 1, 1, 1)
+
+        self.assertTrue(same(model(x), opt_model(x)))
+
+    @maybe_skip
+    def test_reconstruction(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                return CausalLMOutputWithPast(loss=x, logits=None)
+
+        model = Model()
+        x = torch.randn(1, 1, 1, 1)
+        eo = torch._dynamo.export(Model(), aten_graph=True)(x)
+        self.assertTrue(same(model(x), eo.graph_module(x)))
+
+
+class TestModelOutputBert(TestCase):
+    @maybe_skip
+    def test_HF_bert_model_output(self, device):
         class BertPooler(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -316,31 +343,12 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             torch.allclose(orig_result.pooler_output, compiled_result.pooler_output)
         )
 
-    @maybe_skip
-    def test_none(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                x = x + 1
-                return CausalLMOutputWithPast(loss=None, logits=x)[0]
 
-        model = Model()
-        opt_model = torch.compile(model, backend="eager", fullgraph=True)
-        x = torch.randn(1, 1, 1, 1)
+devices = ["cpu", "cuda"]
+if TEST_HPU:
+    devices.append("hpu")
 
-        self.assertTrue(same(model(x), opt_model(x)))
-
-    @maybe_skip
-    def test_reconstruction(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                x = x + 1
-                return CausalLMOutputWithPast(loss=x, logits=None)
-
-        model = Model()
-        x = torch.randn(1, 1, 1, 1)
-        eo = torch._dynamo.export(Model(), aten_graph=True)(x)
-        self.assertTrue(same(model(x), eo.graph_module(x)))
-
+instantiate_device_type_tests(TestModelOutputBert, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
