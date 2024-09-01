@@ -154,7 +154,10 @@ def _check_input_constraints_for_graph(
                                 )
                 else:
                     if arg_dim != node_dim:
-                        if isinstance(node_dim, torch.SymInt):
+                        if (
+                            isinstance(node_dim, torch.SymInt)
+                            and not node_dim.node.expr.is_number
+                        ):
                             # this means we deferred a guard from export analysis to runtime, let this pass
                             # we'll add a runtime assert checking equality to this replacement expression
                             continue
@@ -410,10 +413,9 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
                 new_output.users.clear()
                 node_replace_(call_mod_node, new_output)
             elif isinstance(new_output, (list, tuple)):
-                # Clear the users of the output node and set
-                # the users to be the users of original call_module node.
+                # Pop subgraph output node from users.
                 for node in new_output:
-                    node.users.clear()
+                    node.users.pop(output[0])
 
                 # Inline the get_item calls for the output node.
                 get_item_users = nodes_filter(
