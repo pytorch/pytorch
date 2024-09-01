@@ -60,6 +60,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
+from torch._utils_internal import log_cache_bypass
 
 
 T = TypeVar("T")
@@ -1359,6 +1360,8 @@ class FxGraphCache:
             cache_state = "bypass"
             log.info("Bypassing FX Graph Cache because '%s'", e)
             cache_info["cache_bypass_reason"] = str(e)
+            if remote:
+                log_cache_bypass("bypass_fx_graph", str(e))
             cache_event_time = time_ns()
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(

@@ -132,6 +132,10 @@ def log_trace_structured_event(*args, **kwargs) -> None:
     pass
 
 
+def log_cache_bypass(*args, **kwargs) -> None:
+    pass
+
+
 def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
