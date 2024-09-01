@@ -218,16 +218,6 @@ def reduction_project(reduction_type, acc):
     return acc
 
 
-def find_reduction_var_from_name(acc, varname_map):
-    suffix = None
-    if not isinstance(acc, CppCSEVariable):
-        assert "." in acc
-        var_name, suffix = acc.split(".")
-        assert var_name in varname_map
-        acc = varname_map[var_name]
-    return acc, suffix
-
-
 def transform_kernel_codes_under_inner_loop(
     code: IndentedBuffer, var: str, new_var: str, loop_start, loop_end
 ):
@@ -508,23 +498,12 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             proxy.loop_nest.from_loop_level(self.outer_loop_fusion_depth)
             for proxy in cpp_kernel_proxy_list
         ]
-
-        def find_deepest_proxy(proxy_list):
-            deepest_proxy = None
-            depth = -1
-            for proxy in proxy_list:
-                if len(proxy.loop_nest.loops) > depth:
-                    depth = len(proxy.loop_nest.loops)
-                    deepest_proxy = proxy
-            assert deepest_proxy is not None
-            return deepest_proxy
-
-        deepest_proxy = find_deepest_proxy(cpp_kernel_proxy_list)
-        deepest_proxy.loop_nest.kernel = outer_loop_fused_kernel
-        deepest_proxy.loop_nest.loops = deepest_proxy.loop_nest.loops[
+        outer_fused_proxy = cpp_kernel_proxy_list[0]
+        outer_fused_proxy.loop_nest.kernel = outer_loop_fused_kernel
+        outer_fused_proxy.loop_nest.loops = outer_fused_proxy.loop_nest.loops[
             : self.outer_loop_fusion_depth
         ]
-        return deepest_proxy
+        return outer_fused_proxy
 
 
 class RecordOptimizationContext:
