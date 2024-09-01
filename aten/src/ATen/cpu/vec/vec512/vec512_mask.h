@@ -26,9 +26,6 @@ struct VecMaskLoad<
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
     VectorizedN<mask_t, 2> tmp_vec;
     VectorizedN<T, dst_n> result;
-#ifndef _MSC_VER
-#pragma unroll
-#endif
     for (int i = 0; i < dst_n; i++) {
       tmp_vec[0] = vec_mask[2 * i];
       tmp_vec[1] = vec_mask[2 * i + 1];
@@ -95,6 +92,9 @@ struct VecMaskLoad<
       const VecMask<mask_t, dst_n>& vec_mask) {
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
     VectorizedN<data_t, dst_n> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
     for (int i = 0; i < dst_n; i++) {
       auto tmp_mask = VecMask<mask_t, 1>(vec_mask[i]);
       auto int_mask = tmp_mask.template cast<int, 2>();
@@ -294,9 +294,6 @@ struct VecMaskCast<
       const VecMask<int64_t, mask_n>& vec_mask) {
     VectorizedN<int, dst_n> result;
     VectorizedN<int64_t, 2> int64_vec;
-#ifndef _MSC_VER
-#pragma unroll
-#endif
     for (int i = 0; i < dst_n; ++i) {
       int64_vec[0] = vec_mask[2 * i];
       int64_vec[1] = vec_mask[2 * i + 1];
