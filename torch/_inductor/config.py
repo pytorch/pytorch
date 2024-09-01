@@ -704,6 +704,12 @@ assume_aligned_inputs: bool = False
 # set unless you know what you're doing.
 unsafe_ignore_unsupported_triton_autotune_args: bool = False
 
+# When True, we will check in scheduler.py _codegen that there are no "loops"
+# in the call stack; that is to say, the same frame multiple times.  This
+# ensures that a cProfile trace to this frame will be a straight line without
+# any cycles.
+check_stack_no_cycles_TESTING_ONLY: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
