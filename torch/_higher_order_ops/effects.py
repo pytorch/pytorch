@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple, Union
+from weakref import WeakKeyDictionary
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,10 +24,12 @@ class _EffectType(Enum):
 OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 
 
-SIDE_EFFECTS: Dict[OpType, _EffectType] = {
-    torch.ops.aten._print.default: _EffectType.ORDERED,
-    call_torchbind: _EffectType.ORDERED,
-}
+SIDE_EFFECTS: "WeakKeyDictionary[OpType, _EffectType]" = WeakKeyDictionary(
+    {
+        torch.ops.aten._print.default: _EffectType.ORDERED,
+        call_torchbind: _EffectType.ORDERED,
+    }
+)
 
 
 def _register_effectful_op(op: OpType, effect: _EffectType):
@@ -39,6 +42,13 @@ def _register_effectful_op(op: OpType, effect: _EffectType):
             f"trying to register a different effect type {effect}."
         )
     SIDE_EFFECTS[op] = effect
+
+
+def _deregister_effectful_op(op: OpType):
+    if op not in SIDE_EFFECTS:
+        raise RuntimeError(f"Op {op} is not registered as effectful")
+
+    del SIDE_EFFECTS[op]
 
 
 class WithEffects(HigherOrderOperator):
@@ -116,6 +126,11 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
     return None
 
 
+def new_token_tensor() -> torch.Tensor:
+    # Use dtype bool to not affect Inductor dtype promotions
+    return torch.tensor([], dtype=torch.bool)
+
+
 @with_effects.py_impl(DispatchKey.CompositeExplicitAutograd)
 def with_effects_dense(
     token: torch.Tensor,
@@ -124,7 +139,7 @@ def with_effects_dense(
     **kwargs: Dict[str, Any],
 ) -> Tuple[torch.Tensor, ...]:
     out = op(*args, **kwargs)
-    new_token = torch.tensor([])
+    new_token = new_token_tensor()
     if isinstance(out, tuple):
         return (new_token, *out)
     return (new_token, out)
@@ -216,7 +231,31 @@ def handle_effects(
         assert (
             allow_token_discovery
         ), f"Could not find a token for effect {key} which came from the function {op}"
-        tokens[key] = torch.tensor([])
+        proxy_tensor_mode = torch._C._get_dispatch_mode(
+            torch._C._TorchDispatchModeKey.PROXY
+        )
+        if proxy_tensor_mode is not None:
+            # If we discovered a new token during tracing, we are in backward.
+            # Then we patch the graph, adding additional tangents_token as input to the joint graph.
+            tracer = proxy_tensor_mode.tracer
+
+            from torch.fx.experimental.proxy_tensor import (
+                disable_proxy_modes_tracing,
+                track_tensor_tree,
+            )
+
+            with disable_proxy_modes_tracing():
+                token_tensor = new_token_tensor()
+
+            token_proxy = proxy_tensor_mode.tracer.create_proxy(
+                "placeholder", "tangents_token", (), {}, name="tangents_token"
+            )
+            track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)
+
+            tokens[key] = token_tensor
+        else:
+            tokens[key] = new_token_tensor()
+
     token = tokens[key]
 
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI

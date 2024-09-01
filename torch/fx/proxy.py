@@ -98,8 +98,9 @@ _COPY_META_FIELDS = [
     "recompute",
     "ac_graph_id",
     "from_node",
-    "quantization_tag",
-    "_numeric_debug_handle",
+    "quantization_tag",  # TODO deprecated
+    "_numeric_debug_handle",  # TODO deprecated
+    "custom",
     "partitioner_tag"
 ]
 
@@ -406,23 +407,33 @@ class Proxy:
         return Attribute(self, k)
 
     def __getstate__(self) -> Dict:
-        raise NotImplementedError(
-            """__getstate__ not implemented for Proxy. """
-            f"""Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
-        )
+        return self.__dict__
 
     def __deepcopy__(self, memo) -> Dict:
-        raise NotImplementedError(
-            """__deepcopy__ not implemented for Proxy. """
-            f"""Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
-        )
+        # We have to explicitly override this method, because otherwise deepcopy
+        # will go to __getattr__(self, "__deepcopy__") and return a
+        # Attribute(__deepcopy__), and may go into an infinite loop in some cases.
+        import copy
+        new_dict = {}
+        for k, v in self.__dict__.items():
+            try:
+                new_obj = copy.deepcopy(v, memo)
+            except Exception:
+                log.warning(
+                    "Shallow copy %s of Proxy because it cannot be deepcopied. "
+                    "Proxy is created for node %s", k, self.node.name)
+                new_obj = copy.copy(v)
+            new_dict[k] = new_obj
+        assert "node" in new_dict
+        assert "tracer" in new_dict
+        new_proxy = Proxy(new_dict["node"], new_dict["tracer"])
+        for k, v in new_dict.items():
+            new_proxy.__dict__[k] = v
+        return new_proxy
 
     def __setstate__(self, d):
         # This is called when being unpickled/loaded.
-        raise NotImplementedError(
-            """__setstate__ not implemented for Proxy. """
-            f"""Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
-        )
+        self.__dict__ = d
 
     def __call__(self, *args, **kwargs) -> 'Proxy':
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)

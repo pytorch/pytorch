@@ -34,15 +34,19 @@
 #include <utility>
 #include <vector>
 
+// for validators
+#ifdef USE_ROCM
+#include <rocm-core/rocm_version.h>
+#define ROCBLAS_BETA_FEATURES_API
+#include <rocblas/rocblas.h>
+#include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
+#endif
+
 namespace at::cuda::tunable {
 
-namespace {
-
-TuningContext tuning_context;
-
-} // anonymous namespace
-
 TuningContext* getTuningContext() {
+  static TuningContext tuning_context;
   return &tuning_context;
 }
 
@@ -177,6 +181,54 @@ TuningResultsValidator::TuningResultsValidator() {
       "PT_VERSION",
       [this]() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
+#ifdef USE_ROCM
+  // rocm
+  {
+    std::string rocm_version = ROCM_BUILD_INFO;
+    RegisterValidator(
+       "ROCM_VERSION",
+       [rocm_version]() { return rocm_version; },
+       [rocm_version](auto&& k) { return rocm_version == k ? OK : FAIL; });
+  }
+  // gfx arch
+  {
+    std::string gcn_arch_name = at::cuda::getCurrentDeviceProperties()->gcnArchName;
+    RegisterValidator(
+        "GCN_ARCH_NAME",
+        [gcn_arch_name]() { return gcn_arch_name; },
+        [gcn_arch_name](auto&& k) { return gcn_arch_name == k ? OK : FAIL; });
+  }
+  // rocblas
+  {
+#define STRINGIFY(s) #s
+#define XSTRINGIFY(s) STRINGIFY(s)
+    std::string rocblas_version = c10::str(
+        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
+        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
+        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
+        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
+#undef XSTRINGIFY
+#undef STRINGIFY
+    RegisterValidator(
+        "ROCBLAS_VERSION",
+        [rocblas_version]() { return rocblas_version; },
+        [rocblas_version](auto&& k) { return rocblas_version == k ? OK : FAIL; });
+  }
+  // hipblaslt
+  {
+    int version;
+    std::string revision(128, '\0');
+    auto handle = at::cuda::getCurrentCUDABlasLtHandle();
+    hipblasLtGetVersion(handle, &version);
+    hipblasLtGetGitRevision(handle, revision.data());
+    std::string hipblaslt_version =
+        c10::str(version, "-", revision.c_str());
+    RegisterValidator(
+        "HIPBLASLT_VERSION",
+        [hipblaslt_version]() { return hipblaslt_version; },
+        [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+  }
+#endif
 }
 
 std::unordered_map<std::string, std::string> TuningResultsValidator::GetAllValidators() const {

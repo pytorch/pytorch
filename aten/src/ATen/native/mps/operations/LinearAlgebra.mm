@@ -5,6 +5,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 // For MTLLanguageVersion_3_1
+#include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -124,9 +125,12 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
   static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
-  return always_use_metal || self.stride(0) > max_stride_size || self.stride(1) > max_stride_size ||
-      self.size(0) > max_stride_size || self.size(1) > max_stride_size || other.stride(0) > max_stride_size ||
-      other.stride(1) > max_stride_size || other.size(0) > max_stride_size || other.size(1) > max_stride_size;
+  static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+  return always_use_metal ||
+      (!is_macos_14_4_or_newer &&
+       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
+        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
+        other.size(0) > max_stride_size || other.size(1) > max_stride_size));
 }
 
 } // anonymous namespace
@@ -243,6 +247,8 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support mm for non-float inputs");
@@ -272,8 +278,16 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
       std::tie(newCachedGraph->inputTensor_, newCachedGraph->otherTensor_, newCachedGraph->outputTensor_) =
           do_mm(mpsGraph, self, other);
     });
-    auto selfPlaceholder = self.numel() != 0 ? Placeholder(cachedGraph->inputTensor_, self) : Placeholder();
-    auto otherPlaceholder = other.numel() != 0 ? Placeholder(cachedGraph->otherTensor_, other) : Placeholder();
+    // MPS TODO:
+    // Strided API doesn't play nice with complex data types (at least not in case of matmul).
+    auto selfPlaceholder = self.numel() != 0
+        ? Placeholder(
+              cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, !isComplexType(self.scalar_type()))
+        : Placeholder();
+    auto otherPlaceholder = other.numel() != 0
+        ? Placeholder(
+              cachedGraph->otherTensor_, other, nil, true, MPSDataTypeInvalid, !isComplexType(other.scalar_type()))
+        : Placeholder();
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     auto feeds = self.numel() != 0 ? dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder) : nil;
@@ -496,33 +510,157 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   return output;
 }
 
+static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+    using namespace mps;
+
+    id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
+    id<MTLBuffer> bBuffer = getMTLBufferStorage(batch2);
+    id<MTLBuffer> resBuffer = getMTLBufferStorage(result);
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    id<MTLDevice> device = MPSDevice::getInstance()->device();
+    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+      @autoreleasepool {
+        mpsStream->endKernelCoalescing();
+
+        uint64_t originalBatchSize = batch1.sizes().size() > 2 ? batch1.size(0) : 1;
+        uint64_t aRows = batch1.size(-2);
+        uint64_t bRows = batch2.size(-2);
+        uint64_t resRows = result.size(-2);
+        uint64_t aCols = batch1.size(-1);
+        uint64_t bCols = batch2.size(-1);
+        uint64_t resCols = result.size(-1);
+        uint64_t aElemSize = batch1.element_size();
+        uint64_t bElemSize = batch2.element_size();
+        uint64_t resElemSize = result.element_size();
+        MPSDataType dtype = getMPSDataType(batch1);
+
+        uint64_t elemInMatrix = resRows * resCols;
+        uint64_t largestSupportedBatchSize = floor(pow(2, 32) / elemInMatrix);
+        uint64_t batchSize = std::min(largestSupportedBatchSize, originalBatchSize);
+        uint64_t lastBatchSize = originalBatchSize % batchSize;
+
+        id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+        auto matmul = [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2];
+
+        MPSShape* aShape = @[ @(batchSize), @(aRows), @(aCols) ];
+        MPSShape* bShape = @[ @(batchSize), @(bRows), @(bCols) ];
+        MPSShape* resShape = @[ @(batchSize), @(resRows), @(resCols) ];
+        auto aDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:aShape];
+        aDesc_.preferPackedRows = true;
+        auto bDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:bShape];
+        bDesc_.preferPackedRows = true;
+
+        auto resDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:resShape];
+        resDesc_.preferPackedRows = true;
+
+        getMPSProfiler().beginProfileKernel(matmul, " tiled_bmm_mps", {batch1, batch2});
+
+        // Descriptors to use for last batch if it exists
+        //.matrices is a readonly property so we need a separate descriptor.
+        MPSNDArrayDescriptor *aDescLastBatch_, *bDescLastBatch_, *resDescLastBatch_;
+        if (lastBatchSize != 0) {
+          aDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                   shape:@[ @(lastBatchSize), @(aRows), @(aCols) ]];
+          aDescLastBatch_.preferPackedRows = true;
+          bDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                   shape:@[ @(lastBatchSize), @(bRows), @(bCols) ]];
+          bDescLastBatch_.preferPackedRows = true;
+          resDescLastBatch_ =
+              [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(resRows), @(resCols) ]];
+          resDescLastBatch_.preferPackedRows = true;
+        }
+
+        uint64_t requiredIterations = ceil(float(originalBatchSize) / batchSize);
+        auto aDesc = aDesc_;
+        auto bDesc = bDesc_;
+        auto resDesc = resDesc_;
+        for (const auto i : c10::irange(requiredIterations)) {
+          if (i == requiredIterations - 1 && lastBatchSize != 0) {
+            aDesc = aDescLastBatch_;
+            bDesc = bDescLastBatch_;
+            resDesc = resDescLastBatch_;
+          }
+          const uint64_t aArrayOffset = i * batchSize * aRows * aCols;
+          const uint64_t bArrayOffset = i * batchSize * bRows * bCols;
+          const uint64_t resArrayOffset = i * batchSize * resRows * resCols;
+
+          auto aMatrix = [[[MPSNDArray alloc] initWithBuffer:aBuffer
+                                                      offset:(batch1.storage_offset() + aArrayOffset) * aElemSize
+                                                  descriptor:aDesc] autorelease];
+          auto bMatrix = [[[MPSNDArray alloc] initWithBuffer:bBuffer
+                                                      offset:(batch2.storage_offset() + bArrayOffset) * bElemSize
+                                                  descriptor:bDesc] autorelease];
+          auto resMatrix = [[[MPSNDArray alloc] initWithBuffer:resBuffer
+                                                        offset:(result.storage_offset() + resArrayOffset) * resElemSize
+                                                    descriptor:resDesc] autorelease];
+
+          [matmul encodeToCommandEncoder:computeEncoder
+                           commandBuffer:commandBuffer
+                            sourceArrays:@[ aMatrix, bMatrix ]
+                        destinationArray:resMatrix];
+        }
+      }
+    });
+    return result;
+  } else {
+    TORCH_CHECK(false, "Tiling of batch matmul for larger than 2**32 entries only available from MacOS15 onwards");
+  }
+}
+
 static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   using namespace mps;
 
   TORCH_CHECK(supportedFloatingOrComplexType(batch1), "MPS device does not support bmm for non-float inputs");
+
+  // Currently unsupported if the matmul output goes over the 32-bit indexing limit
+  TORCH_CHECK(
+      batch1.size(1) * batch2.size(2) <= pow(2, 32),
+      "Output size of the matrix multiplication is larger than currently supported by the MPS backend: ",
+      batch1.size(1),
+      ",",
+      batch2.size(2),
+      ", needs to be less than 2**32 elements.",
+      "File a feature request for this use case against the MPS backend at https://github.com/pytorch/pytorch/issues");
 
   if (batch1.numel() == 0 || batch2.numel() == 0) {
     result.zero_();
     return result;
   }
 
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   MPSShape* shape = nil;
   bool doTranspose = false;
 
   // Handle transposes for the second batch of matrices.
-  if (batch2.is_view() && !batch2.is_contiguous()) {
-    if (batch2.numel() == batch2._base().numel()) {
-      const IntArrayRef& viewSizes = batch2.sizes();
+  // In macOS 15 this is detected automatically (for all shapes/ranks)
+  // through the strided MPS support.
+  if (!is_macOS_15_0_or_newer) {
+    if (batch2.is_view() && !batch2.is_contiguous()) {
+      if (batch2.numel() == batch2._base().numel()) {
+        const IntArrayRef& viewSizes = batch2.sizes();
 
-      // Handle 3D and 4D tensors.
-      // For 4D tensors, first it must have been reshaped from 4D to 3D and then transposed.
-      int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
-      if (batch2._base().stride(0) == batch2.stride(0) &&
-          batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
-        shape = @[ @(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1]) ];
-        doTranspose = true;
+        // Handle 3D and 4D tensors.
+        // For 4D tensors, first it must have been reshaped from 4D to 3D and then transposed.
+        int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
+        if (batch2._base().stride(0) == batch2.stride(0) &&
+            batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
+          shape = @[ @(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1]) ];
+          doTranspose = true;
+        }
       }
     }
+  }
+
+  // Check if we need to split the batch to do the computation
+  uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
+  if (resultSize > pow(2, 32)) {
+    result = tiled_bmm_out_mps_impl(batch1, batch2, result);
+    return result;
   }
 
   MPSStream* stream = getCurrentMPSStream();
