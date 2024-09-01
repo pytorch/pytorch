@@ -1,10 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
 import torch
-import torch.nn
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch.nn
 import torch.utils.checkpoint
 
 
