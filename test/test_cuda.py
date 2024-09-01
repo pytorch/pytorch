@@ -171,7 +171,6 @@ class TestCuda(TestCase):
                 # Some GPUs don't support same address space on host and device side
                 pass
 
-
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
