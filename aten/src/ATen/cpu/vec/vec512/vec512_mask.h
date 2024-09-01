@@ -17,8 +17,7 @@ struct VecMaskLoad<
     mask_n,
     typename std::enable_if_t<
         (mask_n == dst_n * 2 && dst_n >= 1) &&
-            (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
-             std::is_same_v<T, uint32_t>),
+            (std::is_same_v<T, float> || std::is_same_v<T, int32_t>),
         void>> {
   static inline VectorizedN<T, dst_n> apply(
       const T* ptr,
@@ -55,8 +54,7 @@ struct VecMaskLoad<
     mask_t,
     dst_n,
     typename std::enable_if_t<
-        std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
-            std::is_same_v<T, uint32_t>,
+        std::is_same_v<T, float> || std::is_same_v<T, int32_t>,
         void>> {
   static inline VectorizedN<T, dst_n> apply(
       const T* ptr,
@@ -83,50 +81,67 @@ struct VecMaskLoad<
   }
 };
 
-template <typename data_t, typename mask_t>
+template <typename data_t, int dst_n, typename mask_t>
 struct VecMaskLoad<
     data_t,
-    1,
+    dst_n,
     mask_t,
-    1,
+    dst_n,
     typename std::enable_if<
         std::is_same_v<data_t, BFloat16> ||
         std::is_same_v<data_t, Half>>::type> {
-  static inline VectorizedN<data_t, 1> apply(
+  static inline VectorizedN<data_t, dst_n> apply(
       const data_t* ptr,
-      const VecMask<mask_t, 1>& vec_mask) {
+      const VecMask<mask_t, dst_n>& vec_mask) {
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
-    auto int_mask = vec_mask.template cast<int, 1>()[0];
-    auto mmask = _mm512_cmp_epi32_mask(int_mask, all_ones, _MM_CMPINT_EQ);
-    auto zero = _mm256_set1_epi16(0);
-    auto temp = _mm256_mask_loadu_epi16(zero, mmask, ptr);
-    return Vectorized<data_t>(
-        _mm512_inserti32x8(_mm512_castsi256_si512(temp), zero, 1));
+    VectorizedN<data_t, dst_n> result;
+    for (int i = 0; i < dst_n; i++) {
+      auto tmp_mask = VecMask<mask_t, 1>(vec_mask[i]);
+      auto int_mask = tmp_mask.template cast<int, 2>();
+      auto mmask0 = _mm512_cmp_epi32_mask(int_mask[0], all_ones, _MM_CMPINT_EQ);
+      auto mmask1 = _mm512_cmp_epi32_mask(int_mask[1], all_ones, _MM_CMPINT_EQ);
+      auto zero = _mm256_set1_epi16(0);
+      auto temp0 = _mm256_mask_loadu_epi16(
+          zero, mmask0, ptr + (2 * i) * Vectorized<int>::size());
+      auto temp1 = _mm256_mask_loadu_epi16(
+          zero, mmask1, ptr + (2 * i + 1) * Vectorized<int>::size());
+      result[i] = Vectorized<data_t>(
+          _mm512_inserti32x8(_mm512_castsi256_si512(temp0), temp1, 1));
+    }
+    return result;
   }
 };
 
-template <typename data_t, typename mask_t>
+template <typename data_t, int dst_n, typename mask_t, int mask_n>
 struct VecMaskLoad<
     data_t,
-    1,
+    dst_n,
     mask_t,
-    2,
-    typename std::enable_if<
-        std::is_same_v<data_t, BFloat16> ||
-        std::is_same_v<data_t, Half>>::type> {
-  static inline VectorizedN<data_t, 1> apply(
+    mask_n,
+    typename std::enable_if_t<
+        (mask_n == 2 * dst_n && dst_n >= 1) &&
+        (std::is_same_v<data_t, BFloat16> || std::is_same_v<data_t, Half>)>> {
+  static inline VectorizedN<data_t, dst_n> apply(
       const data_t* ptr,
-      const VecMask<mask_t, 2>& vec_mask) {
+      const VecMask<mask_t, mask_n>& vec_mask) {
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
-    auto int_mask = vec_mask.template cast<int, 2>();
-    auto mmask0 = _mm512_cmp_epi32_mask(int_mask[0], all_ones, _MM_CMPINT_EQ);
-    auto mmask1 = _mm512_cmp_epi32_mask(int_mask[1], all_ones, _MM_CMPINT_EQ);
-    auto zero = _mm256_set1_epi16(0);
-    auto temp0 = _mm256_mask_loadu_epi16(zero, mmask0, ptr);
-    auto temp1 =
-        _mm256_mask_loadu_epi16(zero, mmask1, ptr + Vectorized<mask_t>::size());
-    return Vectorized<data_t>(
-        _mm512_inserti32x8(_mm512_castsi256_si512(temp0), temp1, 1));
+    VectorizedN<data_t, dst_n> result;
+    VectorizedN<mask_t, 2> tmp_vec;
+    for (int i = 0; i < dst_n; i++) {
+      tmp_vec[0] = vec_mask[2 * i];
+      tmp_vec[1] = vec_mask[2 * i + 1];
+      auto int_mask = VecMask<mask_t, 2>(tmp_vec).template cast<int, 2>();
+      auto mmask0 = _mm512_cmp_epi32_mask(int_mask[0], all_ones, _MM_CMPINT_EQ);
+      auto mmask1 = _mm512_cmp_epi32_mask(int_mask[1], all_ones, _MM_CMPINT_EQ);
+      auto zero = _mm256_set1_epi16(0);
+      auto temp0 = _mm256_mask_loadu_epi16(
+          zero, mmask0, ptr + (2 * i) * Vectorized<int>::size());
+      auto temp1 = _mm256_mask_loadu_epi16(
+          zero, mmask1, ptr + (2 * i + 1) * Vectorized<int>::size());
+      result[i] = Vectorized<data_t>(
+          _mm512_inserti32x8(_mm512_castsi256_si512(temp0), temp1, 1));
+    }
+    return result;
   }
 };
 
