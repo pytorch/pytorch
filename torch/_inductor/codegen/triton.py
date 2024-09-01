@@ -2038,6 +2038,7 @@ class TritonKernel(SIMDKernel):
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             elif is_welford_reduction(reduction_type):
+                self.reverse_loop_order = False  # welford needs forward order
                 accumulator = f"{result_var}_mean"
                 accumulator_m2 = f"{result_var}_m2"
                 accumulator_weight = f"{result_var}_weight"
