@@ -12,7 +12,6 @@ import enum
 import functools
 import importlib
 import inspect
-import itertools
 import linecache
 import logging
 import multiprocessing
@@ -34,7 +33,7 @@ import unittest
 import weakref
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch._inductor.test_operators
@@ -2847,8 +2846,8 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 
 @functools.lru_cache(None)
-def get_torch_obj_rule_map():
-    d: Dict[Any, VariableTracker] = {}
+def get_torch_obj_rule_map() -> Dict[Any, Type["VariableTracker"]]:
+    d: Dict[Any, Type[VariableTracker]] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
             if ".py#" not in k:
@@ -2993,7 +2992,6 @@ def _builtin_function_ids() -> Dict[int, str]:
             if not k.startswith("_") and callable(v)
         }
     )
-    rv.update({id(v): f"itertools.{v.__name__}" for v in (itertools.islice,)})
     rv.update(
         {
             id(cast): "typing.cast",
