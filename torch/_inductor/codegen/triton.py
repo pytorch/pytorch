@@ -72,7 +72,12 @@ from .simd import (
     SIMDKernel,
     SIMDScheduling,
 )
-from .triton_utils import config_of, signature_of, signature_to_meta
+from .triton_utils import (
+    config_of,
+    should_unwrap_unspec_arg,
+    signature_of,
+    signature_to_meta,
+)
 
 
 if TYPE_CHECKING:
@@ -432,6 +437,13 @@ class TritonPrinter(PythonPrinter):
     def _helper_sqrt(self, expr):
         return f"libdevice.sqrt({self._print(expr)}.to(tl.float32))"
 
+    def _print_FloatPow(self, expr):
+        return (
+            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
+        )
+
+    _print_PowByNatural = _print_FloatPow
+
     def _print_Where(self, expr):
         c = self.doprint(expr.args[0])
         p = self.doprint(expr.args[1])
@@ -527,7 +539,10 @@ def triton_compute_type(dtype):
     triton_type_name = str(dtype).split(".")[-1]
     if triton_type_name == "bool":
         triton_type_name = "int1"
-    elif triton_type_name in ("float16", "bfloat16"):
+    elif (
+        triton_type_name in ("float16", "bfloat16")
+        and config.triton.codegen_upcast_to_fp32
+    ):
         # float16 math is done in float32 inside the kernel
         triton_type_name = "float32"
     elif triton_type_name == "float8_e4m3fn":
@@ -545,7 +560,10 @@ def _get_primitive_bitwidth(dtype):
     if hasattr(dtype, "is_floating_point"):
         if dtype.is_floating_point:
             # triton_compute_type changes the bitwidth
-            if dtype in [torch.bfloat16, torch.float16]:
+            if (
+                dtype in [torch.bfloat16, torch.float16]
+                and config.triton.codegen_upcast_to_fp32
+            ):
                 return 32
             return torch.finfo(dtype).bits
         else:
@@ -657,7 +675,10 @@ class TritonOverrides(OpOverrides):
         # In such as case, we will have to convert the input tensor to
         # its src_type, perform bitcast, and then convert the bit-casted
         # tensor back to float to ensure we use values with the right precision.
-        if src_dtype in (torch.float16, torch.bfloat16):
+        if (
+            src_dtype in (torch.float16, torch.bfloat16)
+            and config.triton.codegen_upcast_to_fp32
+        ):
             triton_src_dtype = str(src_dtype).split(".")[-1]
             cast_x = f"{x}.to(tl.{triton_src_dtype})"
             if dtype in (torch.float16, torch.bfloat16):
@@ -1057,7 +1078,7 @@ class TritonKernelOverrides(TritonOverrides):
         need_where = False
         for node in nodes:
             for arg in node.args:
-                if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
+                if arg.target != "load" or should_unwrap_unspec_arg(arg.args[0]):
                     need_where = True
 
         value = None if need_where else other
@@ -1669,7 +1690,7 @@ class TritonKernel(SIMDKernel):
 
         index_str = indexing.index_str
         mask_str = indexing.mask_str if indexing.has_mask() else None
-        size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
+        size_str = texpr(self.rename_indexing(size)) if upper else None
 
         # expr is already wrapped
         line = self.indirect_assert(
@@ -1748,7 +1769,7 @@ class TritonKernel(SIMDKernel):
 
         advance_block_ptr = None
         append_broadcast = None
-        if V.graph.is_unspec_arg(name):
+        if should_unwrap_unspec_arg(name):
             line = var
         else:
             if isinstance(indexing, BlockPtrOptions):
@@ -1766,7 +1787,10 @@ class TritonKernel(SIMDKernel):
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
 
             dtype = V.graph.get_dtype(name)
-            if dtype in (torch.float16, torch.bfloat16):
+            if (
+                dtype in (torch.float16, torch.bfloat16)
+                and config.triton.codegen_upcast_to_fp32
+            ):
                 line += ".to(tl.float32)"
             if dtype == torch.bool and torch.version.hip is None:
                 # Workaround for https://github.com/openai/triton/issues/2151
@@ -2527,6 +2551,9 @@ class TritonKernel(SIMDKernel):
             inductor_meta["profile_bandwidth"] = config.profile_bandwidth
             inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
             inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
+            inductor_meta[
+                "profile_bandwidth_with_do_bench_using_profiling"
+            ] = config.profile_bandwidth_with_do_bench_using_profiling
         if config.coordinate_descent_tuning:
             inductor_meta[
                 "coordinate_descent_tuning"
@@ -2799,9 +2826,9 @@ class TritonKernel(SIMDKernel):
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
-        for arg, arg_type in zip(call_args, arg_types):
-            if isinstance(arg_type, TensorArg):
+        _, call_args, arg_signatures, _ = self.args.python_argdefs()
+        for arg, arg_signature in zip(call_args, arg_signatures):
+            if isinstance(arg_signature, TensorArg):
                 if V.graph.cpp_wrapper:
                     if config.abi_compatible:
                         wrapper.writeline(

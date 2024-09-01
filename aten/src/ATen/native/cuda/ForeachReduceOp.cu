@@ -1,4 +1,5 @@
 #include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
 #include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
@@ -19,7 +20,7 @@
 #include <ATen/ops/_foreach_max_native.h>
 #include <ATen/ops/_foreach_norm_native.h>
 
-#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_native.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -49,11 +50,13 @@ template <
     typename T,
     int depth = 1,
     int r_args_depth = 1,
-    int res_arg_index = 0>
+    int res_arg_index = 0,
+    bool large_kernel_arg = false>
 struct LpMaxFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       T* output_per_tensor_ptr,
       const int max_chunks_per_tensor) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -159,7 +162,13 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
   for (const auto i : c10::irange(ntensors)) {
-    vec_res.push_back(at::empty({}, options));
+    vec_res.push_back(at::native::empty_cuda(
+        {},
+        optTypeMetaToScalarType(options.dtype_opt()),
+        options.layout_opt(),
+        options.device_opt(),
+        options.pinned_memory_opt(),
+        options.memory_format_opt()));
   }
 
   auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
@@ -171,11 +180,13 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
       tensor_lists[0][0].scalar_type(),
       "foreach_tensor_max_cuda_scalar_type",
       [&]() {
-        multi_tensor_apply<1>(
-            tensor_lists,
-            LpMaxFunctor<scalar_t>(),
-            output_per_tensor.mutable_data_ptr<scalar_t>(),
-            max_chunks_per_tensor);
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<1>(
+              tensor_lists,
+              LpMaxFunctor<scalar_t, 1, 1, 0, large_kernel_arg>(),
+              output_per_tensor.mutable_data_ptr<scalar_t>(),
+              max_chunks_per_tensor);
+        });
 
         C10_CUDA_KERNEL_LAUNCH_CHECK();
         const at::cuda::OptionalCUDAGuard device_guard(
@@ -214,7 +225,13 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
       result.emplace_back(vec_res[i]);
       i++;
     } else {
-      result.emplace_back(at::empty({}, options));
+      result.emplace_back(at::native::empty_cuda(
+          {},
+          optTypeMetaToScalarType(options.dtype_opt()),
+          options.layout_opt(),
+          options.device_opt(),
+          options.pinned_memory_opt(),
+          options.memory_format_opt()));
     }
   }
   return result;
@@ -226,12 +243,14 @@ template <
     typename out_t,
     int depth = 1,
     int r_args_depth = 1,
-    int res_arg_index = 0>
+    int res_arg_index = 0,
+    bool large_kernel_arg = false>
 struct LpNormFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using out_opmath_t = typename at::opmath_type<out_t>;
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       out_opmath_t* output_per_tensor_ptr,
       const int max_chunks_per_tensor) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -441,7 +460,13 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   vec_res.reserve(ntensors);
   const auto res_option = options.dtype(output_dtype);
   for (const auto i : c10::irange(ntensors)) {
-    vec_res.push_back(at::empty({}, res_option));
+    vec_res.push_back(at::native::empty_cuda(
+        {},
+        optTypeMetaToScalarType(res_option.dtype_opt()),
+        res_option.layout_opt(),
+        res_option.device_opt(),
+        res_option.pinned_memory_opt(),
+        res_option.memory_format_opt()));
   }
 
   auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
@@ -457,23 +482,50 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
             output_dtype, "foreach_tensor_norm_cuda_out_dtype", [&]() {
               using out_opmath_t = typename at::opmath_type<out_t>;
               if (p == static_cast<double>(1)) {
-                multi_tensor_apply<1>(
-                    tensor_lists,
-                    LpNormFunctor<scalar_t, NormType::L1, out_t>(),
-                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                    max_chunks_per_tensor);
+                DISPATCH_MULTI_TENSOR_APPLY([&]() {
+                  multi_tensor_apply<1>(
+                      tensor_lists,
+                      LpNormFunctor<
+                          scalar_t,
+                          NormType::L1,
+                          out_t,
+                          1,
+                          1,
+                          0,
+                          large_kernel_arg>(),
+                      output_per_tensor.mutable_data_ptr<out_opmath_t>(),
+                      max_chunks_per_tensor);
+                });
               } else if (p == static_cast<double>(2)) {
-                multi_tensor_apply<1>(
-                    tensor_lists,
-                    LpNormFunctor<scalar_t, NormType::L2, out_t>(),
-                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                    max_chunks_per_tensor);
+                DISPATCH_MULTI_TENSOR_APPLY([&]() {
+                  multi_tensor_apply<1>(
+                      tensor_lists,
+                      LpNormFunctor<
+                          scalar_t,
+                          NormType::L2,
+                          out_t,
+                          1,
+                          1,
+                          0,
+                          large_kernel_arg>(),
+                      output_per_tensor.mutable_data_ptr<out_opmath_t>(),
+                      max_chunks_per_tensor);
+                });
               } else if (p == std::numeric_limits<double>::infinity()) {
-                multi_tensor_apply<1>(
-                    tensor_lists,
-                    LpNormFunctor<scalar_t, NormType::LInf, out_t>(),
-                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                    max_chunks_per_tensor);
+                DISPATCH_MULTI_TENSOR_APPLY([&]() {
+                  multi_tensor_apply<1>(
+                      tensor_lists,
+                      LpNormFunctor<
+                          scalar_t,
+                          NormType::LInf,
+                          out_t,
+                          1,
+                          1,
+                          0,
+                          large_kernel_arg>(),
+                      output_per_tensor.mutable_data_ptr<out_opmath_t>(),
+                      max_chunks_per_tensor);
+                });
               }
               C10_CUDA_KERNEL_LAUNCH_CHECK();
               const at::cuda::OptionalCUDAGuard device_guard(
