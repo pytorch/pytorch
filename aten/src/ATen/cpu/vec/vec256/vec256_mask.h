@@ -24,9 +24,6 @@ struct VecMaskLoad<
       const VecMask<mask_t, mask_n>& vec_mask) {
     VectorizedN<mask_t, 2> tmp_vec;
     VectorizedN<T, dst_n> result;
-#ifndef _MSC_VER
-#pragma unroll
-#endif
     for (int i = 0; i < dst_n; i++) {
       tmp_vec[0] = vec_mask[2 * i];
       tmp_vec[1] = vec_mask[2 * i + 1];
@@ -203,9 +200,6 @@ struct VecMaskCast<
       const VecMask<int64_t, mask_n>& vec_mask) {
     VectorizedN<int, dst_n> result;
     VectorizedN<int64_t, 2> int64_vec;
-#ifndef _MSC_VER
-#pragma unroll
-#endif
     for (int i = 0; i < dst_n; ++i) {
       int64_vec[0] = vec_mask[2 * i];
       int64_vec[1] = vec_mask[2 * i + 1];
