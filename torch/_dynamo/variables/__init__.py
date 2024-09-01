@@ -83,6 +83,7 @@ from .misc import (
     UnknownVariable,
 )
 from .nn_module import (
+    FSDPManagedNNModuleVariable,
     NNModuleVariable,
     UnspecializedBuiltinNNModuleVariable,
     UnspecializedNNModuleVariable,

@@ -76,6 +76,7 @@ from torch.utils.weak import TensorWeakRef
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
 from .source import (
+    AttrProxySource,
     AttrSource,
     ChainedSource,
     ConstDictKeySource,
@@ -153,7 +154,7 @@ class GuardManager:
 
         self.closure_vars = None
         self.args = None
-        self.code_parts = None
+        self.code_parts = []
         self.verbose_code_parts = None
         self.global_scope = None
         self.guard_fail_fn = None
@@ -258,6 +259,32 @@ class GuardManager:
     def check_verbose(self, x):
         # Only needed for debugging purposes.
         return self.root.check_verbose(x)
+
+    def populate_code_parts_for_debugging(self):
+        # This should be called when the guard manager is fully populated
+        tensor_aliasing_guard_seen = False
+
+        def get_code_parts(leaf_guard):
+            code_parts = []
+            for verbose_code_part in leaf_guard.verbose_code_parts():
+                code_part = verbose_code_part.split("#")[0].rstrip()
+                code_parts.append(code_part)
+            return code_parts
+
+        def visit(mgr):
+            nonlocal tensor_aliasing_guard_seen
+            for guard in mgr.get_leaf_guards():
+                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
+                    if not tensor_aliasing_guard_seen:
+                        self.code_parts.extend(get_code_parts(guard))
+                        tensor_aliasing_guard_seen = True
+                else:
+                    self.code_parts.extend(get_code_parts(guard))
+
+            for child_mgr in mgr.get_child_managers():
+                visit(child_mgr)
+
+        visit(self.root)
 
 
 def from_numpy(a):
@@ -548,6 +575,8 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_guard_managers: Dict[
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
+
+        self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -1032,6 +1061,14 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x._type().qualified_name(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, AttrProxySource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.get_base(),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1637,6 +1674,13 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
+            # Check that the guard has not been inserted already
+            key = (ref_a, ref_b)
+            if key in self._cached_duplicate_input_guards:
+                return
+            self._cached_duplicate_input_guards.add((ref_a, ref_b))
+            self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
             install_object_aliasing_guard(
                 self.get_guard_manager(guard),
                 self.get_guard_manager_from_source(source_b),
@@ -1761,6 +1805,7 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
+            names: Dict[str, Tuple[int, int]] = {}
             source_pairs: List[Tuple[Source, Source]] = []
             derived_equalities: List[  # type: ignore[type-arg]
                 Tuple[Source, Union[Source, Symbol], Callable]
@@ -1772,6 +1817,7 @@ class GuardBuilder(GuardBuilderBase):
                         constraint,
                         get_sources,
                         output_graph.shape_env,
+                        names,
                         source_pairs,
                         derived_equalities,
                         phantom_symbols,
@@ -2477,7 +2523,10 @@ class CheckFunctionManager:
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
-        guard_fn.code_parts = code_parts
+        if config.enable_cpp_guard_manager:
+            guard_fn.populate_code_parts_for_debugging()
+        else:
+            guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = globals_for_guard_fn

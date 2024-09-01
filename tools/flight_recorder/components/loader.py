@@ -41,9 +41,7 @@ def read_dir(prefix: str, folder: str) -> Dict[str, Dict[str, Any]]:
     t0 = time.time()
     for root, _, files in os.walk(folder):
         for f in files:
-            ta = time.time()
             details[f] = read_dump(prefix, os.path.join(root, f))
-            tb = time.time()
-            # print(f"read file {f} in {tb - ta}s")
+    tb = time.time()
     print(f"loaded {len(files)} files in {tb - t0}s")
     return details

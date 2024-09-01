@@ -6037,6 +6037,33 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
+                        torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypesIfCUDA(*floating_types_and(
+                  *[torch.bfloat16, torch.half] if TEST_WITH_ROCM or SM53OrLater else []))
+    @dtypes(*floating_types_and(torch.bfloat16))
+    @tf32_on_and_off(0.05)
+    @bf32_on_and_off(0.05)
+    def test_addmm_relu_tunableop_rocm(self, device, dtype):
+        torch.cuda.tunable.enable(True)
+        ordinal = torch.cuda.current_device()
+        filename = f"tunableop_results{ordinal}.csv"
+        torch.cuda.tunable.set_filename(filename)
+        iterations = torch.cuda.tunable.get_max_tuning_iterations()
+        torch.cuda.tunable.set_max_tuning_iterations(10)
+        self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
+        # clean up, remove any file that was generated
+        try:
+            import os
+            os.remove(filename)
+        except FileNotFoundError:
+            pass
+        # reset back to prior settings
+        torch.cuda.tunable.set_max_tuning_iterations(iterations)
+        torch.cuda.tunable.enable(False)
+
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(
