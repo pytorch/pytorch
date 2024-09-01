@@ -61,7 +61,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr_1 = torch.nn.Parameter(torch.tensor([[-0.9]]))
                 self.attr_2 = torch.nn.Parameter(torch.tensor([[17.1]]))
@@ -106,7 +106,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # Note: Named as such to result in name collision.
                 self.add_1__CF = torch.nn.Parameter(torch.tensor([[1.0]]))
@@ -168,7 +168,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr1 = torch.nn.Parameter(torch.tensor([[-0.9]]))
 
@@ -211,7 +211,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr1 = torch.nn.Parameter(torch.tensor([[-0.9]]))
                 self.attr1 = torch.nn.Parameter(torch.tensor([[1.32]]))
@@ -254,7 +254,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr1 = torch.nn.Parameter(torch.randn(2, 3))
                 self.attr2 = torch.nn.Parameter(torch.randn(2, 3))
@@ -301,7 +301,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr1 = torch.nn.Parameter(torch.randn(4, 4))
                 self.attr2 = torch.nn.Parameter(torch.randn(4, 4))
@@ -332,7 +332,7 @@ class TestConstFold(TestCase):
         """
 
         class TracedThroughModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.internal_attr = torch.nn.Parameter(torch.randn(2, 3))
 
@@ -340,7 +340,7 @@ class TestConstFold(TestCase):
                 return self.internal_attr
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.my_mod = TracedThroughModule()
                 self.attr = torch.nn.Parameter(torch.randn(2, 3))
@@ -364,7 +364,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.nn.Parameter(torch.randn(2, 3))
 
@@ -413,7 +413,7 @@ class TestConstFold(TestCase):
 
     def test_const_fold_has_inlined_call_module_node(self):
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.nn.Parameter(torch.randn(2, 3))
                 self.mod = torch.nn.Identity()
@@ -434,7 +434,7 @@ class TestConstFold(TestCase):
 
     def test_const_fold_module_attr(self):
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.const = torch.nn.Parameter(torch.randn(2, 3))
                 self.mod = torch.nn.Identity()
@@ -456,7 +456,7 @@ class TestConstFold(TestCase):
 
     def test_const_fold_unused_placeholder(self):
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.const = torch.nn.Parameter(torch.randn(2, 3))
 
@@ -475,7 +475,7 @@ class TestConstFold(TestCase):
 
     def test_dict_output(self):
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.const = torch.nn.Parameter(torch.randn(2, 3))
 
@@ -494,7 +494,7 @@ class TestConstFold(TestCase):
 
     def test_two_outputs(self):
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.const = torch.nn.Parameter(torch.randn(2, 3))
 
@@ -514,7 +514,7 @@ class TestConstFold(TestCase):
 
     def test_three_outputs(self):
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.const = torch.nn.Parameter(torch.randn(2, 3))
 
@@ -540,7 +540,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.nn.Parameter(torch.randn(2, 3))
 
@@ -572,7 +572,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.nn.Parameter(torch.randn(2, 3))
 
@@ -605,7 +605,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.randn(4, 4))
                 self.bias = torch.nn.Parameter(torch.randn(4))
@@ -650,7 +650,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin_input = torch.nn.Parameter(torch.randn(4, 4))
                 self.lin = torch.nn.Linear(4, 4)
@@ -676,7 +676,7 @@ class TestConstFold(TestCase):
         """
 
         class ConstFoldTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr_1 = torch.nn.Parameter(torch.tensor([[-0.9]]), requires_grad)
                 self.attr_2 = torch.nn.Parameter(torch.tensor([[17.1]]), requires_grad)

@@ -155,6 +155,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("str")().cast<std::string>();
   }
 
+  std::string _graph_repr() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("_graph_repr")().cast<std::string>();
+  }
+
   c10::SymNode dispatch_sym_ite_(
       const char* fname,
       const c10::SymNode& other,

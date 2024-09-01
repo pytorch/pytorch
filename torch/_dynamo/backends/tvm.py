@@ -10,9 +10,10 @@ from types import MappingProxyType
 from typing import Optional
 
 import torch
-from .common import device_from_inputs, fake_tensor_unsupported
 
+from .common import device_from_inputs, fake_tensor_unsupported
 from .registry import register_backend
+
 
 log = logging.getLogger(__name__)
 

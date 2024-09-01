@@ -314,6 +314,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.name()});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs());
+    torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
   if (fn.scope() == at::RecordScope::USER_SCOPE) {
     torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
@@ -440,6 +441,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
   auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
   auto extra_meta = StealOrDefault<decltype(extra_meta_)>(extra_meta_);
+  auto kwinputs = StealOrDefault<decltype(kwinputs_)>(kwinputs_);
   auto gpu_fallback =
       StealOrDefault<decltype(device_fallback_)>(device_fallback_);
 
@@ -454,6 +456,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_module(),
         extra_args(),
         extra_meta(),
+        kwinputs(),
         gpu_fallback(),
         event->allow_tf32_cublas_,
         std::move(event->counters_)};
@@ -686,6 +689,12 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
 void RecordQueue::stop() {
   if (python_tracer_) {
     python_tracer_->stop();
+  }
+}
+
+void RecordQueue::restart() {
+  if (python_tracer_) {
+    python_tracer_->restart();
   }
 }
 

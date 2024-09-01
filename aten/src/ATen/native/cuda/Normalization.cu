@@ -492,9 +492,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_cuda(
 
   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, /*training*/true, eps);
   if (backend == BatchNormBackend::Cudnn) {
-    std::tie(output, save_mean, save_var, reserve) =
-        at::cudnn_batch_norm(input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
-  } else if (backend == BatchNormBackend::Miopen) {
+    return at::cudnn_batch_norm(input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
+  }
+  if (backend == BatchNormBackend::Miopen) {
     reserve = at::empty({0}, input.options().dtype(kByte));
     std::tie(output, save_mean, save_var) =
         at::miopen_batch_norm(input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);

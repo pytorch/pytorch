@@ -1,6 +1,6 @@
 import tokenize
-
 from typing import Dict, List, Optional
+
 
 cache: Dict[str, Dict[int, str]] = {}
 

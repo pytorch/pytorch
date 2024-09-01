@@ -2,17 +2,19 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
+#include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
+#include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
 #include <stdbool.h>
 
-
+#define MAX_COMPILE_CONTEXT_SIZE 100
 
 PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
-
+static char compile_context[MAX_COMPILE_CONTEXT_SIZE];
 static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
@@ -33,26 +35,6 @@ inline static void eval_frame_callback_set(PyObject* obj) {
 // 3.14 Not supported at all. See cpython_defs.c for hints
 #if !(IS_PYTHON_3_14_PLUS)
 
-// Problem in CPython includes when mixing core and non-core build
-// The fix was not backported to 3.12 so this is needed here
-// https://github.com/python/cpython/issues/105268
-#if IS_PYTHON_3_12_PLUS
-#undef _PyGC_FINALIZED
-#endif
-
-// see https://bugs.python.org/issue35886
-#if PY_VERSION_HEX >= 0x03080000
-#define Py_BUILD_CORE
-#include <internal/pycore_pystate.h>
-
-// These headers were added in 3.11
-#if IS_PYTHON_3_11_PLUS
-#include <internal/pycore_frame.h>
-#endif
-
-#undef Py_BUILD_CORE
-#endif // PY_VERSION_HEX >= 0x03080000
-
 // All the eval APIs change in 3.11 so we need to decide which one to use on the fly
 // https://docs.python.org/3/c-api/init.html#c._PyFrameEvalFunction
 #if IS_PYTHON_3_11_PLUS
@@ -64,6 +46,7 @@ inline static void eval_frame_callback_set(PyObject* obj) {
 typedef struct THPPyInterpreterFrame {
   PyObject_HEAD
   _PyInterpreterFrame* frame; // Borrowed reference
+  PyObject* locals;
 } THPPyInterpreterFrame;
 
 THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame);
@@ -80,14 +63,22 @@ DECLARE_PYOBJ_ATTR(f_funcobj)
 #else
 DECLARE_PYOBJ_ATTR(f_func)
 #endif
+
 DECLARE_PYOBJ_ATTR(f_globals)
 DECLARE_PYOBJ_ATTR(f_builtins)
-DECLARE_PYOBJ_ATTR(f_locals)
+
+static PyObject* THPPyInterpreterFrame_f_locals(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  DEBUG_NULL_CHECK(self->locals);
+  Py_XINCREF(self->locals);
+  return self->locals;
+}
+
 #if IS_PYTHON_3_13_PLUS
 DECLARE_PYOBJ_ATTR(f_executable)
 #else
 DECLARE_PYOBJ_ATTR(f_code)
 #endif
+
 DECLARE_PYOBJ_ATTR(frame_obj)
 
 #undef DECLARE_PYOBJ_ATTR
@@ -158,6 +149,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
   if (!self)
     return NULL;
   self->frame = frame;
+  self->locals = NULL;
   return self;
 }
 
@@ -261,6 +253,7 @@ inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
 static inline PyObject* call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
+    PyObject* locals,
     CacheEntry* cache_entry,
     FrameState* frame_state) {
 
@@ -271,6 +264,7 @@ static inline PyObject* call_callback(
   if (frame == NULL) {
     return NULL;
   }
+  frame->locals = locals;
 #else
   PyObject* frame = Py_NewRef(_frame);
 #endif
@@ -491,7 +485,8 @@ inline static PyObject* eval_custom_code(
     PyCodeObject* code,
     int throw_flag,
     int free_vars_copied) {
-  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
+  const char* trace_id = compile_context;
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter_with_context("Torch-Compiled Region", trace_id);
   PyObject* result = eval_custom_code_impl(
     tstate,
     frame,
@@ -531,6 +526,7 @@ static PyObject* _custom_eval_frame_shim(
 // we are responsible for clearing it - via clear_old_frame_if_python_312_plus.
 // The should_clear_frame flag is used to indicate whether the frame should be
 // cleared by _custom_eval_frame's caller.
+// Generally should_clear_frame should be set if and only we don't eval_frame_default.
 static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -589,13 +585,19 @@ static PyObject* _custom_eval_frame(
     extra = init_and_set_extra_state(F_CODE(frame));
   }
 
-  // TODO(jansel): investigate directly using the "fast" representation
+
   int free_vars_copied = 0;
+  #if IS_PYTHON_3_12_PLUS
+  PyObject *locals = get_framelocals_mapping(frame);
+  #else
   if (THP_PyFrame_FastToLocalsWithError(frame, &free_vars_copied) < 0) {
     DEBUG_TRACE("error %s", get_frame_name(frame));
     *should_clear_frame = 1;
     return NULL;
   }
+  PyObject *locals = frame->f_locals;
+  Py_INCREF(locals);
+  #endif
 
   PyObject* backend = get_backend(callback);
 
@@ -604,8 +606,10 @@ static PyObject* _custom_eval_frame(
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-    PyObject* maybe_cached_code = lookup(extra, frame->f_locals, backend);
+    PyObject* maybe_cached_code = lookup(extra, locals, backend);
     _pytorch_record_function_exit(rf);
+
+    Py_DECREF(locals);
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
@@ -619,9 +623,9 @@ static PyObject* _custom_eval_frame(
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     *should_clear_frame = 1;
-    return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
+    return eval_custom_code(tstate, frame, cached_code, throw_flag, 0);
   }
-  DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
+  DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
@@ -631,11 +635,12 @@ static PyObject* _custom_eval_frame(
   eval_frame_callback_set(Py_None);
 
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-  PyObject* maybe_cached_code = lookup(extra, frame->f_locals, backend);
+  PyObject* maybe_cached_code = lookup(extra, locals, backend);
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
     *should_clear_frame = 1;
+    Py_DECREF(locals);
     return NULL;
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
@@ -644,13 +649,15 @@ static PyObject* _custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
+    Py_DECREF(locals);
     return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
   }
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
   PyObject* result =
-      call_callback(callback, frame, cache_entry, frame_state);
+      call_callback(callback, frame, locals, cache_entry, frame_state);
+  Py_DECREF(locals);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
@@ -813,12 +820,27 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+static PyObject* set_context_frame(PyObject* dummy, PyObject* obj) {
+    int frame_id, frame_compile_id, attempt;
+    if (!PyArg_ParseTuple(obj, "iii", &frame_id, &frame_compile_id, &attempt)) {
+        PyErr_SetString(PyExc_TypeError, "Expected three integers");
+        return NULL;
+    }
+    if (attempt == 0) {
+      sprintf(compile_context, "%d/%d", frame_id, frame_compile_id);
+    } else {
+      sprintf(compile_context, "%d/%d_%d", frame_id, frame_compile_id, attempt);
+    }
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"set_context_frame", set_context_frame, METH_O, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

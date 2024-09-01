@@ -162,10 +162,10 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const Tensor& weight_t,
     // Unused: but we require them to be passed so that double backwards
     // has access
-    const optional<Tensor>& running_mean_opt,
-    const optional<Tensor>& running_var_opt,
-    const optional<Tensor>& save_mean_t_opt,
-    const optional<Tensor>& save_var_t_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_t_opt,
+    const std::optional<Tensor>& save_var_t_opt,
     double epsilon) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& running_mean =

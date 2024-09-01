@@ -392,10 +392,10 @@ namespace impl {
     }
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct ivalue_to_arg<optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
-    // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
-    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but implicitly convertible
-    // to optional<ArrayRef<T>>.
+  struct ivalue_to_arg<std::optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
+    // If an argument is std::optional<ArrayRef<T>>, convert the IValue to an std::optional<std::vector<T>> and pass that
+    // to the operator. OptionalArray<T> is basically a std::optional<std::vector<T>> but implicitly convertible
+    // to std::optional<ArrayRef<T>>.
     static OptionalArray<T> call(IValue& v) {
       return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
     }
@@ -404,8 +404,8 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<OptionalArrayRef<T>, AllowDeprecatedTypes> final {
     // If an argument is OptionalArrayRef<T>, convert the IValue to an
-    // optional<std::vector<T>> and pass that to the operator. OptionalArray<T>
-    // is basically a optional<std::vector<T>> but implicitly convertible to
+    // std::optional<std::vector<T>> and pass that to the operator. OptionalArray<T>
+    // is basically a std::optional<std::vector<T>> but implicitly convertible to
     // OptionalArrayRef<T>
     static OptionalArray<T> call(IValue& v) {
       return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);

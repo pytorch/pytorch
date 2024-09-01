@@ -2347,7 +2347,7 @@ def gen_source_files(
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
 
-        structured_func_group_dict = dict()
+        structured_func_group_dict = {}
         for func_group in structured_native_functions:
             for func in func_group.functions():
                 if func.structured_delegate is not None:
@@ -2355,7 +2355,7 @@ def gen_source_files(
                     break
 
         if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
-            fallbacks = dict()
+            fallbacks = {}
             for func in native_functions:
                 op_name = get_fallback_op_name(func)
                 if op_name in inductor_fallback_ops:
@@ -2664,7 +2664,9 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
             ]
             + [
                 "\n".join(
-                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is also important for correct visibility
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
                     for f in [g.inplace, g.mutable, g.functional]
                     if f is not None and "generated" not in f.tags
                 )

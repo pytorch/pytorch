@@ -45,7 +45,6 @@ from github_utils import (
     gh_update_pr_state,
     GitHubComment,
 )
-
 from gitutils import (
     are_ghstack_branches_in_sync,
     get_git_remote_name,
@@ -61,6 +60,7 @@ from label_utils import (
     LABEL_ERR_MSG,
 )
 from trymerge_explainer import get_revert_message, TryMergeExplainer
+
 
 # labels
 MERGE_IN_PROGRESS_LABEL = "merging"
@@ -1116,15 +1116,20 @@ class GitHubPR:
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
         msg += msg_body
 
-        # Mention PR co-authors
-        for author_login, author_name in self.get_authors().items():
-            if author_login != self.get_pr_creator_login():
-                msg += f"\nCo-authored-by: {author_name}"
-
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         if ghstack_deps:
             msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
+
+        # Mention PR co-authors, which should be at the end of the message
+        # And separated from the body by two newlines
+        first_coauthor = True
+        for author_login, author_name in self.get_authors().items():
+            if author_login != self.get_pr_creator_login():
+                if first_coauthor:
+                    msg, first_coauthor = (msg + "\n", False)
+                msg += f"\nCo-authored-by: {author_name}"
+
         return msg
 
     def add_numbered_label(self, label_base: str, dry_run: bool) -> None:
@@ -1459,7 +1464,7 @@ def find_matching_merge_rule(
 
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError(
-                "This PR has internal changes and must be landed via Phabricator"
+                "This PR has internal changes and must be landed via Phabricator! Please try reimporting/rexporting the PR!"
             )
 
         # Categorize all checks when skip_mandatory_checks (force merge) is set. Do it here

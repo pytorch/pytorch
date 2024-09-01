@@ -17,7 +17,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
 from typing_extensions import TypeAlias
 
 import torch
@@ -40,7 +39,6 @@ from torch.ao.quantization.quantizer.quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
-
 from torch.ao.quantization.quantizer.utils import _get_module_name_filter
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     get_bias_qspec,
@@ -56,6 +54,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
+
 
 FilterFn: TypeAlias = Callable[[List[Node]], bool]
 
@@ -437,7 +436,7 @@ class X86InductorQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
     module_function_to_aten_operator_type = _map_module_function_to_aten_operator_type()
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_qconfig: Dict[

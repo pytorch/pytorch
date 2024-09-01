@@ -31,12 +31,12 @@
 
 namespace at::native {
 
-Tensor& rename_(Tensor& self, optional<DimnameList> names) {
+Tensor& rename_(Tensor& self, std::optional<DimnameList> names) {
   at::internal_set_names_inplace(self, names);
   return self;
 }
 
-Tensor rename(const Tensor& self, optional<DimnameList> names) {
+Tensor rename(const Tensor& self, std::optional<DimnameList> names) {
   auto result = self.alias();
   at::internal_set_names_inplace(result, names);
   return result;
@@ -163,7 +163,7 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
         tensor.names(),
         names,
         is_aligning_two_tensors);
-  auto result = tensor.rename(nullopt).view(expanded_sizes);
+  auto result = tensor.rename(std::nullopt).view(expanded_sizes);
   at::internal_set_names_inplace(result, names);
   return result;
 }

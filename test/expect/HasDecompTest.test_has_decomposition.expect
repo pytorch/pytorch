@@ -496,6 +496,7 @@ aten::_resize_output.out
 aten::_resize_output_
 aten::_sample_dirichlet
 aten::_sample_dirichlet.out
+aten::_scaled_dot_product_attention_math_for_mps
 aten::_scaled_dot_product_cudnn_attention
 aten::_scaled_dot_product_cudnn_attention_backward
 aten::_scaled_dot_product_efficient_attention
@@ -554,6 +555,7 @@ aten::_sparse_sum_backward
 aten::_sparse_sum_backward.out
 aten::_spdiags
 aten::_spdiags.out
+aten::_spsolve
 aten::_stack
 aten::_stack.out
 aten::_standard_gamma
@@ -613,7 +615,6 @@ aten::_unique
 aten::_unique.out
 aten::_unique2
 aten::_unique2.out
-aten::_unsafe_index_put
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
 aten::_upsample_bicubic2d_aa_backward
@@ -708,8 +709,6 @@ aten::bmm.out
 aten::ccol_indices
 aten::ccol_indices_copy
 aten::ccol_indices_copy.out
-aten::channel_shuffle
-aten::channel_shuffle.out
 aten::cholesky
 aten::cholesky.out
 aten::cholesky_inverse
@@ -1014,6 +1013,8 @@ aten::ones.names_out
 aten::ones.out
 aten::ormqr
 aten::ormqr.out
+aten::permute_copy
+aten::permute_copy.out
 aten::poisson
 aten::poisson.out
 aten::polygamma
@@ -1102,12 +1103,6 @@ aten::range.out
 aten::range.out_
 aten::range.step
 aten::record_stream
-aten::reflection_pad1d_backward
-aten::reflection_pad1d_backward.grad_input
-aten::reflection_pad2d_backward
-aten::reflection_pad2d_backward.grad_input
-aten::reflection_pad3d_backward
-aten::reflection_pad3d_backward.grad_input
 aten::repeat_interleave.Tensor
 aten::repeat_interleave.Tensor_out
 aten::replication_pad1d_backward
@@ -1291,6 +1286,12 @@ aten::split_copy.Tensor_out
 aten::squeeze_
 aten::squeeze_.dim
 aten::squeeze_.dims
+aten::squeeze_copy
+aten::squeeze_copy.dim
+aten::squeeze_copy.dim_out
+aten::squeeze_copy.dims
+aten::squeeze_copy.dims_out
+aten::squeeze_copy.out
 aten::sspaddmm.out
 aten::t_
 aten::to_mkldnn
@@ -1300,6 +1301,8 @@ aten::to_padded_tensor.out
 aten::topk
 aten::topk.values
 aten::transpose_
+aten::transpose_copy.int
+aten::transpose_copy.int_out
 aten::triangular_solve
 aten::triangular_solve.X
 aten::unbind_copy.int

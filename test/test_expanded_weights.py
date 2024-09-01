@@ -893,7 +893,7 @@ class TestExpandedWeightModule(TestCase):
 
     def test_per_sample_api_compute_batch_size(self):
         class CustomModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(5, 5)
 
@@ -926,7 +926,7 @@ class TestExpandedWeightModule(TestCase):
             elem2: torch.Tensor
 
         class CustomModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(5, 5)
 

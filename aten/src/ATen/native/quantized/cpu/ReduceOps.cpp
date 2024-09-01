@@ -166,7 +166,7 @@ Tensor mean_quantized_cpu(
     const Tensor& self,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   Tensor result;
   mean_out_quantized_cpu(self, opt_dim, keepdim, dtype, result);
   return result;

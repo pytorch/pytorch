@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch.fx
 import torch.utils._pytree as pytree
 
+
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
 
 
@@ -83,9 +84,12 @@ def aot_compile(
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
         (args, kwargs or {})
     )
-    flat_example_inputs = tuple(
-        x[1] for x in flat_args_with_path if isinstance(x[1], torch.Tensor)
-    )
+
+    # Replace non-tensor (constant) inputs with Nones, since these are not being
+    # used anyways by the graph
+    flat_example_inputs = [
+        x[1] if isinstance(x[1], torch.Tensor) else None for x in flat_args_with_path
+    ]
 
     if in_spec is not None and received_spec != in_spec:
         raise ValueError(  # noqa: B904
@@ -110,7 +114,7 @@ def aot_compile(
 
     return compile_fx_aot(
         gm,
-        list(flat_example_inputs),
+        flat_example_inputs,  # type: ignore[arg-type]
         config_patches=options,
     )
 

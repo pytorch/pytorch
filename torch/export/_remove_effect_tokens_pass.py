@@ -4,6 +4,7 @@ from typing import List
 
 import torch
 from torch._higher_order_ops.effects import _get_schema, with_effects
+
 from .exported_program import ExportedProgram
 from .graph_signature import (
     CustomObjArgument,
@@ -68,7 +69,7 @@ def _remove_effect_tokens_from_graph_helper(
             schema = _get_schema(func, node.args[2:])
 
         with ep.graph.inserting_before(node):
-            new_node = ep.graph.call_function(func, node.args[2:])
+            new_node = ep.graph.call_function(func, node.args[2:], node.kwargs)
         for k, v in node.meta.items():
             new_node.meta[k] = v
 
