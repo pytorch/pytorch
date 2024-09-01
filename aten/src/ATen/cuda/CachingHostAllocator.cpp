@@ -98,7 +98,7 @@ struct CUDACachingHostAllocatorImpl
             pinned_use_cuda_host_register()) {
       void* ptr = block->ptr_;
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
-      free(ptr);
+      std::free(ptr);
     } else {
       AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
     }
@@ -175,7 +175,7 @@ struct CUDACachingHostAllocatorImpl
     // Here we do regular allocation, pre-fault/map the pages, and then do
     // cudaHostRegister with GPU mapping flags to lock the pages, so we
     // can minimize the cost for the cuda global lock.
-    *ptr = malloc(roundSize);
+    *ptr = std::malloc(roundSize);
 
     // Parallelize the mapping/registering of pages to reduce wall time
     size_t pageSize = (1 << 12); // 4kB pages
