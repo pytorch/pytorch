@@ -5030,9 +5030,13 @@ def grid_sample(
         align_corners = False
 
     if value is None:
-        return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners)
+        return torch.grid_sampler(
+            input, grid, mode_enum, padding_mode_enum, align_corners
+        )
     else:
-        return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners, value)
+        return torch.grid_sampler(
+            input, grid, mode_enum, padding_mode_enum, align_corners, value
+        )
 
 
 def affine_grid(
