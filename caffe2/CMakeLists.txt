@@ -927,10 +927,19 @@ elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
+  target_link_libraries(torch_cuda PRIVATE fmt::fmt-header-only)
 
+  if(USE_CUFILE)
+    target_link_libraries(torch_cuda PRIVATE torch::cufile)
+    target_compile_definitions(torch_cuda PRIVATE USE_CUFILE)
+  endif()
   if(USE_CUSPARSELT)
       target_link_libraries(torch_cuda PRIVATE torch::cusparselt)
       target_compile_definitions(torch_cuda PRIVATE USE_CUSPARSELT)
+  endif()
+  if(USE_CUDSS)
+    target_link_libraries(torch_cuda PRIVATE torch::cudss)
+    target_compile_definitions(torch_cuda PRIVATE USE_CUDSS)
   endif()
   if(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
@@ -1318,6 +1327,7 @@ if(USE_ROCM)
     ${ROCM_SOURCE_DIR}/rocblas/include
     ${ROCM_SOURCE_DIR}/hipsparse/include
     )
+  target_link_libraries(torch_hip PRIVATE fmt::fmt-header-only)
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
   endif()
@@ -1507,7 +1517,12 @@ if(USE_CUDA)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda PUBLIC c10_cuda)
+  if(TARGET torch::nvtx3)
+    target_link_libraries(torch_cuda PRIVATE torch::nvtx3)
+  else()
+    target_link_libraries(torch_cuda PUBLIC torch::nvtoolsext)
+  endif()
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1535,20 +1550,24 @@ if(USE_XPU)
   target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
-  include(CheckLinkerFlag)
-
-  # Check whether the compiler supports '--no-as-needed' and '--as-needed'
-  check_linker_flag(CXX "-Wl,--no-as-needed" HAVE_NO_AS_NEEDED)
-  check_linker_flag(CXX "-Wl,--as-needed" HAVE_AS_NEEDED)
-
   # Ensure that torch_cpu is ready before being linked by torch_xpu.
   add_dependencies(torch_xpu torch_cpu)
 
-  if(HAVE_NO_AS_NEEDED AND HAVE_AS_NEEDED)
-    target_link_libraries(torch_xpu PRIVATE
-        "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+  if(MSVC)
+    target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
   else()
-    target_link_libraries(torch_xpu PRIVATE "$<TARGET_FILE:torch_cpu>")
+    include(CheckLinkerFlag)
+
+    # Check whether the compiler supports '--no-as-needed' and '--as-needed'
+    check_linker_flag(CXX "-Wl,--no-as-needed" HAVE_NO_AS_NEEDED)
+    check_linker_flag(CXX "-Wl,--as-needed" HAVE_AS_NEEDED)
+
+    if(HAVE_NO_AS_NEEDED AND HAVE_AS_NEEDED)
+      target_link_libraries(torch_xpu PRIVATE
+          "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+    else()
+      target_link_libraries(torch_xpu PRIVATE "$<TARGET_FILE:torch_cpu>")
+    endif()
   endif()
 endif()
 
@@ -1594,7 +1613,10 @@ if(BUILD_SHARED_LIBS)
   # not find them, because they're usually in non-standard locations)
   if(USE_CUDA)
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-    target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
+    target_link_libraries(torch_global_deps torch::cudart)
+    if(TARGET torch::nvtoolsext)
+      target_link_libraries(torch_global_deps torch::nvtoolsext)
+    endif()
   endif()
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
