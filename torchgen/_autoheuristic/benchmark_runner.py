@@ -57,7 +57,9 @@ class BenchmarkRunner:
         args = self.parser.parse_args()
         if args.use_heuristic:
             torch._inductor.config.autoheuristic_use = self.name
+            torch._inductor.config.autoheuristic_collect = ""
         else:
+            torch._inductor.config.autoheuristic_use = ""
             torch._inductor.config.autoheuristic_collect = self.name
         torch._inductor.config.autoheuristic_log_path = args.o
         if args.device is not None:
