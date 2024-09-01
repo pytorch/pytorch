@@ -4910,6 +4910,8 @@ def grid_sample(
           e.g., (normalized) pixel location ``x = -3.5`` reflects by border ``-1``
           and becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
+        * ``padding_mode="constant"``: use the constant value specified by the
+          :attr:`value` argument.
 
     Note:
         This function is often used in conjunction with :func:`affine_grid`
@@ -4935,7 +4937,7 @@ def grid_sample(
             used internally will actually be trilinear. However, when the input is 4-D,
             the interpolation mode will legitimately be bilinear.
         padding_mode (str): padding mode for outside grid values
-            ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
+            ``'zeros'`` | ``'border'`` | ``'reflection'`` | ``'constant'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input  as squares rather than points.
             If set to ``True``, the extrema (``-1`` and ``1``) are considered as referring
@@ -4946,6 +4948,8 @@ def grid_sample(
             :func:`interpolate`, and so whichever option is used here
             should also be used there to resize the input image before grid sampling.
             Default: ``False``
+        value (float, optional): constant value used for padding when padding_mode is
+            ``'constant'``. Default: ``0``
 
     Returns:
         output (Tensor): output Tensor
