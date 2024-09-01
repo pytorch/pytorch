@@ -1192,8 +1192,7 @@ void grid_sampler_2d_cpu_kernel_impl(
           [&](const Vectorized<scalar_t>& grid_x, const Vectorized<scalar_t>& grid_y,  \
               int64_t spatial_offset, int64_t len) {                           \
             grid_sample.forward(out_slice, inp_slice, spatial_offset,          \
-                                grid_x, grid_y, len,                           \
-                                  (static_cast<GridSamplerPadding>(padding_mode) == GridSamplerPadding::Constant ? value.value_or(0.) : 0.));  \
+                                grid_x, grid_y, len, value.value_or(0.));      \
           });                                                                  \
         }                                                                      \
       });                                                                      \
