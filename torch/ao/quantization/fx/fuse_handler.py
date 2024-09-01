@@ -1,14 +1,17 @@
 # mypy: allow-untyped-defs
-import torch
-from torch.ao.quantization.backend_config import BackendConfig
-from torch.fx.graph import Node, Graph
-from ..utils import _parent_name, NodePattern, Pattern
-from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Union
+
+import torch
+from torch.ao.quantization.backend_config import BackendConfig
+from torch.ao.quantization.fuser_method_mappings import get_fuser_method_new
+from torch.ao.quantization.utils import _parent_name, NodePattern, Pattern
+from torch.fx.graph import Graph, Node
+from torch.nn.utils.parametrize import type_before_parametrizations
+
 from .custom_config import FuseCustomConfig
 from .match_utils import MatchAllNode
-from torch.nn.utils.parametrize import type_before_parametrizations
+
 
 __all__ = [
     "DefaultFuseHandler",
@@ -20,48 +23,54 @@ __all__ = [
 # Fusion Pattern Registrations
 # ----------------------------
 
+
 # Base Pattern Handler
 class FuseHandler(ABC):
-    """ Base handler class for the fusion patterns
-    """
+    """Base handler class for the fusion patterns"""
+
     @abstractmethod
     def __init__(self, node: Node):
         pass
 
     @abstractmethod
-    def fuse(self,
-             load_arg: Callable,
-             named_modules: Dict[str, torch.nn.Module],
-             fused_graph: Graph,
-             root_node: Node,
-             extra_inputs: List[Any],
-             matched_node_pattern: NodePattern,
-             fuse_custom_config: FuseCustomConfig,
-             fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
-             is_qat: bool) -> Node:
+    def fuse(
+        self,
+        load_arg: Callable,
+        named_modules: Dict[str, torch.nn.Module],
+        fused_graph: Graph,
+        root_node: Node,
+        extra_inputs: List[Any],
+        matched_node_pattern: NodePattern,
+        fuse_custom_config: FuseCustomConfig,
+        fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
+        is_qat: bool,
+    ) -> Node:
         pass
 
+
 class DefaultFuseHandler(FuseHandler):
-    def __init__(
-            self,
-            node: Node):
+    def __init__(self, node: Node):
         super().__init__(node)  # type:ignore[safe-super]
 
-    def fuse(self,
-             load_arg: Callable,
-             named_modules: Dict[str, torch.nn.Module],
-             fused_graph: Graph,
-             root_node: Node,
-             extra_inputs: List[Any],
-             matched_node_pattern: NodePattern,
-             fuse_custom_config: FuseCustomConfig,
-             fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
-             is_qat: bool) -> Node:
-        assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
+    def fuse(
+        self,
+        load_arg: Callable,
+        named_modules: Dict[str, torch.nn.Module],
+        fused_graph: Graph,
+        root_node: Node,
+        extra_inputs: List[Any],
+        matched_node_pattern: NodePattern,
+        fuse_custom_config: FuseCustomConfig,
+        fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
+        is_qat: bool,
+    ) -> Node:
+        assert (
+            root_node.op == "call_module"
+        ), "Expecting module node to be a call_module Node"
         root_module = named_modules[str(root_node.target)]
 
         def get_modules(pattern):
-            """ Given a node pattern, extract the corresponding modules
+            """Given a node pattern, extract the corresponding modules
             e.g. input: (relu_node, (bn_node, conv_node))
                  output: (relu_module, (bn_module, conv_module))
             """
@@ -111,8 +120,10 @@ class DefaultFuseHandler(FuseHandler):
         node.args = tuple(args)
         return node
 
+
 def _get_fusion_pattern_to_fuse_handler_cls(
-        backend_config: BackendConfig) -> Dict[Pattern, Callable]:
+    backend_config: BackendConfig,
+) -> Dict[Pattern, Callable]:
     fusion_pattern_to_fuse_handlers: Dict[Pattern, Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.fuser_method is not None:

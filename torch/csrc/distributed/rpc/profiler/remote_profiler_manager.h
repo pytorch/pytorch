@@ -5,9 +5,7 @@
 #include <optional>
 #include <unordered_map>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 extern const std::string REMOTE_PROFILING_KEY_PREFIX;
 
 class TORCH_API RemoteProfilerManager {
@@ -54,6 +52,4 @@ class TORCH_API RemoteProfilerManager {
   std::mutex mutex_;
   local_id_t currentLocalId_;
 };
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

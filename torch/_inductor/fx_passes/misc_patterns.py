@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import functools
-
 from typing import Dict, Set, Tuple
 
 import torch
 from torch._dynamo.utils import counters
-
 from torch._ops import OpOverload, OpOverloadPacket
+
 from ..pattern_matcher import fwd_only, register_replacement
+
 
 aten = torch.ops.aten
 
@@ -79,7 +79,7 @@ class NumpyCompatNormalization:
     inverse_mapping: Dict[str, str]
     cache: Dict["torch.fx.graph.Target", Set[str]]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cache = {}  # callable -> tuple of replaceable args e.g. ["axis"]
         self.inverse_mapping = {}
         for actual_kwarg, numpy_kwargs in self.numpy_compat.items():

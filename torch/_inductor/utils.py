@@ -9,7 +9,6 @@ import functools
 import inspect
 import io
 import itertools
-import json
 import logging
 import math
 import operator
@@ -23,7 +22,6 @@ import time
 import unittest
 from datetime import datetime
 from io import StringIO
-from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -34,8 +32,8 @@ from typing import (
     NamedTuple,
     Optional,
     Protocol,
+    Sequence,
     Set,
-    Tuple,
     TypeVar,
     Union,
     ValuesView,
@@ -46,7 +44,21 @@ from unittest import mock
 import sympy
 
 import torch
-import torch.utils._pytree as pytree
+
+
+GPU_TYPES = ["cuda", "xpu"]
+
+
+# defines here before import torch._dynamo is for avoiding circular import
+# when get_gpu_type is imported from dynamo
+@functools.lru_cache(None)
+def get_gpu_type():
+    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    assert len(avail_gpus) <= 1
+    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    return gpu_type
+
+
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -62,15 +74,22 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
 from . import config
-from .runtime.runtime_utils import cache_dir, ceildiv as runtime_ceildiv
+from .runtime.runtime_utils import ceildiv as runtime_ceildiv
+
+
+_IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
+InputType = Union[torch.Tensor, int]
+
 
 GPU_ALIGN_BYTES = 16
+ALIGNMENT = 16
 
 ALIGN_BYTES = 64
 assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
@@ -149,7 +168,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
         torch.cuda.synchronize()
 
     log.debug("raw events")
-    log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+    log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
 
     filtered_events = EventList(
         [
@@ -311,7 +330,15 @@ def is_view(op: torch._ops.OpOverload):
     return any(a.alias_info is not None for a in op._schema.arguments)
 
 
-def is_pointwise_use(use):
+def is_pointwise_use(
+    use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
+):
+    """
+    Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
+
+    Uses in views ops will follow the views uses
+    """
+
     if not use.op == "call_function":
         return False
 
@@ -321,9 +348,11 @@ def is_pointwise_use(use):
         return False
 
     if use.target is operator.getitem or is_view(use.target):
-        return all(is_pointwise_use(u) for u in use.users)
+        return all(is_pointwise_use(u, is_pointwise_fn) for u in use.users)
 
-    return torch.Tag.pointwise in use.target.tags
+    return torch.Tag.pointwise in use.target.tags or (
+        is_pointwise_fn is not None and is_pointwise_fn(use.target)
+    )
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -342,7 +371,7 @@ def gen_gm_and_inputs(target, args, kwargs):
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
     ):
-        node = (node,)
+        node = (node,)  # type: ignore[assignment]
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
@@ -509,6 +538,25 @@ def get_kernel_metadata(node_schedule, wrapper):
 
     from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
+
+    # Attempt to sort `inductor_nodes` topologically. Note that the case
+    # where `inductor_nodes` contains nodes from multiple graph instances
+    # is not supported. An example of this is conditional statements.
+    single_graph = None
+    if len(inductor_nodes):
+        unique_graphs = {n.graph for n in inductor_nodes}
+        if len(unique_graphs) == 1:
+            single_graph = inductor_nodes[0].graph
+            # create a map of idx -> node and cache it
+            if not hasattr(single_graph, "_inductor_kernel_metadata_node_to_idx_map"):
+                node_to_idx_map = {}
+                for idx, n in enumerate(single_graph.nodes):
+                    node_to_idx_map[n] = idx
+                single_graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map
+            inductor_nodes.sort(
+                key=lambda n: single_graph._inductor_kernel_metadata_node_to_idx_map[n]
+            )
+
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
             key = str(node.meta["original_aten"]._overloadpacket)
@@ -516,16 +564,27 @@ def get_kernel_metadata(node_schedule, wrapper):
         if "from_node" in node.meta:
             key = node.meta["from_node"][0][0]
             from_node_dict[key].append(node.name)
+    sort_str = "Topologically Sorted" if single_graph is not None else "Unsorted"
     metadata = (
-        f"{wrapper.comment} Source Nodes: [{', '.join(sorted(from_node_dict.keys()))}], "
-        f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}]"
+        f"{wrapper.comment} {sort_str} Source Nodes: [{', '.join(from_node_dict.keys())}], "
+        f"Original ATen: [{', '.join(original_aten_dict.keys())}]"
     )
+
     # trace back to original node here
-    detailed_metadata = []
+    detailed_metadata = [f"{wrapper.comment} Source node to ATen node mapping:"]
     for original_node, nodes in sorted(from_node_dict.items()):
         detailed_metadata.append(
-            f"{wrapper.comment} {original_node} => {', '.join(sorted(nodes))}"
+            f"{wrapper.comment}   {original_node} => {', '.join(sorted(nodes))}"
         )
+
+    # print the aot_autograd graph fragment
+    if single_graph is not None:
+        detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
+        for n in inductor_nodes:
+            # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
+            # generate python code for graph fragments
+            detailed_metadata.append(f"{wrapper.comment}   {n.format_node()}")
+
     return metadata, "\n".join(detailed_metadata)
 
 
@@ -769,8 +828,13 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
         if delete:
             shutil.rmtree(inductor_cache_dir)
     except Exception:
-        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
-        raise
+        if not _IS_WINDOWS:
+            """
+            Windows can't delete the loaded modules, because the modules binaries are opened.
+            TODO: discuss if have better solution to handle this issue.
+            """
+            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+            raise
     finally:
         clear_inductor_caches()
 
@@ -921,7 +985,7 @@ class IndentedBuffer:
 
 
 class FakeIndentedBuffer(IndentedBuffer):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def __getattribute__(self, name):
@@ -990,9 +1054,7 @@ def is_big_gpu(index) -> bool:
 
 
 def use_max_autotune() -> bool:
-    return (
-        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
-    )
+    return config.max_autotune or config.max_autotune_gemm
 
 
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
@@ -1010,12 +1072,20 @@ def _use_autotune_backend(backend: str) -> bool:
     ]
 
 
-def use_triton_template(layout, *, enable_int32=False):
+def _use_conv_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip() for x in config.max_autotune_conv_backends.upper().split(",")
+    ]
+
+
+def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
     from .codegen.common import BackendFeature, has_backend_feature
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+    if enable_float8:
+        layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
     return (
         _use_template_for_cuda(layout, layout_dtypes)
         and _use_autotune_backend("TRITON")
@@ -1104,7 +1174,8 @@ def use_ck_template(layout, m, n, k):
         native_arch.split(":")[0]: native_arch
     }
     requested_supported_archs = [
-        requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch
+        requested_archs[k]
+        for k in requested_archs.keys() & config.rocm.ck_supported_arch
     ]
     if not requested_supported_archs:
         return False
@@ -1141,7 +1212,7 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2):
+def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1156,8 +1227,12 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     int8_gemm = mat1.get_dtype() == torch.uint8
     layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     m, n, k, layout, mat1, mat2 = mm_args(
-        mat1, mat2, out_dtype=layout.dtype if int8_gemm else None
+        mat1,
+        mat2,
+        out_dtype=layout.dtype if int8_gemm else None,
+        mat2_transposed=mat2_transposed,
     )
+
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
@@ -1175,11 +1250,10 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
-    # TODO(jgong5): support n % n_block_size != 0
+
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and n % micro_gemm.register_blocking[1] == 0
         and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
@@ -1194,7 +1268,7 @@ class DebugDirManager:
     counter = itertools.count(0)
     prev_debug_name: str
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.id = next(DebugDirManager.counter)
 
     def __enter__(self):
@@ -1221,6 +1295,15 @@ def run_and_get_code(fn, *args, **kwargs):
     return result, source_codes
 
 
+def run_fw_bw_and_get_code(fn):
+    def run_with_backward():
+        result = fn()
+        result.sum().backward()
+        return result
+
+    return run_and_get_code(run_with_backward)
+
+
 def get_code(fn, *args, **kwargs):
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering
@@ -1234,7 +1317,7 @@ def get_code(fn, *args, **kwargs):
         class DummyModule:
             """This is empty to replace the generated triton module"""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def call(self, *args, **kwargs):
@@ -1451,6 +1534,10 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
+def is_windows():
+    return sys.platform == "win32"
+
+
 def has_free_symbols(itr: Iterable[Any]):
     return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
@@ -1521,10 +1608,10 @@ def pass_execution_and_save(func, gm, inp, msg):
         )
 
 
-def is_collective(node):
+def is_collective(node, op=None):
     from . import ir
 
-    return type(node) == ir._CollectiveKernel
+    return type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
 
 
 def is_wait(node):
@@ -1533,11 +1620,98 @@ def is_wait(node):
     return type(node) == ir._WaitKernel
 
 
+def contains_collective(snode):
+    from torch._inductor.scheduler import BaseSchedulerNode, GroupedSchedulerNode
+
+    assert isinstance(snode, BaseSchedulerNode)
+    if isinstance(snode, GroupedSchedulerNode):
+        return any(contains_collective(x) for x in snode.snodes)
+    else:
+        return is_collective(snode.node)
+
+
+def contains_wait(snode):
+    from torch._inductor.scheduler import BaseSchedulerNode, GroupedSchedulerNode
+
+    assert isinstance(snode, BaseSchedulerNode)
+    if isinstance(snode, GroupedSchedulerNode):
+        return any(contains_wait(x) for x in snode.snodes)
+    else:
+        return is_wait(snode.node)
+
+
+def is_fallback_op(node, op):
+    from . import ir
+
+    if isinstance(op, torch._ops.OpOverload):
+        op = {op}
+    return isinstance(node, ir.FallbackKernel) and node.op_overload in op
+
+
+def buf_name_to_fused_snode(buf_name, name_to_buf, name_to_fused_node):
+    return name_to_fused_node[name_to_buf[buf_name].defining_op.get_name()]
+
+
+def find_recursive_deps_of_node(
+    snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None
+):
+    if criteria_cb and criteria_cb(snode):
+        return
+    collected_node_set.add(snode)
+    for dep in snode.unmet_dependencies:
+        defining_op_for_dep = buf_name_to_fused_snode(
+            dep.name, name_to_buf, name_to_fused_node
+        )
+        if defining_op_for_dep in collected_node_set:
+            continue
+        find_recursive_deps_of_node(
+            defining_op_for_dep,
+            collected_node_set,
+            name_to_buf,
+            name_to_fused_node,
+            criteria_cb=criteria_cb,
+        )
+
+
+def find_recursive_users_of_node(
+    snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None
+):
+    if criteria_cb and criteria_cb(snode):
+        return
+    collected_node_set.add(snode)
+    for o in snode.get_outputs():
+        for user in o.users:
+            assert user.node is not None
+            if user.node.get_name() == "OUTPUT":
+                continue
+            if user.node.get_name() not in name_to_fused_node:
+                continue
+            user_op = name_to_fused_node[user.node.get_name()]
+            if user_op in collected_node_set:
+                continue
+            find_recursive_users_of_node(
+                user_op,
+                collected_node_set,
+                name_to_buf,
+                name_to_fused_node,
+                criteria_cb=criteria_cb,
+            )
+
+
 def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int):
     "Computes the number of inputs to the aot fw graph which have fixed addresses (params and buffers)"
     num_rng_seed_offset_inputs = (
         2 if torch._functorch.config.functionalize_rng_ops else 0
     )
+    # AOT won't lift any parameters if we're inlining NN Modules
+    # however desugaring subclasses will still add arguments
+    # resulted in extra fixed inputs https://github.com/pytorch/pytorch/issues/130502
+    if (
+        torch._dynamo.config.inline_inbuilt_nn_modules
+        and not torch._dynamo.utils.is_parameter_freezing()
+    ):
+        return 0
+
     return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
 
 
@@ -1691,9 +1865,11 @@ def tensor_is_aligned(tensor: torch.Tensor):
     # but symbolic storage_offsets are. For consistency, we suppress guard creation
     # upon performing this check: that ensures that we don't add recompiles when we
     # add this logic.
-    return (
-        tensor.storage_offset() * get_dtype_size(tensor.dtype)
-    ) % GPU_ALIGN_BYTES == 0
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    return statically_known_true(
+        (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % GPU_ALIGN_BYTES == 0
+    )
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):
@@ -1722,168 +1898,6 @@ def maybe_get_suppress_shape_guards_ctx():
     return shape_env.suppress_guards()
 
 
-def aoti_eager_cache_dir(namespace: str, device: str):
-    return Path(cache_dir()) / "aoti_eager" / namespace / device
-
-
-def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
-    from filelock import FileLock
-
-    # Avoid circular import
-    from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
-
-    op_conf_lock_file = f"{op_func_name_with_overload}.lock"
-    lock_dir = get_lock_dir()
-    return FileLock(os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT)
-
-
-def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type: str):
-    device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
-    op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
-    if not op_conf.exists():
-        return []
-
-    with aoti_eager_op_conf_lock(op_func_name_with_overload):
-        with open(op_conf) as f:
-            json_data = json.load(f)
-            for item in json_data:
-                # Get absolution path for kernel library
-                kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
-                item["kernel_path"] = kernel_lib_abs_path.as_posix()
-
-                # Check if the kernel library exists
-                if not kernel_lib_abs_path.exists():
-                    return []
-
-                for metadata in item["meta_info"]:
-                    assert not metadata[
-                        "is_dynamic"
-                    ], "Only support static shape for now"
-                    if metadata["device_type"] == "cpu":
-                        metadata["device_index"] = -1
-                    metadata["dtype"] = getattr(torch, metadata["dtype"].split(".")[-1])
-
-            return json_data
-
-
-def aoti_compile_with_persistent_cache(
-    ns: str,
-    op_func_name_with_overload: str,
-    device_type: str,
-    dynamic: bool,
-    f: Callable[..., Any],
-    args: Tuple[Any],
-    kwargs: Dict[str, Any],
-    *,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
-    options: Optional[Dict[str, Any]] = None,
-    remove_runtime_assertions: bool = False,
-    disable_constraint_solver: bool = False,
-):
-    """
-    Compile the given function with persistent cache for AOTI eager mode.
-    """
-    assert not dynamic, "Only support static shape for now"
-    from torch._export import aot_compile
-
-    type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
-    supported_scalar_types = tuple(type_to_torch_dtype.keys())
-    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
-    if not all(
-        isinstance(input, (supported_scalar_types, torch.Tensor))
-        for input in flattened_inputs
-    ):
-        raise NotImplementedError("Only support tensor, int, float, bool for now")
-
-    persistent_cache = aoti_eager_cache_dir(ns, device_type)
-    if not persistent_cache.exists():
-        persistent_cache.mkdir(parents=True)
-
-    persistent_cache_lib = persistent_cache / "lib"
-    if not persistent_cache_lib.exists():
-        persistent_cache_lib.mkdir()
-
-    with mock.patch.dict(
-        os.environ,
-        {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
-    ):
-        try:
-            kernel_lib_path = aot_compile(
-                f,
-                args,
-                kwargs,
-                dynamic_shapes=dynamic_shapes,
-                options=options,
-                remove_runtime_assertions=remove_runtime_assertions,
-                disable_constraint_solver=disable_constraint_solver,
-                # Some operations may have non-Tensor parameters like int, float, bool. These
-                # non-Tensor parameters will not be the input of the graph. Therefore, we do
-                # need to keep the same signature.
-                same_signature=False,
-            )
-
-            kernel_metadata_items = []
-            for input in flattened_inputs:
-                # TODO(Eikan): To add dynamic support
-                metadata: Dict[str, Any] = {}
-                metadata["is_dynamic"] = dynamic
-
-                if isinstance(input, torch.Tensor):
-                    metadata["device_type"] = f"{input.device.type}"
-                    if is_cpu_device([input]):
-                        metadata["device_index"] = -1
-                    else:
-                        metadata["device_index"] = input.device.index
-                    metadata["dtype"] = f"{input.dtype}"
-                    metadata["sizes"] = list(input.size())
-                    metadata["strides"] = list(input.stride())
-                else:
-                    assert isinstance(input, supported_scalar_types)
-                    # Scalar tensor
-                    metadata["device_type"] = device_type
-                    metadata["device_index"] = -1 if device_type == "cpu" else 0
-                    metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
-                    metadata["sizes"] = []
-                    metadata["strides"] = []
-                    metadata["scalar_value"] = input
-
-                kernel_metadata_items.append(metadata)
-
-            kernel_meta_info: Dict[str, Any] = {}
-            kernel_meta_info["meta_info"] = kernel_metadata_items
-            kernel_meta_info["kernel_path"] = (
-                Path(kernel_lib_path).relative_to(persistent_cache).as_posix()
-            )
-
-            json_data = []
-            update_json = True
-            op_conf = persistent_cache / f"{op_func_name_with_overload}.json"
-            mode = "r" if op_conf.exists() else "w"
-            with aoti_eager_op_conf_lock(op_func_name_with_overload):
-                with open(op_conf, mode) as op_conf_file:
-                    try:
-                        json_data = json.load(op_conf_file)
-                    except Exception as e:
-                        json_data = []
-
-                    assert isinstance(json_data, list)
-                    for item in json_data:
-                        assert isinstance(item, dict)
-                        # Same kernel meta info already exists in the json file
-                        if item["meta_info"] == kernel_metadata_items:
-                            update_json = False
-                            break
-
-                if update_json:
-                    json_data.append(kernel_meta_info)
-                    with open(op_conf, "w") as op_conf_file:
-                        json.dump(json_data, op_conf_file, indent=4)
-
-            return kernel_lib_path
-        except Exception as e:
-            return ""
-
-
 def run_and_get_cpp_code(fn, *args, **kwargs):
     # We use the patch context manager instead of using it as a decorator.
     # In this way, we can ensure that the attribute is patched and unpatched correctly
@@ -1905,3 +1919,96 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
     return result, s
+
+
+def shape_env_from_inputs(inputs: List[torch.Tensor]):
+    shape_env = None
+    fake_mode = detect_fake_mode(inputs)
+
+    # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
+    # pass in real inputs for now.
+    # if len(inputs) > 0:
+    # assert fake_mode is not None, breakpoint()
+
+    if fake_mode is not None:
+        return fake_mode.shape_env
+
+    # When there are no tensor inputs, get shape_env from the first SymInt.
+    for input in inputs:
+        if isinstance(input, torch.SymInt):
+            return input.node.shape_env
+
+    # TODO(voz): Should we always have one anyway?
+    return None
+
+
+def align_inputs_from_check_idxs(
+    model: Callable[[List[InputType]], Any],
+    inputs_to_check: Sequence[int],
+) -> Callable[[List[InputType]], Any]:
+    if len(inputs_to_check) == 0:
+        return model
+
+    def run(new_inputs: List[InputType]):
+        copy_misaligned_inputs(new_inputs, inputs_to_check)
+        return model(new_inputs)
+
+    return run
+
+
+def clone_preserve_strides(x: torch.Tensor):
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+    )
+    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    return torch.as_strided(buffer, x.size(), x.stride())
+
+
+def copy_misaligned_inputs(
+    new_inputs: List[InputType], check_inputs_idxs: Sequence[int]
+) -> None:
+    for i in check_inputs_idxs:
+        _inp = new_inputs[i]
+        assert isinstance(_inp, torch.Tensor)
+        if _inp.data_ptr() % ALIGNMENT:
+            new_inputs[i] = clone_preserve_strides(_inp)
+
+
+def remove_unaligned_input_idxs(
+    inputs: List[InputType],
+    static_input_idxs: Sequence[int],
+):
+    """
+    We require all inputs to be aligned, so introduce a copy for any
+    that aren't.
+    """
+    aligned_static_input_idxs = []
+    for idx in static_input_idxs:
+        input = inputs[idx]
+        if isinstance(input, torch.Tensor) and (input.data_ptr() % ALIGNMENT) == 0:
+            aligned_static_input_idxs.append(idx)
+    if len(aligned_static_input_idxs) != len(static_input_idxs):
+        return aligned_static_input_idxs
+    return static_input_idxs
+
+
+def set_tracing_context_output_strides(example_inputs, compiled_graph):
+    # Return the output strides to the caller via TracingContext
+    context = torch._guards.TracingContext.try_get()
+    if context is not None and context.output_strides is not None:
+        assert len(context.output_strides) == 0
+        shape_env = shape_env_from_inputs(example_inputs)
+        for exprs in compiled_graph.output_strides:
+            if exprs is None:
+                context.output_strides.append(None)
+            else:
+                context.output_strides.append(
+                    tuple(
+                        (
+                            shape_env.evaluate_symexpr(e)
+                            if shape_env is not None
+                            else int(e)
+                        )
+                        for e in exprs
+                    )
+                )

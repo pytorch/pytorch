@@ -5,6 +5,7 @@ import dis
 import sys
 from typing import Any, Set, Union
 
+
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],
     dis.opmap["JUMP_FORWARD"],

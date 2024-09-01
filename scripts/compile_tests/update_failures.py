@@ -12,8 +12,8 @@ from common import (
     key,
     open_test_results,
 )
-
 from download_reports import download_reports
+
 
 """
 Usage: update_failures.py /path/to/dynamo_test_failures.py /path/to/test commit_sha
@@ -221,5 +221,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     assert Path(args.filename).exists(), args.filename
     assert Path(args.test_dir).exists(), args.test_dir
-    dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
-    update(args.filename, args.test_dir, dynamo38, dynamo311, args.also_remove_skips)
+    dynamo39, dynamo311 = download_reports(args.commit, ("dynamo39", "dynamo311"))
+    update(args.filename, args.test_dir, dynamo39, dynamo311, args.also_remove_skips)

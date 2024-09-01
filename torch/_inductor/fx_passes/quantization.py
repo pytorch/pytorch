@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
 import functools
@@ -10,11 +11,13 @@ import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
+
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -607,13 +610,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             )
         )
         if (
-            len(
-                _get_remaining_users(
-                    extra_input_of_pattern,
-                    compute_node,
-                )
-            )
-            > 1
+            len(_get_remaining_users(extra_input_of_pattern, compute_node)) > 1
             or extra_input_of_pattern == compute_node.args[0]
         ):
             return False
@@ -708,7 +705,9 @@ def _register_quantization_unary_fusion():
     )
 
     class UnaryAttr:
-        def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+        def __init__(
+            self, op_name: str, scalars_attr=None, algorithm_attr=None
+        ) -> None:
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
@@ -904,7 +903,7 @@ def _register_quantization_binary_fusion():
             unary_op_name: str = "none",
             scalars_attr=None,
             algorithm_attr=None,
-        ):
+        ) -> None:
             self.binary_op_name = binary_op_name
             self.alpha = alpha if alpha else 1.0
             self.unary_op_name = unary_op_name
@@ -1888,14 +1887,14 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             graph.erase_node(conv_node)
             # Erase the dequant pattern
             if dtype == torch.bfloat16:
-                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined]
-            graph.erase_node(dequant_node)
+                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined, arg-type]
+            graph.erase_node(dequant_node)  # type: ignore[arg-type]
             # Erase the dequant per channel pattern
             if clone_node is not None:
-                graph.erase_node(clone_node)
+                graph.erase_node(clone_node)  # type: ignore[arg-type]
             if dtype == torch.bfloat16:
-                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
-            graph.erase_node(dequant_per_channel)
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined, arg-type]
+            graph.erase_node(dequant_per_channel)  # type: ignore[arg-type]
             counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
                 match.nodes
@@ -2582,8 +2581,8 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
                     new_args = map_arg(new_quant_node.args, maybe_replace_node)
                     new_kwargs = map_arg(new_quant_node.kwargs, maybe_replace_node)
-                    new_quant_node.args = new_args
-                    new_quant_node.kwargs = new_kwargs
+                    new_quant_node.args = new_args  # type: ignore[assignment]
+                    new_quant_node.kwargs = new_kwargs  # type: ignore[assignment]
                     graph_module.graph.erase_node(quant_node)
 
     graph_module.graph.lint()

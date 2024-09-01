@@ -76,7 +76,7 @@ def reverse_dict(d):
     result = {}  # type: ignore[var-annotated]
     for key in d:
         for val in d[key]:
-            result[val] = result.get(val, tuple()) + (key, )
+            result[val] = result.get(val, ()) + (key,)
     return result
 
 

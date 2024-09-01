@@ -14,17 +14,18 @@ from typing import Any, Callable, Dict, List, NewType, Optional, Set, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
+from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -328,7 +329,7 @@ class ViewAndMutationMeta:
     deterministic: Optional[bool] = None
 
     # Keeps track of which input indices store parameters (which we will treat as static)
-    static_parameter_indices: List[int] = field(default_factory=list)
+    static_input_indices: List[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -344,6 +345,15 @@ class ViewAndMutationMeta:
     indices_of_inputs_that_requires_grad_with_mutations_in_bw: List[int] = field(
         default_factory=list
     )
+
+    # Indexes of saved tensors which are donated buffer.
+    # Donated buffer means the tensor is not alias of any forward user input, forward user output,
+    # and backward output.
+    bw_donated_idxs: Optional[List[int]] = None
+
+    # Number of tokens used in backward, appended at the end of backward outputs.
+    # Filled after tracing joint function.
+    num_backward_tokens: int = 0
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
@@ -467,11 +477,11 @@ class ViewAndMutationMeta:
         self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
 
         # Our forward() returns both (tokens, mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
+        # Tokens will be split out before mutations/view handling and we do not count them here.
         self.num_forward_returns = (
             self.num_mutated_inp_runtime_indices
             + self.num_outputs
             + self.num_intermediate_bases
-            + len(self.tokens)
         )
         # In case of functionalization of rng ops, the fw_module returns one
         # additional output for rng offset. This rng offset is used right
@@ -560,6 +570,7 @@ class ViewAndMutationMeta:
                 x.shape == y.shape and x.dtype == y.dtype
                 for x, y, in zip(self.traced_tangents, other.traced_tangents)
             )
+            and self.num_backward_tokens == other.num_backward_tokens
         )
 
 
@@ -596,7 +607,7 @@ class SubclassMeta:
     # Optional field because we don't compute for inference graphs
     grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         # The fields in this class get set after its construction.
         pass
 
@@ -794,7 +805,7 @@ class AOTConfig:
     fw_compiler: Callable
     bw_compiler: Callable
     partition_fn: Callable
-    decompositions: Dict[Callable, Callable]
+    decompositions: Dict[OpOverload, Callable]
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
@@ -802,6 +813,7 @@ class AOTConfig:
     no_tangents: bool = False
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
+    static_input_indices: Optional[List[int]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
     # this is always false outside of export.

@@ -2,7 +2,6 @@
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 
@@ -297,7 +296,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
     def test_simple_module_recompile(self):
         class SimpleDropout(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dropout = torch.nn.Dropout(0.5)
                 self.linear = torch.nn.Linear(10, 1)

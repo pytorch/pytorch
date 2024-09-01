@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
-
 import math
 import operator
 import os
@@ -18,7 +17,9 @@ from torch._inductor.codegen.common import device_codegens, register_backend_for
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import WrapperCodeGen
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -26,8 +27,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     IS_ARM64,
-    IS_CI,
-    IS_WINDOWS,
     parametrize,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
@@ -35,13 +34,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor_dynamic_shapes yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -53,6 +45,7 @@ from inductor.test_torchinductor import (
     copy_tests,
     TestFailure,
 )
+
 
 importlib.import_module("filelock")
 
@@ -145,6 +138,51 @@ class TestInductorDynamic(TestCase):
         self._stack.close()
         TestCase.tearDown(self)
         torch._dynamo.reset()
+
+    def test_constant_fold_uniform_value_dynamic(self, device):
+        def full_add_zero(x):
+            a = torch.full(x.shape, 1, dtype=x.dtype, device=x.device)
+            b = a - 1
+            return x + b
+
+        def full_mul_one(x):
+            a = torch.full(x.shape, -1, dtype=x.dtype, device=x.device)
+            b = 2 + a
+            return x * b
+
+        def full_view_op(x):
+            a = torch.ones([1], dtype=x.dtype, device=x.device)
+            a = a[:, None]
+            return x * a
+
+        def full_mul_symint(x):
+            a = torch.full(x.shape, -1, dtype=x.dtype, device=x.device)
+            b = 2 + a
+            return b * x.shape[0]
+
+        fns = (full_add_zero, full_mul_one, full_view_op)
+
+        x = torch.randn((2, 4), device=device)
+        y = torch.randn((3, 4), device=device)
+
+        for dynamic in [False, True]:
+            torch._dynamo.reset()
+            for fn in fns:
+                ref = fn(x)
+                fn_c = torch.compile(fn, dynamic=dynamic)
+
+                actual, source_codes = run_and_get_code(fn_c, x)
+
+                if fn is not full_mul_symint:
+                    # due to constant folding, fn returns x directly.
+                    if device == "cpu":
+                        FileCheck().check_not("cpp_fused").run(source_codes[0])
+                    else:
+                        FileCheck().check_not("triton.jit").run(source_codes[0])
+
+                self.assertEqual(ref, actual)
+                self.assertEqual(fn(x), fn_c(x))
+                self.assertEqual(fn(y), fn_c(y))
 
     def test_arange_dynamic(self, device):
         def fn(a):
@@ -863,6 +901,18 @@ class TestInductorDynamic(TestCase):
             return torch.ones(a, a)
 
         f(torch.tensor([5], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symint_sum_list(self, device):
+        @torch.compile()
+        def f(xt):
+            xs = xt.tolist()
+            for x in xs:
+                torch._check_is_size(x)
+            y = sum(xs)
+            return torch.zeros(y, device=device)
+
+        f(torch.tensor([5] * 320))
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:

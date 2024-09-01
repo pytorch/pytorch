@@ -1,3 +1,8 @@
+"""
+To run the example, use the following command:
+torchrun --standalone --nnodes=1 --nproc-per-node=4 visualize_sharding_example.py
+"""
+
 import os
 
 import torch

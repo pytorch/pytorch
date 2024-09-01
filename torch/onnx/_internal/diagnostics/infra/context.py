@@ -4,24 +4,10 @@
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import gzip
-
 import logging
-
-from typing import (
-    Callable,
-    Generator,
-    Generic,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Type,
-    TypeVar,
-)
-
+from typing import Callable, Generator, Generic, Literal, Mapping, TypeVar
 from typing_extensions import Self
 
 from torch.onnx._internal.diagnostics import infra
@@ -38,16 +24,16 @@ diagnostic_logger: logging.Logger = logging.getLogger(__name__)
 class Diagnostic:
     rule: infra.Rule
     level: infra.Level
-    message: Optional[str] = None
-    locations: List[infra.Location] = dataclasses.field(default_factory=list)
-    stacks: List[infra.Stack] = dataclasses.field(default_factory=list)
-    graphs: List[infra.Graph] = dataclasses.field(default_factory=list)
-    thread_flow_locations: List[infra.ThreadFlowLocation] = dataclasses.field(
+    message: str | None = None
+    locations: list[infra.Location] = dataclasses.field(default_factory=list)
+    stacks: list[infra.Stack] = dataclasses.field(default_factory=list)
+    graphs: list[infra.Graph] = dataclasses.field(default_factory=list)
+    thread_flow_locations: list[infra.ThreadFlowLocation] = dataclasses.field(
         default_factory=list
     )
-    additional_messages: List[str] = dataclasses.field(default_factory=list)
-    tags: List[infra.Tag] = dataclasses.field(default_factory=list)
-    source_exception: Optional[Exception] = None
+    additional_messages: list[str] = dataclasses.field(default_factory=list)
+    tags: list[infra.Tag] = dataclasses.field(default_factory=list)
+    source_exception: Exception | None = None
     """The exception that caused this diagnostic to be created."""
     logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
     """The logger for this diagnostic. Defaults to 'diagnostic_logger' which has the same
@@ -244,7 +230,7 @@ class Diagnostic:
         self,
         fn: Callable,
         state: Mapping[str, str],
-        message: Optional[str] = None,
+        message: str | None = None,
         frames_to_skip: int = 0,
     ) -> infra.ThreadFlowLocation:
         """Records a python call as one thread flow step."""
@@ -279,15 +265,15 @@ class DiagnosticContext(Generic[_Diagnostic]):
     options: infra.DiagnosticOptions = dataclasses.field(
         default_factory=infra.DiagnosticOptions
     )
-    diagnostics: List[_Diagnostic] = dataclasses.field(init=False, default_factory=list)
+    diagnostics: list[_Diagnostic] = dataclasses.field(init=False, default_factory=list)
     # TODO(bowbao): Implement this.
     # _invocation: infra.Invocation = dataclasses.field(init=False)
-    _inflight_diagnostics: List[_Diagnostic] = dataclasses.field(
+    _inflight_diagnostics: list[_Diagnostic] = dataclasses.field(
         init=False, default_factory=list
     )
     _previous_log_level: int = dataclasses.field(init=False, default=logging.WARNING)
     logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
-    _bound_diagnostic_type: Type = dataclasses.field(init=False, default=Diagnostic)
+    _bound_diagnostic_type: type = dataclasses.field(init=False, default=Diagnostic)
 
     def __enter__(self):
         self._previous_log_level = self.logger.level
@@ -345,9 +331,9 @@ class DiagnosticContext(Generic[_Diagnostic]):
             raise TypeError(
                 f"Expected diagnostic of type {self._bound_diagnostic_type}, got {type(diagnostic)}"
             )
-        if self.options.warnings_as_errors and diagnostic.level == infra.Level.WARNING:
-            diagnostic.level = infra.Level.ERROR
-        self.diagnostics.append(diagnostic)
+        if self.options.warnings_as_errors and diagnostic.level == infra.Level.WARNING:  # type: ignore[attr-defined]
+            diagnostic.level = infra.Level.ERROR  # type: ignore[attr-defined]
+        self.diagnostics.append(diagnostic)  # type: ignore[arg-type]
 
     def log_and_raise_if_error(self, diagnostic: _Diagnostic) -> None:
         """Logs a diagnostic and raises an exception if it is an error.
@@ -404,7 +390,7 @@ class DiagnosticContext(Generic[_Diagnostic]):
         """
         return self._inflight_diagnostics.pop()
 
-    def inflight_diagnostic(self, rule: Optional[infra.Rule] = None) -> _Diagnostic:
+    def inflight_diagnostic(self, rule: infra.Rule | None = None) -> _Diagnostic:
         if rule is None:
             # TODO(bowbao): Create builtin-rules and create diagnostic using that.
             if len(self._inflight_diagnostics) <= 0:

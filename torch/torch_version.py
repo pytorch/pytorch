@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 from typing import Any, Iterable
 
 from torch._vendor.packaging.version import InvalidVersion, Version

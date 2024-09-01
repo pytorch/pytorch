@@ -352,7 +352,7 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
   return norm_sparse(self, p, IntArrayRef{}, false, std::nullopt);
 }
 
-Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor norm_sparse(const SparseTensor& self, const std::optional<Scalar>& p, IntArrayRef dim, bool keepdim, std::optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
   if (!dim.empty()) {
     // Only full reductions are supported, so check if that is the case

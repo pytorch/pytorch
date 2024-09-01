@@ -121,7 +121,7 @@ class DataLoaderBase {
   /// The finished result of a job.
   struct Result : Sequenced {
     Result() = default;
-    Result(optional<Batch>&& b, size_t sqn)
+    Result(std::optional<Batch>&& b, size_t sqn)
         : Sequenced(sqn), batch(std::move(b)) {}
     Result(std::exception_ptr exception, size_t sqn)
         : Sequenced(sqn), exception(std::move(exception)) {}
@@ -166,7 +166,7 @@ class DataLoaderBase {
   /// is still expected.
   std::optional<BatchType> next() {
     if (options_.workers > 0) {
-      while (optional<Result> result = this->pop_result()) {
+      while (std::optional<Result> result = this->pop_result()) {
         if (result->exception) {
           throw WorkerException(result->exception);
         } else if (result->batch) {

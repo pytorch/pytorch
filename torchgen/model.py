@@ -262,7 +262,12 @@ for fk in FUNCTIONALITY_KEYS:
             )
 
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
+STRUCTURED_DISPATCH_KEYS = {
+    DispatchKey.MPS,
+    DispatchKey.CUDA,
+    DispatchKey.CPU,
+    DispatchKey.XPU,
+}
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Set of supported dispatch keys
@@ -273,6 +278,7 @@ dispatch_keys = [
     DispatchKey.MkldnnCPU,
     DispatchKey.CUDA,
     DispatchKey.MPS,
+    DispatchKey.XPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -1774,7 +1780,7 @@ class Annotation:
         assert not (
             is_write and len(alias_set) > 1
         ), f"alias set larger than 1 is not mutable, got {ann} instead."
-        after_set = tuple(m.group(5).split("|")) if m.group(5) else tuple()
+        after_set = tuple(m.group(5).split("|")) if m.group(5) else ()
         assert not (
             len(before_alias) > 1 and len(after_set) > 1
         ), f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
@@ -1874,7 +1880,9 @@ class BaseTy(Enum):
     Storage = auto()
     Stream = auto()
     SymInt = auto()
+    SymBool = auto()
     ConstQuantizerPtr = auto()  # TODO: rename
+    GraphModule = auto()
 
 
 @dataclass(frozen=True)
@@ -2283,7 +2291,7 @@ class Arguments:
             # TensorOptions are dropped in signature,
             # so we can pair factory functions with their out= variants.
             tensor_options=None,
-            post_tensor_options_kwarg_only=tuple(),
+            post_tensor_options_kwarg_only=(),
             # out arguments are dropped in signature
             out=(),
         )

@@ -24,6 +24,8 @@ Core Maintainers
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
+-  Alban Desmaison (`albanD <https://github.com/albanD>`__)
+-  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
 
 Module-level maintainers
 ------------------------

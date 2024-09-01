@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
 from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
@@ -8,6 +9,7 @@ from torch._prims_common import corresponding_real_dtype
 from torch.masked import _docs
 from torch.masked.maskedtensor.core import is_masked_tensor, MaskedTensor
 from torch.masked.maskedtensor.creation import as_masked_tensor
+
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -1385,12 +1387,7 @@ elements, have ``nan`` values.
             total = sum(input, dim, keepdim=keepdim, dtype=dtype)
         else:
             inmask = _input_mask(input, mask=mask)
-            count = sum(
-                inmask.new_ones(input.shape, dtype=torch.int64),
-                dim,
-                keepdim=keepdim,
-                mask=inmask,
-            )
+            count = inmask.sum(dim=dim, keepdim=bool(keepdim))
             total = sum(input, dim, keepdim=keepdim, dtype=dtype, mask=inmask)
         return total / count
     elif input.layout == torch.sparse_csr:
@@ -1609,12 +1606,7 @@ def _std_var(
             sample_total = sum(input, dim, keepdim=True, dtype=dtype)
         else:
             inmask = _input_mask(input, mask=mask)
-            count = sum(
-                inmask.new_ones(input.shape, dtype=torch.int64),
-                dim,
-                keepdim=True,
-                mask=inmask,
-            )
+            count = inmask.sum(dim=dim, keepdim=True)
             sample_total = sum(input, dim, keepdim=True, dtype=dtype, mask=inmask)
         # TODO: replace torch.subtract/divide/square/maximum with
         # masked subtract/divide/square/maximum when these will be

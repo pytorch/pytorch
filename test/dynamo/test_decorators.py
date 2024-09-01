@@ -1,14 +1,15 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import operator
 import os
 import unittest.mock as mock
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import IncorrectUsage
+from torch._dynamo.utils import counters
 
 
 def my_custom_function(x):
@@ -86,7 +87,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
     def test_disable_nn_modules_forward_hook(self):
         class SimpleLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer0 = torch.nn.Linear(4, 4)
 
@@ -94,7 +95,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 return self.layer0(torch.sigmoid(inp))
 
         class SimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer0 = SimpleLinear()
                 self.layer1 = torch.nn.Linear(4, 4)
@@ -139,7 +140,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.disable
         class SimpleLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer0 = torch.nn.Linear(4, 4)
 
@@ -148,7 +149,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend=cnts)
         class SimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer0 = SimpleLinear()
                 self.layer1 = torch.nn.Linear(4, 4)
@@ -245,6 +246,60 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_substitute_in_graph(self):
+        counters.clear()
+
+        # NB: Choose another C function for test when we support operator.indexOf
+        #     out of the box
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = operator.indexOf
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 1)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with self.assertRaisesRegex(TypeError, "Signature mismatch"):
+
+            @torch._dynamo.substitute_in_graph(operator.indexOf)
+            def _(sequence, x):
+                for i, item in enumerate(sequence):
+                    if item is x or item == x:
+                        return i
+                raise ValueError("sequence.index(x): x not in sequence")
+
+        @torch._dynamo.substitute_in_graph(operator.indexOf)
+        def polyfill(a, b):
+            for i, item in enumerate(a):
+                if item is b or item == b:
+                    return i
+            raise ValueError("sequence.index(x): x not in sequence")
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = operator.indexOf
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = polyfill
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
@@ -368,13 +423,43 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 3)
 
     def _test_mark_static_address(self, guarded):
+        # This test verifies that dynamo properly marks inputs as static
+        # when using the mark_static_address API.
+        # On 1st compile, we expect the input to be marked as static, with guarded
+        # set depending on the `guarded` flag.
+        # On 2nd compile, we expect the input to be unmarked
+        # if inlining NN modules, we expect metadata to be present on the tensor, indicating
+        # the static address type of the input
+        # if not inlining NN modules, we expect the tensor to be present in the buffers attribute
+        # of the graph.
+
         compiles_with_buffers = 0
         compiles = 0
 
         def debug_compiler(gm, _):
             nonlocal compiles_with_buffers
             nonlocal compiles
-            compiles_with_buffers += len(gm._buffers) > 0
+            if torch._dynamo.config.inline_inbuilt_nn_modules:
+                input_node = [
+                    n
+                    for n in gm.graph.nodes
+                    if n.op == "placeholder" and n.name == "l_x_"
+                ]
+                self.assertEqual(len(input_node), 1)
+                input_node = input_node[0]
+                if compiles == 0:
+                    self.assertEqual(
+                        input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
+                        "guarded" if guarded else "unguarded",
+                    )
+                elif compiles == 1:
+                    self.assertFalse(
+                        "_dynamo_static_input_type" in input_node.meta["tensor_dict"]
+                    )
+                else:
+                    raise RuntimeError(f"Unexpected number of compiles: {compiles}")
+            else:
+                compiles_with_buffers += len(gm._buffers) > 0
             compiles += 1
             return gm
 
@@ -387,7 +472,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_static_address(inp, guard=guarded)
 
         fn(inp)
-        self.assertEqual(compiles_with_buffers, 1)
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertEqual(compiles_with_buffers, 1)
 
         inp2 = torch.ones(2)
 
@@ -395,13 +481,22 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # since it was not marked static, compiles with buffers
         # should not be incremented
         fn(inp2)
-        self.assertEqual(compiles_with_buffers, 1)
+
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertEqual(compiles_with_buffers, 1)
+
         self.assertEqual(compiles, 2 if guarded else 1)
 
     def test_mark_static_address_guarded(self):
+        with torch._dynamo.config.patch("inline_inbuilt_nn_modules", True):
+            self._test_mark_static_address(guarded=True)
+
         self._test_mark_static_address(guarded=True)
 
     def test_mark_static_address_unguarded(self):
+        with torch._dynamo.config.patch("inline_inbuilt_nn_modules", True):
+            self._test_mark_static_address(guarded=False)
+
         self._test_mark_static_address(guarded=False)
 
     def test_class_methods(self):
@@ -501,6 +596,33 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor(1)
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_nn_module(self):
+        @torch._dynamo.mark_static
+        class Mock(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod1 = Mock(10)
+        mod2 = Mock(20)
+        mod3 = Mock(30)
+        opt_mod1 = torch.compile(mod1, backend=cnts, fullgraph=True)
+        opt_mod2 = torch.compile(mod2, backend=cnts, fullgraph=True)
+        opt_mod3 = torch.compile(mod3, backend=cnts, fullgraph=True)
+
+        x = torch.randn(4, 4)
+        opt_mod1(x)
+        opt_mod2(x)
+        opt_mod3(x)
+
+        # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
+        self.assertEqual(cnts.frame_count, 3)
 
 
 if __name__ == "__main__":

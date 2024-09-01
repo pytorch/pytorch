@@ -488,6 +488,10 @@ class CodeGen:
                 return f"{clsname}.{arg.name}"
             elif isinstance(arg, Node):
                 return repr(arg)
+            elif isinstance(arg, torch.Tensor):
+                size = list(arg.size())
+                dtype = str(arg.dtype).split(".")[-1]
+                return f"torch.Tensor(size={size}, dtype={dtype})"
             else:
                 return blue(repr(arg))
 
@@ -527,6 +531,13 @@ class CodeGen:
                 body.append('\n')
                 return
             nodes_to_delete = user_to_last_uses.get(user, [])
+
+            if len(user.users.keys()) == 0:
+                # This node is not used by any others. however it's also not
+                # removed by DCE since side-effect. We want to free it's outputs
+                # right after its execution done to save memory.
+                nodes_to_delete.append(user)
+
             if len(nodes_to_delete):
                 to_delete_str = ' = '.join([repr(n) for n in nodes_to_delete] + ['None'])
                 body.append(f';  {dim(to_delete_str)}\n')
@@ -565,14 +576,13 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
-                from torch._subclasses.fake_tensor import FakeTensor
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', node.meta.get('example_value', None)))
                 # use string as annotation, to make it valid python code
 
-                if isinstance(meta_val, FakeTensor):
+                if isinstance(meta_val, torch.Tensor):
                     stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
                     device_annotation = f"{meta_val.device}" if include_device else ""
                     maybe_type_annotation = \
@@ -1574,11 +1584,16 @@ class Graph:
                             m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
-    def eliminate_dead_code(self):
+    def eliminate_dead_code(self, is_impure_node: Optional[Callable[[Node], bool]] = None):
         """
         Remove all dead code from the graph, based on each node's number of
         users, and whether the nodes have any side effects. The graph must be
         topologically sorted before calling.
+
+        Args:
+            is_impure_node (Optional[Callable[[Node], bool]]): A function that returns
+            whether a node is impure. If this is None, then the default behavior is to
+            use Node.is_impure.
 
         Returns:
           bool: Whether the graph was changed as a result of the pass.
@@ -1608,18 +1623,24 @@ class Graph:
             side-effectful nodes (see Node.is_impure) but in general coverage
             is very bad, so you should assume that this method is not sound
             to call unless you know that your FX graph consists entirely
-            of functional operations.
+            of functional operations or you supply your own custom
+            function for detecting side-effectful nodes.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
         self.lint()
+
+        def has_side_effect(node):
+            if is_impure_node is not None:
+                return is_impure_node(node)
+            return node.is_impure()
 
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
         # the removed node.
         changed = False
         for node in reversed(self.nodes):
-            if not node.is_impure() and len(node.users) == 0:
+            if not has_side_effect(node) and len(node.users) == 0:
                 self.erase_node(node)
                 changed = True
 

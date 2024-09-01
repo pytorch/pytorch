@@ -325,7 +325,7 @@ struct TORCH_API FunctionSchema {
   std::optional<AliasAnalysisKind> alias_kind_;
 
   template <typename T>
-  void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
+  void checkArg(const IValue& value, const Argument& argument, std::optional<size_t> pos) const;
 
   void checkSchema() const {
     bool seen_default_arg = false;
