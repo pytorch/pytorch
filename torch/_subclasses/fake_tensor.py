@@ -474,7 +474,7 @@ class FakeTensorConverter:
 
 
 @functools.lru_cache(None)
-def init_cuda_context() -> None:
+def init_gpu_context() -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
         (
@@ -482,6 +482,9 @@ def init_cuda_context() -> None:
             if torch.version.hip is None
             else torch.zeros(1, device="cuda")
         )
+
+    if torch.xpu.is_available():
+        (torch.empty(1, device="xpu"))
 
 
 @contextlib.contextmanager
@@ -530,11 +533,16 @@ class FakeTensorConfig:
 # which is required for testing version counter and epoch validity
 class SymIntMemoDescriptor:
     _name: str
-    _is_unbacked: bool
 
-    def __init__(self, *, is_unbacked: Optional[bool] = None):
-        assert is_unbacked is not None
-        self._is_unbacked = is_unbacked
+    # By default, SymInts in this memo are invalidated across versions/epochs.
+    # nested_ints however are preserved across epochs and across versions.
+    # Preserving across versions is okay for nested int since the association
+    # of a nested int is agnostic to the underlying data and nested ints are not
+    # shared across multiple distinct tensors.
+    _is_nested_int: bool
+
+    def __init__(self, *, is_nested_int: bool = False) -> None:
+        self._is_nested_int = is_nested_int
 
     def __set_name__(self, owner: str, name: str) -> None:
         self._name = name
@@ -559,8 +567,10 @@ class SymIntMemoDescriptor:
             return None
         # Version counter based tracking isn't 100% sound but it's close
         # enough
-        if getattr(obj, self._memo_vc(obj)) != obj._version or (
-            self._is_unbacked
+        if (
+            not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version
+        ) or (
+            not self._is_nested_int
             and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
         ):
             setattr(obj, self._memo(obj), None)
@@ -572,9 +582,10 @@ class SymIntMemoDescriptor:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
             setattr(obj, self._memo_epoch(obj), None)
-        elif not torch.is_inference_mode_enabled():
+        elif not obj.is_inference() or self._is_nested_int:
             setattr(obj, self._memo(obj), value)
-            setattr(obj, self._memo_vc(obj), obj._version)
+            if not self._is_nested_int:
+                setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
 
@@ -595,14 +606,14 @@ class FakeTensor(Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
     # memo mechanism here won't work)
-    nonzero_memo = SymIntMemoDescriptor(is_unbacked=True)
-    item_memo = SymIntMemoDescriptor(is_unbacked=True)
-    unique_memo = SymIntMemoDescriptor(is_unbacked=True)
+    nonzero_memo = SymIntMemoDescriptor()
+    item_memo = SymIntMemoDescriptor()
+    unique_memo = SymIntMemoDescriptor()
 
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
     # nested int.
-    nested_int_memo = SymIntMemoDescriptor(is_unbacked=False)
+    nested_int_memo = SymIntMemoDescriptor(is_nested_int=True)
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -678,8 +689,8 @@ class FakeTensor(Tensor):
         if not fake_mode.allow_meta:
             assert device.type != "meta"
         # normalize device.
-        if device.type == "cuda":
-            init_cuda_context()
+        if device.type in ["cuda", "xpu"]:
+            init_gpu_context()
 
         if (
             device.type
@@ -1212,6 +1223,10 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
+        if torch.xpu._is_compiled():
+            assert not torch.cuda._is_compiled()
+            return not torch.xpu.is_available()
+
         return not torch.cuda.is_available()
 
     @property
@@ -2201,8 +2216,8 @@ class FakeTensorMode(TorchDispatchMode):
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
-            _, new_kwargs = normalize_function(
-                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            _, new_kwargs = normalize_function(  # type: ignore[misc]
+                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
             )
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"

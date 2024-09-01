@@ -198,7 +198,7 @@ if __name__ == "__main__":
         "head": branch_name,
         "base": "main",
         "body": "This PR is auto-generated weekly by [this action](https://github.com/pytorch/pytorch/blob/main/"
-        + ".github/workflows/weeekly.yml).\nUpdate the list of slow tests.",
+        + ".github/workflows/weekly.yml).\nUpdate the list of slow tests.",
     }
     if pr_num is None:
         # no existing pr, so make a new one and approve it

@@ -95,3 +95,6 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel
         )
+
+    def benchmark_combo_kernel(self, node_list):
+        return self._triton_scheduling.benchmark_combo_kernel(node_list)

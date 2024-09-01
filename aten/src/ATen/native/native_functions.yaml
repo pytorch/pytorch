@@ -694,6 +694,9 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: all.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_all
+
 
 - func: all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -3395,6 +3398,10 @@
 
 - func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
 
+- func: wrapped_linear_prepack(Tensor weight, Tensor weight_scale, Tensor weight_zero_point, Tensor bias) -> Tensor
+
+- func: wrapped_quantized_linear_prepacked(Tensor input, Tensor input_scale, Tensor input_zero_point, Tensor packed_weight, Tensor output_scale, Tensor output_zero_point, int out_channel) -> Tensor
+
 - func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
 
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
@@ -3913,11 +3920,10 @@
   tags: core
 
 # For normal naming convention this should be `mean.out`. However since we already have `mean.out` we have to rename this.
-# FIXME: fix CI jobs and re-enable this
-#- func: mean.dtype_out(Tensor self, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-#  device_check: NoCheck   # TensorIterator
-#  dispatch:
-#    CompositeExplicitAutograd: mean_dtype_out
+- func: mean.dtype_out(Tensor self, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CompositeExplicitAutograd: mean_dtype_out
 
 - func: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: mean.out
@@ -6229,33 +6235,6 @@
     CompositeExplicitAutogradNonFunctional: _nested_get_values_copy
   autogen: _nested_get_values_copy.out
 
-- func: _nested_strided_to_jagged(Tensor(a) self) -> Tensor(a)
-  variants: function
-  device_check: NoCheck
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _nested_strided_to_jagged
-
-- func: _nested_strided_to_jagged_copy(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  tags: view_copy
-  dispatch:
-    CompositeExplicitAutogradNonFunctional: _nested_strided_to_jagged_copy
-  autogen: _nested_strided_to_jagged_copy.out
-
-- func: _nested_jagged_to_strided(Tensor(a) self) -> Tensor(a)
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
-- func: _nested_jagged_to_strided_copy(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  tags: view_copy
-  dispatch:
-    CompositeExplicitAutogradNonFunctional: _nested_jagged_to_strided_copy
-  autogen: _nested_jagged_to_strided_copy.out
-
 - func: _nested_get_offsets(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
@@ -6498,6 +6477,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA, MPS: where
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_where
   tags: [core, pointwise]
 
 - func: where.self_out(Tensor condition, Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -8913,6 +8893,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: eq_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: eq_tensor_nested
   tags: [core, pointwise]
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -14238,6 +14219,11 @@
 - func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
   python_module: linalg
 
+- func: _spsolve(Tensor A, Tensor B, *, bool left=True) -> Tensor
+  python_module: sparse
+  dispatch:
+    SparseCsrCUDA: _sparse_csr_linear_solve
+
 - func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
@@ -14724,6 +14710,11 @@
     NestedTensorCUDA: NestedTensor_softmax_dropout_cuda
   tags: nondeterministic_seeded
 
+- func: _safe_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _safe_softmax
+    NestedTensorCPU, NestedTensorCUDA: _safe_softmax
+
 # Apparently, putting "forward" in the name will cause Python bindings to be skipped, so "fwd" it is.
 - func: _transformer_encoder_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, int? mask_type=None) -> Tensor
   variants: function
@@ -14772,7 +14763,7 @@
     CPU: _scaled_dot_product_flash_attention_cpu
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias=None, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable
   tags: nondeterministic_seeded
