@@ -30,6 +30,7 @@ import uuid
 import warnings
 import weakref
 from contextlib import contextmanager
+from dataclasses import is_dataclass
 from functools import lru_cache
 from types import MethodWrapperType
 from typing import (
@@ -2313,9 +2314,13 @@ def import_submodule(mod: types.ModuleType):
 
 
 def object_has_getattribute(value: Any):
+    return class_has_getattribute(type(value))
+
+
+def class_has_getattribute(cls: type):
     try:
         if isinstance(
-            inspect.getattr_static(type(value), "__getattribute__"),
+            inspect.getattr_static(cls, "__getattribute__"),
             types.FunctionType,
         ):
             return True
@@ -2958,6 +2963,16 @@ def to_fake_tensor(t, fake_mode):
 
     return fake_mode.from_tensor(
         t, static_shapes=False, symbolic_context=symbolic_context, source=source
+    )
+
+
+# NB: this works for both classes and instances
+def is_frozen_dataclass(value):
+    return (
+        not object_has_getattribute(value)
+        and not class_has_getattribute(value)
+        and is_dataclass(value)
+        and value.__dataclass_params__.frozen
     )
 
 
