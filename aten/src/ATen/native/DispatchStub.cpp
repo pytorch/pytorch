@@ -334,10 +334,9 @@ DispatchResult DispatchStubImpl::try_choose_cpu_impl(
   if (capability >= static_cast<int>(CPUCapability::SVE256)) {
     if (C10_UNLIKELY(!SVE256)) {
       // dispatch to DEFAULT, since the SVE kernel is missing
-      TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
-      return DEFAULT;
+      return DEFAULT != nullptr ? DispatchResult(DEFAULT) : ErrorType::MissingDeviceKernel;
     } else {
-      return SVE256;
+      return DispatchResult(SVE256);
     }
   }
 #endif

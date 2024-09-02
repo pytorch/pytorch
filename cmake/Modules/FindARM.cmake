@@ -22,6 +22,15 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       set(ASIMD_FOUND false CACHE BOOL "ASIMD/NEON available on host")
    ENDIF (ASIMD_TRUE)
 
+   #sve instruction can be found on the majority part of modern ARM processor
+   STRING(REGEX REPLACE "^.*(sve).*$" "\\1" SVE_THERE ${CPUINFO})
+   STRING(COMPARE EQUAL "sve" "${SVE_THERE}" SVE_TRUE)
+   IF (SVE_TRUE)
+      set(SVE_FOUND true CACHE BOOL "SVE available on host")
+   ELSE (SVE_TRUE)
+      set(SVE_FOUND false CACHE BOOL "SVE available on host")
+   ENDIF (SVE_TRUE)
+
    #Find the processor type (for now OMAP3 or OMAP4)
    STRING(REGEX REPLACE "^.*(OMAP3).*$" "\\1" OMAP3_THERE "${CPUINFO}")
    STRING(COMPARE EQUAL "OMAP3" "${OMAP3_THERE}" OMAP3_TRUE)
@@ -79,3 +88,80 @@ if(NOT CORTEXA9_FOUND)
       MESSAGE(STATUS "No OMAP4 processor on this machine.")
 endif(NOT CORTEXA9_FOUND)
 mark_as_advanced(NEON_FOUND)
+
+# Include necessary modules for checking C and C++ source compilations
+INCLUDE(CheckCSourceCompiles)
+INCLUDE(CheckCXXSourceCompiles)
+
+# Test code for SVE support
+SET(SVE_CODE "
+  #include <arm_sve.h>
+  int main()
+  {
+    svfloat64_t a;
+    a = svdup_n_f64(0);
+    return 0;
+  }
+")
+
+# Test code for SVE256 support
+SET(SVE256_CODE "
+  #include <arm_sve.h>
+  int main()
+  {
+    svfloat64_t a;
+    a = svdup_n_f64(0);
+    return 0;
+  }
+")
+
+# Macro to check for SVE instruction support
+MACRO(CHECK_SVE lang type flags)
+  # Save the current state of required flags
+  SET(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
+
+  # Set the flags necessary for compiling the test code with SVE support
+  SET(CMAKE_REQUIRED_FLAGS "${CMAKE_${lang}_FLAGS_INIT} ${flags}")
+
+  # Check if the source code compiles with the given flags for the specified language (C or C++)
+  IF(lang STREQUAL "CXX")
+    CHECK_CXX_SOURCE_COMPILES("${SVE_CODE}" ${lang}_HAS_${type})
+  ELSE()
+    CHECK_C_SOURCE_COMPILES("${SVE_CODE}" ${lang}_HAS_${type})
+  ENDIF()
+
+  # If the compilation test is successful, set appropriate variables indicating support
+  IF(${lang}_HAS_${type})
+    set(${lang}_SVE_FOUND TRUE CACHE BOOL "SVE available on host")
+    SET(${lang}_${type}_FOUND TRUE CACHE BOOL "${lang} ${type} support")
+    SET(${lang}_${type}_FLAGS "${flags}" CACHE STRING "${lang} ${type} flags")
+  ENDIF()
+
+  # Restore the original state of required flags
+  SET(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
+
+  # If the compilation test fails, indicate that the support is not found
+  IF(NOT ${lang}_${type}_FOUND)
+    SET(${lang}_${type}_FOUND FALSE CACHE BOOL "${lang} ${type} support")
+    SET(${lang}_${type}_FLAGS "" CACHE STRING "${lang} ${type} flags")
+  ENDIF()
+
+  # Mark the variables as advanced to hide them in the default CMake GUI
+  MARK_AS_ADVANCED(${lang}_${type}_FOUND ${lang}_${type}_FLAGS)
+ENDMACRO()
+
+# Check for SVE256 vector length
+CHECK_SVE(CXX "SVE256" "-march=armv8-a+sve -msve-vector-bits=256")
+
+# If SVE256 support is not found, set CXX_SVE_FOUND to FALSE and notify the user
+if(NOT CXX_SVE256_FOUND)
+  set(CXX_SVE_FOUND FALSE CACHE BOOL "SVE not available on host")
+  message(STATUS "No SVE processor on this machine.")
+else()
+  # If SVE256 support is found, set CXX_SVE_FOUND to TRUE and notify the user
+  set(CXX_SVE_FOUND TRUE CACHE BOOL "SVE available on host")
+  message(STATUS "SVE support detected.")
+endif()
+
+# Mark the SVE support variable as advanced
+mark_as_advanced(CXX_SVE_FOUND)

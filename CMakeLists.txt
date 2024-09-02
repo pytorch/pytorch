@@ -1150,22 +1150,6 @@ int main() {
   endif()
 endif()
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=armv8-a+sve")
-  check_c_source_compiles("#include <arm_sve.h>
-int main() {
-  svfloat64_t a;
-  a = svdup_n_f64(0);
-  return 0;
-}" COMPILER_HAS_ARM_SVE)
-
-  if(COMPILER_HAS_ARM_SVE)
-    string(APPEND CMAKE_CXX_FLAGS " -DCOMPILER_HAS_ARM_SVE")
-  endif()
-  set(CMAKE_C_FLAGS ${ORIGINAL_CMAKE_C_FLAGS})
-endif()
-
 # Add code coverage flags to supported compilers
 if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")

@@ -314,7 +314,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
             std::array<Vectorized<float>, 4>,
             std::array<Vectorized<c10::qint32>, 4>,
             VECTOR_WIDTH>(ptr) {}
-#if 1
+
   static Vectorized<c10::qint8> loadu(const void* ptr) {
     return Vectorized<c10::qint8>(ptr);
   }
@@ -330,14 +330,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
       std::memcpy(tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
       return loadu(tmp_values);
   }
-#else
-  static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count = size()) {
-    if (count == size())
-      return svld1_s8(ptrue, reinterpret_cast<const int8_t*>(ptr));
-    svbool_t pg = svwhilelt_b8(0ull, count);
-    return svld1_s8(pg, reinterpret_cast<const int8_t*>(ptr));
-  }
-#endif
+
   static Vectorized<c10::qint8> quantize(
       const float_vec_return_type& rhs,
       float scale,
