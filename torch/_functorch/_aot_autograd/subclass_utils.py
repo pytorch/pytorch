@@ -128,8 +128,9 @@ def filter_symints(lst: Iterable[Union[int, SymInt]]) -> List[SymInt]:
     return [s for s in lst if isinstance(s, SymInt) and not s.node.is_nested_int()]
 
 
-def compute_symint_placeholders(lst: Iterable[Union[int, SymInt]]) -> List[bool]:
-    return [isinstance(s, SymInt) and not s.node.is_nested_int() for s in lst]
+def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> List[bool]:
+    # Non-nested symints are replaced with None values in `make_runtime_safe()`
+    return [s is None for s in lst]
 
 
 # The reason for "append_symints"
@@ -141,6 +142,9 @@ def compute_symint_placeholders(lst: Iterable[Union[int, SymInt]]) -> List[bool]
 #
 # * At runtime: we similarly append subclass sizes when we unwrap subclass
 # primals (but not tangents) on entry to the forward.
+#
+# subclass_metas is needed at runtime to compute which indices are symints in
+# the outer_size/outer_stride
 def unwrap_tensor_subclasses(
     wrapped_args: List[Union[Tensor, int]],
     *,

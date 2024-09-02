@@ -183,8 +183,8 @@ class SubclassCreationMeta:
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
     attrs: Dict[str, Union["SubclassCreationMeta", None]]
-    outer_size: List[Union[int, torch.SymInt]]
-    outer_stride: List[Union[int, torch.SymInt]]
+    outer_size: List[Union[None, int, torch.SymInt]]
+    outer_stride: List[Union[None, int, torch.SymInt]]
     meta: Any
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
@@ -206,35 +206,26 @@ class SubclassCreationMeta:
     ):
         from .subclass_utils import compute_symint_placeholders
 
-        outer_size_symint_placeholders = compute_symint_placeholders(self.outer_size)
-        outer_stride_symint_placeholders = compute_symint_placeholders(
-            self.outer_stride
-        )
-        has_symbolic = any(outer_size_symint_placeholders)
+        def compute(outer, start_idx):
+            placeholders = compute_symint_placeholders(outer)
+            has_symbolic = any(placeholders)
 
-        if is_runtime and has_symbolic and not is_nested:
-            start = curr_start_idx
-            end = start + sum(outer_size_symint_placeholders)
-            it_args = iter(all_args[start:end])
-            it_placeholders = iter(outer_size_symint_placeholders)
-            outer_size = pytree.tree_map_only(
-                lambda _: next(it_placeholders),
-                lambda _: next(it_args),
-                self.outer_size,
-            )
+            if is_runtime and has_symbolic:
+                if is_nested:
+                    return None, curr_start_idx
+                else:
+                    start = curr_start_idx
+                    end = start_idx + sum(placeholders)
+                    it_args = iter(all_args[start:end])
+                    it_placeholders = iter(placeholders)
+                    return pytree.tree_map_only(
+                        lambda _: next(it_placeholders), lambda _: next(it_args), outer
+                    ), start + len(placeholders)
+            return outer, start_idx
 
-            start = end
-            end = start + sum(outer_stride_symint_placeholders)
-            it_args = iter(all_args[start:end])
-            it_placeholders = iter(outer_stride_symint_placeholders)
-            outer_stride = pytree.tree_map_only(
-                lambda _: next(it_placeholders),
-                lambda _: next(it_args),
-                self.outer_size,
-            )
-            return outer_size, outer_stride
-
-        return self.outer_size, self.outer_stride
+        outer_size, next_idx = compute(self.outer_size, curr_start_idx)
+        outer_stride, _ = compute(self.outer_stride, next_idx)
+        return outer_size, outer_stride
 
     def creation_fn(
         self,
@@ -286,9 +277,19 @@ class SubclassCreationMeta:
         return rebuilt
 
     def make_runtime_safe(self):
+        def _make_size_runtime_safe(x: Union[None, int, torch.SymInt]) -> Optional[int]:
+            dummy = -1
+            if isinstance(x, torch.SymInt):
+                # Replace nested ints by a dummy value (-1) as NJT ignores
+                # the outer_size/outer_stride at runtime
+                return dummy if x.node.is_nested_int() else None
+            return x
+
         assert self.original_subclass is not None
         self.original_subclass_type = type(self.original_subclass)
         self.original_subclass = None
+        self.outer_size = [_make_size_runtime_safe(x) for x in self.outer_size]
+        self.outer_stride = [_make_size_runtime_safe(x) for x in self.outer_stride]
         # Recurse on nested subclass info
         for creation_meta in self.attrs.values():
             if creation_meta is not None:
@@ -409,6 +410,10 @@ class ViewAndMutationMeta:
     # Donated buffer means the tensor is not alias of any forward user input, forward user output,
     # and backward output.
     bw_donated_idxs: Optional[List[int]] = None
+
+    # Number of tokens used in backward, appended at the end of backward outputs.
+    # Filled after tracing joint function.
+    num_backward_tokens: int = 0
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
@@ -532,11 +537,11 @@ class ViewAndMutationMeta:
         self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
 
         # Our forward() returns both (tokens, mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
+        # Tokens will be split out before mutations/view handling and we do not count them here.
         self.num_forward_returns = (
             self.num_mutated_inp_runtime_indices
             + self.num_outputs
             + self.num_intermediate_bases
-            + len(self.tokens)
         )
         # In case of functionalization of rng ops, the fw_module returns one
         # additional output for rng offset. This rng offset is used right
@@ -625,6 +630,7 @@ class ViewAndMutationMeta:
                 x.shape == y.shape and x.dtype == y.dtype
                 for x, y, in zip(self.traced_tangents, other.traced_tangents)
             )
+            and self.num_backward_tokens == other.num_backward_tokens
         )
 
 
