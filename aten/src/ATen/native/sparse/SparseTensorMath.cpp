@@ -619,9 +619,9 @@ const SparseTensor broadcast_sparce_cpu(const SparseTensor& t, const std::vector
       }
     const SparseTensor& const_t = new_t;
     return const_t;
+    }
   }
   return t;
-}
 }
 
 Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, const Scalar& value);
