@@ -2251,6 +2251,7 @@ def wrap_fx_proxy_cls(
         torch.backends.cuda.is_flash_attention_available,
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
+        torch.ops.nested.is_same_set,
     ]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)

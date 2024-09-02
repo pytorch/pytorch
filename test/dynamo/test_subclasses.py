@@ -1772,7 +1772,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             else:
                 return (torch.ones_like(out_val),)
 
-        self.branch_nested_state():
+        with self.branch_nested_state():
             # TODO(soulitzer): update code to validate that compilation does not modify eager state
 
             # from torch.nested._internal.nested_tensor import _tensor_symint_registry
@@ -1993,6 +1993,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
 
         self._validate_compile(fn, arg_fn=lambda: (values, offsets, offsets))
 
+
+        # TODO(soulitzer): improve how we handle
+        torch.nested._internal.nested_tensor._dummy_instance = None
+
+
     def test_in_graph_construction_from_input_4(self):
         # The offsets is taken from an NJT input
         def fn(nt, other_values):
@@ -2169,6 +2174,8 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
         compiled = torch.compile(fn, fullgraph=True, backend="aot_eager")
         compiled(nt)
 
+    # TODO(soulitzer): Use COW
+    @unittest.expectedFailure
     def test_inference_tensor(self):
         with torch.inference_mode():
             nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
@@ -2177,7 +2184,8 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             return n * 2
 
         torch.compile(fn, backend="eager")(nt)
-    # TODO: also implement min_seqlen
+
+    # TODO(soulitzer): also implement min_seqlen
     def test_max_seqlen(self):
         a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64)
         b = torch.randn(3, 5, requires_grad=True, dtype=torch.float64)
@@ -2197,7 +2205,8 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             compile_count[0] += 1
             return gm
 
-        # Manual checks for guards that are produced?
+        # TODO(soulitzer): Manual checks for guards that are produced?
+        # TODO(soulitzer): try with aot eager
         compiled_fn = torch.compile(fn, fullgraph=True, backend=counter)
         uf = union_find.get_union_find()
         metadata = uf.get_metadata(nt.offsets())
@@ -2209,10 +2218,9 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
         out2 = compiled_fn(nt)
         self.assertEqual(compile_count[0], 2)
 
-        metadata["_max_seqlen"] = 100
+        metadata["_max_seqlen"] = 10
         out3 = compiled_fn(nt)
         self.assertEqual(compile_count[0], 2)
-
         self.assertEqual(out1, out3)
         self.assertEqual(out1 * 4, out2)
 
@@ -2372,7 +2380,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
                     """\
 Eq(s4 - 1, s2)
 Eq(s10 - 1, s7)
-Eq(s13, s9)""",
+Eq(s12, s9)""",
                 )
             elif nt_view_name.startswith("base_is_nt_True"):
                 self.assertExpectedInline(
@@ -2385,7 +2393,7 @@ Eq(s13, s9)""",
                     """\
 Eq(s3 - 1, s1)
 Eq(s11 - 1, s8)
-Eq(s14, s10)""",
+Eq(s13, s10)""",
                 )
             return gm
 

@@ -4003,7 +4003,8 @@ class ShapeEnv:
                         inner_context.constraint_sizes,
                         inner_context.constraint_strides
                     ))
-                    uf = torch.nested._internal.union_find.get_union_find()
+                    uf = torch.nested._internal.union_find._get_union_find(inner_t)
+
                     if uf.get_metadata(inner_t).get("_max_seqlen") is not None:
                         track_symint(
                             torch._dynamo.source.UnionFindMetadataSource(AttrSource(source, attr), "_max_seqlen"),

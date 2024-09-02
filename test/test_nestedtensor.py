@@ -7479,23 +7479,25 @@ class TestTensorUnionFind(TestCase):
         self.assertIs(uf.find(a), a)
 
     @xfailIfTorchDynamo
-    def test_union_find_compile(self):
+    def test_unsafe_union_find_compile(self):
         # Today, UnionFind APIs should not be used directly when compiling.
+        # For NJT, we rely on nested int dynamic shapes guards.
 
         # During fakification, compiler is only aware of the state of the
         # global union find. Alternatively, we could add a way to track which
         # union find each tensor belongs to.
         uf = torch.nested._internal.union_find.get_union_find()
-        from torch.nested._internal.union_find import merge, find
+        from torch.nested._internal.union_find import merge, is_same_set
 
-        # You should NOT be calling `find(a) is find(b)` directly when using
+        # You should NOT be calling `is_same_set` directly when using
         # the union find in a compiled function. Checking whether two tensors
         # are in the same set should only be done as part of testing whether
         # two nested tensors have the same shape, as that would allow us to
         # make use of ShapeEnv guards.
         def f(a, b, c, d):
             merge(b, c)
-            return find(a) is find(d)
+            # In real usage, dynamo should not actually see this function
+            return is_same_set(a, d)
 
         a = torch.tensor([1.], requires_grad=True)
         b = torch.tensor([1.], requires_grad=True)
@@ -7510,8 +7512,7 @@ class TestTensorUnionFind(TestCase):
         # The state of the union find is properly reflected in the fake world
         self.assertTrue(out1)
 
-        # This is wrong, we need side effects
-        self.assertFalse(find(a) is find(d))
+        self.assertTrue(is_same_set(a, d))
 
         a = torch.tensor([1.], requires_grad=True)
         b = torch.tensor([1.], requires_grad=True)
@@ -7521,8 +7522,9 @@ class TestTensorUnionFind(TestCase):
         compiled_f(a, b, c, d)
         out2 = compiled_f(a, b, c, d)
 
-        # This is not correct because we do NOT guard on the state of the union
-        # find.
+        # This is WRONG because we do NOT guard on the state of the union
+        # find! Do not use union find with compile with nested ints.
+        # NestedInts as a frontend for union find I guess.
         self.assertTrue(out2)
 
 

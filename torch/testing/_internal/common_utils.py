@@ -5268,7 +5268,8 @@ class NestedTensorTestCase(TestCase):
     def branch_nested_state(self):
         """Context manager to branch and restore the nested tensor state."""
         union_find_module = torch.nested._internal.union_find
-        union_find_copy = union_find_module._union_find.copy()
+        # Call get_union_find to trigger lazy creation
+        union_find_copy = union_find_module.get_union_find().copy()
         union_find_orig = union_find_module._union_find
         union_find_module._union_find = union_find_copy
         try:

@@ -201,7 +201,10 @@ class MetaTensorDescriber:
 
             if isinstance(x, torch.SymInt):
                 # TODO(soulitzer): investigate why sometimes we fail this assert
+                if not isinstance(x.node, NestedIntNode):
+                    print(x.node.creation_trace)
                 assert isinstance(x.node, NestedIntNode)
+
                 return MetaNestedIntDesc(
                     tensor=self.describe_tensor(x.node.get_tensor()),
                     # TODO(soulitzer): Maybe we should not hardcode this
@@ -855,72 +858,14 @@ class MetaConverter:
             assert t is not None
             uf.merge(t, t_fake)
 
-            # It's possible that we may have not fakified the canonical tensor
-            # We need to preemptively fakify the canonical tensor to ensure that
-            # calling uf.find(t_fake) will always return a FakeTensor.
-            # The issue is that someone might legitimently fakify it later,
-            # and then our thing is wrong because we don't have the right
-            # src or symbolic context.
-            # This seems annoying to do, so let's just ban this case for now.
-            # This means that user must always trigger the fakification
-            # of the canonical tensor first.
-            # Let's say the user has a couple different tensors, and pass in
-            # one of them. This is too hard. Let's just create a brand new
-            # The other strategy is that compile doesn't actually preserve
-            # canonical tensor, we must somehow be able to make a different
-            # tensor canonical.
-            # Also what is annoying is that as more tensors are fakified
-            # the canonical tensor may change, because we'd merging?
-            # Actually it would not right because we want to favor the
-            # one with the shorter chain, and the newly fakified one is a single
-            # tensor. It would change at n==2. but, this doesn't matter because
-            # We don't actually want to expose find(a) as a public API
-            # we want to expose find(a) == find(b) as a public API.
-            # In that sense, it is okay to have a canonical that is non-fake?
-            # We can do whatever we want within the custom op, including
-            # callinf uf.find(a) which returns a real tensor, and then#
-            # So the alternative to all of this, is
-            # 1. we don't actually have the copy as scaffolding
-            #    instead, we record the union_find_id onto the fake tensor desc
-            #    so... okay, I mean we can still fork, and rely on the
-            #    fake_union_find that we have#
-            #    I don't want to have to replay too many merge calls.
-            #    The scaffolding strategy means exactly N merges
-            #    the fresh union find strategy requires that potentially N merges
-            #    because at time step k, we may need to merge with any of the
-            #    existing tensors. n^2
-            #    I don't think we should be too worried about operations on
-            #    real tensors happening.
-            #    .find() is not a public API. users cannot get at the canonical.#
-            #    they can only query that two tensors
-            #    so handle union find needs some additional state to figu
-
-            # It's enough to just fakify the canonical tensor because it
-            # does not change.
-            # canonical = uf.find(t_fake)
             from torch._subclasses.fake_tensor import FakeTensor
-
-            if not isinstance(canonical, FakeTensor):
-                # This assumes the callback always creates a FakeTensor
-                canonical_fake = self.meta_tensor(
-                    t,
-                    shape_env,
-                    callback,
-                    source=src,
-                    symbolic_context=(
-                        None
-                        if symbolic_context is None
-                        # Would be cool not to hard code this!
-                        else symbolic_context.inner_contexts["_offsets"]
-                    )
-                )
-                uf._tensor_int_map.replace(canonical, canonical_fake)
 
             cached_metadata = uf.get_metadata(t_fake)
 
             # We didn't even need to rely on the descr to record the min/max
             # because we can access the metadata directly from the union find
             # TODO(soulitzer): check the guards here
+
             if t_descr.cached_max is not None:
                 import sympy
 

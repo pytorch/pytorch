@@ -177,7 +177,6 @@ def run_functionalized_fw_and_collect_metadata(
             if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
                 shape_env.pending_fresh_unbacked_symbols.clear()
                 fake_mode.epoch += 1
-                print("reset when reusing FakeMode in aot autograd")
                 fake_mode.reset_union_find()
 
         if prior_autocast_states != _get_autocast_states():

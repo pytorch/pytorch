@@ -13,12 +13,10 @@ from torch.utils.weak import WeakTensorKeyDictionary
 
 def create_nested_symint(uf, tensor, *, coeff=1):
     t_id = uf._tensor_int_map.get_int(tensor)
-    print(f"create_nested_symint: t_id={t_id}")
     return torch.SymInt(NestedIntNode(t_id, tensor, coeff=coeff))
 
 
 def get_nested_symint(tensor, *, coeff=1):
-    print(f"get_nested_symint: tensor={id(tensor)}")
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
 

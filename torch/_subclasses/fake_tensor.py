@@ -1194,7 +1194,6 @@ class FakeTensorMode(TorchDispatchMode):
         self.fake_union_find = get_union_find().copy()
 
     def reset_union_find(self) -> None:
-        print("FakeMode.reset_union_find")
         # resets it to the current eager state
         # we probably actually want to reset it to what the eager state originally
         # was when this fake mode was creted, but that requires another copy
