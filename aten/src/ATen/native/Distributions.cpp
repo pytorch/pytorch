@@ -592,7 +592,7 @@ Tensor& multinomial_out(const Tensor& self,
     if (self.dim() == 1){
       zero_prob_condition = (self.sum() == 0);
     } else {
-      zero_prob_condition = (self.sum(1) == 0).sum();
+      zero_prob_condition = (self.sum(1) == 0).any();
     }
     at::_assert_async(~zero_prob_condition, "invalid multinomial distribution (sum of probabilities <= 0)");
 
