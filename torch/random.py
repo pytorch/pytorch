@@ -45,6 +45,7 @@ def manual_seed(seed, device: Union[str, torch.device] = None) -> torch._C.Gener
 
     # Set the seed for the current device of a given device type
     if device is not None:
+        import torch
         device_type = device.type if isinstance(device, torch.device) else device
         _manual_seed_for_device(seed, device_type)
         return None
@@ -74,34 +75,16 @@ def seed() -> int:
     random number on all devices. Returns a 64 bit number used to seed the RNG.
     """
     seed = default_generator.seed()
-    import torch.cuda
-
-    if not torch.cuda._is_in_bad_fork():
-        torch.cuda.manual_seed_all(seed)
-
-    import torch.mps
-
-    if not torch.mps._is_in_bad_fork():
-        torch.mps.manual_seed(seed)
-
-    import torch.xpu
-
-    if not torch.xpu._is_in_bad_fork():
-        torch.xpu.manual_seed_all(seed)
-
-    _seed_custom_device(seed)
-
+    _ = manual_seed(seed)
     return seed
 
 
 def _manual_seed_for_device(seed: int, device: str) -> None:
-    r"""Set the seed for generating random numbers for the given device.
+    r"""Set the seed for generating random numbers for the current device of a
+    given device type.
 
     Unlike :meth:`torch.manual_seed(seed)`, this function only sets the seed
-    for the given device.
-
-    It's safe to call this function if the given device is not available; in
-    that case, it is silently ignored.
+    for the current device.
 
     Args:
         seed (int): The desired seed.
