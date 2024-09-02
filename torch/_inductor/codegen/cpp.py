@@ -1799,7 +1799,7 @@ class CppKernel(Kernel):
                 acc,
                 acc_type,
                 reduction_type,
-                dtype,
+                init_dtype,
                 size,
                 reduction_init,
             )
@@ -2523,6 +2523,14 @@ class CppVecKernel(CppKernel):
             reduction_combine_fn=self.reduction_combine_vec,
             reduction_init_fn=self.reduction_init_vec,
         )
+        self._gen_parallel_reduction_buffers(
+            acc,
+            acc_type,
+            reduction_type,
+            init_dtype,
+            reduction_combine_fn=reduction_combine,
+            reduction_init_fn=reduction_init,
+        )
         if reduction_type == "welford_reduce":
             # use masked acc_vec for tail vec kernel
             self._gen_parallel_reduction_buffers(
@@ -2532,15 +2540,6 @@ class CppVecKernel(CppKernel):
                 dtype,
                 reduction_combine_fn=self.reduction_combine_vec,
                 reduction_init_fn=self.reduction_init_vec,
-            )
-        else:
-            self._gen_parallel_reduction_buffers(
-                acc,
-                acc_type,
-                reduction_type,
-                init_dtype,
-                reduction_combine_fn=reduction_combine,
-                reduction_init_fn=reduction_init,
             )
         tmpvar: Union[str, CSEVariable]
         is_bool = dtype == torch.bool
