@@ -192,9 +192,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return self.conv2(input)
 
         x = torch.randn(20, 16, 50, 50)
-        onnx_program = dynamo_export(
-            TraceModel(), x, export_options=ExportOptions(op_level_debug=False)
-        )
+        onnx_program = dynamo_export(TraceModel(), x)
         assert_has_diagnostics(
             onnx_program.diagnostic_context,
             diagnostics.rules.find_opschema_matched_symbolic_function,
