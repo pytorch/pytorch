@@ -28,6 +28,11 @@ TCustomFloat = TypeVar("TCustomFloat", bound=Union[FLOAT16, FLOAT, DOUBLE, BFLOA
 
 class TestRegistration(common_utils.TestCase):
     def setUp(self) -> None:
+        # Trigger op registration
+        from onnxscript.function_libs.torch_lib import ops
+
+        del ops  # Unused
+
         self.registry = torch.onnx.OnnxRegistry()
         self.custom_domain = onnxscript.values.Opset(domain="custom", version=1)
 
