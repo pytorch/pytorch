@@ -5091,7 +5091,7 @@ def resize_as(self, other, memory_format=None):
 @register_decomposition(aten.median.default)
 @out_wrapper()
 def median(x):
-    if x.numel() == 0 or x.ndim == 0:
+    if x.numel() == 0:
         return x.new_full([], float("nan")).to(x.dtype)
 
     return median_impl(x.flatten(), dim=0, keepdim=False, ignore_nan=False)[0]
@@ -5100,7 +5100,7 @@ def median(x):
 @register_decomposition(aten.nanmedian.default)
 @out_wrapper()
 def nanmedian(x):
-    if x.numel() == 0 or x.ndim == 0:
+    if x.numel() == 0:
         return x.new_full([], float("nan")).to(x.dtype)
 
     return median_impl(x.flatten(), dim=0, keepdim=False, ignore_nan=True)[0]
@@ -5124,7 +5124,7 @@ def median_impl(x, dim, keepdim=False, ignore_nan=True):
     dim = utils.canonicalize_dim(x.dim(), dim)
 
     if x.ndim == 0:
-        return x.new_zeros([]), x.new_zeros([], dtype=torch.int64)
+        return x.clone(), x.new_full(x.shape, 0, dtype=torch.int64)
 
     size = x.shape[dim]
     torch._check(
