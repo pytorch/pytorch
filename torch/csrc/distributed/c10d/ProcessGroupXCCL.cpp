@@ -70,7 +70,7 @@ ccl::datatype getXcclDataType(at::ScalarType type) {
 namespace {
 
 static std::mutex xcclCommDevIdxMapMutex;
-static std::unordered_map<std::shared_ptr<XCCLComm>, int> xcclCommDevIdxMap;
+static std::unordered_map<std::shared_ptr<xcclComm_t>, int> xcclCommDevIdxMap;
 
 template <
     template <typename, typename, typename, typename, typename>
@@ -118,7 +118,7 @@ c10::intrusive_ptr<Backend> ProcessGroupXCCL::createProcessGroupXCCL(
 
 ProcessGroupXCCL::~ProcessGroupXCCL() {}
 
-std::shared_ptr<XCCLComm> ProcessGroupXCCL::getXCCLComm(
+std::shared_ptr<xcclComm_t> ProcessGroupXCCL::getXCCLComm(
     const std::string& deviceKey,
     at::Device& device) {
   if (deviceKey.empty()) {
@@ -135,7 +135,7 @@ std::shared_ptr<XCCLComm> ProcessGroupXCCL::getXCCLComm(
     }
   }
 
-  std::shared_ptr<XCCLComm> xcclComm;
+  std::shared_ptr<xcclComm_t> xcclComm_t;
 
   XCCL_KVS kvs = get_kvs(rank_, store_);
 
@@ -149,11 +149,11 @@ std::shared_ptr<XCCLComm> ProcessGroupXCCL::getXCCLComm(
   auto q = get_sycl_queue(stream);
   auto ctx = ccl::create_context(q.get_context());
   devs_rank.emplace_back(rank, ccl::create_device(q.get_device()));
-  xcclComm = ccl::create_communicator(numRanks, devs_rank, ctx, kvs);
+  xcclComm_t = ccl::create_communicator(numRanks, devs_rank, ctx, kvs);
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    inInitializationCommMap_.emplace(deviceKey, xcclComm);
+    inInitializationCommMap_.emplace(deviceKey, xcclComm_t);
   }
 
   auto it = inInitializationCommMap_.find(deviceKey);
@@ -162,7 +162,7 @@ std::shared_ptr<XCCLComm> ProcessGroupXCCL::getXCCLComm(
     inInitializationCommMap_.erase(deviceKey);
 
     xcclCommDevIdxMapMutex.lock();
-    xcclCommDevIdxMap.emplace(xcclComm, device.index());
+    xcclCommDevIdxMap.emplace(xcclComm_t, device.index());
     xcclCommDevIdxMapMutex.unlock();
   }
 
@@ -187,7 +187,7 @@ c10::intrusive_ptr<Work> ProcessGroupXCCL::collective(
 
   auto device = input.device();
   const auto key = std::to_string(device.index());
-  auto xcclComm = getXCCLComm(key, device);
+  auto xcclComm_t = getXCCLComm(key, device);
 
   std::vector<at::Tensor> inputs{input};
   std::vector<at::Tensor> outputs{output};
@@ -198,7 +198,7 @@ c10::intrusive_ptr<Work> ProcessGroupXCCL::collective(
   //     enqueue);
 
   work = make_work_ccl<WorkXCCL>(
-      inputs, outputs, fn, xcclComm, attr, rank_, op_type);
+      inputs, outputs, fn, xcclComm_t, attr, rank_, op_type);
   // pre(ncclStream, work);
   // ncclComm_t comm = ncclComm->getNcclComm();
   // post(ncclStream, work);

@@ -25,14 +25,13 @@
 #include <unordered_map>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 namespace c10d {
 
 constexpr const char* XCCL_BACKEND_NAME = "xccl";
+using namespace torch::xpu::xccl;
 
 class ProcessGroupXCCL : public Backend {
  public:
@@ -41,13 +40,10 @@ class ProcessGroupXCCL : public Backend {
     WorkXCCL(
         std::vector<std::vector<at::Tensor>> outputTensors,
         int rank = -1,
-        OpType opType = UNKNOWN,
+        OpType opType = OpType::UNKNOWN,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
         : Work(rank, opType), outputTensors_(std::move(outputTensors)) {}
-
-    WorkXCCL(const WorkXCCL& w)
-        : outputTensors_(w.outputTensors_), events_(w.events_) {}
 
     ~WorkXCCL() override {
       // Ensures all events are properly handled before destruction
@@ -57,7 +53,7 @@ class ProcessGroupXCCL : public Backend {
     }
 
     bool isCompleted() override {
-      for (const auto& event : events_) {
+      for (auto& event : events_) {
         if (!event.test()) {
           return false;
         }
@@ -80,13 +76,14 @@ class ProcessGroupXCCL : public Backend {
       }
     }
 
-    void wait() override {
-      std::lock_guard<std::mutex> lock(mutex_);
+    void wait() {
+      std::unique_lock<std::timed_mutex> lock(mutex_);
       for (auto& event : events_) {
-        CCL_CHECK(event.wait());
+        event.wait();
       }
       events_.clear();
     }
+
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
       TORCH_CHECK(
@@ -109,9 +106,9 @@ class ProcessGroupXCCL : public Backend {
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size)
-      : store_(store), rank_(rank), size_(size) {}
+      : store_(store), Backend(rank, size)  {}
 
-  ProcessGroupXCCL::~ProcessGroupXCCL() = default;
+  ~ProcessGroupXCCL() = default;
 
   const std::string getBackendName() const override {
     return std::string(XCCL_BACKEND_NAME);
@@ -129,14 +126,10 @@ class ProcessGroupXCCL : public Backend {
       int rank = -1,
       int size = -1);
 
- private:
-  int rank_;
-  int size_;
-
  public:
-  std::unordered_map<std::string, std::shared_ptr<XCCLComm>>
+  std::unordered_map<std::string, std::shared_ptr<xcclComm_t>>
       inInitializationCommMap_;
-  std::unordered_map<std::string, std::shared_ptr<XCCLComm>> devXCCLCommMap_;
+  std::unordered_map<std::string, std::shared_ptr<xcclComm_t>> devXCCLCommMap_;
   c10::intrusive_ptr<Store> store_;
   std::mutex mutex_;
 };

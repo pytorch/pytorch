@@ -697,3 +697,12 @@ class ProcessGroupCudaP2P(Backend):
         storage_offset: Optional[int] = 0,
     ) -> torch.Tensor: ...
     def _shutdown(self) -> None: ...
+
+class ProcessGroupXCC(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        timeout: timedelta,
+    ): ...
