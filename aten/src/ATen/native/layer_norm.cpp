@@ -6,6 +6,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -296,12 +297,8 @@ Tensor rms_norm(
     }
 
     // upcast is needed for fp16 and bf16
-    Tensor upcasted_input;
-    if constexpr (std::is_same_v<scalar_t, c10::Half> || std::is_same_v<scalar_t, c10::BFloat16>) {
-      upcasted_input = input.to(ScalarType::Float);
-    } else {
-      upcasted_input = input;
-    }
+    c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
+    Tensor upcasted_input = input.to(opmath_t);
 
     Tensor rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
     Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
