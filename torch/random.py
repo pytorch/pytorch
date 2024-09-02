@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
 import warnings
-from typing import Generator
+from typing import Generator, Union
 
 import torch
+from torch import Generator
 from torch._C import default_generator
 
 
@@ -29,7 +30,7 @@ def get_rng_state() -> torch.Tensor:
     return default_generator.get_state()
 
 
-def manual_seed(seed) -> torch._C.Generator:
+def manual_seed(seed, device: Union[str, torch.device] = None) -> torch._C.Generator | None:
     r"""Sets the seed for generating random numbers on all devices. Returns a
     `torch.Generator` object.
 
@@ -38,8 +39,16 @@ def manual_seed(seed) -> torch._C.Generator:
             `[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]`. Otherwise, a RuntimeError
             is raised. Negative inputs are remapped to positive values with the formula
             `0xffff_ffff_ffff_ffff + seed`.
+        device (str): The device to set the seed.
     """
     seed = int(seed)
+
+    # Set the seed for the given device
+    if device is not None:
+        device_type = device.type if isinstance(device, torch.device) else device
+        _manual_seed_for_device(seed, device_type)
+        return None
+
     import torch.cuda
 
     if not torch.cuda._is_in_bad_fork():
@@ -83,6 +92,43 @@ def seed() -> int:
     _seed_custom_device(seed)
 
     return seed
+
+
+def _manual_seed_for_device(seed: int, device: str) -> None:
+    r"""Set the seed for generating random numbers for the given device.
+
+    Unlike :meth:`torch.manual_seed(seed)`, this function only sets the seed
+    for the given device.
+
+    It's safe to call this function if the given device is not available; in
+    that case, it is silently ignored.
+
+    Args:
+        seed (int): The desired seed.
+        device (str): The device type to set the seed.
+    """
+
+    if device == "cuda" and torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    elif device == "mps" and torch.mps.is_available():
+        torch.mps.manual_seed(seed)
+    elif device == "xpu" and torch.xpu.is_available():
+        torch.xpu.manual_seed(seed)
+    elif device == torch._C._get_privateuse1_backend_name():
+        _manual_seed_for_privateuse1(seed)
+
+
+def _manual_seed_for_privateuse1(seed: int) -> None:
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    if hasattr(torch, privateuse1_backend_name):
+        privateuse1_mod = getattr(torch, privateuse1_backend_name)
+        _manual_seed_fn = "manual_seed"
+        if hasattr(privateuse1_mod, _manual_seed_fn):
+            getattr(privateuse1_mod, _manual_seed_fn)(seed)
+        else:
+            message = f"Set seed for `{privateuse1_backend_name}` device does not take effect, please add API's "
+            message += f"`{_manual_seed_fn}` to `{privateuse1_backend_name}` device module."
+            warnings.warn(message, UserWarning, stacklevel=3)
 
 
 def _seed_custom_device(seed) -> None:

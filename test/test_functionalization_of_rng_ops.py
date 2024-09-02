@@ -41,10 +41,10 @@ class TestFunctionalizationRngOps(TestCase):
         x = torch.rand(10, device=device, dtype=dtype)
 
         for seed in range(10):
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             ref = fn(x)
 
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             aot_fn = aot_function(fn, functools.partial(count_philox_rand, freq=2))
             res = aot_fn(x)
 
@@ -61,10 +61,10 @@ class TestFunctionalizationRngOps(TestCase):
         for seed in range(1, 10):
             shape = (seed, seed)
             x = torch.rand(shape, device=device, dtype=dtype)
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             ref = fn(x)
 
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True)
             res = opt_fn(x)
 
@@ -81,11 +81,11 @@ class TestFunctionalizationRngOps(TestCase):
         for seed in range(1, 10):
             shape = (seed, seed)
             x = torch.rand(shape, device=device, dtype=dtype, requires_grad=True)
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             ref = fn(x)
             ref.sum().backward()
 
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True)
             res = opt_fn(x)
             res.sum().backward()
@@ -105,10 +105,10 @@ class TestFunctionalizationRngOps(TestCase):
         x = torch.rand(*shape, device=device, dtype=dtype)
 
         for seed in range(10):
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             ref = fn(x)
 
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             aot_fn = aot_function(fn, functools.partial(count_philox_rand, freq=2))
             res = aot_fn(x)
 
@@ -138,11 +138,11 @@ class TestFunctionalizationRngOps(TestCase):
 
         x_clone = x.clone().detach().requires_grad_(True)
 
-        torch.cuda.manual_seed(123)
+        torch.manual_seed(123, device=device)
         ref = custom(x)
         ref.sum().backward()
 
-        torch.cuda.manual_seed(123)
+        torch.manual_seed(123, device=device)
         fwd_compiler = functools.partial(count_philox_rand, freq=2)
         bwd_compiler = functools.partial(count_philox_rand, freq=1)
         aot_custom = aot_function(custom, fwd_compiler, bwd_compiler)
@@ -205,15 +205,15 @@ class TestFunctionalizationRngOps(TestCase):
             return aot_custom_op2(b)
 
         for seed in range(10):
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             x = torch.rand(*shape, device=device, dtype=dtype, requires_grad=True)
             x_clone = x.clone().detach().requires_grad_(True)
 
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             ref = fn(x)
             ref.sum().backward()
 
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             res = aot_fn(x_clone)
             res.sum().backward()
 
@@ -234,10 +234,10 @@ class TestFunctionalizationRngOps(TestCase):
         x = torch.rand(10, device=device, dtype=dtype)
 
         for seed in range(10):
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             ref = fn(x)
 
-            torch.cuda.manual_seed(seed)
+            torch.manual_seed(seed, device=device)
             fwd_compiler = functools.partial(count_philox_rand, freq=3)
             aot_fn = aot_function(fn, fwd_compiler)
             res = aot_fn(x)
@@ -262,11 +262,11 @@ class TestFunctionalizationRngOps(TestCase):
 
         x_clone = x.clone().detach().requires_grad_(True)
 
-        torch.cuda.manual_seed(123)
+        torch.manual_seed(123, device=device)
         ref = fn(x)
         ref.sum().backward()
 
-        torch.cuda.manual_seed(123)
+        torch.manual_seed(123, device=device)
         fwd_compiler = functools.partial(count_philox_rand, freq=2)
         bwd_compiler = functools.partial(count_philox_rand, freq=0)
         aot_custom = aot_function(
@@ -293,9 +293,9 @@ class TestFunctionalizationRngOps(TestCase):
             return torch.utils.checkpoint.checkpoint(g, x, y, use_reentrant=False)
 
         # x = torch.rand(2, 2, device="cuda", requires_grad=True)
-        x = torch.ones(2, 2, device="cuda", requires_grad=True)
-        y = torch.rand(2, 2, device="cuda", requires_grad=True)
-        torch.cuda.manual_seed(123)
+        x = torch.ones(2, 2, device=device, requires_grad=True)
+        y = torch.rand(2, 2, device=device, requires_grad=True)
+        torch.manual_seed(123, device=device)
         ref = fn(x, y)
 
         # With checkpointing we should recompute dropout in bwd, and philox_rand is passed from fwd
