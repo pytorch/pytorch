@@ -928,10 +928,6 @@ aten::max_unpool2d
 aten::max_unpool2d.out
 aten::max_unpool3d
 aten::max_unpool3d.out
-aten::median
-aten::median.dim
-aten::median.dim_values
-aten::median.out
 aten::min
 aten::min.dim
 aten::min.dim_min
@@ -994,10 +990,6 @@ aten::multilabel_margin_loss_backward
 aten::multilabel_margin_loss_backward.grad_input
 aten::multinomial
 aten::multinomial.out
-aten::nanmedian
-aten::nanmedian.dim
-aten::nanmedian.dim_values
-aten::nanmedian.out
 aten::native_group_norm.out
 aten::native_norm
 aten::native_norm.ScalarOpt_dim_dtype

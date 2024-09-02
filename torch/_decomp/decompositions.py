@@ -5088,7 +5088,7 @@ def resize_as(self, other, memory_format=None):
     return aten.resize(self, other.shape, memory_format=memory_format)
 
 
-@register_decomposition(aten.median.default)
+@register_decomposition([aten.median.default, aten.median.out])
 @out_wrapper()
 def median(x):
     if x.numel() == 0:
@@ -5097,7 +5097,7 @@ def median(x):
     return median_impl(x.flatten(), dim=0, keepdim=False, ignore_nan=False)[0]
 
 
-@register_decomposition(aten.nanmedian.default)
+@register_decomposition([aten.nanmedian.default, aten.nanmedian.out])
 @out_wrapper()
 def nanmedian(x):
     if x.numel() == 0:
@@ -5106,14 +5106,14 @@ def nanmedian(x):
     return median_impl(x.flatten(), dim=0, keepdim=False, ignore_nan=True)[0]
 
 
-@register_decomposition(aten.median.dim)
+@register_decomposition([aten.median.dim, aten.median.dim_values])
 @out_wrapper("values", "indices")
 def median_dim(x, dim, keepdim=False):
     utils.alert_not_deterministic("median with indices output")
     return median_impl(x, dim=dim, keepdim=keepdim, ignore_nan=False)
 
 
-@register_decomposition(aten.nanmedian.dim)
+@register_decomposition([aten.nanmedian.dim, aten.nanmedian.dim_values])
 @out_wrapper("values", "indices")
 def nanmedian_dim(x, dim, keepdim=False):
     utils.alert_not_deterministic("median with indices output")
