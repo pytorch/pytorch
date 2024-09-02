@@ -279,7 +279,7 @@ def _full_qual_class_name(qualname: str) -> str:
 # Return the namespace and class name from fully qualified name.
 def _ns_and_class_name(full_qualname: str) -> Tuple[str, str]:
     splits = full_qualname.split(".")
-    _torch, _, classes, ns, class_name = splits
+    _torch, _, _, ns, class_name = splits
     return ns, class_name
 
 

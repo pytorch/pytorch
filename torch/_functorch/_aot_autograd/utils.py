@@ -303,7 +303,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         with_effect_nodes = []
         output_token_nodes = []
         other_output_nodes = []
-        for i, node in enumerate(module.graph.nodes):
+        for node in module.graph.nodes:
             if node.op == "placeholder":
                 input_nodes.append(node)
             elif is_with_effects(node):

@@ -1737,7 +1737,7 @@ class SIMDScheduling(BaseScheduling):
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
                     # swap so a0 is bigger
                     a0, a1 = ranked_tilings[i]
-                    b0, b1 = ranked_tilings[0]
+                    _, b1 = ranked_tilings[0]
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     tiling = (a0, FloorDiv(a1, b1), b1)

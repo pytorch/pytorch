@@ -132,6 +132,10 @@ def log_trace_structured_event(*args, **kwargs) -> None:
     pass
 
 
+def log_cache_bypass(*args, **kwargs) -> None:
+    pass
+
+
 def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
@@ -201,6 +205,9 @@ class JustKnobsConfig:
     def __str__(self):
         v = bool(self)
         return f"JustknobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
+
+    def __bool__(self):
+        return self.get()
 
 
 def justknobs_feature(
