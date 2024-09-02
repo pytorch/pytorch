@@ -247,7 +247,11 @@ def mark_nodes_dislike_padding(
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
-        if user_visible_outputs and cur.name in user_visible_outputs:
+        if (
+            not config.pad_outputs
+            and user_visible_outputs
+            and cur.name in user_visible_outputs
+        ):
             cur.meta["dislike_padding"] = True
 
 
@@ -1359,9 +1363,8 @@ class GraphLowering(torch.fx.Interpreter):
                 strides = n.meta["val"].stride()
                 if len(strides):
                     allow_padding = (
-                        n.name not in self.user_visible_outputs
-                        and not is_input_for_as_strided
-                    )
+                        config.pad_outputs or n.name not in self.user_visible_outputs
+                    ) and not is_input_for_as_strided
                     dense = torch._prims_common.is_non_overlapping_and_dense(
                         n.meta["val"]
                     )
