@@ -2232,7 +2232,7 @@ the output has the same batch dimensions.
         equations with a unique solution.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= True`)
+    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= False`)
                 where `*` is zero or more batch dimensions.
     B (Tensor): right-hand side tensor of shape `(*, n, k)`.
 
