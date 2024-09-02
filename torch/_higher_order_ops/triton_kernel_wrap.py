@@ -179,13 +179,18 @@ def generate_ttir(kernel, kwargs):
 
     src = ASTSource(kernel, signature, constants, specialization)
 
-    # Triton changes ASTSource.make_ir to take 3 arguments. Handle
+    # Triton changes ASTSource.make_ir to take 3/4 arguments. Handle
     # backward compatibility here.
-    if len(inspect.signature(src.make_ir).parameters) == 2:
+    make_ir_sig_params = len(inspect.signature(src.make_ir).parameters)
+    if make_ir_sig_params == 2:
         ttir_module = src.make_ir(options, context)
-    else:
+    elif make_ir_sig_params == 3:
         codegen_fns = backend.get_codegen_implementation()
         ttir_module = src.make_ir(options, codegen_fns, context)
+    else:
+        codegen_fns = backend.get_codegen_implementation()
+        module_map = backend.get_module_map()
+        ttir_module = src.make_ir(options, codegen_fns, module_map, context)
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 

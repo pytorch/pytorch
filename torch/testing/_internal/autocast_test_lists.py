@@ -242,7 +242,6 @@ class AutocastCPUTestLists:
         # Utility arguments, created as one-element tuples
         pointwise0_bf16 = (torch.randn(n, dtype=torch.bfloat16, device=dev),)
         pointwise1_bf16 = (torch.randn(n, dtype=torch.bfloat16, device=dev),)
-        pointwise2_bf16 = (torch.randn(n, dtype=torch.bfloat16, device=dev),)
         mat0_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
         mat1_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
         mat2_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
@@ -256,14 +255,10 @@ class AutocastCPUTestLists:
                       for dimset in dummy_dimsets]
 
         dimsets = ((n, n, n), (n, n, n, n), (n, n, n, n, n))
-        conv_args_bf16 = [(torch.randn(dimset, dtype=torch.bfloat16, device=dev),
-                           torch.randn(dimset, dtype=torch.bfloat16, device=dev))
-                          for dimset in dimsets]
         conv_args_fp32 = [(torch.randn(dimset, dtype=torch.float32, device=dev),
                            torch.randn(dimset, dtype=torch.float32, device=dev))
                           for dimset in dimsets]
 
-        bias_fp32 = (torch.randn((n,), dtype=torch.float32, device=dev),)
         element0_fp32 = (torch.randn(1, dtype=torch.float32, device=dev),)
         pointwise0_fp32 = (torch.randn(n, dtype=torch.float32, device=dev),)
         pointwise1_fp32 = (torch.randn(n, dtype=torch.float32, device=dev),)

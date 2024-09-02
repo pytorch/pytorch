@@ -47,7 +47,6 @@ def aot_autograd_check(
 
     """
     flat_args, args_spec = pytree.tree_flatten((args, kwargs))
-    args_is_tensor = [isinstance(arg, torch.Tensor) for arg in flat_args]
     args = [arg for arg in flat_args if isinstance(arg, torch.Tensor)]
 
     # We construct a new function that only accepts Tensors as inputs

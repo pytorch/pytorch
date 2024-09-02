@@ -508,15 +508,13 @@ def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name
     if variant_name != '':
         test_name = test_name + '_' + variant_name
 
-    no_grad = variant_name == 'inplace'
-
     self_variable = create_input((self_size,))[0][0]
-    kwargs = None
 
     # need to record this because methods can change the size (e.g. unsqueeze)
-    args_variable, kwargs_variable = create_input(args)
+    args_variable, _ = create_input(args)
 
     self_tensor = deepcopy(self_variable.data)
+    # FIXME(rec): args_tensor, f_args_tensor not used
     args_tensor = deepcopy(unpack_variables(args_variable))
 
     f_args_variable = (self_variable,) + args_variable
@@ -589,7 +587,7 @@ def forward({}):
 
 def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
     def script_module(*args, **kwargs):
-        formals, tensors, actuals = get_script_args(args)
+        _, tensors, actuals = get_script_args(args)
 
         method_args = ', '.join(['self'] + actuals)
         call_args_str = ', '.join(actuals)
@@ -709,7 +707,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
             input = (input,)
         input = input + (kwargs['target_fn'](),)
 
-    args_variable, kwargs_variable = create_input(input, dtype=input_dtype)
+    args_variable, _ = create_input(input, dtype=input_dtype)
     f_args_variable = deepcopy(unpack_variables(args_variable))
     out_var = deepcopy(f_args_variable)
 

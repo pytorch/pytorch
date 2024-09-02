@@ -36,7 +36,7 @@ _ENFORCED_ZERO_POINT = defaultdict(lambda: None, {
 })
 
 def _get_valid_min_max(qparams):
-    scale, zero_point, quantized_type = qparams
+    scale, zero_point, _ = qparams
     adjustment = 1 + torch.finfo(torch.float).eps
     _long_type_info = torch.iinfo(torch.long)
     long_min, long_max = _long_type_info.min / adjustment, _long_type_info.max / adjustment
@@ -317,7 +317,7 @@ def tensor_conv(
         spatial_dim = draw(st.sampled_from(spatial_dim))
 
     feature_map_shape = []
-    for i in range(spatial_dim):
+    for _ in range(spatial_dim):
         feature_map_shape.append(draw(st.integers(*feature_map_range)))
 
     kernels = []

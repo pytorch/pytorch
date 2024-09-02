@@ -85,7 +85,7 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
         for sample in samples:
             try:
                 op(sample.input, *sample.args, **sample.kwargs)
-            except RuntimeError as re:
+            except RuntimeError:
                 # dtype is not supported
                 supported = False
                 break

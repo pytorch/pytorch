@@ -1130,7 +1130,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         self.assertEqual(peer_worker_info.name, worker_name(peer_rank))
 
         with self.assertRaisesRegex(RuntimeError, "could not find destination"):
-            unknown_worker_id = rpc.get_worker_info("WorkerUnknown")
+            rpc.get_worker_info("WorkerUnknown")
 
     @dist_init
     def test_get_worker_infos(self):
@@ -1149,7 +1149,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init
     def test_self_add(self):
         self_worker_info = rpc.get_worker_info()
-        self_worker_name = worker_name(self.rank)
         fut = rpc.rpc_async(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
         ret = rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
         self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
@@ -1473,18 +1472,18 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         worker_id = 0
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            info = WorkerInfo("abc*", worker_id)
+            WorkerInfo("abc*", worker_id)
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            info = WorkerInfo(" ", worker_id)
+            WorkerInfo(" ", worker_id)
 
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            info = WorkerInfo("", worker_id)
+            WorkerInfo("", worker_id)
 
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
-            info = WorkerInfo("".join(["a" for i in range(500)]), worker_id)
+            WorkerInfo("".join(["a" for i in range(500)]), worker_id)
 
     # Test that WorkerInfo can be pickled and sent in RPC call
     @dist_init
@@ -1562,9 +1561,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init
     def test_future_wait_twice(self):
         dst = worker_name((self.rank + 1) % self.world_size)
-        futs = []
-        for i in range(20):
-            futs.append(rpc.rpc_async(dst, raise_func))
+        futs = [rpc.rpc_async(dst, raise_func) for _ in range(20)]
 
         with self.assertRaisesRegex(ValueError, "Expected error"):
             torch.futures.wait_all(futs)
@@ -1724,7 +1721,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_expected_src(self):
         dst_rank = (self.rank + 1) % self.world_size
         expected_src_rank = (self.rank - 1) % self.world_size
-        ret = rpc.rpc_sync(worker_name(dst_rank), set_value, args=(self.rank,))
+        rpc.rpc_sync(worker_name(dst_rank), set_value, args=(self.rank,))
         value = VALUE_FUTURE.result()
         self.assertEqual(value, expected_src_rank)
 
@@ -1803,7 +1800,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         dst_worker = worker_name(dst)
         with _profile(profile_memory=True) as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
-            res = fut.wait()
+            fut.wait()
 
         function_events = p.function_events
         event_cpu_mem_usages = {event.cpu_memory_usage for event in function_events}
@@ -1827,9 +1824,8 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         dst_worker = worker_name(dst)
         with _profile() as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
-            res = fut.wait()
+            fut.wait()
 
-        events = p.function_events
         with TemporaryFileName() as fname:
             path = fname
             p.export_chrome_trace(path)
@@ -1920,7 +1916,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             dst_worker = worker_name(dst)
             with _profile() as prof:
                 fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
-                ret = fut.wait()
+                fut.wait()
 
             events = prof.function_events
 
@@ -1999,7 +1995,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             ret = rpc.rpc_async(
                 dst1, slow_async_add, args=(dst2, x, y, device), timeout=20
             )
-            out = ret.wait()
+            ret.wait()
 
         function_events = prof.function_events
         # slow_async_add resulted in an RPC from dst1 -> dst2, so this should be
@@ -2130,7 +2126,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         dst = (self.rank + 1) % self.world_size
         if self.rank == 1:
             # Cases where we can double wrap messages with profiling information and autograd info.
-            with dist_autograd.context() as context_id:
+            with dist_autograd.context():
                 with _profile() as prof:
                     self.run_profiling_workload(dst)
 
@@ -2168,7 +2164,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                         "foo"
                     )
                 )
-                with record_function_ctx_mgr as rf:
+                with record_function_ctx_mgr:
                     if rpc_exec_mode == RPCExecMode.SYNC:
                         rpc.rpc_sync(worker_name(dst), func, args=args)
                     elif rpc_exec_mode == RPCExecMode.ASYNC:
@@ -2452,7 +2448,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         num_sleep_seconds = 1
         if self.rank == 1:
             # Validate that calling the function twice results in an error.
-            with _profile() as pf:
+            with _profile():
                 with torch.autograd.profiler.record_function("foo") as rf:
                     fut = rpc.rpc_async(
                         worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
@@ -2470,7 +2466,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Note: These exist for backward compatibility with TorchScript
         num_sleep_seconds = 1
         if self.rank == 1:
-            with _profile() as pf:
+            with _profile():
                 try:
                     handle = torch.ops.profiler._record_function_enter("foo", None)
                     fut = rpc.rpc_async(
@@ -2623,7 +2619,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         n = self.rank + 1
         dst_rank = n % self.world_size
         with self.assertRaises(TypeError):
-            ret = rpc.rpc_sync(worker_name(dst_rank), no_result, args=(10,))
+            rpc.rpc_sync(worker_name(dst_rank), no_result, args=(10,))
 
     @dist_init
     def test_py_raise_in_user_func(self):
@@ -2840,7 +2836,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         ret_rref = rref_forward_chain(dst_rank, self.world_size, rref, ttl)
 
-        for i in range(ttl):
+        for _ in range(ttl):
             self.assertEqual(len(ret_rref), 1)
             ret_rref = ret_rref[0].to_here()
 
@@ -3125,7 +3121,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Wait for all init to complete.
         dist.barrier()
 
-        rref = rpc.remote(
+        rpc.remote(
             worker_name((self.rank + 1) % self.world_size),
             torch.add,
             args=(torch.ones(2, 2), 1),
@@ -3556,7 +3552,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 self.assertTrue(_thread_local_var.future_list == [])
                 dst = worker_name((self.rank + 1) % self.world_size)
                 timeout = 0.1  # 100 ms
-                fut = rpc.rpc_async(dst, my_sleep_func, args=(1,), timeout=timeout)
+                rpc.rpc_async(dst, my_sleep_func, args=(1,), timeout=timeout)
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
@@ -3565,7 +3561,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             with _wait_all():
                 self.assertTrue(_thread_local_var.future_list == [])
                 dst = worker_name((self.rank + 1) % self.world_size)
-                fut = rpc.rpc_async(dst, raise_func)
+                rpc.rpc_async(dst, raise_func)
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
@@ -3846,7 +3842,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @dist_init
     def test_callback_wrong_arg_num(self):
-        set_by_cb = concurrent.futures.Future()
         n = self.rank + 1
 
         fut = rpc.rpc_async(
@@ -3911,7 +3906,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init
     def test_callback_chain(self):
         n = self.rank + 1
-        dst = worker_name(n % self.world_size)
 
         def callback(fut):
             return fut.wait() + 1
@@ -4030,15 +4024,15 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         errMsg = "Can not pickle torch.futures.Future"
 
         dst = worker_name((self.rank + 1) % self.world_size)
-        with TemporaryFileName() as fname:
+        with TemporaryFileName():
             with self.assertRaisesRegex(RuntimeError, errMsg):
                 rpc.rpc_sync(dst, fail_on_fut, args=(fut,))
 
-        with TemporaryFileName() as fname:
+        with TemporaryFileName():
             with self.assertRaisesRegex(RuntimeError, errMsg):
                 rpc.rpc_async(dst, fail_on_fut, args=(fut,))
 
-        with TemporaryFileName() as fname:
+        with TemporaryFileName():
             with self.assertRaisesRegex(RuntimeError, errMsg):
                 rpc.remote(dst, fail_on_fut, args=(fut,))
 
@@ -4380,7 +4374,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             futs.append(rpc.rpc_async(dst, raise_func))
 
         with self.assertRaisesRegex(ValueError, "Expected error"):
-            ret = torch.futures.wait_all(futs)
+            torch.futures.wait_all(futs)
 
     @dist_init
     def test_wait_all_with_partial_exception(self):
@@ -4392,7 +4386,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         futs.append(rpc.rpc_async(dst, raise_func))
 
         with self.assertRaisesRegex(ValueError, "Expected error"):
-            ret = torch.futures.wait_all(futs)
+            torch.futures.wait_all(futs)
 
     @dist_init(setup_rpc=False)
     @skip_but_pass_in_sandcastle_if(
@@ -4717,7 +4711,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
         timeout = timedelta()
         # Ensure that constructing TensorPipeRpcBackendOptions with timedelta fails
         with self.assertRaisesRegex(TypeError, "incompatible constructor arguments"):
-            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            rpc.TensorPipeRpcBackendOptions(
                 init_method=self.rpc_backend_options.init_method,
                 num_worker_threads=self.rpc_backend_options.num_worker_threads,
                 rpc_timeout=timeout,
@@ -5747,9 +5741,6 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_missing_config_not_timeout(self):
-        dst = worker_name((self.rank + 1) % self.world_size)
-        options = self.rpc_backend_options
-
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
@@ -5973,7 +5964,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             RuntimeError,
             "Expected all tensors to be on the same device, but found at least two devices"
         ):
-            rets = rpc.rpc_sync(
+            rpc.rpc_sync(
                 dst,
                 TensorPipeAgentCudaRpcTest._gpu_add_wrong_gpus,
                 args=(x, y)
@@ -6284,22 +6275,22 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_int(self):
-        fut = Future(devices=[0])
+        Future(devices=[0])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_str(self):
-        fut = Future(devices=["cuda:0"])
+        Future(devices=["cuda:0"])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_device(self):
-        fut = Future(devices=[torch.device("cuda", 0)])
+        Future(devices=[torch.device("cuda", 0)])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_not_cuda(self):
         with self.assertRaisesRegex(
             ValueError, "Expected devices to have indices, got cpu"
         ):
-            fut = Future(devices=["cpu"])
+            Future(devices=["cpu"])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_cuda_tensor(self):

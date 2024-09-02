@@ -117,7 +117,6 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 def reduction_reference(op, sample):
     assert sample.input.is_nested
     dim = sample.kwargs.get("dim", None)
-    keepdim = sample.kwargs.get("keepdim", False)
     assert dim != 0, "reductions over the batch dim are not supported"
     assert "dims" not in sample.kwargs
     assert sample.input._ragged_idx == 1
