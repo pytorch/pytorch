@@ -376,7 +376,7 @@ __host__ __device__
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)                                  \
   if (C10_UNLIKELY(!(cond))) {                                             \
     (void)(_wassert(                                                       \
-               msg, _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), \
+               _CRT_WIDE(cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), \
            0);                                                             \
   }
 #define SYCL_KERNEL_ASSERT(cond)                 \
