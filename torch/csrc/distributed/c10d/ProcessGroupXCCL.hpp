@@ -83,11 +83,9 @@ class ProcessGroupXCCL : public Backend {
       }
       events_.clear();
     }
-
-
+    
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
-      TORCH_CHECK(
-          false, "ProcessGroupXCCL::WorkXCCL::getFuture not implemented");
+      return future_;
     }
 
     std::vector<at::Tensor> result() override {
@@ -118,8 +116,8 @@ class ProcessGroupXCCL : public Backend {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  c10::intrusive_ptr<Work> barrier(
-      const BarrierOptions& opts = BarrierOptions()) override;
+  // c10::intrusive_ptr<Work> barrier(
+  //     const BarrierOptions& opts = BarrierOptions()) override;
 
   static c10::intrusive_ptr<Backend> createProcessGroupXCCL(
       const c10::intrusive_ptr<Store>& store,

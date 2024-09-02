@@ -65,10 +65,6 @@ ccl::datatype getXcclDataType(at::ScalarType type) {
   return it->second;
 }
 
-} // namespace c10d
-
-namespace {
-
 static std::mutex xcclCommDevIdxMapMutex;
 static std::unordered_map<std::shared_ptr<xcclComm_t>, int> xcclCommDevIdxMap;
 
@@ -116,7 +112,13 @@ c10::intrusive_ptr<Backend> ProcessGroupXCCL::createProcessGroupXCCL(
   return c10::make_intrusive<ProcessGroupXCCL>(store, rank, size);
 }
 
-ProcessGroupXCCL::~ProcessGroupXCCL() {}
+ProcessGroupXCCL::ProcessGroupXCCL(
+    const c10::intrusive_ptr<Store>& store,
+    int rank,
+    int size)
+    : Backend(rank, size), store_(store) {}
+
+ProcessGroupXCCL::~ProcessGroupXCCL() = default;
 
 std::shared_ptr<xcclComm_t> ProcessGroupXCCL::getXCCLComm(
     const std::string& deviceKey,
@@ -135,7 +137,7 @@ std::shared_ptr<xcclComm_t> ProcessGroupXCCL::getXCCLComm(
     }
   }
 
-  std::shared_ptr<xcclComm_t> xcclComm_t;
+  std::shared_ptr<xcclComm_t> XCCLComm;
 
   XCCL_KVS kvs = get_kvs(rank_, store_);
 
@@ -149,11 +151,11 @@ std::shared_ptr<xcclComm_t> ProcessGroupXCCL::getXCCLComm(
   auto q = get_sycl_queue(stream);
   auto ctx = ccl::create_context(q.get_context());
   devs_rank.emplace_back(rank, ccl::create_device(q.get_device()));
-  xcclComm_t = ccl::create_communicator(numRanks, devs_rank, ctx, kvs);
+  XCCLComm = ccl::create_communicator(numRanks, devs_rank, ctx, kvs);
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    inInitializationCommMap_.emplace(deviceKey, xcclComm_t);
+    inInitializationCommMap_.emplace(deviceKey, XCCLComm);
   }
 
   auto it = inInitializationCommMap_.find(deviceKey);
@@ -162,7 +164,7 @@ std::shared_ptr<xcclComm_t> ProcessGroupXCCL::getXCCLComm(
     inInitializationCommMap_.erase(deviceKey);
 
     xcclCommDevIdxMapMutex.lock();
-    xcclCommDevIdxMap.emplace(xcclComm_t, device.index());
+    xcclCommDevIdxMap.emplace(XCCLComm, device.index());
     xcclCommDevIdxMapMutex.unlock();
   }
 
@@ -193,15 +195,9 @@ c10::intrusive_ptr<Work> ProcessGroupXCCL::collective(
   std::vector<at::Tensor> outputs{output};
 
   c10::intrusive_ptr<ProcessGroupXCCL::WorkXCCL> work;
-  // work =
-  //     initWork(device, rank_, opType, profilingTitle, inputs, outputs,
-  //     enqueue);
 
   work = make_work_ccl<WorkXCCL>(
       inputs, outputs, fn, xcclComm_t, attr, rank_, op_type);
-  // pre(ncclStream, work);
-  // ncclComm_t comm = ncclComm->getNcclComm();
-  // post(ncclStream, work);
 
   return work;
 }
@@ -255,6 +251,9 @@ c10::intrusive_ptr<Work> ProcessGroupXCCL::allreduce(
       OpType::ALLREDUCE);
 }
 
-} // namespace
+// c10::intrusive_ptr<Work> barrier(
+//     const BarrierOptions& opts = BarrierOptions()) override;
+
+} // namespace c10d
 
 #endif // USE_C10D_XCCL
