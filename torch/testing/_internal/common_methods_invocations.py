@@ -4975,7 +4975,7 @@ def sample_inputs_reduction_unique(*args, **kwargs):
     unique_values = kwargs.pop('unique_values', False)
     for sample in sample_inputs_reduction(*args, **kwargs):
         is_nonunique = 'dim' in sample.kwargs and sample.args and sample.args[0].unique().numel() != sample.args[0].numel()
-        if is_nonunique != unique_values:
+        if is_nonunique == unique_values:
             yield sample
 
 
