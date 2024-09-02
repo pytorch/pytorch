@@ -11,7 +11,7 @@ namespace at {
 
 struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
   ~PrivateUse1HooksInterface() override = default;
-  virtual const at::Generator& getDefaultGenerator(
+  virtual const at::Generator& getDefaultGenerator const (
       c10::DeviceIndex device_index) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
