@@ -28,11 +28,6 @@ TCustomFloat = TypeVar("TCustomFloat", bound=Union[FLOAT16, FLOAT, DOUBLE, BFLOA
 
 class TestRegistration(common_utils.TestCase):
     def setUp(self) -> None:
-        # Trigger op registration
-        from onnxscript.function_libs.torch_lib import ops
-
-        del ops  # Unused
-
         self.registry = torch.onnx.OnnxRegistry()
         self.custom_domain = onnxscript.values.Opset(domain="custom", version=1)
 
@@ -87,60 +82,6 @@ class TestRegistration(common_utils.TestCase):
             [func.onnx_function for func in function_group],
             [test_original, test_custom],
         )
-
-    def test_unsupported_nodes_analysis_with_missing_aten_op(self):
-        # NOTE: simulate unsupported nodes
-        aten_mul_tensor = registration.OpName.from_name_parts(
-            namespace="aten", op_name="mul", overload="Tensor"
-        )
-        aten_mul_default = registration.OpName.from_name_parts(
-            namespace="aten", op_name="mul"
-        )
-        aten_add_tensor = registration.OpName.from_name_parts(
-            namespace="aten", op_name="add", overload="Tensor"
-        )
-        aten_add_default = registration.OpName.from_name_parts(
-            namespace="aten", op_name="add"
-        )
-
-        self.registry._registry.pop(aten_mul_tensor)
-        self.registry._registry.pop(aten_mul_default)
-        self.registry._registry.pop(aten_add_tensor)
-        self.registry._registry.pop(aten_add_default)
-
-        diagnostic_context = diagnostics.DiagnosticContext(
-            "torch.onnx.dynamo_export", torch.__version__
-        )
-        dispatcher = onnxfunction_dispatcher.OnnxFunctionDispatcher(
-            self.registry, diagnostic_context
-        )
-
-        graph: torch.fx.Graph = torch.fx.Graph()
-        x: torch.fx.Node = graph.create_node("placeholder", "x")
-        x.meta["val"] = torch.tensor(3.0)
-        b: torch.fx.Node = graph.create_node(
-            "call_function", target=torch.ops.aten.mul.Tensor, args=(x, x)
-        )
-        c: torch.fx.Node = graph.create_node(
-            "call_function", target=torch.ops.aten.add.Tensor, args=(b, b)
-        )
-        output: torch.fx.Node = graph.output(c)
-        module = torch.fx.GraphModule(torch.nn.Module(), graph)
-
-        with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
-            analysis.UnsupportedFxNodesAnalysis(
-                diagnostic_context, module, dispatcher
-            ).analyze(infra.levels.ERROR)
-
-        try:
-            analysis.UnsupportedFxNodesAnalysis(
-                diagnostic_context, module, dispatcher
-            ).analyze(infra.levels.ERROR)
-        except infra.RuntimeErrorWithDiagnostic as e:
-            self.assertIn(
-                "Unsupported FX nodes: {'call_function': ['aten.mul.Tensor', 'aten.add.Tensor']}.",
-                e.diagnostic.message,
-            )
 
 
 @common_utils.instantiate_parametrized_tests
