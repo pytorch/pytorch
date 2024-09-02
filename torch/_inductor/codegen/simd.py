@@ -1141,7 +1141,7 @@ class SIMDScheduling(BaseScheduling):
                         pass  # need to start a new reduction loop
 
                 if current_loop_buffer_usage and not expect_improved_memory_usage(node):
-                    # If we don't imporve memory usage, then it is better to split into two loops
+                    # If we don't improve memory usage, then it is better to split into two loops
                     maybe_split_index = maybe_split_index or len(node_schedule)
                 else:
                     # Memory usage got improved, cancel the loop split

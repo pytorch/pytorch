@@ -1219,6 +1219,7 @@ class TritonKernel(SIMDKernel):
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
+        self.reverse_loop_order = False
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
@@ -2018,6 +2019,7 @@ class TritonKernel(SIMDKernel):
                 )
 
             if reduction_type in {"argmax", "argmin"}:
+                self.reverse_loop_order = False  # argmin/argmax needs forward order
                 accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
@@ -2036,6 +2038,7 @@ class TritonKernel(SIMDKernel):
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             elif is_welford_reduction(reduction_type):
+                self.reverse_loop_order = False  # welford needs forward order
                 accumulator = f"{result_var}_mean"
                 accumulator_m2 = f"{result_var}_m2"
                 accumulator_weight = f"{result_var}_weight"
@@ -2200,12 +2203,12 @@ class TritonKernel(SIMDKernel):
         ],
         values: Tuple[CSEVariable, ...],
     ) -> Tuple[CSEVariable, ...]:
+        self.reverse_loop_order = False  # scan needs forward order
         assert self.inside_reduction
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
-        reduction_range_prefix = self.range_trees[-1].prefix
 
         broadcasted_values = []
         accumulators = []
@@ -2215,9 +2218,6 @@ class TritonKernel(SIMDKernel):
         dim = self.triton_tensor_ndim() - 1
 
         for value, dtype in zip(values, dtypes):
-            acc_type = triton_acc_type(dtype)
-            cond = " & ".join(masks)
-
             value_dtype = self.cse.generate(
                 self.compute,
                 f"{value}.to({triton_compute_type(dtype)})",
@@ -2229,7 +2229,6 @@ class TritonKernel(SIMDKernel):
             broadcasted_values.append(value)
 
             acc_type = triton_acc_type(dtype)
-            cond = " & ".join(masks)
 
             if not self.persistent_reduction:
                 accumulator = self.cse.newvar()
@@ -2377,7 +2376,15 @@ class TritonKernel(SIMDKernel):
             return
 
         if self.inside_reduction and self.range_trees[-1].is_loop:
-            self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
+            if self.reverse_loop_order:
+                self.body.writeline(
+                    "for roffset in range((rnumel-1)//RBLOCK*RBLOCK, -1, -RBLOCK):"
+                )
+            else:
+                self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
+            # alternate order of loops to improve cache behavior
+            # the end of loop N is likely in cache when we start loop N+1
+            self.reverse_loop_order = not self.reverse_loop_order
             with self.body.indent():
                 # last range tree is always reduction
                 self.iteration_ranges_codegen_header(self.range_trees[-1], self.body)
