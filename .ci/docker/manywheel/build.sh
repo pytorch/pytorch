@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Script used only in CD pipeline
+# ignore me: triggering CI
 
 set -eou pipefail
 
