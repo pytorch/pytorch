@@ -2,23 +2,22 @@
 
 import contextlib
 import dis
-from typing import Callable, List
+from typing import List
 
 import torch
 import torch._dynamo.test_case
 
 
+def _filter_instructions(instructions, opname):
+    return list(filter(lambda x: x.opname == opname, instructions))
+
+
 class ReconstructTest(torch._dynamo.test_case.TestCase):
     @contextlib.contextmanager
-    def register_bytecode_hook(self, hook):
-        def _build_hook(check: Callable[[List[dis.Instruction]], None]):
-            def hook(code, out_code):
-                check(list(dis.get_instructions(out_code)))
-                return code
-
-            return hook
-
-        hook = _build_hook(hook)
+    def register_bytecode_hook(self, check_fn):
+        def hook(code, out_code):
+            check_fn(list(dis.get_instructions(out_code)))
+            return code
 
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(hook)
@@ -33,7 +32,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """
 
         def hook(instructions: List[dis.Instruction]):
-            build_map = list(filter(lambda x: x.opname == "BUILD_MAP", instructions))
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct only d[40]
             self.assertEqual(build_map[0].argval, 1)
@@ -58,7 +57,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """
 
         def hook(instructions: List[dis.Instruction]):
-            build_map = list(filter(lambda x: x.opname == "BUILD_MAP", instructions))
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct everything
             self.assertEqual(build_map[0].argval, 2)
@@ -78,13 +77,66 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    def test_ConstDict_del_reconstruct(self):
+        """
+        If something is deleted from the dict, we reconstruct everything
+        """
+
+        def hook(instructions: List[dis.Instruction]):
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
+            self.assertEqual(len(build_map), 1)
+            # reconstruct everything
+            self.assertEqual(build_map[0].argval, 2)
+
+        def f(d, t):
+            del d[2]
+            d[40] = t + 1
+
+        t = torch.randn(3, 4)
+        d = {1: t, 2: t + 1}
+        d_opt = d.copy()
+
+        f(d, t)
+
+        with self.register_bytecode_hook(hook):
+            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f(d_opt, t)
+            self.assertEqual(d, d_opt)
+
+    def test_ConstDict_get_reconstruct(self):
+        """
+        dict.get shouldn't affect anything
+        """
+
+        def hook(instructions: List[dis.Instruction]):
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
+            self.assertEqual(len(build_map), 1)
+            self.assertEqual(build_map[0].argval, 1)
+            load_const = _filter_instructions(instructions, "LOAD_CONST")
+            self.assertNotIn(123, load_const)
+
+        def f(d, t):
+            d[456] = d.get(456) + t
+            # d[40] = d.get(1) + 1
+
+        t = torch.randn(3, 4)
+        d = {123: t, 456: t + 1}
+        d_opt = d.copy()
+
+        f(d, t)
+
+        with self.register_bytecode_hook(hook):
+            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f(d_opt, t)
+            self.assertEqual(d, d_opt)
+
     def test_ConstDict_clear_reconstruct(self):
         """
         If dict.clear() is used, we reconstruct everything
         """
 
         def hook(instructions: List[dis.Instruction]):
-            build_map = list(filter(lambda x: x.opname == "BUILD_MAP", instructions))
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct everything
             self.assertEqual(build_map[0].argval, 1)
@@ -110,7 +162,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """
 
         def hook(instructions: List[dis.Instruction]):
-            build_map = list(filter(lambda x: x.opname == "BUILD_MAP", instructions))
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # reconstruct everything
             self.assertEqual(build_map[0].argval, 2)
@@ -132,7 +184,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """
 
         def hook(instructions: List[dis.Instruction]):
-            build_map = list(filter(lambda x: x.opname == "BUILD_MAP", instructions))
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
             self.assertEqual(len(build_map), 1)
             # don't reconstruct anything
             self.assertEqual(build_map[0].argval, 0)

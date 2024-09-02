@@ -326,7 +326,6 @@ class ConstDictVariable(VariableTracker):
             self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
         elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
-            self.pop_items = True
             # missing item, return the default value
             if len(args) == 1:
                 return ConstantVariable(None)
