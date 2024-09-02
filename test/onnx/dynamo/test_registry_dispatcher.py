@@ -12,13 +12,7 @@ from onnxscript.onnx_opset import opset15 as op  # type: ignore[import]
 
 import torch
 import torch.fx
-from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.fx import (
-    analysis,
-    diagnostics,
-    onnxfunction_dispatcher,
-    registration,
-)
+from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher, registration
 from torch.testing._internal import common_utils
 
 

@@ -124,6 +124,9 @@ class OnnxRegistry:
         )
 
         # Initialize registry from torchlib
+        # Trigger op registration from torchlib
+        import onnxscript.function_libs.torch_lib.ops  # noqa: F401
+
         self._initiate_registry_from_torchlib(registration.default_registry)
 
     @property
