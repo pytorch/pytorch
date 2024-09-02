@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import builtins
 import copy
 import functools
@@ -14,7 +16,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 
@@ -40,11 +42,13 @@ from .runtime_utils import (
     get_num_bytes,
     next_power_of_2,
     triton_config_to_hashable,
+    validate_triton_config,
 )
 
 
 if TYPE_CHECKING:
-    from ..remote_cache import RemoteCacheBackend
+    from ..remote_cache import JsonDataTy, RemoteCache
+
 
 try:
     import triton
@@ -182,6 +186,10 @@ class CachingAutotuner(KernelInterface):
         super().__init__()
 
         assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
+        # makes sure there are no pre-hooks on any of the triton configs
+        for cfg in configs:
+            validate_triton_config(cfg)
+
         self.fn = fn
         self.device_props: DeviceProperties = triton_meta["device"]
         self.triton_meta = {
@@ -655,11 +663,6 @@ class CachingAutotuner(KernelInterface):
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
         def kernel_call():
-            if launcher.config.pre_hook is not None:
-                launcher.config.pre_hook(
-                    {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
-                )
-
             cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
             launcher(
                 *cloned_args,
@@ -847,11 +850,6 @@ class CachingAutotuner(KernelInterface):
         (launcher,) = self.launchers
         if launcher.store_cubin:
             self.save_gpu_kernel(grid, stream, launcher)
-
-        if launcher.config.pre_hook is not None:
-            launcher.config.pre_hook(
-                {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
-            )
 
         if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
             _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
@@ -1042,7 +1040,7 @@ def load_cached_autotuning(
     return matching_configs[0]
 
 
-def should_use_remote_autotune_cache(inductor_meta):
+def _should_use_remote_autotune_cache(inductor_meta):
     if inductor_meta.get("autotune_remote_cache") is not None:
         return inductor_meta.get("autotune_remote_cache")
     if not inductor_meta.get("is_fbcode"):
@@ -1100,14 +1098,16 @@ def cached_autotune(
 
         local_cache = None
         cache_filename = None
-        remote_cache: Optional[RemoteCacheBackend] = None
+        remote_cache: Optional[
+            Union[RemoteCache[JsonDataTy], RemoteCache[object]]
+        ] = None
         remote_cache_key = None
         best_config = None
         if not inductor_meta.get("force_disable_caches", False):
             if inductor_meta.get("autotune_local_cache", True):
                 local_cache = LocalAutotuneCache()
                 cache_filename = os.path.splitext(filename)[0] + ".best_config"
-            if should_use_remote_autotune_cache(inductor_meta):
+            if _should_use_remote_autotune_cache(inductor_meta):
                 backend_hash = inductor_meta.get("backend_hash", None)
                 if backend_hash is not None:
                     key = backend_hash + configs_hash + "autotune-best-config-v2"
@@ -1116,16 +1116,14 @@ def cached_autotune(
                     try:
                         if inductor_meta.get("is_fbcode"):
                             from torch._inductor.fb.remote_cache import (
-                                FbRemoteAutotuneCacheBackend,
+                                FbRemoteAutotuneCache,
                             )
 
-                            remote_cache = FbRemoteAutotuneCacheBackend(key)
+                            remote_cache = FbRemoteAutotuneCache(key)
                         else:
-                            from torch._inductor.remote_cache import (
-                                RedisRemoteCacheBackend,
-                            )
+                            from torch._inductor.remote_cache import RemoteAutotuneCache
 
-                            remote_cache = RedisRemoteCacheBackend(key)
+                            remote_cache = RemoteAutotuneCache(key)
                     except Exception:
                         remote_cache = None
                         log.warning("Unable to create a remote cache", exc_info=True)
@@ -1874,16 +1872,38 @@ def split_scan_grid(xnumel, rnumel):
     return grid_fn
 
 
-def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
+def grid_combo_kernels(
+    *numels, num_kernels, min_blocks, is_sequential, default_meta=None
+):
     """min_blocks is the minimal size of the grid x dimension"""
     if not is_sequential:
         # round robin dispatch
-        kernel_grid_fn = grid(*numels)
+        numels_agg = list(numels)
+        for i in range(len(numels_agg)):
+            if isinstance(numels_agg[i], (list, tuple)):
+                numels_agg[i] = max(max(numels_agg[i]), 0)  # noqa: PLW3301
+        kernel_grid_fn = grid(*numels_agg)
+
+        if isinstance(numels[-1], (list, tuple)):
+            min_blocks_d = max(-min(numels[-1]), 0) * num_kernels
+        else:
+            min_blocks_d = None
+        if min_blocks is None:
+            assert min_blocks_d is not None
+            min_blocks = min_blocks_d
+        else:
+            assert (
+                min_blocks_d is None or min_blocks == min_blocks_d
+            ), f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
     else:
         # sequential dispatch
         seq_numels = list(numels)
         # x numels are not used here, just a place holder
         seq_numels[-1] = 1024
+        for i in range(len(seq_numels) - 1):
+            if isinstance(seq_numels[i], (list, tuple)):
+                seq_numels[i] = max(seq_numels[i])
+
         kernel_grid_fn = grid(*seq_numels)
 
     def get_grid_dim(numel, block):
@@ -1894,6 +1914,7 @@ def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
         return ceildiv(numel, block)
 
     def grid_fn(meta):
+        assert min_blocks is not None, "min_blocks must be a number"
         cuda_grid = list(kernel_grid_fn(meta))
         cuda_grid[0] = max(num_kernels * cuda_grid[0], min_blocks)
         return tuple(cuda_grid)
@@ -1910,4 +1931,13 @@ def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
         cuda_grid[0] = x_grid
         return tuple(cuda_grid)
 
-    return grid_fn if not is_sequential else seq_grid_fn
+    def grid_fn_default_meta(meta):
+        return grid_fn(default_meta)
+
+    def seq_grid_fn_default_meta(meta):
+        return seq_grid_fn(default_meta)
+
+    if default_meta is None:
+        return grid_fn if not is_sequential else seq_grid_fn
+    else:
+        return grid_fn_default_meta if not is_sequential else seq_grid_fn_default_meta
