@@ -12,7 +12,7 @@ from torch.nn.utils import parametrize
 __all__ = ["orthogonal", "spectral_norm", "weight_norm"]
 
 
-def _is_orthogonal(Q, eps=None):
+def _is_orthogonal(Q):
     n, k = Q.size(-2), Q.size(-1)
     Id = torch.eye(k, dtype=Q.dtype, device=Q.device)
     # A reasonable eps, but not too large
