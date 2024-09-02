@@ -289,7 +289,9 @@ class Backend(str):
         tensor_ = torch.randn(5, device=current_device)
         get_backend_from_device(tensor_.device) -> returns 'nccl'
         """
-        return Backend.default_device_backend_map.get(device.type, "Unknown device type")
+        return Backend.default_device_backend_map.get(
+            device.type, "Unknown device type"
+        )
 
 
     @classmethod
