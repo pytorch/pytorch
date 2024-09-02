@@ -1459,8 +1459,13 @@ class TestSparse(TestSparseBase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     def test_bmm_oob(self, device):
-        # targets an out of bounds error when the sparse tensor has no non-zero
-        # values in the first batch dimension (#131977)
+        # Targets an out of bounds error when the sparse tensor has no non-zero
+        # values in the first batch dimension (#131977).
+        # NOTE: This test is separated from the other bmm tests to avoid
+        # interference from prior memory allocations on the device. Since CUDA
+        # doesn't perform bounds checking, we need the error to cause an
+        # illegal memory access (by indexing into unallocated memory) for the
+        # test to fail.
         torch.cuda.empty_cache()
         indices = torch.tensor([[1], [0], [0]], device=device)
         values = torch.tensor([1.], device=device)
