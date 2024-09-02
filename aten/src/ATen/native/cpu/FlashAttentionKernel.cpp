@@ -386,6 +386,7 @@ void cpu_flash_attention(
   // we need to split kvSplitSize with packb_size for packing k.T,
   // for (q @ k.T) @ v [qSplitSize, kvSplitSize] x [kvSplitSize, headSize] -> [qSplitSize, headSize],
   // we need to split headSize with packb_size for packing v
+  // TODO Simplify the check when oneDNN supports fused pack with transpose and has better performance
   if (with_pack) {
     if (dtype == at::ScalarType::BFloat16) {
       // BF16 requires better shapes as mkl_gemm_bf16bf16f32 is faster than mkl_gemm_f16f16f32
@@ -396,19 +397,29 @@ void cpu_flash_attention(
     } else {
       need_pack =
           ((kvSize < 448 && kvSize % packb_size == 0) || kvSize >= 448) &&
+          (num_thread >= 4) &&
           (headSize % packb_size == 0 && headSize < 512);
     }
     if (need_pack) {
-      float pack_size_per_thread =
-          (batchSize * num_head * kvSlice + num_thread - 1) / num_thread * kvSplitSize * headSize;
+      float pack_size = batchSize * num_head * kvSize * headSize / 1024;
       float gemm_size_per_thread =
-          (batchSize * num_head * qSlice + num_thread - 1) / num_thread * qSplitSize * kvSize * headSize;
-      // cpu_flash_attention with pack has better performance when qSize, kvSize and headSize are long enough,
-      need_pack = pack_size_per_thread >= 65535 && qSize >= 320;
+          (batchSize * num_head * qSlice + num_thread - 1) / num_thread *
+          qSplitSize * (is_causal ? qSize : kvSize) * headSize / 1024;
       // When the number of gemm is much greater than the number of pack,
       // the pack and padding overhead can be overlaped.
-      need_pack = need_pack &&
-          (gemm_size_per_thread / pack_size_per_thread > (dtype == at::ScalarType::BFloat16 ? 9215 : 447));
+      if (dtype == at::ScalarType::BFloat16) {
+        need_pack = gemm_size_per_thread / pack_size >= 160;
+      } else {
+        if (pack_size < 512) {
+          need_pack = false;
+        } else if (pack_size < 2688) {
+          need_pack = gemm_size_per_thread / pack_size >= 32 && headSize > packb_size;
+        } else if (pack_size < 16384) {
+          need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 54 : 52);
+        } else {
+          need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 54 : 40);
+        }
+      }
     }
   }
 
