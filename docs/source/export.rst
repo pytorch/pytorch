@@ -538,7 +538,7 @@ The conditional of (``x.shape[0] > 5``) does not appear in the
 shape of (10, 2). Since ``torch.export`` specializes on the inputs' static
 shapes, the else branch (``x - 1``) will never be reached. To preserve the dynamic
 branching behavior based on the shape of a tensor in the traced graph,
-:func:`torch.export.dynamic_dim` will need to be used to specify the dimension
+:func:`torch.export.Dim` will need to be used to specify the dimension
 of the input tensor (``x.shape[0]``) to be dynamic, and the source code will
 need to be :ref:`rewritten <Data/Shape-Dependent Control Flow>`.
 
@@ -673,7 +673,6 @@ API Reference
 
 .. automodule:: torch.export
 .. autofunction:: export
-.. autofunction:: torch.export.dynamic_shapes.dynamic_dim
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
@@ -721,3 +720,5 @@ API Reference
 .. automodule:: torch.export.custom_obj
 
 .. automodule:: torch.export.experimental
+.. automodule:: torch.export.passes
+.. autofunction:: torch.export.passes.move_to_device_pass
