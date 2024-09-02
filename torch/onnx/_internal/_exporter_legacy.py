@@ -28,6 +28,7 @@ import torch
 import torch._ops
 import torch.export as torch_export
 import torch.utils._pytree as pytree
+from torch.onnx import _flags
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import (
@@ -1462,6 +1463,24 @@ def dynamo_export(
         resolved_export_options = ResolvedExportOptions(ExportOptions(), model=model)
 
     _assert_dependencies(resolved_export_options)
+
+    # NOTE: The new exporter is experimental and is not enabled by default.
+    if _flags.USE_EXPERIMENTAL_LOGIC:
+        from torch.onnx._internal import exporter
+
+        return exporter.export_compat(
+            model,
+            model_args,
+            f=None,
+            kwargs=model_kwargs,
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_shapes=dynamic_shapes,
+            opset_version=18,
+            external_data=True,
+            export_params=True,
+            fallback=True,
+        )
 
     try:
         from torch._dynamo import config as _dynamo_config
