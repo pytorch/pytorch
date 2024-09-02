@@ -641,7 +641,7 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
   TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in add operation");
 
   // get the result size using broadcasting rules
-  const const std::vector<int64_t> res_shape = infer_size(t.sizes(), src.sizes());
+  const std::vector<int64_t> res_shape = infer_size(t.sizes(), src.sizes());
 
   // expand the two tensors if necessary using broadcasting rules
   const SparseTensor broadcasted_t = broadcast_sparce_cpu(t, res_shape, commonDtype);
