@@ -44,6 +44,21 @@ from unittest import mock
 import sympy
 
 import torch
+
+
+GPU_TYPES = ["cuda", "xpu"]
+
+
+# defines here before import torch._dynamo is for avoiding circular import
+# when get_gpu_type is imported from dynamo
+@functools.lru_cache(None)
+def get_gpu_type():
+    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    assert len(avail_gpus) <= 1
+    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    return gpu_type
+
+
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -356,7 +371,7 @@ def gen_gm_and_inputs(target, args, kwargs):
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
     ):
-        node = (node,)
+        node = (node,)  # type: ignore[assignment]
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
@@ -1039,9 +1054,7 @@ def is_big_gpu(index) -> bool:
 
 
 def use_max_autotune() -> bool:
-    return (
-        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
-    )
+    return config.max_autotune or config.max_autotune_gemm
 
 
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
@@ -1199,7 +1212,7 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2):
+def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1214,8 +1227,12 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     int8_gemm = mat1.get_dtype() == torch.uint8
     layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     m, n, k, layout, mat1, mat2 = mm_args(
-        mat1, mat2, out_dtype=layout.dtype if int8_gemm else None
+        mat1,
+        mat2,
+        out_dtype=layout.dtype if int8_gemm else None,
+        mat2_transposed=mat2_transposed,
     )
+
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
@@ -1233,6 +1250,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
+
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None

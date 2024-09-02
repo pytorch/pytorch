@@ -22,8 +22,6 @@ on:
 env:
   DOCKER_REGISTRY: "docker.io"
   DOCKER_BUILDKIT: 1
-  DOCKER_ID: ${{ secrets.DOCKER_ID }}
-  DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
   WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
 
 concurrency:
@@ -32,6 +30,7 @@ concurrency:
 
 jobs:
   build-docker-cuda:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
@@ -54,6 +53,9 @@ jobs:
             push: true
       - name: Authenticate if WITH_PUSH
         if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
         run: |
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
@@ -63,10 +65,11 @@ jobs:
         run: |
           .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cuda${{matrix.cuda_version}}
   build-docker-rocm:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
-        rocm_version: ["6.0", "6.1"]
+        rocm_version: ["6.1", "6.2"]
     env:
       GPU_ARCH_TYPE: rocm
       GPU_ARCH_VERSION: ${{ matrix.rocm_version }}
@@ -85,6 +88,9 @@ jobs:
             push: true
       - name: Authenticate if WITH_PUSH
         if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
         run: |
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
@@ -94,6 +100,7 @@ jobs:
         run: |
           .ci/docker/libtorch/build.sh libtorch-cxx11-builder:rocm${{matrix.rocm_version}}
   build-docker-cpu:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     runs-on: linux.9xlarge.ephemeral
     steps:
       - name: Checkout PyTorch
@@ -110,6 +117,9 @@ jobs:
             push: true
       - name: Authenticate if WITH_PUSH
         if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
         run: |
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin

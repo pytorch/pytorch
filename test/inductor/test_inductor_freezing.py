@@ -10,6 +10,7 @@ import weakref
 
 import torch
 from torch import nn
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
@@ -22,23 +23,8 @@ from torch.testing._internal.common_utils import skipIfRocm
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-)
-
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
 
 
 importlib.import_module("functorch")
@@ -92,6 +78,17 @@ class ConvBN(torch.nn.Module):
 
     def forward(self, x):
         return self.bn(self.conv(x))
+
+
+class ConvBNHardswish(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, bias=False, **kwargs):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+        self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001, dtype=torch.float)
+        self.hardswish = nn.Hardswish(inplace=True)
+
+    def forward(self, x):
+        return self.hardswish(self.bn(self.conv(x)))
 
 
 class ConvFunctionalBN(torch.nn.Module):
@@ -452,6 +449,9 @@ class OptimizeForInferenceTemplate(TestCase):
 
             x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
 
+            torch._dynamo.reset()
+            counters.clear()
+
             @torch.compile()
             def foo(mod, x):
                 return mod(x)
@@ -472,6 +472,52 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
+            self.assertEqual(counters["inductor"]["binary_folding"], 4)
+
+    @torch._inductor.config.patch(layout_optimization=False)
+    def test_folded_conv_bn_hardswish(self):
+        for use_bias, dtype in itertools.product(
+            [True, False], [torch.float16, torch.bfloat16, torch.float32]
+        ):
+            if self.device == "cpu" and dtype == torch.float16:
+                continue
+
+            if self.device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+                continue
+
+            mod = (
+                ConvBNHardswish(3, 32, bias=use_bias, kernel_size=3, stride=2)
+                .eval()
+                .to(self.device)
+                .to(dtype)
+            )
+
+            x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
+
+            torch._dynamo.reset()
+            counters.clear()
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            # TODO - bias is separate kernel right now, we should only unfuse it
+            # from conv if it can be fused
+
+            with torch.no_grad():
+                out_eager = mod(x)
+                out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+
+            # we unfuse the conv bias, but it should only have one constant in the kernel
+            if self.device == "cuda":
+                FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
+                    "frozen_param"
+                ).check_not("frozen_param").check_next("return").run(code[0])
+
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+            self.assertEqual(counters["inductor"]["binary_folding"], 4)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_module_sharing(self):
