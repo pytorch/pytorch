@@ -4974,8 +4974,8 @@ def sample_inputs_reduction_unique(*args, **kwargs):
     # value if `unique_values` is false.
     unique_values = kwargs.pop('unique_values', False)
     for sample in sample_inputs_reduction(*args, **kwargs):
-        is_unique = 'dim' in sample.kwargs and args[0].unique().numel() != args[0].numel()
-        if is_unique == unique_values:
+        is_nonunique = 'dim' in sample.kwargs and sample.args and sample.args[0].unique().numel() != sample.args[0].numel()
+        if is_nonunique != unique_values:
             yield sample
 
 
@@ -14000,7 +14000,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_median,
-           sample_inputs_func=partial(sample_inputs_reduction_unique, supports_multiple_dims=False, unique=False),
+           sample_inputs_func=partial(sample_inputs_reduction_unique, supports_multiple_dims=False, unique_values=False),
            skips=(
                DecorateInfo(unittest.skip("Non-deterministic when non-unique values present"), 'TestDecomp', 'test_comprehensive'),
                DecorateInfo(unittest.skip("Non-deterministic when non-unique values present"), 'TestDecomp', 'test_quick'),
@@ -14013,7 +14013,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_median,
-           sample_inputs_func=partial(sample_inputs_reduction_unique, supports_multiple_dims=False, unique=True)),
+           sample_inputs_func=partial(sample_inputs_reduction_unique, supports_multiple_dims=False, unique_values=True)),
     OpInfo('nanmedian',
            variant_test_name='nonunique',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
@@ -14021,7 +14021,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=partial(sample_inputs_reduction_unique, supports_multiple_dims=False, unique=False),
+           sample_inputs_func=partial(sample_inputs_reduction_unique, supports_multiple_dims=False, unique_values=False),
            skips=(
                DecorateInfo(unittest.skip("Non-deterministic when non-unique values present"), 'TestDecomp', 'test_comprehensive'),
                DecorateInfo(unittest.skip("Non-deterministic when non-unique values present"), 'TestDecomp', 'test_quick'),
@@ -14033,7 +14033,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=partial(sample_inputs_reduction_unique, supports_multiple_dims=False, unique=True)),
+           sample_inputs_func=partial(sample_inputs_reduction_unique, supports_multiple_dims=False, unique_values=True)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
