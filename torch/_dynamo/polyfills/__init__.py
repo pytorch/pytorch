@@ -4,19 +4,32 @@ Python polyfills for common builtins.
 
 # NOTE: 1. Please do not import any submodule in the directory here to avoid circular imports.
 #       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
+#          Add it in the TYPE_CHECKING block below as well.
 
 # mypy: allow-untyped-defs
 
-import math
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Sequence, TYPE_CHECKING
 
 import torch
 
 
-def index(iterator, item, start=0, end=None):
-    import itertools
+if TYPE_CHECKING:
+    # Load by torch._dynamo.polyfills.loader
+    # See also the POLYFILLED_MODULE_NAMES in torch/_dynamo/polyfills/loader.py
+    # Put the submodules here to avoid circular imports
+    from . import (
+        builtins as builtins,
+        functools as functools,
+        itertools as itertools,
+        os as os,
+        sys as sys,
+    )
 
-    for i, elem in itertools.islice(enumerate(iterator), start, end):
+
+def index(iterator, item, start=0, end=None):
+    from itertools import islice
+
+    for i, elem in islice(enumerate(iterator), start, end):
         if item == elem:
             return i
     # This will not run in dynamo
@@ -29,6 +42,8 @@ def repeat(item, count):
 
 
 def radians(x):
+    import math
+
     return math.pi / 180.0 * x
 
 
@@ -133,3 +148,19 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     if isinstance(obj, cls):
         obj.__init__(*args, **kwargs)
     return obj
+
+
+def foreach_lerp_inplace(self, end, weight):
+    # decompose foreach lerp into constituent ops, prevents a graph break due to
+    # converting a value to a scalar when arg[2] is a single tensor
+    result = torch._foreach_sub(end, self)
+    result = torch._foreach_mul(result, weight)
+    return torch._foreach_add_(self, result)
+
+
+def foreach_pow_scalar(scalar, exps):
+    return torch._foreach_pow([scalar for _ in exps], exps)
+
+
+def addcmul_inplace(self, tensor1, tensor2, value):
+    return self.add_(tensor1 * tensor2 * value)
