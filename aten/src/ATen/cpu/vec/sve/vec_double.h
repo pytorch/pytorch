@@ -6,7 +6,12 @@
 #if defined(CPU_CAPABILITY_SVE)
 #include <sleef.h>
 #endif
-
+#include <cmath>
+#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
+#else
+#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
+#endif
 namespace at {
 namespace vec {
 // Note [CPU_CAPABILITY namespace]
@@ -136,52 +141,95 @@ public:
     return *this;
   }
   Vectorized<double> acos() const {
-    return Vectorized<double>(Sleef_acosdx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_acosdx_u10sve(values)),map(std::acos));
   }
   Vectorized<double> acosh() const {
-    return Vectorized<double>(Sleef_acoshdx_u10sve(values));
+    return USE_SLEEF( Vectorized<double>(Sleef_acoshdx_u10sve(values)),map(std::acosh));
   }
   Vectorized<double> asin() const {
-    return Vectorized<double>(Sleef_asindx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_asindx_u10sve(values)),map(std::asin));
   }
   Vectorized<double> atan() const {
-    return Vectorized<double>(Sleef_atandx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_atandx_u10sve(values)),map(std::atan));
   }
   Vectorized<double> atanh() const {
-    return Vectorized<double>(Sleef_atanhdx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_atanhdx_u10sve(values)),map(std::atanh));
   }
   Vectorized<double> atan2(const Vectorized<double> &b) const {
-    return Vectorized<double>(Sleef_atan2dx_u10sve(values, b));
+    USE_SLEEF({return Vectorized<double>(Sleef_atan2dx_u10sve(values, b));},
+      {
+        __at_align__ double tmp[size()];
+        __at_align__ double tmp_b[size()];
+        store(tmp);
+        b.store(tmp_b);
+        for (int64_t i = 0; i < size(); i++) {
+          tmp[i] = std::atan2(tmp[i], tmp_b[i]);
+        }
+        return loadu(tmp);
+      }
+    )
   }
   Vectorized<double> copysign(const Vectorized<double> &sign) const {
-    return Vectorized<double>(Sleef_copysigndx_sve(values, sign));
+   USE_SLEEF( {return Vectorized<double>(Sleef_copysigndx_sve(values, sign));},
+     {
+       __at_align__ double tmp[size()];
+       __at_align__ double tmp_sign[size()];
+       store(tmp);
+       sign.store(tmp_sign);
+       for (int64_t i = 0; i < size(); i++) {
+         tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
+       }
+       return loadu(tmp);
+     }
+   )
   }
   Vectorized<double> erf() const {
-    return Vectorized<double>(Sleef_erfdx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_erfdx_u10sve(values)),map(std::erf));
   }
   Vectorized<double> erfc() const {
-    return Vectorized<double>(Sleef_erfcdx_u15sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_erfcdx_u15sve(values)),map(std::erfc));
   }
   Vectorized<double> erfinv() const {
     return map(calc_erfinv);
   }
   Vectorized<double> exp() const {
-    return Vectorized<double>(Sleef_expdx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_expdx_u10sve(values)),map(std::exp));
   }
   Vectorized<double> exp2() const {
-    return Vectorized<double>(Sleef_exp2dx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_exp2dx_u10sve(values)),map(std::exp2));
   }
   Vectorized<double> expm1() const {
-    return Vectorized<double>(Sleef_expm1dx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_expm1dx_u10sve(values)),map(std::expm1));
   }
   Vectorized<double> exp_u20() const {
     return exp();
   }
   Vectorized<double> fmod(const Vectorized<double>& q) const {
-    return Vectorized<double>(Sleef_fmoddx_sve(values, q));
+    USE_SLEEF({return Vectorized<double>(Sleef_fmoddx_sve(values, q));},
+    {
+        __at_align__ double tmp[size()];
+        __at_align__ double tmp_q[size()];
+        store(tmp);
+        q.store(tmp_q);
+        for (int64_t i = 0; i < size(); i++) {
+          tmp[i] = std::fmod(tmp[i], tmp_q[i]);
+        }
+        return loadu(tmp);
+      }
+    )
   }
   Vectorized<double> hypot(const Vectorized<double> &b) const {
-    return Vectorized<double>(Sleef_hypotdx_u05sve(values, b));
+    USE_SLEEF({return Vectorized<double>(Sleef_hypotdx_u05sve(values, b));},
+    {
+      __at_align__ double tmp[size()];
+      __at_align__ double tmp_b[size()];
+      store(tmp);
+      b.store(tmp_b);
+      for (int64_t i = 0; i < size(); i++) {
+        tmp[i] = std::hypot(tmp[i], tmp_b[i]);
+      }
+      return loadu(tmp);
+    })
   }
   Vectorized<double> i0() const {
     return map(calc_i0);
@@ -216,29 +264,29 @@ public:
     return Vectorized<double>(Sleef_nextafterdx_sve(values, b));
   }
   Vectorized<double> log() const {
-    return Vectorized<double>(Sleef_logdx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_logdx_u10sve(values)),map(std::log));
   }
   Vectorized<double> log2() const {
-    return Vectorized<double>(Sleef_log2dx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_log2dx_u10sve(values)),map(std::log2));
   }
   Vectorized<double> log10() const {
-    return Vectorized<double>(Sleef_log10dx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_log10dx_u10sve(values)),map(std::log10));
   }
   Vectorized<double> log1p() const {
-    return Vectorized<double>(Sleef_log1pdx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_log1pdx_u10sve(values)),map(std::log1p));
   }
   Vectorized<double> frac() const;
   Vectorized<double> sin() const {
-    return Vectorized<double>(Sleef_sindx_u10sve(values));
+    return USE_SLEEF( Vectorized<double>(Sleef_sindx_u10sve(values)),map(std::sin));
   }
   Vectorized<double> sinh() const {
-    return Vectorized<double>(Sleef_sinhdx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_sinhdx_u10sve(values)),map(std::sinh));
   }
   Vectorized<double> cos() const {
-    return Vectorized<double>(Sleef_cosdx_u10sve(values));
+    return USE_SLEEF(Vectorized<double>(Sleef_cosdx_u10sve(values)),map(std::cos));
   }
   Vectorized<double> cosh() const {
-    return Vectorized<double>(Sleef_coshdx_u10sve(values));
+    return USE_SLEEF( Vectorized<double>(Sleef_coshdx_u10sve(values)),map(std::cosh));
   }
   Vectorized<double> ceil() const {
     return svrintp_f64_x(ptrue, values);
@@ -253,16 +301,16 @@ public:
     return svrinti_f64_x(ptrue, values);
   }
   Vectorized<double> tan() const {
-    return Vectorized<double>(Sleef_tandx_u10sve(values));
+    return USE_SLEEF( Vectorized<double>(Sleef_tandx_u10sve(values)),map(std::tan));
   }
   Vectorized<double> tanh() const {
-    return Vectorized<double>(Sleef_tanhdx_u10sve(values));
+    return USE_SLEEF( Vectorized<double>(Sleef_tanhdx_u10sve(values)),map(std::tanh));
   }
   Vectorized<double> trunc() const {
     return svrintz_f64_x(ptrue, values);
   }
   Vectorized<double> lgamma() const {
-    return Vectorized<double>(Sleef_lgammadx_u10sve(values));
+    return USE_SLEEF( Vectorized<double>(Sleef_lgammadx_u10sve(values)),map(std::lgamma));
   }
   Vectorized<double> sqrt() const {
     return svsqrt_f64_x(ptrue, values);
@@ -274,7 +322,18 @@ public:
     return svdivr_f64_x(ptrue, svsqrt_f64_x(ptrue, values), ONE_F64);
   }
   Vectorized<double> pow(const Vectorized<double> &b) const {
-    return Vectorized<double>(Sleef_powdx_u10sve(values, b));
+   USE_SLEEF( {return Vectorized<double>(Sleef_powdx_u10sve(values, b));},
+    {
+      __at_align__ double tmp[size()];
+      __at_align__ double tmp_b[size()];
+      store(tmp);
+      b.store(tmp_b);
+      for (int64_t i = 0; i < size(); i++) {
+        tmp[i] = std::pow(tmp[i], tmp_b[i]);
+      }
+      return loadu(tmp);
+    }
+    )
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
