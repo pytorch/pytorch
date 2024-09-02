@@ -31,8 +31,8 @@ def get_rng_state() -> torch.Tensor:
 
 
 def manual_seed(seed, device: Union[str, torch.device] = None) -> torch._C.Generator | None:
-    r"""Sets the seed for generating random numbers on all devices. Returns a
-    `torch.Generator` object.
+    r"""Sets the seed for generating random numbers on all devices or on the
+    current device of a given device type. Returns a `torch.Generator` object.
 
     Args:
         seed (int): The desired seed. Value must be within the inclusive range
@@ -43,7 +43,7 @@ def manual_seed(seed, device: Union[str, torch.device] = None) -> torch._C.Gener
     """
     seed = int(seed)
 
-    # Set the seed for the given device
+    # Set the seed for the current device of a given device type
     if device is not None:
         device_type = device.type if isinstance(device, torch.device) else device
         _manual_seed_for_device(seed, device_type)
