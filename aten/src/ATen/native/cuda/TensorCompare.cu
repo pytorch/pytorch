@@ -111,10 +111,10 @@ __global__ void _assert_async_cuda_kernel(const scalar_t* input, Msg msg) {
 }
 
 __global__ void _assert_async_cuda_kernel(const c10::complex<float>* input, Msg msg) {
-  CUDA_KERNEL_ASSERT(input[0] != c10::complex<float>(0, 0));
+  CUDA_KERNEL_ASSERT_MSG(input[0] != c10::complex<float>(0, 0), msg.msg);
 }
 __global__ void _assert_async_cuda_kernel(const c10::complex<double>* input, Msg msg) {
-  CUDA_KERNEL_ASSERT(input[0] != c10::complex<double>(0, 0));
+  CUDA_KERNEL_ASSERT_MSG(input[0] != c10::complex<double>(0, 0), msg.msg);
 }
 
 void _assert_async_msg_cuda(const Tensor& self_tensor, c10::string_view assert_msg) {
@@ -134,7 +134,6 @@ void _assert_async_msg_cuda(const Tensor& self_tensor, c10::string_view assert_m
   });
 }
 
-// TODO (tmanlaibaatar) Ignore assert msg for now
 void _assert_async_cuda(const Tensor& self_tensor) {
   _assert_async_msg_cuda(self_tensor, "");
 }
