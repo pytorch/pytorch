@@ -32,12 +32,24 @@ from .utils import (
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
 # remove the wrapper call when it's ready.
 class MapWrapper(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("map")
+
     def __call__(self, xs, *args):
         return map_wrapper(xs, *args)
 
 
-map = MapWrapper("map")
-map_impl = HigherOrderOperator("map_impl")
+class MapImpl(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("map_impl")
+
+    def __call__(self, *args, **kwargs):
+        return super().__call__(*args, **kwargs)
+
+
+map = MapWrapper()
+
+map_impl = MapImpl()
 
 dummy_aot_config = AOTConfig(
     fw_compiler=None,  # type: ignore[arg-type]
