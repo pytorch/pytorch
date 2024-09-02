@@ -1747,3 +1747,13 @@ include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/
 # Include moodycamel
 add_library(moodycamel INTERFACE IMPORTED)
 include_directories(moodycamel SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/concurrentqueue)
+
+# ---[ ARMPL for Arm architecture
+set(AT_ARMPL_ENABLED 0)
+if(USE_ARMPL)
+  find_package(ARMPL REQUIRED)
+  if(ARMPL_FOUND)
+    message(INFO " USING ARMPL ")
+    set(AT_ARMPL_ENABLED 1)
+  endif()
+endif()
