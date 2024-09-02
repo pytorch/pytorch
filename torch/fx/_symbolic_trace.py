@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import builtins
 import copy
+import contextlib
 import functools
 import inspect
 import math
@@ -793,13 +794,13 @@ class Tracer(TracerBase):
                     return _orig_module_call(mod, *args, **kwargs)
 
                 _autowrap_check(
-                    patcher,
+                    patcher,  # type: ignore[has-type]
                     getattr(getattr(mod, "forward", mod), "__globals__", {}),
                     self._autowrap_function_ids,
                 )
                 return self.call_module(mod, forward, args, kwargs)
 
-            with _Patcher() as patcher:
+            with _new_patcher() as patcher:
                 # allow duplicate patches to support the case of nested calls
                 patcher.patch_method(
                     torch.nn.Module,
@@ -990,8 +991,12 @@ class _PatchedFn(NamedTuple):
     frame_dict: Any
     fn_name: str
     orig_fn: Any
+    new_fn: Any
 
     def revert(self):
+        raise NotImplementedError
+
+    def patch(self):
         raise NotImplementedError
 
 
@@ -999,16 +1004,23 @@ class _PatchedFnSetItem(_PatchedFn):
     def revert(self):
         self.frame_dict[self.fn_name] = self.orig_fn
 
+    def patch(self):
+        self.frame_dict[self.fn_name] = self.new_fn
 
 class _PatchedFnDel(_PatchedFn):
     def revert(self):
         del self.frame_dict[self.fn_name]
+
+    def patch(self):
+        self.frame_dict[self.fn_name] = self.new_fn
 
 
 class _PatchedFnSetAttr(_PatchedFn):
     def revert(self):
         setattr(self.frame_dict, self.fn_name, self.orig_fn)
 
+    def patch(self):
+        setattr(self.frame_dict, self.fn_name, self.new_fn)
 
 class _Patcher:
     def __init__(self) -> None:
@@ -1028,14 +1040,15 @@ class _Patcher:
         """
         new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
         if name not in frame_dict and hasattr(builtins, name):
-            self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
+            self.patches_made.append(_PatchedFnDel(frame_dict, name, None, new_fn))
+            self.patches_made[-1].patch()
         elif getattr(frame_dict[name], "__fx_already_patched", False):
             return  # already patched, no need to do it again
         else:
             self.patches_made.append(
-                _PatchedFnSetItem(frame_dict, name, frame_dict[name])
+                _PatchedFnSetItem(frame_dict, name, frame_dict[name], new_fn)
             )
-        frame_dict[name] = new_fn
+            self.patches_made[-1].patch()
 
     def patch_method(
         self, cls: type, name: str, new_fn: Callable, deduplicate: bool = True
@@ -1047,8 +1060,8 @@ class _Patcher:
         orig_fn = getattr(cls, name)
         if getattr(orig_fn, "__fx_already_patched", False):
             return  # already patched, no need to do it again
-        self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn))
-        setattr(cls, name, new_fn)
+        self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn, new_fn))
+        self.patches_made[-1].patch()
 
     def visit_once(self, thing: Any):
         """Return True on the first call to with thing, otherwise false"""
@@ -1057,6 +1070,22 @@ class _Patcher:
             return False
         self.visited.add(idx)
         return True
+
+    def revert_all_patches(self):
+        """
+        Remove all the stored patcheds. It doesn't modify patches_made.
+        """
+        for patch in self.patches_made:
+            patch.revert()
+        return self.patches_made
+
+    def reapply_all_patches(self):
+        """
+        Patch all the stored patcheds. It doesn't modify patches_made.
+        """
+        for patch in self.patches_made:
+            patch.patch()
+        return self.patches_made
 
     def __enter__(self):
         return self
@@ -1070,6 +1099,36 @@ class _Patcher:
             self.patches_made.pop().revert()
         self.visited.clear()
 
+
+CURRENT_PATCHER: Optional[_Patcher] = None
+
+@contextlib.contextmanager
+def _new_patcher():
+    global CURRENT_PATCHER
+    prior_patcher = CURRENT_PATCHER
+    try:
+        CURRENT_PATCHER = _Patcher()
+        yield CURRENT_PATCHER
+    finally:
+        # Clear all the patches made by when using current patcher.
+        assert CURRENT_PATCHER is not None
+        CURRENT_PATCHER.revert_all_patches()
+        CURRENT_PATCHER = prior_patcher
+
+
+@contextlib.contextmanager
+def _maybe_revert_all_patches():
+    current_patcher = CURRENT_PATCHER
+    patches_made = None
+    patches_removed = None
+    try:
+        if current_patcher is not None:
+            patches_removed = current_patcher.revert_all_patches()
+        yield
+    finally:
+        if current_patcher is not None:
+            patches_made = current_patcher.reapply_all_patches()
+        assert patches_made == patches_removed, "CURRENT_PATCHER was changed during a revert_all_patches"
 
 def _patch_wrapped_functions(patcher: _Patcher):
     """
