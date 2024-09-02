@@ -5325,7 +5325,6 @@ def recover_orig_fp32_precision():
         old_matmul_precision = torch.get_float32_matmul_precision()
         old_cubls_tf32 = torch.backends.cuda.matmul.allow_tf32
         try:
-            pass
             yield
         finally:
             torch.backends.mkldnn.conv.fp32_precision = old_mkldnn_conv_p
