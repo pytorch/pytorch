@@ -2583,10 +2583,11 @@ def forward(self, arg0_1):
         else:
             self.assertEqual(res, (a + 1, a - 1))
 
-    def test_vmap_vmap(self):
+    @parametrize("boolcond", [True, False])
+    def test_vmap_vmap(self, boolcond):
         def fn(x):
             return torch.cond(
-                pred=torch.tensor([True]),
+                pred=torch.tensor([True]) if not boolcond else True,
                 true_fn=lambda x: x + 1,
                 false_fn=lambda x: x - 1,
                 operands=(x,),
