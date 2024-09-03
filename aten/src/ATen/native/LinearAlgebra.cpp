@@ -1967,6 +1967,19 @@ void dot_out_impl(
     const Tensor& self,
     const Tensor& other,
     const Tensor& result) {
+    auto output_device = result.device();
+    auto input1_device = self.device();
+    auto input2_device = other.device();
+    // check if the input & output tensors are on the same device.
+    TORCH_CHECK(
+        (output_device == input1_device) && (input1_device == input2_device),
+        "vdot: Expected the output and input tensors to be on the "
+        "same device, but got the output tensor on ",
+        output_device,
+        ", the 'input' tensor on ",
+        input1_device,
+        ", and the 'other' tensor on ",
+        input2_device);
     if (self.is_complex()) {
     if (self.is_conj()) {
       if (other.is_conj()) {
@@ -2014,48 +2027,61 @@ void vdot_out_impl(
     const Tensor& self,
     const Tensor& other,
     const Tensor& result) {
-  // Dispatch to `dot` for real dtypes.
-  if (!self.is_complex()) {
+    auto output_device = result.device();
+    auto input1_device = self.device();
+    auto input2_device = other.device();
+    // check if the input & output tensors are on the same device.
+    TORCH_CHECK(
+        (output_device == input1_device) && (input1_device == input2_device),
+        "vdot: Expected the output and input tensors to be on the "
+        "same device, but got the output tensor on ",
+        output_device,
+        ", the 'input' tensor on ",
+        input1_device,
+        ", and the 'other' tensor on ",
+        input2_device);
+    // Dispatch to `dot` for real dtypes.
+    if (!self.is_complex()) {
     dot_out_impl(self, other, result);
     return;
-  }
+    }
 
-  if (self.is_conj()) {
+    if (self.is_conj()) {
     if (other.is_conj()) {
-       vdot_out_impl(other.conj(), self.conj(), result);
+      vdot_out_impl(other.conj(), self.conj(), result);
     } else {
-       dot_out_impl(self.conj(), other, result);
+      dot_out_impl(self.conj(), other, result);
     }
     return;
-  } else if (other.is_conj()) {
+    } else if (other.is_conj()) {
     Tensor temp_result = at::empty({}, result.options());
     dot_out_impl(self, other.conj(), result);
     result.copy_(temp_result.conj());
     return;
-  }
+    }
 
-  if (self._is_zerotensor() || other._is_zerotensor()) {
+    if (self._is_zerotensor() || other._is_zerotensor()) {
     result.fill_(0);
-  }
+    }
 
-  AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
-    result.fill_(vdot_impl<scalar_t>(
-        self.numel(),
-        const_cast<scalar_t*>(self.const_data_ptr<scalar_t>()),
-        self.stride(0),
-        const_cast<scalar_t*>(other.const_data_ptr<scalar_t>()),
-        other.stride(0)));
-  });
+    AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
+      result.fill_(vdot_impl<scalar_t>(
+          self.numel(),
+          const_cast<scalar_t*>(self.const_data_ptr<scalar_t>()),
+          self.stride(0),
+          const_cast<scalar_t*>(other.const_data_ptr<scalar_t>()),
+          other.stride(0)));
+    });
 }
 
 TORCH_IMPL_FUNC(dot_out_cpu)
 (const Tensor& self, const Tensor& other, const Tensor& result) {
-  dot_out_impl(self, other, result);
+    dot_out_impl(self, other, result);
 }
 
 TORCH_IMPL_FUNC(vdot_out_cpu)
 (const Tensor& self, const Tensor& other, const Tensor& result) {
-  vdot_out_impl(self, other, result);
+    vdot_out_impl(self, other, result);
 }
 
 static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_out) {
