@@ -603,8 +603,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
     // create a buffer for tiles of B.
-    // alignment of 128 is being used to prevent segfault on RHEL with some specific libstdc++ version.
-    alignas(128) {{input_t}} bf16_weights_buf[512];
+    alignas(64) {{input_t}} bf16_weights_buf[512];
 
     int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
     int b_tile_ptr_stride = ldb * {{vnni_size}};
