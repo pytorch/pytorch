@@ -3229,6 +3229,7 @@ MOD_INLINELIST = [
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
     "torch._inductor.test_operators",
+    "torch._library.autograd",
     "torch._library.custom_ops",
     "torch._prims",
     "torch._refs",
