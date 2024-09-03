@@ -471,10 +471,20 @@ def dynamo_export(
     import warnings
 
     from torch.onnx import _flags
+    from torch.onnx._internal import exporter
 
-    if _flags.USE_EXPERIMENTAL_LOGIC:
-        from torch.onnx._internal import exporter
-
+    if isinstance(model, torch.export.ExportedProgram):
+        return exporter.export_compat(
+            model,  # type: ignore[arg-type]
+            model_args,
+            f=None,
+            kwargs=model_kwargs,
+            opset_version=18,
+            external_data=True,
+            export_params=True,
+            fallback=True,
+        )
+    elif _flags.USE_EXPERIMENTAL_LOGIC:
         if export_options is not None:
             warnings.warn(
                 "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
