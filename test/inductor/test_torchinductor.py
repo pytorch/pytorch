@@ -3367,7 +3367,7 @@ class CommonTemplate:
 
         requires_grad = True
         buf0 = torch.zeros(
-            (1, 16, 1024, 64),
+            (5, 5, 5, 5),
             dtype=torch.float16,
             requires_grad=requires_grad,
             device=self.device,
