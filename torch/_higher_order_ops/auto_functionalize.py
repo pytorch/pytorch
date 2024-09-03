@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -21,9 +21,9 @@ from torch.fx.experimental.proxy_tensor import (
 @dataclass
 class ViewInfo:
     base_index: int
-    size: Any = None
-    stride: Any = None
-    storage_offset: Any = None
+    size: Optional[Sequence[int | torch.SymInt]] = None
+    stride: Optional[Sequence[int | torch.SymInt]] = None
+    storage_offset: Optional[int] = None
     # When is_view is false, the tensor is the base, and
     # size, stride and storage_offset are all None.
     is_view: bool = True
@@ -31,6 +31,11 @@ class ViewInfo:
     def regenerate_view(self, bases_list: List[Tensor]):
         if not self.is_view:
             return bases_list[self.base_index]
+
+        assert self.stride is not None
+        assert self.size is not None
+        assert self.storage_offset is not None
+
         return torch.as_strided(
             bases_list[self.base_index],
             self.size,

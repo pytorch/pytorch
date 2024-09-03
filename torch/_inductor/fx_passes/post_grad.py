@@ -736,13 +736,6 @@ def true_noop(*args, **kwargs):
     return True
 
 
-def remove_self_clone(graph: torch.fx.Graph):
-    for node in graph.nodes:
-        if node.target == aten.copy_.default and node.args[0] == node.args[1]:
-            node.replace_all_uses_with(node.args[0])
-            graph.erase_node(node)
-
-
 def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
@@ -818,7 +811,7 @@ def decompose_auto_functionalized(graph):
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
         pass_dict=graph_pass,
     )
-    def p1(match: Match, *args, **kwargs):
+    def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
         only_clone_these_tensors = tuple(
@@ -840,7 +833,7 @@ def decompose_auto_functionalized(graph):
         CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
         pass_dict=graph_pass,
     )
-    def p2(match: Match, *args, **kwargs):
+    def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_functional_dense,
         )
@@ -860,7 +853,7 @@ def decompose_auto_functionalized(graph):
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
         pass_dict=graph_pass,
     )
-    def p3(match: Match, *args, **kwargs):
+    def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import (
             auto_functionalized_v2_dense,
         )

@@ -358,6 +358,7 @@ arg2_1 = arg3_1 = arg1_1 = arg0_1 = foo_default = None
         x = torch.zeros(100, dtype=torch.int64)
         f(x)
 
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_v2(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -458,6 +459,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
 
         return [compiled_args, result, graph]
 
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_with_returns_v2(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -519,6 +521,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             self.assertEqual(compiled_out, eager_out)
 
     # foo takes two inputs that are not views.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_extra1(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -616,6 +619,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
                     )
 
     # foo takes two views on the same input, function does not have return.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_extra2(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -711,6 +715,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     )
 
     # foo takes two views on the same input, function returns both views and the input
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_extra3(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -779,6 +784,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                 )
 
     # foo takes a mutable list with views in addition to other args.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_extra4(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -847,6 +853,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2
                     ignore_empty_lines=True,
                 )
 
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_optional_v2(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -899,15 +906,14 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
 
-    @torch._dynamo.config.patch(
-        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
-    )
-    def test_inference_mode1(self):
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
+    def test_inference_mode1_v2(self):
         with torch.inference_mode():
             self.test_auto_functionalize_extra1()
 
     # In inference mode we do not support inplacing views yet.
-    def test_inference_mode2(self):
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_inference_mode2_v2(self):
         with torch.inference_mode(), torch.library._scoped_library(
             "mylib", "FRAGMENT"
         ) as lib:
@@ -981,13 +987,16 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     ignore_empty_lines=True,
                 )
 
-    def test_dynamic(self):
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_dynamic_v2(self):
         self.test_auto_functionalize_v2(_dynamic=True)
 
-    def test_dynamic2(self):
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_dynamic2_v2(self):
         self.test_auto_functionalize_extra1(_dynamic=True)
 
-    def test_dynamic3(self):
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_dynamic3_v2(self):
         self.test_auto_functionalize_extra2(_dynamic=True)
 
 

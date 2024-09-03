@@ -808,10 +808,7 @@ def solve_min_cut(
         print()
 
     def can_fuse_into_auto_functionalized(a, b):
-        if (
-            b.target != torch.ops.higher_order.auto_functionalized
-            and b.target != torch.ops.higher_order.auto_functionalized_v2
-        ):
+        if b.target != torch.ops.higher_order.auto_functionalized:
             return False
         mutable_op = b.args[0]
         (
