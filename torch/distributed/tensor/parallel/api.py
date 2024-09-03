@@ -40,14 +40,15 @@ def parallelize_module(  # type: ignore[return]
     Args:
         module (:class:`nn.Module`):
             Module to be parallelized.
-        device_mesh (:class:`DeviceMesh`):
-            Object which describes the mesh topology
-            of devices for the DTensor.
-        parallelize_plan (Union[:class:`ParallelStyle`, Dict[str, :class:`ParallelStyle`]]):
+        device_mesh (:class:`DeviceMesh`, optional):
+            Object which describes the mesh topology of devices for the DTensor.
+            If not specified, the call must be under a DeviceMesh context.
+        parallelize_plan (Union[:class:`ParallelStyle`, Dict[str, :class:`ParallelStyle`]], optional):
             The plan used to parallelize the module. It can be either a
-            :class:`ParallelStyle` object which contains how
-            we prepare input/output for Tensor Parallelism or it can be a
-            dict of module FQN and its corresponding :class:`ParallelStyle` object.
+            :class:`ParallelStyle` object which contains how we prepare
+            input/output for Tensor Parallelism or it can be a dict of module
+            FQN and its corresponding :class:`ParallelStyle` object. If not
+            specified, the call will do nothing at the moment.
     Return:
         A :class:`nn.Module` object parallelized.
 
@@ -73,7 +74,8 @@ def parallelize_module(  # type: ignore[return]
 
     if parallelize_plan is None:
         warnings.warn(
-            "No parallelize_plan is provided, so parallelize_module does nothing."
+            "No parallelize_plan is provided and auto-parallel is not supported "
+            "at the moment, so this parallelize_module call will do nothing."
         )
         return module
 
