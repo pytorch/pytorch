@@ -21,8 +21,8 @@ from torch.fx.experimental.proxy_tensor import (
 @dataclass
 class ViewInfo:
     base_index: int
-    size: Optional[Sequence[int | torch.SymInt]] = None
-    stride: Optional[Sequence[int | torch.SymInt]] = None
+    size: Optional[Sequence[Union[int, torch.SymInt]]] = None
+    stride: Optional[Sequence[Union[int, torch.SymInt]]] = None
     storage_offset: Optional[int] = None
     # When is_view is false, the tensor is the base, and
     # size, stride and storage_offset are all None.
