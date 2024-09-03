@@ -18,12 +18,7 @@ from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import GlobalSource, LocalSource, Source
 from .utils import nn_module_new, object_new
-from .variables.base import (
-    is_side_effect_safe,
-    MutableLocalBase,
-    MutableLocalSource,
-    VariableTracker,
-)
+from .variables.base import MutableLocalBase, MutableLocalSource, VariableTracker
 
 
 class MutableSideEffects(MutableLocalBase):
@@ -151,10 +146,12 @@ class SideEffects:
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
             return True
-        if not is_side_effect_safe(item.mutable_local):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
-            )
+        # TODO(yf225): skip check only if traced FSDP2 and this is FSDP2 pre-forward / post-forward hook.
+        # Look at https://github.com/pytorch/pytorch/pull/134310 for inspiration on how to implement this.
+        # if not is_side_effect_safe(item.mutable_local):
+        #     unimplemented(
+        #         "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+        #     )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
