@@ -15,13 +15,13 @@ from typing import Callable, Sequence, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
-from torch.utils import _pytree as pytree
+from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
     import onnxruntime as ort
 
-_LARGE_MODEL_THRESHOLD = 512 * 1024 * 1024  # 512MB
+_LARGE_MODEL_THRESHOLD = 1536 * 1024 * 1024  # 1536MB
 
 logger = logging.getLogger(__name__)
 
@@ -175,10 +175,11 @@ ONNXProgram(
         """
         # TODO(justinchuby): Allow different inference options
         logger.debug("Initializing the inference session.")
-        if _count_initializer_size(self.model.graph) > _LARGE_MODEL_THRESHOLD:
-            logger.debug(
-                "The serialized ONNX model has more than 512MB of initializers."
-            )
+        if (
+            byte_size := _count_initializer_size(self.model.graph)
+        ) > _LARGE_MODEL_THRESHOLD:
+            logger.debug("The model initializers is larger than 1.5GB (%s).", byte_size)
+            # Save the model to a temporary file if too large
             self._tempdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
             model_path = os.path.join(self._tempdir.name, "model.onnx")
             self.save(model_path, external_data=True)
@@ -213,7 +214,7 @@ def _process_args(args, kwargs) -> tuple[torch.Tensor, ...]:
 
 
 def _flatten_inputs(model_args, model_kwargs):
-    flattened_args, _ = pytree.tree_flatten((model_args, model_kwargs))
+    flattened_args, _ = _pytree.tree_flatten((model_args, model_kwargs))
     return flattened_args
 
 

@@ -137,7 +137,6 @@ def export_compat(
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
         # TODO(justinchuby): Change the hardcoded opset version for it to be flexible
-        # FIXME(justinchuby): Handle when torchlib bumps opset version
         opset_version = 18
 
     if isinstance(model, torch.export.ExportedProgram):

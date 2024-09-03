@@ -18,7 +18,6 @@ import onnxscript
 import onnxscript.evaluator
 import onnxscript.function_libs
 import onnxscript.function_libs.torch_lib
-import onnxscript.function_libs.torch_lib.registration
 from onnxscript import ir
 from onnxscript.ir import convenience as ir_convenience
 
@@ -163,7 +162,11 @@ def _set_shape_types(
 
 def _set_shape_type(
     value: ir.Value,
-    meta_val: torch.Tensor | tuple[torch.Tensor],
+    meta_val: torch.Tensor
+    | torch.SymBool
+    | torch.SymInt
+    | torch.SymFloat
+    | tuple[torch.Tensor],
     complex_to_float: bool,
 ) -> None:
     # TODO: Consider using meta["tensor_meta"] for this? Would it be faster?
@@ -689,13 +692,7 @@ def exported_program_to_ir(
         registry: The registry of all ONNX Script decomposition.
     """
     if registry is None:
-        # Trigger op registration
-        from onnxscript.function_libs.torch_lib import ops  # noqa: F401
-
-        del ops
-        registry = _registration.ONNXRegistry.from_torchlib(
-            onnxscript.function_libs.torch_lib.registration.default_registry  # type: ignore[arg-type]
-        )
+        registry = _registration.ONNXRegistry.from_torchlib()
     if lower != "none":
         exported_program = _prepare_exported_program_for_export(
             exported_program, registry=registry
@@ -979,6 +976,8 @@ def export(
     program: torch.export.ExportedProgram | None = None
     # Step 1: Export the model with torch.export.export if the model is not already an ExportedProgram
     if isinstance(model, torch.export.ExportedProgram):
+        # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
+        # are not used.
         program = model
         export_status.torch_export = True
     else:
@@ -1069,13 +1068,7 @@ def export(
     try:
         # Build the ONNX function registry
         if registry is None:
-            # Trigger op registration
-            from onnxscript.function_libs.torch_lib import ops
-
-            del ops
-            registry = _registration.ONNXRegistry.from_torchlib(
-                onnxscript.function_libs.torch_lib.registration.default_registry  # type: ignore[arg-type]
-            )
+            registry = _registration.ONNXRegistry.from_torchlib()
 
         # Process the exported program to run decompositions and type promotions etc.
         decomposed_program = _prepare_exported_program_for_export(
@@ -1195,11 +1188,12 @@ def export(
                     if not failed_results
                     else _format_exceptions_for_all_strategies(failed_results),
                     onnx_program.exported_program,
-                    profile_result=profile_result,
-                    export_status=export_status,
                     decomp_comparison=_reporting.format_decomp_comparison(
                         pre_decomp_unique_ops, post_decomp_unique_ops
                     ),
+                    export_status=export_status,
+                    profile_result=profile_result,
+                    model=onnx_program.model,
                     registry=registry,
                 )
                 verbose_print(f"Export report has been saved to '{report_path}'.")
