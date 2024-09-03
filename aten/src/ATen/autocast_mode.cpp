@@ -69,7 +69,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::ScalarType::Undefined, // Vulkan
         at::ScalarType::Undefined, // Metal
         at::kHalf, // XPU
-        at::kHalf, // MPS
+        at::kBFloat16, // MPS
         at::ScalarType::Undefined, // Meta (tensors with no data)
         at::kBFloat16, // HPU / HABANA
         at::ScalarType::Undefined, // SX-Aurora / NEC
@@ -262,6 +262,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS2(frobenius_norm, dim, fp32)
   KERNEL_MPS(nuclear_norm, fp32)
   KERNEL_MPS2(nuclear_norm, dim, fp32)
+  KERNEL_MPS(batch_norm, fp32)
   KERNEL_MPS(cosine_similarity, fp32)
   KERNEL_MPS(poisson_nll_loss, fp32)
   KERNEL_MPS(cosine_embedding_loss, fp32)
