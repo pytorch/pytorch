@@ -9,9 +9,6 @@
 #endif
 #include <cstdlib>
 #include <cstring>
-#if defined(__linux__)
-#include <sys/prctl.h>
-#endif
 
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
 #include <sys/auxv.h>
@@ -38,9 +35,14 @@ static CPUCapability compute_cpu_capability() {
       return CPUCapability::ZVECTOR;
     }
 #elif defined(HAVE_SVE_CPU_DEFINITION)
+    int sve_vl = cpuinfo_get_max_arm_sve_length(); //Returns maximum SVE VL supported by your HW.
 #ifdef HAVE_SVE256_CPU_DEFINITION
     if (strcmp(envar, "sve256") == 0) {
-      return CPUCapability::SVE256;
+      if (sve_vl == 256) {
+        return CPUCapability::SVE256;
+      }
+      TORCH_WARN("SVE256 capability not available on hardware. Falling back to DEFAULT");
+      return CPUCapability::DEFAULT;
     }
 #endif
 #else
@@ -90,32 +92,19 @@ static CPUCapability compute_cpu_capability() {
 
 #if defined(__linux__) && defined(HAVE_SVE_CPU_DEFINITION)
   if (cpuinfo_initialize() && cpuinfo_has_arm_sve()) {
-    static bool prctl_call = false; // To cache the prctl system call, so that it is called only once.
-    static int cached_sve_vl = -1; // Storing the cache value
-    if (!prctl_call) {
-      int ret = prctl(PR_SVE_GET_VL);
-      prctl_call = true;
-      if (ret < 0) {
-        if (errno == EINVAL) {
-          // SVE is not supported on this system.
-          // Return the default CPU capability.
-          return CPUCapability::DEFAULT;
-        } else {
-          // Undefined in the manual.
-          // Should report and exit.
-          TORCH_INTERNAL_ASSERT(false, "Unexpected error while checking SVE support");
-        }
-      }
-      int vl = ret & PR_SVE_VL_LEN_MASK;
-      cached_sve_vl = vl; // Update the cache
+    int sve_vl = cpuinfo_get_max_arm_sve_length(); //Returns maximum SVE VL supported by your HW.
+    if (sve_vl <= 0) {
+      // SVE is not supported on this system.
+      // Return the default CPU capability.
+      return CPUCapability::DEFAULT;
     }
-    if (cached_sve_vl != -1) {
-      #ifdef HAVE_SVE256_CPU_DEFINITION
-        if (cached_sve_vl == 32) { // Check for SVE256 (32 bytes vector length)
-          return CPUCapability::SVE256;
+    #ifdef HAVE_SVE256_CPU_DEFINITION
+        if (sve_vl == 256) { // Check for SVE256
+            return CPUCapability::SVE256;
         }
-      #endif
-    }
+    #endif
+    // Return the default CPU capability.
+    return CPUCapability::DEFAULT;
   }
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
