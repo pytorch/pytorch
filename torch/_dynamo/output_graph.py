@@ -1461,8 +1461,8 @@ class OutputGraph:
             # The backend compiler has requested that we skip the frame, instead of
             # aborting execution.
             raise e
-        # except Exception as e:
-        #     raise BackendCompilerFailed(self.compiler_fn, e) from e
+        except Exception as e:
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
 
         signpost_event(
             "dynamo",

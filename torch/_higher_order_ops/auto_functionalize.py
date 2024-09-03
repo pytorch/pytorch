@@ -167,9 +167,8 @@ def read_view_information_from_args(
 # called: it clones inputs that will be mutated, runs the op, and
 # then returns (output, Tensors with the new values)
 #
-# if the passed inputs are views of another inputs, we return the changed
-# base tensor and regenerate the future views from it.
-
+# auto_functionalize_v2 is an improved version of auto_functionalize that better handle
+# re-inplacing views.
 
 class AutoFunctionalized(HigherOrderOperator):
     """auto_functionalized(_mutable_op, **kwargs)
