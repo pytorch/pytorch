@@ -2098,10 +2098,8 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
 class TestBlockMask(InductorTestCase):
     @supported_platform
-    @common_utils.parametrize("compile", [False, True])
+    @common_utils.parametrize("compile", [True, False])
     def test_page_allocation(self, compile: bool):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads = (3, 4, 8, 5, 10, 2)
         paged_cache = PagedCache(n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads)
 

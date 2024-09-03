@@ -844,7 +844,7 @@ class PagedCache(torch.nn.Module):
 
     def allocate(self, batch: Tensor, head: Tensor, logical_block_idx: Tensor):
         # batch, head, and logical_block_idx are 1D tensor with 1 element.
-        assert self.empty_pages, "empty_pages must have at least 1 element for allocation"
+        assert len(self.empty_pages) > 0, "empty_pages must have at least 1 element for allocation"
         new_page_idx = self.empty_pages.pop()
         self.page_table[batch, head, logical_block_idx] = torch.tensor([new_page_idx, 0, 1])
 
