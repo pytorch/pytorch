@@ -373,6 +373,8 @@ __host__ __device__
                static_cast<unsigned>(__LINE__)), \
            0);                                   \
   }
+// TODO: This doesn't assert the message because I (chilli) couldn't figure out
+// a nice way to convert a char* to a wchar_t*
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)        \
   if (C10_UNLIKELY(!(cond))) {                   \
     (void)(_wassert(                             \
