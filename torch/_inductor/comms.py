@@ -509,12 +509,11 @@ def enforce_comm_ordering_for_fsdp(
                 name_to_fused_node,
             )
 
-            # Find the "all_gather + all_gather_wait_tensor + copy_out + set_" code block
+            # Find the "all_gather + all_gather_wait_tensor + copy_out + copy_" code block
             allowed_ops = {
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
                 torch.ops._c10d_functional.wait_tensor.default,
                 torch.ops.fsdp.split_with_sizes_copy.default,
-                torch.ops.aten.copy_.default,
             }
             find_recursive_users_of_node(
                 ag_snode,
@@ -526,6 +525,14 @@ def enforce_comm_ordering_for_fsdp(
                     or (
                         isinstance(x, scheduler.ExternKernelSchedulerNode)
                         and x.node.op_overload in allowed_ops  # type: ignore[union-attr]
+                    )
+                    or (
+                        isinstance(x, scheduler.SchedulerNode)
+                        and isinstance(x.node, ir.ComputedBuffer)
+                        and isinstance(x.node.data, ir.Pointwise)
+                        and len(x.node.data.origins) == 1
+                        and next(iter(x.node.data.origins)).target
+                        is torch.ops.fsdp.copy_.default
                     )
                 ),
             )

@@ -575,10 +575,10 @@ test_single_dynamo_benchmark() {
     fi
 
     if [[ "${TEST_CONFIG}" == *_avx2* ]]; then
-      TEST_CONFIG=${TEST_CONFIG::-5}
+      TEST_CONFIG=${TEST_CONFIG//_avx2/}
     fi
     if [[ "${TEST_CONFIG}" == *_avx512* ]]; then
-      TEST_CONFIG=${TEST_CONFIG::-7}
+      TEST_CONFIG=${TEST_CONFIG//_avx512/}
     fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
@@ -698,11 +698,14 @@ test_inductor_get_core_number() {
 
 test_inductor_set_cpu_affinity(){
   #set jemalloc
+  JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
+  export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
+  export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
+
   if [[ "${TEST_CONFIG}" != *aarch64* ]]; then
-    JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
+    # Use Intel OpenMP for x86
     IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
-    export LD_PRELOAD="$JEMALLOC_LIB":"$IOMP_LIB":"$LD_PRELOAD"
-    export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
+    export LD_PRELOAD="$IOMP_LIB":"$LD_PRELOAD"
     export KMP_AFFINITY=granularity=fine,compact,1,0
     export KMP_BLOCKTIME=1
   fi
@@ -1477,8 +1480,6 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.8-gcc11-build ]]; then
-      # Temporarily skip test_inductor_aoti due to https://github.com/pytorch/pytorch/issues/130311
-      test_inductor_aoti
       test_inductor_distributed
     fi
   fi
