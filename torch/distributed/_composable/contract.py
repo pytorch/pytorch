@@ -29,9 +29,13 @@ class RegistryItem:
 def contract(state_cls: Type[_State] = _State):
     r"""
     Decorate a function as a composable distributed API, where the first
-    argument of the function must be an :class:`nn.Module` instance. The
-    decorator verifies that the wrapped function does not modify parameter,
-    buffer or sub-module fully-qualified names (FQN).
+    argument of the function must be an :class:`nn.Module` instance or sequence
+    of :class:`nn.Module` instances.
+
+    The decorator verifies that the decorated function does not modify
+    fully-qualified names (FQNs) for parameters, buffers, or modules. The
+    decorated function can return different module instances than the input
+    modules; the FQN invariant will be enforced following the input order.
 
     When a function ``func`` is decorated by ``@contract()``, a
     ``.state(module: nn.Module)`` method will be installed to the decorated
@@ -43,7 +47,7 @@ def contract(state_cls: Type[_State] = _State):
         >>> import torch.nn as nn
         >>>
         >>> class MyModel(nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>         super().__init__()
         >>>         self.l1 = nn.Linear(10, 10)
         >>>         self.l2 = nn.Linear(10, 10)
@@ -74,51 +78,50 @@ def contract(state_cls: Type[_State] = _State):
             if isinstance(module, nn.Module):
                 modules = [module]
             else:
-                # Special case: only FSDP permits a sequence of modules, in
-                # which case we only want to insert the state object on the
-                # root modules (i.e. those without a parent) with respect to
-                # the passed-in modules.
+                # If the user passes a sequence of modules, then we assume that
+                # we only need to insert the state object on the root modules
+                # (i.e. those without a parent) among the passed-in modules.
                 modules = _get_root_modules(list(module))
             state = state_cls()  # shared across all modules
             registry_item = RegistryItem()  # shared across all modules
-            module_to_orig_named_params: Dict[nn.Module, Dict[str, nn.Parameter]] = {}
-            module_to_orig_named_buffers: Dict[nn.Module, Dict[str, torch.Tensor]] = {}
-            module_to_orig_named_modules: Dict[nn.Module, Dict[str, nn.Module]] = {}
+
+            # `func` is allowed to return different module instances than the
+            # input modules as long as FQNs are preserved following the input
+            # module order
+            all_orig_named_params: List[Dict[str, nn.Parameter]] = []
+            all_orig_named_buffers: List[Dict[str, torch.Tensor]] = []
+            all_orig_named_modules: List[Dict[str, nn.Module]] = []
+
             for module in modules:
                 default_all_state: Dict[Callable, _State] = OrderedDict()
                 default_registry: Dict[str, RegistryItem] = OrderedDict()
                 all_state: Dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
                     STATE_KEY, default_all_state
                 )
-                assert isinstance(
-                    all_state, dict
-                ), "Distributed composable API states corrupted"
+                if not isinstance(all_state, dict):
+                    raise AssertionError(
+                        f"Distributed composable API states corrupted: {all_state}"
+                    )
                 registry: Dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
                     REGISTRY_KEY, default_registry
                 )
-                assert isinstance(
-                    registry, dict
-                ), "Distributed composable API registry corrupted"
-                # Make sure that func has not been applied to the module yet
-                assert func not in all_state and func.__name__ not in registry, (
-                    "Each distinct composable distributed API can only be applied to a "
-                    f"module once. {func.__name__} has already been applied to the "
-                    f"following module:\n{module}"
-                )
+                if not isinstance(registry, dict):
+                    raise AssertionError(
+                        f"Distributed composable API registry corrupted: {registry}"
+                    )
+                if func in all_state or func.__name__ in registry:
+                    raise AssertionError(
+                        "Each distinct composable distributed API can only be applied to a "
+                        f"module once. {func.__name__} has already been applied to the "
+                        f"following module:\n{module}"
+                    )
                 all_state.setdefault(func, state)
                 registry.setdefault(func.__name__, registry_item)
 
-                module_to_orig_named_params[module] = OrderedDict(
-                    module.named_parameters()
-                )
-                module_to_orig_named_buffers[module] = OrderedDict(
-                    module.named_buffers(remove_duplicate=False)
-                )
-                module_to_orig_named_modules[module] = OrderedDict(
-                    module.named_modules(remove_duplicate=False)
-                )
+                all_orig_named_params.append(OrderedDict(module.named_parameters()))
+                all_orig_named_buffers.append(OrderedDict(module.named_buffers()))
+                all_orig_named_modules.append(OrderedDict(module.named_modules()))
 
-            # `func` should return the same type as the input module/modules
             updated = func(inp_module, *args, **kwargs)
             if updated is None:
                 updated = inp_module
@@ -127,18 +130,21 @@ def contract(state_cls: Type[_State] = _State):
             else:
                 updated_modules = _get_root_modules(list(inp_module))
 
-            module_to_new_named_params: Dict[nn.Module, Dict[str, nn.Parameter]] = {}
-            module_to_new_named_buffers: Dict[nn.Module, Dict[str, torch.Tensor]] = {}
-            module_to_new_named_modules: Dict[nn.Module, Dict[str, nn.Module]] = {}
+            all_new_named_params: List[Dict[str, nn.Parameter]] = []
+            all_new_named_buffers: List[Dict[str, torch.Tensor]] = []
+            all_new_named_modules: List[Dict[str, nn.Module]] = []
             for module in updated_modules:
-                module_to_new_named_params[module] = OrderedDict(
-                    module.named_parameters()
-                )
-                module_to_new_named_buffers[module] = OrderedDict(
-                    module.named_buffers(remove_duplicate=False)
-                )
-                module_to_new_named_modules[module] = OrderedDict(
-                    module.named_modules(remove_duplicate=False)
+                all_new_named_params.append(OrderedDict(module.named_parameters()))
+                all_new_named_buffers.append(OrderedDict(module.named_buffers()))
+                all_new_named_modules.append(OrderedDict(module.named_modules()))
+
+            num_orig_modules = len(all_orig_named_modules)
+            num_new_modules = len(all_new_named_modules)
+            if num_orig_modules != num_new_modules:
+                raise AssertionError(
+                    f"{func.__name__} should return the same number of modules as input modules"
+                    f"Inputs: {num_orig_modules} modules\n"
+                    f"Outputs: {num_new_modules} modules"
                 )
 
             def check_fqn(orig_fqns: List[str], new_fqns: List[str], check_key: str):
@@ -151,10 +157,9 @@ def contract(state_cls: Type[_State] = _State):
                 if len(orig_only) or len(new_only):
                     raise RuntimeError(
                         f"{check_key}"
-                        "Composable distributed API implementations cannot modify "
-                        "FQNs.\n"
-                        f"Only in original FQNs: {orig_only},\n"
-                        f"Only in new FQNs: {new_only}"
+                        "Composable distributed API implementations cannot modify FQNs.\n"
+                        f"FQNs only in original: {orig_only}\n"
+                        f"FQNs only in new: {new_only}"
                     )
                 else:
                     raise RuntimeError(
@@ -165,33 +170,30 @@ def contract(state_cls: Type[_State] = _State):
                         f"New FQNs: {new_only}"
                     )
 
-            if set(module_to_new_named_modules.keys()) != set(
-                module_to_orig_named_modules.keys()
+            for orig_named_params, new_named_params in zip(
+                all_orig_named_params, all_new_named_params
             ):
-                raise RuntimeError(
-                    f"{func.__name__} should not change the module structure.\n"
-                    f"Before: {[str(type(m)) for m in module_to_orig_named_modules]}\n"
-                    f"After: {[str(type(m)) for m in module_to_new_named_modules]}"
-                )
-            for module in module_to_new_named_modules:
                 check_fqn(
-                    list(module_to_orig_named_params[module].keys()),
-                    list(module_to_new_named_params[module].keys()),
-                    "Check parameters, ",
+                    list(orig_named_params.keys()),
+                    list(new_named_params.keys()),
+                    "Checking parameters: ",
                 )
+            for orig_named_buffers, new_named_buffers in zip(
+                all_orig_named_buffers, all_new_named_buffers
+            ):
                 check_fqn(
-                    list(module_to_orig_named_buffers[module].keys()),
-                    list(module_to_new_named_buffers[module].keys()),
-                    "Check buffers, ",
+                    list(orig_named_buffers.keys()),
+                    list(new_named_buffers.keys()),
+                    "Checking buffers: ",
                 )
+            for orig_named_modules, new_named_modules in zip(
+                all_orig_named_modules, all_new_named_modules
+            ):
                 check_fqn(
-                    list(module_to_orig_named_modules[module].keys()),
-                    list(module_to_new_named_modules[module].keys()),
-                    "Check modules, ",
+                    list(orig_named_modules.keys()),
+                    list(new_named_modules.keys()),
+                    "Checking modules: ",
                 )
-
-            # TODO: a stricter verification should also reject changing module
-            # types and monkey-patching forward() method implementations.
 
             # TODO: verify that installed distributed paradigms are compatible with
             # each other.

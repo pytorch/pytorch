@@ -11,14 +11,15 @@ from test_cuda import (  # noqa: F401
 )
 
 import torch
-
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+
 from tools.stats.import_test_stats import get_disabled_tests
+
 
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))

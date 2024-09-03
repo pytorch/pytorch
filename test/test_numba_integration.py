@@ -3,7 +3,6 @@
 import unittest
 
 import torch
-
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_cuda import (
     TEST_CUDA,
@@ -11,6 +10,7 @@ from torch.testing._internal.common_cuda import (
     TEST_NUMBA_CUDA,
 )
 from torch.testing._internal.common_utils import TEST_NUMPY
+
 
 if TEST_NUMPY:
     import numpy

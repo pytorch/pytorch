@@ -107,8 +107,8 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-focal-py3_8-clang9-xla / build
-  - pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
+  - pull / linux-focal-py3_9-clang9-xla / build
+  - pull / linux-focal-py3_9-clang9-xla / test (xla, 1, 1, linux.12xlarge)
 
 - name: Documentation
   patterns:
@@ -282,9 +282,11 @@
   - torch/_C/_distributed*
   - torch/csrc/distributed/**
   - torch/testing/_internal/distributed/**
+  - torch/multiprocessing/**
   - test/distributed/**
   - test/cpp/dist_autograd/**
   - test/cpp/rpc/**
+  - test/*multiprocessing*
   approved_by:
   - wconstab
   - mrshenli
@@ -523,6 +525,13 @@
   - Skylion007
   - ngimel
   - peterbell10
+  - eqy
+  - jansel
+  - jeffdaily
+  - eellison
+  - anijain2305
+  - bdhirsh
+  - zou3519
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -537,6 +546,8 @@
   - ezyang
   - dzhulgakov
   - malfet
+  - albanD
+  - ptrblck
   mandatory_checks_name:
   - EasyCLA
   - Lint

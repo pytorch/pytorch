@@ -9,10 +9,9 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
-from torch._dynamo.testing import skipIfNotPy311
-
+from torch._dynamo.testing import empty_line_normalizer, skipIfNotPy311
+from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
@@ -24,6 +23,7 @@ from torch.testing._internal.logging_utils import (
     make_logging_test,
     make_settings_test,
 )
+
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
@@ -189,6 +189,15 @@ due to:
 Traceback (most recent call last):
   File "test_logging.py", line N, in throw
     raise AssertionError
+torch._inductor.exc.LoweringException: AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
 torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
 LoweringException: AssertionError:
   target: aten.round.default
@@ -204,7 +213,7 @@ LoweringException: AssertionError:
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.Linear(1024, 1024),
@@ -622,6 +631,18 @@ print("arf")
             record_str,
         )
 
+    @make_logging_test(cudagraph_static_inputs=True)
+    def test_cudagraph_static_inputs(self, records):
+        @torch.compile(mode="reduce-overhead")
+        def fn(x):
+            return x + 1
+
+        x = torch.ones(2, 2)
+        torch._dynamo.mark_static_address(x)
+        fn(x)
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 4)
+
     @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
@@ -648,10 +669,18 @@ print("arf")
     def test_logs_out(self):
         import tempfile
 
-        with tempfile.NamedTemporaryFile() as tmp:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            file_path = _as_posix_path(tmp.name)
+            """
+            NamedTemporaryFile will include a file open operation.
+            On Windowsm the file is opened by NamedTemporaryFile, the
+            following run_process_no_exception can't access a opened file.
+            And then, raise a PermissionError: [Errno 13] Permission denied: [file_path]
+            """
+            tmp.close()
             env = dict(os.environ)
             env["TORCH_LOGS"] = "dynamo"
-            env["TORCH_LOGS_OUT"] = tmp.name
+            env["TORCH_LOGS_OUT"] = file_path
             stdout, stderr = self.run_process_no_exception(
                 """\
 import torch
@@ -663,9 +692,18 @@ fn(torch.randn(5))
                 """,
                 env=env,
             )
-            with open(tmp.name) as fd:
+            with open(
+                file_path, encoding="utf-8"
+            ) as fd:  # encoding file to UTF-8 for Windows.
                 lines = fd.read()
-                self.assertEqual(lines, stderr.decode("utf-8"))
+                fd.close()
+                os.remove(
+                    file_path
+                )  # Delete temp file manually, due to setup NamedTemporaryFile as delete=False.
+                self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
+                    empty_line_normalizer(lines),
+                    empty_line_normalizer(stderr.decode("utf-8")),
+                )
 
 
 # single record tests
@@ -677,6 +715,7 @@ exclusions = {
     "fusion",
     "overlap",
     "aot_graphs",
+    "aot_graphs_effects",
     "post_grad_graphs",
     "compiled_autograd",
     "compiled_autograd_verbose",
@@ -700,6 +739,9 @@ exclusions = {
     "sym_node",
     "export",
     "trace_shape_events",
+    "cudagraph_static_inputs",
+    "benchmarking",
+    "loop_ordering",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

@@ -498,10 +498,10 @@ static void gemm_batched_mkl_impl(
 
 template <typename scalar_t>
 using is_blas_library_type = std::integral_constant<bool,
-    std::is_same<scalar_t, double>::value ||
-    std::is_same<scalar_t, float>::value ||
-    std::is_same<scalar_t, c10::complex<double>>::value ||
-    std::is_same<scalar_t, c10::complex<float>>::value>;
+    std::is_same_v<scalar_t, double> ||
+    std::is_same_v<scalar_t, float> ||
+    std::is_same_v<scalar_t, c10::complex<double>> ||
+    std::is_same_v<scalar_t, c10::complex<float>>>;
 
 template <typename scalar_t>
 void gemm_batched_generic(

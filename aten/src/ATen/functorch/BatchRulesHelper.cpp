@@ -34,7 +34,7 @@ int64_t numelWithoutBatchDim(const Tensor& tensor, std::optional<int64_t> maybe_
   return tensor.numel() / tensor.size(*maybe_batch_dim);
 }
 
-optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val) {
+std::optional<int64_t> valIfNonempty(std::optional<int64_t> maybe_empty, int64_t new_val) {
   if (maybe_empty.has_value()) {
     return new_val;
   }
@@ -43,7 +43,7 @@ optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val) 
 
 int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical_dim) {
   // NB: assumes the batch dim is at the front of the tensor
-  std::optional<int64_t> bdim = has_batch_dim ? std::optional<int64_t>(0) : nullopt;
+  std::optional<int64_t> bdim = has_batch_dim ? std::optional<int64_t>(0) : std::nullopt;
   auto rank = rankWithoutBatchDim(tensor, bdim);
   auto wrapped_dim = maybe_wrap_dim(logical_dim, rank);
   if (has_batch_dim) {
@@ -54,7 +54,7 @@ int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical
 
 VmapDimVector getPhysicalDims(const Tensor& tensor, bool has_batch_dim, IntArrayRef logical_dims) {
   // NB: assumes the batch dim is at the front of the tensor
-  std::optional<int64_t> bdim = has_batch_dim ? std::optional<int64_t>(0) : nullopt;
+  std::optional<int64_t> bdim = has_batch_dim ? std::optional<int64_t>(0) : std::nullopt;
   auto rank = rankWithoutBatchDim(tensor, bdim);
   VmapDimVector result;
   result.reserve(logical_dims.size());

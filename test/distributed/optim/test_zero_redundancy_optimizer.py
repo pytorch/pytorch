@@ -17,6 +17,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -39,6 +40,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 try:
     import torchvision
@@ -857,8 +859,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 torch.nn.Linear(HIDDEN_DIM, HIDDEN_DIM),
                 torch.nn.Linear(HIDDEN_DIM, OUTPUT_DIM),
             ).to(self.device)
-            model.register_buffer(
-                "test_buffer",
+            model.test_buffer = torch.nn.Buffer(
                 torch.ones((1), device=self.device) * self.rank,
             )
             # Define models/optimizers for DDP with ZeRO and DDP with local
@@ -1065,7 +1066,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     p.grad = grad.detach().clone().to(device)
 
         class _GradientSetter(Joinable):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def join_hook(self, **kwargs):
@@ -1154,7 +1155,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 return self.net1(x)
 
         class LocalModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net0 = torch.nn.Linear(10, 10)
                 self.relu = torch.nn.ReLU()

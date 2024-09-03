@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import weakref
 from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
@@ -85,9 +86,12 @@ class _ReplicateState(_State):
         device_mesh = kwargs.get("device_mesh", None)
         self.module = module
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
+        for submodule in module.modules():
+            if _is_fully_sharded(submodule):
+                ignored_params.update(submodule.parameters())
         from torch.distributed.tensor.parallel.ddp import _localize_dtensor
 
-        _localize_dtensor(module)
+        _localize_dtensor(module, ignored_params=ignored_params)
         self._collect_params(module, ignored_modules, ignored_params)
 
         if "device_id" in kwargs:
@@ -214,7 +218,10 @@ def replicate(
     if device_mesh is not None:
         from torch.distributed.device_mesh import _mesh_resources
 
-        if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+        root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+        # if a root mesh is not the same as device_mesh,
+        # meaning the device_mesh is sliced out from the root mesh.
+        if root_mesh != device_mesh:
             # TODO: This is a temporary work around to enable DDP + TP.
             # We should do the logic in DDP so that the 2D implementation is
             # sound and the state_dict works out of the box.

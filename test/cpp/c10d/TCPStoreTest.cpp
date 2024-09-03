@@ -166,11 +166,11 @@ TEST(TCPStoreTest, testHelperUV) {
 }
 
 TEST(TCPStoreTest, testHelperPrefix) {
-  testHelper(false, "testPrefix");
+  testHelper(false, "testPrefixNoUV");
 }
 
 TEST(TCPStoreTest, testHelperPrefixUV) {
-  testHelper(true, "testPrefix");
+  testHelper(true, "testPrefixUV");
 }
 
 TEST(TCPStoreTest, testCleanShutdown) {

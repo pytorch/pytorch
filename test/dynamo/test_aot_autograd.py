@@ -6,7 +6,6 @@ from textwrap import dedent
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
@@ -16,6 +15,7 @@ from torch._functorch.aot_autograd import _aot_export_function, create_functiona
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
@@ -26,6 +26,10 @@ def maybe_dupe_op(x):
         return y, y
     else:
         return y, z
+
+
+def is_dynamic_shape_test(test_name):
+    return test_name.endswith("_dynamic_shapes")
 
 
 aten = torch.ops.aten
@@ -39,7 +43,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.self_mod_model_lstm_lstm = torch.nn.LSTM(
                     64, 64, num_layers=2, bidirectional=True
@@ -144,7 +148,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
     def test_call_fn_with_non_const_inputs_aot_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
@@ -430,7 +434,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -483,7 +487,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         z = None
 
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -520,7 +524,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg_list(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -570,7 +574,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -726,7 +730,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             from torch._functorch.aot_autograd import aot_module_simplified
 
             class WrapperModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.original = input_mod
                     self.submod = aot_module_simplified(input_mod, args, nop)
@@ -771,7 +775,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
     def test_aot_sequence_nr(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
@@ -838,7 +842,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Walk all the nodes in fx graph.
         # Write the resulting ops to a table
         min_seq_nr = -1
-        seq_table = "SeqNr|OrigAten|SrcFn\n"
+        seq_table = "SeqNr|OrigAten|SrcFn|FwdSrcFn\n"
         for node in fx_g.graph.nodes:
             if "call_" in node.op and "getitem" not in str(node.target):
                 seq_nr = node.meta.get("seq_nr", -1)
@@ -853,51 +857,59 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                     mod_name = source_fn_stack[-1][0]
                 # Make all seq_nr relative so it starts at 0
                 seq_nr = seq_nr - min_seq_nr
-                seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
+                # For backward nodes, also test that metadata from the corresponding
+                # forward node is copied over.
+                fwd_source_fn_stack = node.meta.get("fwd_source_fn_stack", [])
+                fwd_mod_name = ""
+                if len(fwd_source_fn_stack):
+                    fwd_mod_name = fwd_source_fn_stack[-1][0]
+                seq_table = (
+                    seq_table + f"{seq_nr}|{orig_aten}|{mod_name}|{fwd_mod_name}\n"
+                )
 
         self.maxDiff = None
         self.assertExpectedInline(
             seq_table,
             dedent(
                 """\
-SeqNr|OrigAten|SrcFn
-0|aten.convolution.default|l__self___conv1
-0|aten.add.Tensor|l__self___bn1
-1|aten._native_batch_norm_legit_functional.default|l__self___bn1
-2|aten.relu.default|l__self___relu1
-2|aten.detach.default|l__self___relu1
-2|aten.detach.default|l__self___relu1
-3|aten.add.Tensor|add
-4|aten.view.default|flatten
-5|aten.view.default|l__self___fc1
-6|aten.t.default|l__self___fc1
-7|aten.addmm.default|l__self___fc1
-8|aten.view.default|l__self___fc1
-9|aten.sub.Tensor|l__self___loss_fn
-10|aten.abs.default|l__self___loss_fn
-11|aten.mean.default|l__self___loss_fn
-11|aten.ones_like.default|
-11|aten.expand.default|
-11|aten.div.Scalar|
-10|aten.sgn.default|
-10|aten.mul.Tensor|
-8|aten.view.default|
-7|aten.t.default|
-7|aten.mm.default|
-7|aten.t.default|
-7|aten.mm.default|
-7|aten.t.default|
-7|aten.sum.dim_IntList|
-7|aten.view.default|
-6|aten.t.default|
-5|aten.view.default|
-4|aten.view.default|
-2|aten.detach.default|
-2|aten.detach.default|
-2|aten.threshold_backward.default|
-1|aten.native_batch_norm_backward.default|
-0|aten.convolution_backward.default|
-11|aten.add.Tensor|
+SeqNr|OrigAten|SrcFn|FwdSrcFn
+0|aten.convolution.default|l__self___conv1|
+0|aten.add.Tensor|l__self___bn1|
+1|aten._native_batch_norm_legit_functional.default|l__self___bn1|
+2|aten.relu.default|l__self___relu1|
+2|aten.detach.default|l__self___relu1|
+2|aten.detach.default|l__self___relu1|
+3|aten.add.Tensor|add|
+4|aten.view.default|flatten|
+5|aten.view.default|l__self___fc1|
+6|aten.t.default|l__self___fc1|
+7|aten.addmm.default|l__self___fc1|
+8|aten.view.default|l__self___fc1|
+9|aten.sub.Tensor|l__self___loss_fn|
+10|aten.abs.default|l__self___loss_fn|
+11|aten.mean.default|l__self___loss_fn|
+11|aten.ones_like.default||l__self___loss_fn
+11|aten.expand.default||l__self___loss_fn
+11|aten.div.Scalar||l__self___loss_fn
+10|aten.sgn.default||l__self___loss_fn
+10|aten.mul.Tensor||l__self___loss_fn
+8|aten.view.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.mm.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.mm.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.sum.dim_IntList||l__self___fc1
+7|aten.view.default||l__self___fc1
+6|aten.t.default||l__self___fc1
+5|aten.view.default||l__self___fc1
+4|aten.view.default||
+2|aten.detach.default||l__self___relu1
+2|aten.detach.default||l__self___relu1
+2|aten.threshold_backward.default||l__self___relu1
+1|aten.native_batch_norm_backward.default||l__self___bn1
+0|aten.convolution_backward.default||l__self___conv1
+11|aten.add.Tensor||l__self___loss_fn
 """
             ),
         )
@@ -949,7 +961,7 @@ SeqNr|OrigAten|SrcFn
 
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
@@ -1189,6 +1201,216 @@ SeqNr|OrigAten|SrcFn
             fn(x)
         with self.assertRaises(Exception):
             opt_fn(x_opt)
+
+    @torch._functorch.config.patch(donated_buffer=True)
+    def test_donated_buffer1(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        @torch.compile()
+        def relu(x):
+            return torch.nn.functional.relu(x)
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            relu(torch.rand([3, 3], requires_grad=True)).sum().backward()
+
+        if is_dynamic_shape_test(self._testMethodName):
+            # an extra symint exists
+            expected_msg = "bw_donated_idxs=[1]"
+        else:
+            expected_msg = "bw_donated_idxs=[0]"
+
+        # le is a donated buffer from relu
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer2(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        # we will re-use the graph for g across f1 and f2
+        @torch.compile()
+        def g(activation, param2):
+            return torch.matmul(activation, param2)
+
+        def f(inp, param1, param2):
+            activation = inp + param1
+            return g(activation, param2)
+
+        inp = torch.ones(4, 4)
+        param1 = torch.ones(4, 4, requires_grad=True)
+        param2 = torch.ones(4, 4, requires_grad=True)
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            f(inp, param1, param2).sum().backward()
+
+        FileCheck().check("bw_donated_idxs=[]").run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer3(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        # we will re-use the graph for g across f1 and f2
+        @torch.compile()
+        def g(activation, param2):
+            return torch.matmul(activation, param2)
+
+        def f(inp, param1, param2):
+            # exp saves it output (the activation) for bw
+            activation = torch.exp(inp + param1)
+            return g(activation, param2)
+
+        inp = torch.ones(4, 4)
+        param1 = torch.ones(4, 4, requires_grad=True)
+        param2 = torch.ones(4, 4, requires_grad=True)
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            f(inp, param1, param2).sum().backward()
+
+        FileCheck().check("bw_donated_idxs=[]").run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer4(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([2, 2]))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return torch.nn.functional.relu(x) + self.param
+
+        mod = Mod()
+        mod = torch.compile(mod)
+
+        inp = torch.ones([2, 2], requires_grad=True)
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            mod(inp).sum().backward()
+
+        # Forward graph:
+        #   %primals_1 : [num_users=1] = placeholder[target=primals_1]
+        #   %primals_2 : [num_users=1] = placeholder[target=primals_2]
+        #   %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%primals_2,), kwargs = {})
+        #   %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%relu, %primals_1), kwargs = {})
+        #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
+        #   return [add, le]
+        #
+        # `le` is a donated buffer
+        FileCheck().check("bw_donated_idxs=[0]").run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer5(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        @torch.compile()
+        def f(x, z):
+            y = x.view(2, 3)
+            z = torch.nn.functional.relu(z)
+            return torch.mm(y, x) + z
+
+        inp = [
+            torch.rand([3, 2], requires_grad=True),
+            torch.rand([2, 2], requires_grad=True),
+        ]
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            f(*inp).sum().backward()
+
+        # Forward graph:
+        #   %primals_1 : [num_users=3] = placeholder[target=primals_1]
+        #   %primals_2 : [num_users=1] = placeholder[target=primals_2]
+        #   %view : [num_users=1] = call_function[target=torch.ops.aten.view.default](args = (%primals_1, [2, 3]), kwargs = {})
+        #   %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%primals_2,), kwargs = {})
+        #   %mm : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%view, %primals_1), kwargs = {})
+        #   %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mm, %relu), kwargs = {})
+        #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
+        #   return [add, primals_1, le]
+        #
+        # `le` is a donated buffer but primals_1 is not.
+        FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph1(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
+        mod = torch.compile(Mod())
+        for _ in range(5):
+            mod(inp).sum().backward()
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph2(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
+        mod = torch.compile(Mod())
+        out = mod(inp).sum()
+        for _ in range(5):
+            out.backward(retain_graph=True)
+        out.backward()
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph3(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
+        mod = torch.compile(Mod())
+        mod(inp).sum().backward(create_graph=True)
+        out = mod(inp).sum()
+        for _ in range(5):
+            out.backward(retain_graph=True)
+        out.backward()
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph4(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
+        mod = torch.compile(Mod())
+        mod(inp).sum().backward()
+        out = mod(inp).sum()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"This backward function was compiled with non-empty donated "
+            r"buffers which requires create_graph=False and retain_graph=False. "
+            r"Please keep backward\(create_graph=False, retain_graph=False\) "
+            r"across all backward\(\) function calls, or set "
+            r"torch._functorch.config.donated_buffer=False to disable "
+            r"donated buffer.",
+        ):
+            out.backward(retain_graph=True)
 
 
 if __name__ == "__main__":

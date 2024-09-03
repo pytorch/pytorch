@@ -9,6 +9,7 @@ from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.uniform import Uniform
 from torch.distributions.utils import broadcast_all, euler_constant
 
+
 __all__ = ["Gumbel"]
 
 

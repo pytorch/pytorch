@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, cast, Dict
 from urllib.request import urlopen
 
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -20,7 +21,6 @@ def get_disabled_issues() -> list[str]:
     return issue_numbers
 
 
-SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
 ADDITIONAL_CI_FILES_FOLDER = Path(".additional_ci_files")
 TEST_TIMES_FILE = "test-times.json"
@@ -74,17 +74,6 @@ def fetch_and_cache(
             print(f"Could not download {url} because: {e}.")
     print(f"All retries exhausted, downloading {url} failed.")
     return {}
-
-
-def get_slow_tests(
-    dirpath: str, filename: str = SLOW_TESTS_FILE
-) -> dict[str, float] | None:
-    url = "https://ossci-metrics.s3.amazonaws.com/slow-tests.json"
-    try:
-        return fetch_and_cache(dirpath, filename, url, lambda x: x)
-    except Exception:
-        print("Couldn't download slow test set, leaving all tests enabled...")
-        return {}
 
 
 def get_test_times() -> dict[str, dict[str, float]]:

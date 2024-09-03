@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import argparse
 import inspect
 import sys
@@ -7,12 +8,12 @@ import numpy as np
 import tabulate
 
 import torch
-
 import torch._inductor
 from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import timed
+
 
 aten = torch.ops.aten
 

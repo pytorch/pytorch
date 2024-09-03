@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 
 
 class ToyModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)])
         self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)])
@@ -85,10 +85,8 @@ class TestContract(TestCase):
 
         model = ToyModel()
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "wrap_module should not change the module structure",
-        ):
+        regex = "Checking parameters: Composable distributed API implementations cannot modify FQNs."
+        with self.assertRaisesRegex(RuntimeError, regex):
             wrap_module(model.seq1)
 
     @skipIfTorchDynamo("Dynamo does not support the state key")

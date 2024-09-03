@@ -18,11 +18,14 @@ The MTIA backend is implemented out of the tree, only interfaces are be defined 
     init
     is_available
     is_initialized
+    memory_stats
     set_device
     set_stream
     stream
     synchronize
     device
+    set_rng_state
+    get_rng_state
     DeferredMtiaCallError
 
 Streams and events
