@@ -3,6 +3,7 @@
 import dataclasses
 import functools
 import logging
+import random
 from importlib import import_module
 from typing import Any, Callable, List, Optional, Type
 
@@ -220,19 +221,21 @@ def test_subclasses(gm, inputs, **kwargs):
     import copy
 
     test_gm = copy.deepcopy(gm)
-    test_inputs = copy.deepcopy(inputs)
+    test_inputs = copy.copy(inputs)
 
     compiler_fn = aot_eager
 
     # Verify original inputs
     compiler_fn(test_gm, test_inputs)
 
-    MAX_NUM_TEST_INPUTS: int = 3
+    MAX_NUM_TEST_INPUTS: int = 10
 
+    from torch.testing._internal.common_subclass import F32_QI32QuantRWTensor
     from torch.testing._internal.two_tensor import TwoTensor
 
     TRANSFORMATIONS: List[Callable[[Tensor], Type]] = [
         (lambda t: TwoTensor(t, t), True),
+        (lambda t: F32_QI32QuantRWTensor.from_src(t), True),
         (lambda t: t, False),
     ]
 
@@ -251,16 +254,12 @@ def test_subclasses(gm, inputs, **kwargs):
             return gm
 
     def apply_transformation(inps, transform_tensor_subclasses: bool = False):
-        import random
-
-        random.seed(42)
         for j in range(len(inps)):
             inp = inps[j]
             if _is_tensor(inp) and (
                 not transform_tensor_subclasses or not _is_tensor_subclass(inp)
             ):
-                tt = TRANSFORMATIONS[random.randrange(0, len(TRANSFORMATIONS))]
-
+                tt = random.choice(TRANSFORMATIONS)
                 test_inputs[j] = tt[0](inp)
                 if tt[1]:
                     return True

@@ -3,6 +3,8 @@
 import torch
 from copy import deepcopy
 from torch.utils._pytree import tree_map
+import torch.utils._pytree as pytree
+
 
 # TODO: Move LoggingTensor here.
 from torch.testing._internal.logging_tensor import LoggingTensor
@@ -216,3 +218,154 @@ subclass_db = {
         closed_under_ops=False  # sparse semantics
     ),
 }
+
+class SubclassWithTensorFactory(torch.Tensor):
+    @staticmethod
+    def __new__(cls, src):
+        shape = src.shape
+        kwargs = {}
+        kwargs["strides"] = src.stride()
+        kwargs["storage_offset"] = src.storage_offset()
+        kwargs["device"] = src.device
+        kwargs["layout"] = src.layout
+        kwargs["requires_grad"] = src.requires_grad
+        kwargs["dtype"] = src.dtype
+        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+        return out
+
+    def __init__(self, src):
+        self.src = src
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}"
+
+    def __tensor_flatten__(self):
+        return ["src"], None
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, meta, outer_size, outer_stride):
+        src = inner_tensors["src"]
+        return cls(src)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+
+        def _fn(x):
+            return x.src * torch.ones(x.src.shape) if x.src.dtype == torch.float32 else x.src
+
+        _args = pytree.tree_map_only(cls, _fn, args)
+        _kwargs = pytree.tree_map_only(cls, _fn, kwargs)
+
+        _out = func(*_args, **_kwargs)
+
+        _out_flat, _out_spec = pytree.tree_flatten(_out)
+
+        out_flat = [cls(o) if isinstance(o, torch.Tensor) else o for o in _out_flat]
+        return pytree.tree_unflatten(out_flat, _out_spec)
+
+
+def quant_rw(src, scale, bias, dtype): # scale, bias are tensors
+    assert src.ndim == 2
+    assert scale.ndim == 1
+    assert bias.ndim == 1
+    assert src.size(0) == scale.size(0)
+    assert src.size(0) == bias.size(0)
+    b = bias.expand(src.size(1), src.size(0)).t()
+    s = scale.expand(src.size(1), src.size(0)).t()
+    sub = src - b
+    return (sub / s).to(dtype)
+
+
+class QuantRWTensorBase(torch.Tensor):
+    DTYPE = torch.int32
+    QDTYPE = torch.int8
+    @staticmethod
+    def __new__(cls, qdata, scale, bias):
+        assert (
+            qdata.dtype == cls.QDTYPE
+        )
+        src = qdata
+        shape = src.shape
+        kwargs = {}
+        kwargs["strides"] = src.stride()
+        kwargs["storage_offset"] = src.storage_offset()
+        kwargs["device"] = src.device
+        kwargs["layout"] = src.layout
+        kwargs["requires_grad"] = src.requires_grad
+        kwargs["dtype"] = cls.DTYPE
+        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+        return out
+
+    def __init__(self, qdata, scale, bias):
+        assert qdata.dtype == self.QDTYPE
+        assert qdata.size(0) == scale.size(0)
+        assert qdata.size(0) == bias.size(0)
+        assert scale.dtype == self.DTYPE
+        assert bias.dtype == self.DTYPE
+        assert scale.ndim == 1
+        assert bias.ndim == 1
+        self.qdata = qdata
+        self.scale = scale
+        self.bias = bias
+
+    @classmethod
+    def from_src(cls, src):
+        if isinstance(src, cls):
+            return src
+
+        if src.ndim == 0:
+            breakpoint()
+        scale = torch.ones((src.size(0), ), dtype=cls.DTYPE)
+        bias = torch.zeros((src.size(0), ), dtype=cls.DTYPE)
+        qdata = quant_rw(src, scale, bias, cls.QDTYPE)
+        return cls(qdata, scale, bias)
+
+    def dequant(self):
+        b = self.bias.expand(self.qdata.size(1), self.qdata.size(0)).t()
+        s = self.scale.expand(self.qdata.size(1), self.qdata.size(0)).t()
+        return (self.qdata * s + b).to(self.DTYPE)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}"
+
+    def __tensor_flatten__(self):
+        return ["qdata", "scale", "bias"], None
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, meta, outer_size, outer_stride):
+        assert meta is None
+        qdata, scale, bias = inner_tensors["qdata"], inner_tensors["scale"], inner_tensors["bias"]
+        return cls(qdata, scale, bias)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        args_dequant = pytree.tree_map_only(cls, lambda x: x.dequant(), args)
+        kwargs_dequant = pytree.tree_map_only(cls, lambda x: x.dequant(), kwargs)
+
+        raw_out = func(*args_dequant, **kwargs_dequant)
+        out_flat, spec = pytree.tree_flatten(raw_out)
+        res_out_flat = [
+            cls.from_src(o) if isinstance(o, torch.Tensor) and o.dtype == cls.DTYPE else o
+            for o in out_flat
+        ]
+        return pytree.tree_unflatten(res_out_flat, spec)
+
+
+class I32QuantRWTensor(QuantRWTensorBase):
+    DTYPE = torch.int16
+    QDTYPE = torch.int8
+
+class F32_QI32QuantRWTensor(QuantRWTensorBase):
+    DTYPE = torch.float32
+    QDTYPE = torch.int16
+    @classmethod
+    def from_src(cls, src):
+        scale = torch.full((src.size(0),), 1, dtype=cls.DTYPE)
+        bias = torch.full((src.size(0),), 1, dtype=cls.DTYPE)
+        qdata = quant_rw(src, scale, bias, dtype=cls.QDTYPE)
+        qqdata = I32QuantRWTensor.from_src(qdata)
+        return cls(qqdata, scale, bias)
