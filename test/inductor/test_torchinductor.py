@@ -7951,7 +7951,6 @@ class CommonTemplate:
         out = [torch.empty_like(x) for _ in range(2)]
         y = g(x)
 
-    @expectedFailureXPU
     def test_functionalize_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But
         # currently the plan is to introduce these operators at the partitioner
@@ -10614,8 +10613,8 @@ class CommonTemplate:
             with torch.no_grad():
                 self.common(fn, (inp,), check_lowp=False)
 
-            # Dynamic shapes invalidate this test case
-            if torch._dynamo.config.assume_static_by_default:
+            # Dynamic shapes and rocm invalidate this test case
+            if torch._dynamo.config.assume_static_by_default and not TEST_WITH_ROCM:
                 # For this test to be valid, Inductor must have changed the conv
                 # to be channels-last. If this assertion ever fails then we need
                 # a new test case.
@@ -11022,7 +11021,6 @@ class CommonTemplate:
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
 
-    @skipIfWindows(msg="torch._dynamo.exc.BackendCompilerFailed")  # TODO: FIX IT
     def test_randint_int64_mod(self):
         # This used to not compile due to a wrong return type of randint64_cpu
         # See https://github.com/pytorch/pytorch/issues/117435
@@ -11396,6 +11394,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
+    @instantiate_parametrized_tests
     class TritonCodeGenTests(TestCase):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -11899,6 +11898,20 @@ if HAS_GPU and not TEST_WITH_ASAN:
             # we are asserting that when inductor allocates this tensor,
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
+
+        @requires_gpu()
+        @parametrize("upcast_to_fp32", [False, True])
+        def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
+            @torch.compile
+            def func(a, b):
+                return a * b
+
+            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 2
+            with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                fp32_cast_in_code = "to(tl.float32)" in code
+                self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
