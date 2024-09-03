@@ -50,7 +50,8 @@ def _collect_and_set_constant_attrs(
 ) -> "ConstantAttrMap":
     # the exported module will store constants & non-persistent buffers such that
     # retracing treats them as persistent buffers, so we inform the constants lifting pass
-    # and overwrite the new graph signature using the previous program.
+    # and overwrite the new graph signature using the previous program. This is intended to only be used
+    # in run_decompositions where we still have access to original EP.
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
 
     constant_attrs = ConstantAttrMap()
@@ -93,7 +94,9 @@ def _overwrite_signature_for_non_persistent_buffers(
 def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> Dict[str, Any]:
     """
     Param/buffer metadata needs to be saved before lowering to aten IR
-    because aten IR lifts them, as a result, automatic preservation doesn't work
+    because aten IR lifts them, as a result, automatic preservation doesn't work.
+    This is intended to be called on the strict mode tracing right before lowering to
+    aten IR OR run_decomposition pass.
     """
     params_buffers_to_node_meta = {}
 
@@ -876,16 +879,16 @@ def _detect_fake_mode_from_gm(
             fake_val = node.meta["val"]
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_inps.append(fake_val)
-
-    if len(fake_inps) == 0:
-        for node in gm.graph.nodes:
-            if "example_value" in node.meta or "val" in node.meta:
-                fake_val = None
-                if "example_value" in node.meta:
-                    fake_val = node.meta["example_value"]
-                elif "val" in node.meta:
-                    fake_val = node.meta["val"]
-                if fake_val is not None and isinstance(fake_val, torch.Tensor):
-                    fake_vals.append(fake_val)
+        
+        elif len(fake_inps) == 0 and (
+            "example_value" in node.meta or "val" in node.meta
+        ):
+            fake_val = None
+            if "example_value" in node.meta:
+                fake_val = node.meta["example_value"]
+            elif "val" in node.meta:
+                fake_val = node.meta["val"]
+            if fake_val is not None and isinstance(fake_val, torch.Tensor):
+                fake_vals.append(fake_val)
 
     return detect_fake_mode(fake_inps + fake_vals)
