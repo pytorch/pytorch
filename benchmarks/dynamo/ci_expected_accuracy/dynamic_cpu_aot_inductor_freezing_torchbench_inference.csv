@@ -2,19 +2,11 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,eager_fail_to_run,0
-
-
-
-BERT_pytorch,fail_to_run,0
+BERT_pytorch,pass,0
 
 
 
 Background_Matting,pass_due_to_skip,0
-
-
-
-DALLE2_pytorch,fail_to_run,0
 
 
 
@@ -82,22 +74,6 @@ detectron2_fasterrcnn_r_50_fpn,fail_to_run,0
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_to_run,0
-
-
-
-detectron2_maskrcnn_r_101_fpn,fail_to_run,0
-
-
-
-detectron2_maskrcnn_r_50_c4,fail_to_run,0
-
-
-
-detectron2_maskrcnn_r_50_fpn,fail_to_run,0
-
-
-
 dlrm,fail_to_run,0
 
 
@@ -138,10 +114,6 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,fail_to_run,0
-
-
-
 hf_DistilBert,pass,0
 
 
@@ -154,19 +126,11 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_T5,pass,0
-
-
-
 hf_T5_base,pass,0
 
 
 
 hf_T5_large,pass_due_to_skip,0
-
-
-
-hf_Whisper,pass,0
 
 
 
@@ -182,23 +146,11 @@ llama,fail_to_run,0
 
 
 
-llama_v2_7b_16h,model_fail_to_load,0
-
-
-
-llava,model_fail_to_load,0
-
-
-
 maml,pass_due_to_skip,0
 
 
 
 maml_omniglot,pass,0
-
-
-
-mnasnet1_0,pass,0
 
 
 
@@ -214,15 +166,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,fail_to_run,0
-
-
-
 moondream,pass,0
-
-
-
-nanogpt,pass,0
 
 
 
@@ -282,27 +226,11 @@ resnext50_32x4d,pass,0
 
 
 
-sam,fail_to_run,0
-
-
-
-sam_fast,fail_to_run,0
-
-
-
-shufflenet_v2_x1_0,pass,0
-
-
-
 soft_actor_critic,fail_to_run,0
 
 
 
 squeezenet1_1,pass,0
-
-
-
-stable_diffusion_text_encoder,pass,0
 
 
 
@@ -342,11 +270,11 @@ timm_vovnet,pass,0
 
 
 
-torch_multimodal_clip,fail_to_run,0
+torch_multimodal_clip,pass,0
 
 
 
-tts_angular,fail_to_run,0
+tts_angular,pass,0
 
 
 
@@ -358,4 +286,4 @@ vision_maskrcnn,fail_to_run,0
 
 
 
-yolov3,pass,0
+yolov3,fail_to_run,0

@@ -1479,7 +1479,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.8-gcc11-build ]]; then
+    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.9-gcc11-build ]]; then
       test_inductor_distributed
     fi
   fi
