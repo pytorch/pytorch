@@ -154,10 +154,7 @@ class BaseTorchVariable(VariableTracker):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -579,6 +576,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
                 return TorchInGraphFunctionVariable(torch.add).call_function(
                     tx, [args[0], result], {}
+                )
+
+        @register(torch._foreach_lerp_)
+        def handle_inplace_foreach_lerp_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_lerp_inplace),
+                    args,
+                    kwargs,
+                )
+
+        @register(torch._foreach_pow)
+        def handle_foreach_pow_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            # In eager it's more performant to call item() from within the C op implementation
+            # in compile, it's more performant to not graph break.
+            if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_pow_scalar),
+                    args,
+                    kwargs,
                 )
 
         @register(torch._assert)
