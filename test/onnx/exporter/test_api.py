@@ -126,6 +126,17 @@ class TestExportAPIDynamo(common_utils.TestCase):
             },
         )
 
+    def test_auto_convert_all_axes_to_dynamic_shapes_with_dynamo_export(self):
+        os.environ["TORCH_ONNX_USE_EXPERIMENTAL_LOGIC"] = "1"
+        assert os.environ.get("TORCH_ONNX_USE_EXPERIMENTAL_LOGIC") == "1"
+
+        torch.onnx.dynamo_export(
+            SampleModelForDynamicShapes(),
+            torch.randn(2, 2, 3),
+            torch.randn(2, 2, 3),
+            export_options=torch.onnx.ExportOptions(dynamic_shapes=True),
+        )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

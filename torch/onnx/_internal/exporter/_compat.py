@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence, TYPE_CHECKING
 import onnx
 
 import torch
-import torch.export
+from torch.export import dynamic_shapes as ds_tools
 from torch.onnx._internal.exporter import _core, _onnx_program
 
 
@@ -187,6 +187,54 @@ def export_compat(
             ):
                 should_convert_version = True
 
+    except torch._dynamo.exc.UserError as exc:
+        try:
+            # Auto fix the dynamic_shapes and retry
+            new_shapes = ds_tools.refine_dynamic_shapes_from_suggested_fixes(
+                exc.msg,
+                dynamic_shapes,  # type: ignore[arg-type]
+            )
+            onnx_program = _core.export(
+                model,
+                args,
+                kwargs,
+                registry=None,
+                dynamic_shapes=new_shapes,
+                input_names=input_names,
+                output_names=output_names,
+                profile=profile,
+                report=report,
+                verify=verify,
+                dump_exported_program=dump_exported_program,
+                artifacts_dir=artifacts_dir,
+                verbose=verbose,
+            )
+        except Exception as e:
+            if fallback:
+                if verbose is not False:
+                    print(
+                        "[torch.onnx] Falling back to legacy torch.onnx.export due "
+                        f"to the following error: {e}",
+                    )
+                torch.onnx.utils.export(
+                    model,  # type: ignore[arg-type]
+                    args,
+                    f,  # type: ignore[arg-type]
+                    kwargs=kwargs,
+                    export_params=export_params,
+                    input_names=input_names,
+                    output_names=output_names,
+                    opset_version=17,  # TODO(justinchuby): Hard coded to 17 for now
+                    dynamic_axes=dynamic_axes,
+                    keep_initializers_as_inputs=keep_initializers_as_inputs,
+                )
+                onnx_program = None
+                if opset_version is None:
+                    opset_version = 18
+                if opset_version != 17:
+                    should_convert_version = True
+            else:
+                raise
     except Exception as e:
         if fallback:
             if verbose is not False:

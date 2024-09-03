@@ -28,7 +28,6 @@ import torch
 import torch._ops
 import torch.export as torch_export
 import torch.utils._pytree as pytree
-from torch.onnx import _flags
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import (
@@ -1386,7 +1385,7 @@ def dynamo_export(
     *model_args,
     export_options: ExportOptions | None = None,
     **model_kwargs,
-) -> ONNXProgram:
+) -> ONNXProgram | Any:
     """Export a torch.nn.Module to an ONNX graph.
 
     Args:
@@ -1465,16 +1464,36 @@ def dynamo_export(
     _assert_dependencies(resolved_export_options)
 
     # NOTE: The new exporter is experimental and is not enabled by default.
+    from torch.onnx import _flags
+
     if _flags.USE_EXPERIMENTAL_LOGIC:
         from torch.onnx._internal import exporter
 
+        warnings.warn(
+            "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
+            "For a more comprehensive set of export options, including advanced features, please consider using "
+            "`torch.onnx.export(..., dynamo=True)`. ",
+            category=FutureWarning,
+        )
+
+        if resolved_export_options.dynamic_shapes:
+            # Make all shapes dynamic
+            dynamic_shapes = []
+            for arg_order, model_arg in enumerate(model_args):
+                arg_dynamic_shapes = {}
+                rank = len(model_arg.shape)
+                for idx in range(rank):
+                    dim = torch.export.Dim(f"arg{arg_order}_dim_{idx}")
+                    arg_dynamic_shapes[idx] = dim
+                dynamic_shapes.append(arg_dynamic_shapes)
+        else:
+            dynamic_shapes = None
+
         return exporter.export_compat(
-            model,
+            model,  # type: ignore[arg-type]
             model_args,
             f=None,
             kwargs=model_kwargs,
-            input_names=input_names,
-            output_names=output_names,
             dynamic_shapes=dynamic_shapes,
             opset_version=18,
             external_data=True,
