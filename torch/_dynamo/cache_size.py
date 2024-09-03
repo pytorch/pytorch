@@ -121,7 +121,7 @@ def _has_same_id_matched_objs(frame: types.FrameType, cache_entry) -> bool:
     ) in cache_entry.check_fn.id_matched_objs.items():
         if weakref_from_cache_entry() is not None:
             weakref_from_frame = _get_weakref_from_f_locals(frame, local_name)
-            if weakref_from_frame != weakref_from_cache_entry:
+            if weakref_from_frame is not weakref_from_cache_entry:
                 return False
 
     # Also covers the case where no ID_MATCH objects are saved in frame.f_locals
