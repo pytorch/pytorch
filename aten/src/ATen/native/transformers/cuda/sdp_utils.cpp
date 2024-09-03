@@ -25,7 +25,10 @@
 #include <c10/util/string_view.h>
 
 #if USE_ROCM
+#if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
 #include <aotriton/flash.h>
+#define USE_AOTRITON 1
+#endif
 #endif
 
 /**
@@ -208,6 +211,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
 #if USE_ROCM
+#if USE_AOTRITON
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -217,6 +221,9 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
       }
       return false;
   }
+#else
+  return false;
+#endif
 #else
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm90>(dprops)) {
@@ -239,6 +246,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
 #if USE_ROCM
+#if USE_AOTRITON
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -248,6 +256,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       }
       return false;
   }
+#else
+  return false;
+#endif
 #else
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm50, sm90>(dprops)) {
@@ -641,7 +652,12 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
-      check_head_dim_size_mem_efficient);
+#ifdef USE_ROCM
+      check_head_dim_size_flash
+#else
+      check_head_dim_size_mem_efficient
+#endif
+  );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
