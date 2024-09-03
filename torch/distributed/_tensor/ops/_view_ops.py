@@ -377,7 +377,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
 
         if len(to_group_shape) > 0:
             flattened = Flatten.new(
-                tuple(InputDim(fi) for fi in from_group_dim if from_size[fi] > 1)
+                tuple(InputDim(fi) for fi in from_group_dim if from_size[fi] >= 1)
             )
             result_pp += [
                 Split.new(flattened, tuple(to_group_shape), i)
@@ -511,12 +511,12 @@ def propagate_shape_and_sharding(
             seen_input_dims.add(cmd.input_dim)
         for inp in cmd.inputs():
             collect_used_inputs(inp)
-
+    
     for cmd in rule:
         collect_used_inputs(cmd)
     for dim in range(len(local_in_shape)):
         shardable_dims[dim] = [dim in seen_input_dims] * mesh_ndim
-
+    
     def get_in_dim_to_shard(cmd: DimSpec) -> Optional[InputDim]:
         if isinstance(cmd, InputDim):
             return cmd
