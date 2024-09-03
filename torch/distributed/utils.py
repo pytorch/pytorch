@@ -234,7 +234,7 @@ def _apply_to_tensors(fn, container):
             dc = dataclasses.replace(x)
             changes = {
                 f.name: apply(getattr(dc, f.name))
-                for f in dataclasses.fields(dc):
+                for f in dataclasses.fields(dc)
             }
             dc = dataclasses.replace(dc, **changes)
             return dc
