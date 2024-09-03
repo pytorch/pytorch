@@ -207,7 +207,7 @@ def run_experiment(
 ) -> None:
     print(f"Loading model {x.name}")
     t0 = time.time()
-    model = _load_model(x)
+    model = _load_model(x, device=device)
     device_sync(device=device)  # MKG
     print(f"Time to load model: {time.time() - t0:.02f} seconds")
 
