@@ -167,18 +167,15 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
                 # op node
                 buf_to_fx_node[x.get_name()] = fx_node
                 # buf node
-                node = x.node
-                assert isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer))
-                if isinstance(node, ir.ComputedBuffer):
-                    node_name = node.get_computed_buffer_name()
+                if x.node and hasattr(x.node, "name") and x.node.name:
+                    buf_to_fx_node[x.node.name] = fx_node
                 else:
-                    node_name = node.name
-                buf_to_fx_node[node_name] = fx_node
+                    raise RuntimeError("Can't obtain name for this node", x)
         else:
             if snode.node and hasattr(snode.node, "name"):
                 buf_to_fx_node[snode.node.name] = fx_node
             else:
-                raise RuntimeError("Unknown node type", snode)
+                raise RuntimeError("Can't obtain name for this node", snode)
         # op node
         buf_to_fx_node[name] = fx_node
 
