@@ -17,7 +17,19 @@ import sys
 import types
 import warnings
 import weakref
-from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    MutableMapping,
+    NamedTuple,
+    Optional,
+    Set,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 from torch import SymInt
@@ -320,6 +332,17 @@ class FrameStateSizeEntry:
     stride: Optional[List[int]]
 
 
+# All class-based iterators in itertools
+# NOTE: use id() because some objects are not hashable, it will raise error during lookup
+ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
+    id(member)
+    for name, member in vars(itertools).items()
+    if not name.startswith("_") and inspect.isclass(member)
+)
+# Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
+ITERTOOLS_POLYFILLED_TYPE_IDS: Set[int] = set()
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -463,7 +486,9 @@ class VariableBuilder:
 
     @classmethod
     @functools.lru_cache(None)
-    def _id_dispatch(cls):
+    def _id_dispatch(
+        cls,
+    ) -> Dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
         from ..comptime import comptime
 
         entries = [
@@ -875,7 +900,10 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif istype(value, type) and value in itertools.__dict__.values():
+        elif (
+            id(value) in ITERTOOLS_TYPE_IDS
+            and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS
+        ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
@@ -2281,6 +2309,7 @@ def wrap_fx_proxy_cls(
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
     elif isinstance(example_value, bool) and proxy.node.target in [
+        torch._C._are_functorch_transforms_active,
         torch.backends.cuda.is_flash_attention_available,
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
