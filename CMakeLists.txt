@@ -899,6 +899,9 @@ endif()
 
 if(USE_X86_SIMD_SORT)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_X86_SIMD_SORT")
+  if(USE_XSS_OPENMP)
+    string(APPEND CMAKE_CXX_FLAGS " -DXSS_USE_OPENMP")
+  endif()
 endif()
 
 if(USE_PYTORCH_QNNPACK)

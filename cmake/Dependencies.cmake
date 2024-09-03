@@ -1366,6 +1366,12 @@ if(USE_X86_SIMD_SORT)
   endif()
 
   if(USE_X86_SIMD_SORT)
+    if(USE_OPENMP AND NOT MSVC)
+      set(USE_XSS_OPENMP ON)
+    else()
+      set(USE_XSS_OPENMP OFF)
+    endif()
+
     set(XSS_SIMD_SORT_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/x86-simd-sort)
     include_directories(SYSTEM ${XSS_SIMD_SORT_INCLUDE_DIR})
   endif()
