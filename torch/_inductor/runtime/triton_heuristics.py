@@ -6,7 +6,6 @@ import copy
 import functools
 import hashlib
 import inspect
-import json
 import logging
 import math
 import operator
@@ -16,10 +15,11 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
@@ -44,10 +44,6 @@ from .runtime_utils import (
     triton_config_to_hashable,
     validate_triton_config,
 )
-
-
-if TYPE_CHECKING:
-    from ..remote_cache import JsonDataTy, RemoteCache
 
 
 try:
@@ -1004,74 +1000,6 @@ def hash_configs(configs: List[Config]):
     return hasher.hexdigest()
 
 
-def load_cached_autotuning(
-    best_config,
-    configs_hash: str,
-    configs: List[Config],
-    inductor_meta: Dict[str, Any],
-):
-    if best_config is None:
-        return None
-    if best_config.pop("configs_hash", None) != configs_hash:
-        return None
-
-    # Remove time taken for comparison
-    best_config.pop("time_taken_ms", None)
-
-    if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
-        "found_by_coordesc", False
-    ):
-        num_warps = best_config.pop("num_warps")
-        num_stages = best_config.pop("num_stages")
-        triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
-        triton_config.found_by_coordesc = True
-        return triton_config
-
-    matching_configs = [
-        cfg
-        for cfg in configs
-        if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
-        and cfg.num_warps == best_config.get("num_warps")
-        and cfg.num_stages == best_config.get("num_stages")
-    ]
-    if len(matching_configs) != 1:
-        return None
-
-    return matching_configs[0]
-
-
-def _should_use_remote_autotune_cache(inductor_meta):
-    if inductor_meta.get("autotune_remote_cache") is not None:
-        return inductor_meta.get("autotune_remote_cache")
-    if not inductor_meta.get("is_fbcode"):
-        return False
-    if torch._utils_internal.is_fb_unit_test():
-        return False
-    if inductor_meta.get("is_hip"):
-        return False
-
-    try:
-        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
-    except ModuleNotFoundError:
-        return False
-
-    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/remote_cache:autotune_memcache_version"
-    )
-
-
-class LocalAutotuneCache:
-    def get(self, filename):
-        if os.path.exists(filename):
-            with open(filename) as fd:
-                return json.loads(fd.read())
-        return None
-
-    def put(self, filename, data):
-        with open(filename, "w") as fd:
-            fd.write(json.dumps(data))
-
-
 def cached_autotune(
     size_hints: Optional[List[int]],
     configs: List[Config],
@@ -1087,92 +1015,27 @@ def cached_autotune(
     """
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
-    save_cache_hook: Optional[Callable[[Any, Any, Any], Any]]
     inductor_meta = {} if inductor_meta is None else inductor_meta
 
+    disabled = inductor_meta.get("force_disable_caches", False)
+
     # on disk caching logic and/or remote caching
-    if filename is not None and (
-        len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning")
+    autotune_cache = None
+    if (
+        not disabled
+        and filename is not None
+        and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
     ):
         configs_hash = hash_configs(configs)
 
-        local_cache = None
-        cache_filename = None
-        remote_cache: Optional[
-            Union[RemoteCache[JsonDataTy], RemoteCache[object]]
-        ] = None
-        remote_cache_key = None
-        best_config = None
-        if not inductor_meta.get("force_disable_caches", False):
-            if inductor_meta.get("autotune_local_cache", True):
-                local_cache = LocalAutotuneCache()
-                cache_filename = os.path.splitext(filename)[0] + ".best_config"
-            if _should_use_remote_autotune_cache(inductor_meta):
-                backend_hash = inductor_meta.get("backend_hash", None)
-                if backend_hash is not None:
-                    key = backend_hash + configs_hash + "autotune-best-config-v2"
-                    key = hashlib.sha256(key.encode("utf-8")).hexdigest()
-
-                    try:
-                        if inductor_meta.get("is_fbcode"):
-                            from torch._inductor.fb.remote_cache import (
-                                FbRemoteAutotuneCache,
-                            )
-
-                            remote_cache = FbRemoteAutotuneCache(key)
-                        else:
-                            from torch._inductor.remote_cache import RemoteAutotuneCache
-
-                            remote_cache = RemoteAutotuneCache(key)
-                    except Exception:
-                        remote_cache = None
-                        log.warning("Unable to create a remote cache", exc_info=True)
-                    # we already sha256 hash the source contents
-                    remote_cache_key = os.path.basename(filename)
-                else:
-                    log.debug(
-                        "backend_hash is not passed on the inductor_meta, unable to use autotune remote cache"
-                    )
-
-            best_config = None
-            if local_cache is not None and cache_filename is not None:
-                best_config = local_cache.get(cache_filename)
-            if (
-                remote_cache is not None
-                and remote_cache_key is not None
-                and best_config is None
-            ):
-                best_config = remote_cache.get(remote_cache_key)
-
-            best_config = load_cached_autotuning(
-                best_config, configs_hash, configs, inductor_meta
-            )
-            if best_config:
+        autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
+        if autotune_cache:
+            if best_config := autotune_cache.read_best(inductor_meta, configs):
                 configs = [best_config]
 
-        else:
-            log.debug("autotune caching is disabled by config.force_disable_caches")
-
-        def save_cache_hook(cfg, time_taken_ns, found_by_coordesc=False):
-            data = {
-                **cfg.kwargs,
-                "num_warps": cfg.num_warps,
-                "num_stages": cfg.num_stages,
-                "configs_hash": configs_hash,
-                "found_by_coordesc": found_by_coordesc,
-                "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-            }
-            if local_cache is not None and cache_filename is not None:
-                local_cache.put(cache_filename, data)
-            if remote_cache is not None and remote_cache_key is not None:
-                remote_cache.put(remote_cache_key, data)  # type: ignore[arg-type]
-
-            if log.isEnabledFor(logging.DEBUG):
-                type_str = "coordesc" if found_by_coordesc else "heuristic"
-                log.debug("Save %s tuning result to %s", type_str, cache_filename)
-
     else:
-        save_cache_hook = None
+        if disabled:
+            log.debug("autotune caching is disabled by config.force_disable_caches")
 
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
 
@@ -1199,7 +1062,7 @@ def cached_autotune(
                     "profile_bandwidth_with_do_bench_using_profiling"
                 ],
                 configs=configs,
-                save_cache_hook=save_cache_hook,
+                save_cache_hook=autotune_cache and autotune_cache.save,
                 mutated_arg_names=mutated_arg_names,
                 heuristic_type=heuristic_type,
                 size_hints=size_hints,
@@ -1211,7 +1074,7 @@ def cached_autotune(
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,
             configs=configs,
-            save_cache_hook=save_cache_hook,
+            save_cache_hook=autotune_cache and autotune_cache.save,
             mutated_arg_names=mutated_arg_names,
             heuristic_type=heuristic_type,
             size_hints=size_hints,

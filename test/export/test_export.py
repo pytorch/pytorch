@@ -4362,12 +4362,9 @@ def forward(self, b_a_buffer, x):
         f = Module()
         if is_non_strict_test(self._testMethodName):
             error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-            error_msg = r"Could not guard on data-dependent expression"
         else:
             error = torch._dynamo.exc.UserError
-            error_msg = (
-                r"Tried to use data-dependent value in the subsequent computation"
-            )
+        error_msg = r"Could not guard on data-dependent expression"
         with self.assertRaisesRegex(error, error_msg):
             _ = export(f, (torch.tensor(6),))
 
