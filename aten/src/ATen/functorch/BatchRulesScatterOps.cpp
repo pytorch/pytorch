@@ -807,7 +807,8 @@ std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
 
 Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t dim) {
   if (index.dim() == 0) {
-    return index.expand(self_size);
+    std::vector<int64_t> singleton_dims(self_size.size(), 1);
+    return index.view(singleton_dims);
   }
   dim = maybe_wrap_dim(dim, static_cast<int64_t>(self_size.size()));
 
