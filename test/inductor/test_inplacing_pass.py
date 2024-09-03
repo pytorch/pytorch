@@ -408,7 +408,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertEqual(num_reinplacing_failures(), 1)
 
             # Both list inputs failed to reinplace. So we should have emitted clones for them.
-        self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
+            self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
 
     @parametrize(
         "factory_op",

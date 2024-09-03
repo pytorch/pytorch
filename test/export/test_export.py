@@ -6098,7 +6098,7 @@ def forward(self, x):
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
     cos_1 = torch.ops.aten.cos.default(x);  x = None
-    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, _x_base_index = 0, _z_base_index = 1, _all_bases = [cos, cos_1]);  cos = cos_1 = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1);  cos = cos_1 = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
     return (cos_2,)""",
