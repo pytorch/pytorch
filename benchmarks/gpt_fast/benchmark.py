@@ -208,8 +208,8 @@ def run_gemv(device: str = "cuda"):
             def gemv(W, x):
                 return W.to(x.dtype) @ x
 
-            W = torch.randn(D, D, device="cuda").to(dtype=dtype)
-            x = torch.randn(D, device="cuda", dtype=torch.bfloat16)
+            W = torch.randn(D, D, device=device).to(dtype=dtype)
+            x = torch.randn(D, device=device, dtype=torch.bfloat16)
 
             compiled_fn = torch.compile(gemv, dynamic=False)
 
