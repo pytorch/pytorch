@@ -81,4 +81,4 @@ namespace detail {
 TORCH_API const XPUHooksInterface& getXPUHooks();
 } // namespace detail
 } // namespace at
-C10_CLANG_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
