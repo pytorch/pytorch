@@ -6,47 +6,32 @@ from __future__ import annotations
 import logging
 import operator
 import types
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Sequence, TYPE_CHECKING
 
 import torch
 import torch._ops
 import torch.fx
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
     diagnostics,
     registration,
     type_utils as fx_type_utils,
 )
 
+
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
+    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+        graph_building as onnxscript_graph_building,
+    )
 
     from torch.onnx import OnnxRegistry
 
 
-# For beartype
-from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-    graph_building as onnxscript_graph_building,
-)
-
-
-@_beartype.beartype
 def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     fn: Callable,
     self,
     node: torch.fx.Node,
-    default_and_custom_functions: List[registration.ONNXFunction],
+    default_and_custom_functions: list[registration.ONNXFunction],
     *args,
     **kwargs,
 ) -> str:
@@ -58,7 +43,6 @@ def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     return f"FX Node: {node.target}. \n" f"{all_function_overload_names}"
 
 
-@_beartype.beartype
 def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(
     fn: Callable,
     self,
@@ -97,7 +81,7 @@ class OnnxFunctionDispatcher:
 
     def __init__(
         self,
-        onnx_registry: "OnnxRegistry",
+        onnx_registry: OnnxRegistry,
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
         """Initialize the ONNX Function dispatcher.
@@ -109,18 +93,15 @@ class OnnxFunctionDispatcher:
         self.onnx_registry = onnx_registry
         self.diagnostic_context = diagnostic_context
 
-    @_beartype.beartype
     def dispatch(
         self,
         node: torch.fx.Node,
         onnx_args: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            fx_type_utils.TensorLike | str | int | float | bool | list | complex | None
         ],
-        onnx_kwargs: Dict[str, fx_type_utils.Argument],
+        onnx_kwargs: dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
-    ) -> Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]:
+    ) -> onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction:
         """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
         Args:
             node: The TorchFX node to dispatch the function for.
@@ -148,13 +129,12 @@ class OnnxFunctionDispatcher:
             diagnostic_context,
         )
 
-    @_beartype.beartype
     def _filter_or_keep_complex(
         self,
         node,
-        default_and_custom_functions: List[registration.ONNXFunction],
+        default_and_custom_functions: list[registration.ONNXFunction],
         diagnostic_context: diagnostics.DiagnosticContext,
-    ) -> List[registration.ONNXFunction]:
+    ) -> list[registration.ONNXFunction]:
         """Filter the complex functions if the input has complex dtype."""
 
         args_with_complex_dtype = [_is_arg_with_complex_dtype(arg) for arg in node.args]
@@ -196,7 +176,6 @@ class OnnxFunctionDispatcher:
                 raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
         return default_and_custom_functions
 
-    @_beartype.beartype
     @diagnostics.diagnose_call(
         diagnostics.rules.find_opschema_matched_symbolic_function,
         diagnostic_message_formatter=_find_opschema_matched_symbolic_function_disagnostic_message_formatter,
@@ -204,13 +183,11 @@ class OnnxFunctionDispatcher:
     def _find_the_perfect_or_nearest_match_onnxfunction(
         self,
         node: torch.fx.Node,  # this is used in diagnostic_message_formatter
-        default_and_custom_functions: List[registration.ONNXFunction],
+        default_and_custom_functions: list[registration.ONNXFunction],
         onnx_args: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            fx_type_utils.TensorLike | str | int | float | bool | list | complex | None
         ],
-        onnx_kwargs: Dict[str, fx_type_utils.Argument],
+        onnx_kwargs: dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
         """Find the perfect/nearest matched OnnxFunction for the given FX node, arguments, and keyword arguments.
@@ -227,7 +204,7 @@ class OnnxFunctionDispatcher:
             Raises:
                 RuntimeError: If there are no overloaded functions available for the given FX node.
         """
-        overload_match_ranking: Dict[registration.ONNXFunction, Optional[int]] = {}
+        overload_match_ranking: dict[registration.ONNXFunction, int | None] = {}
         diagnostic = diagnostic_context.inflight_diagnostic()
 
         # Iterate the overloaded functions in reverse order to prioritize the custom ones
@@ -273,7 +250,7 @@ class OnnxFunctionDispatcher:
         # NOTE: 3. Tie breaker: if there are multiple nearest matches, we will choose the one
         # that is custom first. If there are multiple custom ones, we will choose the one
         # that is added lastly in the list.
-        symbolic_function_list: List[registration.ONNXFunction] = sorted(
+        symbolic_function_list: list[registration.ONNXFunction] = sorted(
             overload_match_ranking,
             key=lambda k: (
                 overload_match_ranking[k],
@@ -284,7 +261,6 @@ class OnnxFunctionDispatcher:
         )
         return symbolic_function_list[0].onnx_function
 
-    @_beartype.beartype
     def _get_aten_name(
         self, node: torch.fx.Node, diagnostic_context: diagnostics.DiagnosticContext
     ) -> registration.OpName:
@@ -350,7 +326,6 @@ class OnnxFunctionDispatcher:
         diagnostic_context.log(diagnostic)
         raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
-    @_beartype.beartype
     @diagnostics.diagnose_call(
         diagnostics.rules.find_operator_overloads_in_onnx_registry,
         diagnostic_message_formatter=_find_operator_overloads_in_onnx_registry_disagnostic_message_formatter,
@@ -359,7 +334,7 @@ class OnnxFunctionDispatcher:
         self,
         node: torch.fx.Node,
         diagnostic_context: diagnostics.DiagnosticContext,
-    ) -> List[registration.ONNXFunction]:
+    ) -> list[registration.ONNXFunction]:
         """Get the function overloads from the registry.
 
         Args:
@@ -377,7 +352,7 @@ class OnnxFunctionDispatcher:
 
         # If the ATen/Custom operators are not registered, the group will be None.
         # And non-registered ATen/Custom operators will trigger error in the next step.
-        function_group: Optional[List[registration.ONNXFunction]] = None
+        function_group: list[registration.ONNXFunction] | None = None
 
         function_group = self.onnx_registry.get_op_functions(
             namespace=internal_opname.namespace,
@@ -440,10 +415,9 @@ class _OnnxSchemaChecker:
         inputs = (Tensor[2, 3], Tensor[2, 3])
         attributes = {"alpha": 1.0}
 
-        @torch_op("aten::op")
-        def aten_op(self: TReal, other: TReal, alpha: float = 1) -> TReal:
-            ...
 
+        @torch_op("aten::op")
+        def aten_op(self: TReal, other: TReal, alpha: float = 1) -> TReal: ...
         ```
         Result: Perfect match.
 
@@ -518,7 +492,7 @@ class _OnnxSchemaChecker:
 
     def __init__(
         self,
-        onnxfunction: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
+        onnxfunction: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
     ):
         """Initialize the OnnxSchemaChecker .
 
@@ -538,10 +512,10 @@ class _OnnxSchemaChecker:
             for constraint in self.op_schema.type_constraints
         }
         self.attributes = self.op_schema.attributes
-        self._matching_score: Optional[int] = None
+        self._matching_score: int | None = None
 
     @property
-    def match_score(self) -> Optional[int]:
+    def match_score(self) -> int | None:
         """The matching score of the OnnxSchemaChecker .
 
         If this remains None, it means the matching score has not been calculated,
@@ -552,16 +526,13 @@ class _OnnxSchemaChecker:
         """
         return self._matching_score
 
-    @_beartype.beartype
     def perfect_match_inputs(
         self,
         diagnostic: diagnostics.Diagnostic,
         args: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            fx_type_utils.TensorLike | str | int | float | bool | list | complex | None
         ],
-        kwargs: Dict[str, fx_type_utils.Argument],
+        kwargs: dict[str, fx_type_utils.Argument],
     ) -> bool:
         """Check if the inputs perfectly match the OpSchema requirements.
 
@@ -687,13 +658,10 @@ class _OnnxSchemaChecker:
             diagnostic.info("match score: %d", self.match_score)
             return is_perfect_match
 
-    @_beartype.beartype
     def _match_onnx_attribute_type(
         self,
         attribute_name: str,
-        attribute: Union[
-            fx_type_utils.Argument, onnxscript_graph_building.TorchScriptTensor
-        ],
+        attribute: fx_type_utils.Argument | onnxscript_graph_building.TorchScriptTensor,
         is_sequence: bool = False,
     ) -> bool:
         if isinstance(attribute, (int, float, bool, str)):
@@ -713,15 +681,12 @@ class _OnnxSchemaChecker:
             return False
         return True
 
-    @_beartype.beartype
     def _record_matching_score(
         self,
         inputs: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            fx_type_utils.TensorLike | str | int | float | bool | list | complex | None
         ],
-        attributes: Dict[str, fx_type_utils.Argument],
+        attributes: dict[str, fx_type_utils.Argument],
     ):
         """Calculate the inputs matching score of the OpSchema requirements to find the nearest match.
 
@@ -768,18 +733,16 @@ class _OnnxSchemaChecker:
 
     # NOTE: Referenced from onnxscript internal function.
     # Importing this function makes the code less robust, as it is not a public API.
-    @_beartype.beartype
+
     def _separate_input_attributes_from_arguments(
         self,
-        param_schemas: Sequence["onnxscript.values.ParamSchema"],
+        param_schemas: Sequence[onnxscript.values.ParamSchema],
         args: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            fx_type_utils.TensorLike | str | int | float | bool | list | complex | None
         ],
-        kwargs: Dict[str, fx_type_utils.Argument],
+        kwargs: dict[str, fx_type_utils.Argument],
         fill_defaults: bool = True,
-    ) -> Tuple[List[Any], Dict[str, Any]]:
+    ) -> tuple[list[Any], dict[str, Any]]:
         """Separate Python args and kwargs into ONNX inputs and attributes.
 
         Extra_kwargs are ignored if their values are None. For example, if the
@@ -808,8 +771,8 @@ class _OnnxSchemaChecker:
 
         import onnx
 
-        onnx_inputs: List[Any] = []
-        onnx_attributes: Dict[str, Any] = {}
+        onnx_inputs: list[Any] = []
+        onnx_attributes: dict[str, Any] = {}
         # NOTE: We need to copy kwargs because we will mutate it
         copy_kwargs = kwargs.copy()
         for i, param in enumerate(param_schemas):
@@ -851,7 +814,6 @@ class _OnnxSchemaChecker:
         return onnx_inputs, onnx_attributes
 
 
-@_beartype.beartype
 def _is_arg_with_complex_dtype(arg: fx_type_utils.Argument) -> bool:
     """Check if the node has complex dtype recursively."""
     if (
@@ -867,12 +829,17 @@ def _is_arg_with_complex_dtype(arg: fx_type_utils.Argument) -> bool:
     return False
 
 
-@_beartype.beartype
 def _find_onnx_data_type(
-    torch_input: Optional[
-        Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple, complex]
-    ]
-) -> Set[str]:
+    torch_input: fx_type_utils.TensorLike
+    | str
+    | int
+    | float
+    | bool
+    | list
+    | tuple
+    | complex
+    | None,
+) -> set[str]:
     """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
     if (
         isinstance(torch_input, fx_type_utils.TensorLike)

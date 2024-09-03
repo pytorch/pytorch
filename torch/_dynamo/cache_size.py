@@ -5,7 +5,10 @@ import weakref
 from dataclasses import dataclass
 from typing import Tuple
 
+from torch._guards import CompileId
+
 from . import config
+
 
 log = logging.getLogger(__name__)
 """
@@ -162,7 +165,9 @@ def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     return cache_size.will_compilation_exceed(1)
 
 
-def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> Tuple[bool, str]:
+def exceeds_cache_size_limit(
+    cache_size: CacheSizeRelevantForFrame, compile_id: CompileId
+) -> Tuple[bool, str]:
     """
     Checks if we are exceeding the cache size limit.
     """
@@ -170,4 +175,11 @@ def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> Tuple[boo
         return True, "accumulated_cache_size_limit"
     if cache_size.will_compilation_exceed_specific_limit(config.cache_size_limit):
         return True, "cache_size_limit"
+    # NOTE this check is needed in the case that the frame's cache doesn't grow
+    # and we keep recompiling. This can happen if the guard check_fn becomes invalidated,
+    # e.g. due to guarded objects being freed. This technically makes the
+    # will_compilation_exceed_accumulated_limit check unnecessary, but we will keep the
+    # check in case we have a better fix in the future.
+    if compile_id.frame_compile_id >= config.accumulated_cache_size_limit:
+        return True, "accumulated_cache_size_limit"
     return False, ""

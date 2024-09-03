@@ -11,11 +11,8 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
-
-import contextlib
 import importlib
 import os
-import sys
 import threading
 import traceback
 import warnings
@@ -24,9 +21,11 @@ from typing import Any, Callable, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
+from torch import device as _device
+from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
-from .. import device as _device
-from .._utils import _dummy_type, _LazySeedTracker, classproperty
+
+from . import gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -36,6 +35,7 @@ from .graphs import (
     make_graphed_callables,
 )
 from .streams import Event, ExternalStream, Stream
+
 
 try:
     from torch._C import _cudart  # type: ignore[attr-defined]
@@ -54,18 +54,19 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
+    from torch import version as _version
+
     try:
-        import pynvml  # type: ignore[import]
+        if not _version.hip:
+            import pynvml  # type: ignore[import]
+        else:
+            import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
         pass
-    try:
-        import amdsmi  # type: ignore[import]
-
-        _HAS_PYNVML = True
-    except ModuleNotFoundError:
-        pass
+    finally:
+        del _version
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
 
@@ -134,6 +135,10 @@ def is_bf16_supported(including_emulation: bool = True):
     # since it is supported on AMD GPU archs.
     if torch.version.hip:
         return True
+
+    # If CUDA is not available, than it does not support bf16 either
+    if not is_available():
+        return False
 
     device = torch.cuda.current_device()
 
@@ -1108,7 +1113,11 @@ def _get_amdsmi_temperature(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+    socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
+    if socket_power != "N/A":
+        return socket_power
+    else:
+        return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
@@ -1277,9 +1286,8 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int
 
 
 from .memory import *  # noqa: F403
-
-
 from .random import *  # noqa: F403
+
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -1529,6 +1537,7 @@ _lazy_call(_register_triton_kernels)
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
 
+
 __all__ = [
     # Typed storage and tensors
     "BFloat16Storage",
@@ -1617,6 +1626,9 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
+    "MemPool",
+    "MemPoolContext",
+    "use_mem_pool",
     "temperature",
     "power_draw",
     "clock_rate",

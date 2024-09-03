@@ -217,7 +217,7 @@ void GradInterpreterPtr::sendToNextInterpreterImpl(
       op, stack, *base_,
       TransformType::Grad,
       prevGradMode(),
-      nullopt,
+      std::nullopt,
       grad_special_case);
 }
 
@@ -234,7 +234,7 @@ void JvpInterpreterPtr::sendToNextInterpreterImpl(
   autogradBasedTransformSendToNext(
       op, stack, *base_,
       TransformType::Jvp,
-      nullopt,
+      std::nullopt,
       prevFwdGradMode(),
       grad_special_case);
 }

@@ -23,6 +23,7 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 
+
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
 
@@ -312,8 +313,14 @@ def gen_alias_from_base(
 def has_same_metadata(t1, t2):
     return (
         definitely_true(sym_eq(t1.size(), t2.size()))
-        and definitely_true(sym_eq(t1.stride(), t2.stride()))
-        and definitely_true(t1.storage_offset() == t2.storage_offset())
+        and definitely_true(t1.layout == t2.layout)
+        and (
+            is_sparse_any(t1)
+            or (
+                definitely_true(sym_eq(t1.stride(), t2.stride()))
+                and definitely_true(t1.storage_offset() == t2.storage_offset())
+            )
+        )
         and t1.is_conj() == t2.is_conj()
         and t1.is_neg() == t2.is_neg()
     )
@@ -394,6 +401,13 @@ def was_tensor_metadata_updated(arg, new_arg):
 
 # Returns the number of detected copy_
 def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+    allowed_mutation_ops = [
+        torch.ops.aten.copy_.default,
+        torch.ops.aten.set_.source_Tensor,
+    ]
+    if hasattr(torch.ops.fsdp, "set_"):
+        allowed_mutation_ops.append(torch.ops.fsdp.set_.default)
+
     placeholders = set()
     mutation_count = 0
     # NB: It would also be nice to verify that the mutations all happen at the
@@ -403,19 +417,15 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target in [
-                torch.ops.aten.copy_.default,
-                torch.ops.aten.set_.source_Tensor,
-            ]:
+            if n.target in allowed_mutation_ops:
                 suffix = True
-                # Can only copy_/set_ into an input, and can only do so once
+                # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
                     assert (
                         n.args[0] in placeholders
                     ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
-                    placeholders.remove(n.args[0])
                 mutation_count += 1
             else:
                 assert (

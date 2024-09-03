@@ -1,9 +1,7 @@
 # Owner(s): ["module: inductor"]
 import torch
-
 from torch._inductor.codegen.aoti_hipify_utils import maybe_hipify_code_wrapper
 from torch._inductor.codegen.codegen_device_driver import cuda_kernel_driver
-
 from torch._inductor.test_case import run_tests, TestCase
 
 

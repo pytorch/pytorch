@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
-#include <ATen/CachedTensorUtils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <fmt/core.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
@@ -35,6 +35,7 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/cuda/python_comm.h>
@@ -541,9 +542,20 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::CachingHostAllocator_emptyCache();
+  }
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::emptyCache();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::emptyCache();
+  }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -738,7 +750,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
-  py::str user_defined_s = "user_defined";
 
   using namespace c10::cuda::CUDACachingAllocator;
 
@@ -762,8 +773,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
-      case TraceEntry::USER_DEFINED:
-        return user_defined_s;
     }
     throw std::runtime_error("unreachable");
   };
@@ -787,6 +796,17 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       trace.append(trace_entry);
     }
     traces.append(trace);
+  }
+
+  py::list external_annotations;
+  for (const auto& ae : snapshot.external_annotations) {
+    py::dict annotation_entry;
+    for (const auto& md : ae.metadata_) {
+      annotation_entry[(py::str)md.first] = md.second;
+    }
+    annotation_entry[device_s] = ae.device_;
+    annotation_entry[time_us_s] = ae.time_.t_;
+    external_annotations.append(annotation_entry);
   }
 
   py::dict allocator_settings;
@@ -826,6 +846,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   result["segments"] = segments;
   result["device_traces"] = traces;
   result["allocator_settings"] = allocator_settings;
+  result["external_annotations"] = external_annotations;
 
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
@@ -906,6 +927,34 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+std::string uuid_to_string(const char* uuid_bytes) {
+  // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
+  // For string representation, the code here expands this to
+  // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
+  return fmt::format(
+      "{:02x}{:02x}{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+      (uint8_t)uuid_bytes[0],
+      (uint8_t)uuid_bytes[1],
+      (uint8_t)uuid_bytes[2],
+      (uint8_t)uuid_bytes[3],
+      (uint8_t)uuid_bytes[4],
+      (uint8_t)uuid_bytes[5],
+      (uint8_t)uuid_bytes[6],
+      (uint8_t)uuid_bytes[7],
+      (uint8_t)uuid_bytes[8],
+      (uint8_t)uuid_bytes[9],
+      (uint8_t)uuid_bytes[10],
+      (uint8_t)uuid_bytes[11],
+      (uint8_t)uuid_bytes[12],
+      (uint8_t)uuid_bytes[13],
+      (uint8_t)uuid_bytes[14],
+      (uint8_t)uuid_bytes[15]);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -924,37 +973,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
             return std::vector<uint8_t>(uuid.bytes, uuid.bytes + 16);
           })
       .def("__str__", [](const CUuuid& uuid) {
-        // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
-        // For string representation, the code here expands this to
-        // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
-        // Size is 16x2 hex characters + 4 hyphens + 1 null byte.
-        constexpr size_t size = sizeof(CUuuid) * 2 + 4 + 1;
-        char device_path_str[size] = {0};
-        snprintf(
-            device_path_str,
-            sizeof(device_path_str),
-            "%02x%02x%02x%02x-"
-            "%02x%02x-"
-            "%02x%02x-"
-            "%02x%02x-"
-            "%02x%02x%02x%02x%02x%02x",
-            (uint8_t)uuid.bytes[0],
-            (uint8_t)uuid.bytes[1],
-            (uint8_t)uuid.bytes[2],
-            (uint8_t)uuid.bytes[3],
-            (uint8_t)uuid.bytes[4],
-            (uint8_t)uuid.bytes[5],
-            (uint8_t)uuid.bytes[6],
-            (uint8_t)uuid.bytes[7],
-            (uint8_t)uuid.bytes[8],
-            (uint8_t)uuid.bytes[9],
-            (uint8_t)uuid.bytes[10],
-            (uint8_t)uuid.bytes[11],
-            (uint8_t)uuid.bytes[12],
-            (uint8_t)uuid.bytes[13],
-            (uint8_t)uuid.bytes[14],
-            (uint8_t)uuid.bytes[15]);
-        return std::string(device_path_str);
+        return uuid_to_string(uuid.bytes);
       });
 #endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
@@ -987,6 +1006,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #ifndef FBCODE_CAFFE2
       .def_readonly("uuid", &cudaDeviceProp::uuid)
 #endif
+      .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
@@ -997,9 +1017,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
 #ifndef FBCODE_CAFFE2
-               << ", uuid=" << std::string(prop.uuid.bytes, 16)
+               << ", uuid=" << uuid_to_string(prop.uuid.bytes)
 #endif
-               << ")";
+               << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
+               << "MB)";
         return stream.str();
       });
 
@@ -1176,16 +1197,14 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_release_pool(func);
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
-    using MallocFuncType = void*(size_t, int, cudaStream_t);
-    using FreeFuncType = void(void*, size_t, int, cudaStream_t);
+    using namespace torch::cuda::CUDAPluggableAllocator;
     std::function<MallocFuncType> malloc_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
     std::function<FreeFuncType> free_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<FreeFuncType*>(free_ptr);
-    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-        malloc_fn, free_fn);
+    return createCustomAllocator(malloc_fn, free_fn);
   });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -1217,34 +1236,11 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
       });
 
-  m.def(
-      "_set_storage_data_ptr_access_error_msg",
-      [](size_t storage_impl_ptr, std::string s) {
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
-  });
-
-  m.def("_set_cached_tensors_enabled", [](bool enabled) {
-    at::caching::set_cached_tensors_enabled(enabled);
-  });
-
-  m.def("_add_cached_tensor", [](const at::Tensor& t) {
-    at::caching::add_cached_tensor(t);
-  });
-
-  m.def("_remove_cached_tensor", [](const at::Tensor& t) {
-    at::caching::remove_cached_tensor(t);
-  });
-
-  m.def("_is_cached_tensor", [](const at::Tensor& t) {
-    return at::caching::is_cached_tensor(t);
   });
 
   m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
@@ -1294,6 +1290,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             device, mempool_id, [stream](cudaStream_t target) {
               return target == stream;
             });
+      });
+
+  m.def(
+      "_cuda_beginAllocateToPool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [](cudaStream_t) { return true; });
       });
 
   m.def(
@@ -1845,6 +1848,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaHostAllocator,
      METH_NOARGS,
      nullptr},
+    {"_host_emptyCache", THCPModule_hostEmptyCache, METH_NOARGS, nullptr},
     {"_cuda_cudaCachingAllocator_raw_alloc",
      THCPModule_cudaCachingAllocator_raw_alloc,
      METH_VARARGS,
@@ -1979,8 +1983,12 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
+void initGdsBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
+#endif
+#if defined(USE_CUSPARSELT)
+void initCusparseltBindings(PyObject* module);
 #endif
 
 } // namespace shared
@@ -1994,6 +2002,10 @@ void initModule(PyObject* module) {
 #if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
+#if defined(USE_CUSPARSELT)
+  shared::initCusparseltBindings(module);
+#endif
+  shared::initGdsBindings(module);
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
 }

@@ -7,6 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
 
+
 __all__ = ["VonMises"]
 
 

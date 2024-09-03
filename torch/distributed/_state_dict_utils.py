@@ -2,6 +2,7 @@
 import copy
 import io
 import math
+import weakref
 from typing import (
     Any,
     Callable,
@@ -406,12 +407,23 @@ def _create_cpu_state_dict(
             return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
-            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype).share_memory_()
+            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
+            t = t.share_memory_()
             if pin_memory:
-                succ = torch.cuda.cudart().cudaHostRegister(
-                    t.data_ptr(),
-                    t.numel() * t.element_size(),
-                    1,  # lines up with 'cudaHostRegisterPortable'
+
+                def unpin_memory(t):
+                    succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
+                    assert (
+                        succ == 0
+                    ), f"Unpinning shared memory failed with error-code: {succ}"
+
+                weakref.finalize(t, unpin_memory, t)
+                succ = int(
+                    torch.cuda.cudart().cudaHostRegister(
+                        t.data_ptr(),
+                        t.numel() * t.element_size(),
+                        1,  # lines up with 'cudaHostRegisterPortable'
+                    )
                 )
                 assert (
                     succ == 0
@@ -615,16 +627,17 @@ def _distribute_state_dict(
             local_state_dict[key] = value.cpu()
         else:
             assert isinstance(value, torch.Tensor)
-            full_tensor = value.detach().to(device)
             local_state = local_state_dict.get(key, None)
             if local_state is None:
                 continue
             elif isinstance(local_state, DTensor):
-                local_state_dict[key] = (local_state, full_tensor)
+                local_state_dict[key] = distribute_tensor(
+                    value.detach().to(device),
+                    local_state.device_mesh,
+                    local_state.placements,
+                )
             else:
-                local_state_dict[key] = full_tensor
-
-            _distribute_tensors(local_state_dict, [key], device, pg)
+                local_state_dict[key] = value.detach().to(device)
 
 
 # These APIs are from torch.distributed.checkpoint.

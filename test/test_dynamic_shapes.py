@@ -2,14 +2,12 @@
 
 import contextlib
 import copy
-import inspect
 import itertools
 import math
 import operator
-import re
+import unittest
 
 import numpy as np
-
 import sympy
 
 import torch
@@ -49,6 +47,7 @@ from torch.utils._sympy.functions import (
     IsNonOverlappingAndDenseIndicator,
     Mod,
 )
+
 
 aten = torch.ops.aten
 
@@ -201,14 +200,7 @@ def create_symtype(cls, pytype, shape_env, val, duck=True):
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
     )
-    return cls(
-        SymNode(
-            symbol,
-            shape_env,
-            pytype,
-            hint=val,
-        )
-    )
+    return cls(SymNode(symbol, shape_env, pytype, hint=val))
 
 
 # TODO: default duck to False
@@ -815,12 +807,7 @@ def forward(self, x_1):
         self.assertTrue(
             cf(
                 torch.empty_strided(
-                    (
-                        2,
-                        3,
-                        1,
-                        u0,
-                    ),
+                    (2, 3, 1, u0),
                     (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
                     device="meta",
                 )
@@ -856,12 +843,7 @@ def forward(self, x_1):
         self.assertEqual(
             cf(
                 torch.empty_strided(
-                    (
-                        2,
-                        3,
-                        1,
-                        u0,
-                    ),
+                    (2, 3, 1, u0),
                     (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
                     device="meta",
                 )
@@ -1262,11 +1244,15 @@ class TestSymNumberMagicMethods(TestCase):
     def get_constant_bool(self, val):
         return SymBool(torch._C._get_constant_bool_symnode(val))
 
+    @unittest.expectedFailure
+    def test_symint_hashing(self):
+        shape_env = ShapeEnv()
+        hash(create_symint(shape_env, 3))
+
     def test_symnode_hashing(self):
         shape_env = ShapeEnv()
 
         # These all trigger specialization when hashed
-        hash(create_symint(shape_env, 3))
         hash(create_symbool(shape_env, True))
         # We should be passing in float here, but create_symbol currently
         # only supports int
@@ -1364,6 +1350,96 @@ class TestSymNumberMagicMethods(TestCase):
         sz2 = torch.Size([3, j2, 4])
         self.assertIs(sz1 == sz2, True)
         self.assertIs(sz1 != sz2, False)
+
+    def test_stride_symnode(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+
+        def _create_symbolic_tensor(x, dynamic_sizes, dynamic_strides):
+            with FakeTensorMode(shape_env=shape_env) as fake_mode:
+                return fake_mode.from_tensor(
+                    x,
+                    symbolic_context=StatelessSymbolicContext(
+                        dynamic_sizes=dynamic_sizes,
+                        dynamic_strides=dynamic_strides,
+                    ),
+                )
+
+        # check everything static
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.STATIC,
+                DimDynamic.STATIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.INFER_STRIDE,
+                DimDynamic.INFER_STRIDE,
+            ],
+        )
+        self.assertTrue(all(isinstance(size, int) for size in t.size()))
+        self.assertTrue(all(isinstance(stride, int) for stride in t.stride()))
+
+        # check dynamic size but static dims
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.DYNAMIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.INFER_STRIDE,
+                DimDynamic.INFER_STRIDE,
+            ],
+        )
+        # Expect stride to be inferred
+        s0, s1 = t.size()
+        s2, s3 = t.stride()
+        self.assertTrue(isinstance(s0, torch.SymInt))
+        self.assertTrue(isinstance(s1, torch.SymInt))
+        self.assertTrue(isinstance(s2, torch.SymInt))
+        self.assertTrue(s1 == s2)
+        self.assertEqual(s3, 1)
+
+        # Check dynamic stride but static dims
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.STATIC,
+                DimDynamic.STATIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.INFER_STRIDE,
+            ],
+        )
+        s0, s1 = t.size()
+        s2, s3 = t.stride()
+        self.assertTrue(isinstance(s0, int))
+        self.assertTrue(isinstance(s1, int))
+        self.assertTrue(isinstance(s2, torch.SymInt))
+        self.assertTrue(isinstance(s3, int))
+
+        # Check dynamic sizes and dims, and ensure different symbol
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.DYNAMIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.INFER_STRIDE,
+            ],
+        )
+        s0, s1 = t.size()
+        s2, s3 = t.stride()
+        self.assertTrue(isinstance(s0, torch.SymInt))
+        self.assertTrue(isinstance(s1, torch.SymInt))
+        self.assertTrue(isinstance(s2, torch.SymInt))
+        self.assertTrue(isinstance(s3, int))
+        self.assertTrue(str(s1.node.expr) != str(s2.node.expr))
 
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
@@ -2423,7 +2499,6 @@ class TestDimConstraints(TestCase):
         dim_constraints.add(s5 >= 2)
 
         dim_constraints.solve()
-        dim_constraints.remove_redundant_dynamic_results()
         self.assertEqual(
             dim_constraints._static_results,
             {
@@ -2442,51 +2517,11 @@ class TestDimConstraints(TestCase):
         self.assertEqual(
             dim_constraints._dynamic_results,
             {
-                "dynamic_dim(L['e'], 1) == dynamic_dim(L['c'], 1)",
-                "dynamic_dim(L['d'], 1) == dynamic_dim(L['c'], 1)",
+                "2 <= L['c'].size()[1]",
+                "L['d'].size()[1] == L['c'].size()[1]",
+                "L['e'].size()[1] == L['c'].size()[1]",
             },
         )
-
-        def dummy_fn(a, b, c, d, e, f):
-            pass
-
-        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn), {})
-        static_code, dynamic_code = re.findall(r"```(.*?)```", action_code, re.DOTALL)
-        expected_static = """
-def specializations(a, b, c, d, e, f):
-    # a:
-    assert a.size()[0] == 8
-    assert a.size()[1] == 22
-    assert a.size()[2] == 96
-    assert a.size()[3] == 96
-
-    # b:
-    assert b.size()[0] == 8
-    assert b.size()[1] == 22
-    assert b.size()[2] == 3
-
-    # c:
-    assert c.size()[0] == 8
-
-    # d:
-    assert d.size()[0] == 8
-
-    # f:
-    assert f.size()[1] == 1
-"""
-        expected_dynamic = """
-def specify_constraints(a, b, c, d, e, f):
-    return [
-        # d:
-        dynamic_dim(d, 1) == dynamic_dim(c, 1),
-
-        # e:
-        dynamic_dim(e, 1) == dynamic_dim(c, 1),
-    ]
-"""
-
-        self.assertEqual(static_code, expected_static)
-        self.assertEqual(dynamic_code, expected_dynamic)
 
 
 class TestGuardsExpressions(TestCase):

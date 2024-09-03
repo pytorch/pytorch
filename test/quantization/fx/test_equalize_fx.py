@@ -835,7 +835,7 @@ class TestEqualizeFx(QuantizationTestCase):
         torch.manual_seed(1)
 
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bot = torch.nn.Sequential(torch.nn.Linear(5, 5))
                 self.top = torch.nn.Sequential(torch.nn.Linear(5, 5))

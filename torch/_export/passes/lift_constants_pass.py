@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 import collections
+import warnings
 from typing import Any, Dict, List, Union
 
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
-
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
     ArgumentSpec,
     CustomObjArgument,
@@ -25,7 +26,7 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     if that's the case).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: Dict[
             Union[int, torch.Tensor, FakeScriptObject], List[Any]
@@ -90,6 +91,8 @@ def get_constant_fqn(node: torch.fx.Node, constant_name: str) -> str:
     # The FQN of the constant tensor in the state dict should
     # correspond to the module where the constant tensor was
     # originally used.
+    if len(node.meta["nn_module_stack"]) == 0:
+        return constant_name
     parent_fqn = list(node.meta["nn_module_stack"].values())[-1][0]
     if len(parent_fqn) > 0:
         return f"{parent_fqn}.{constant_name}"
@@ -182,6 +185,15 @@ def lift_constants_pass(
                     constant_fqn = get_constant_fqn(node, constant_name)
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
+                # Remove the parameterness of constant_val
+                if isinstance(constant_val, torch.nn.Parameter):
+                    warnings.warn(
+                        f"{node.target} created when tracing {node.meta['stack_trace']} is a parameter. But"
+                        f"it's not registered with register_parameter(). export will treat it as a constant tensor"
+                    )
+                    # We get the real data out of the parameter by disabling the surrounding fake mode.
+                    with unset_fake_temporarily():
+                        constant_val = constant_val.data
                 constant_kind = InputKind.CONSTANT_TENSOR
                 constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:

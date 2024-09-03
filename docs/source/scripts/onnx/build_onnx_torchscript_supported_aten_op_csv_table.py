@@ -30,20 +30,10 @@ def _get_op_lists():
         if opname in symbolic_schemas:
             # Supported op
             opsets = symbolic_schemas[opname].opsets
-            supported_result.add(
-                (
-                    opname,
-                    f"Since opset {opsets[0]}",
-                )
-            )
+            supported_result.add((opname, f"Since opset {opsets[0]}"))
         else:
             # Unsupported op
-            not_supported_result.add(
-                (
-                    opname,
-                    "Not yet supported",
-                )
-            )
+            not_supported_result.add((opname, "Not yet supported"))
     return (
         sorted(supported_result, key=lambda x: _sort_key(x[0])),
         sorted(not_supported_result),

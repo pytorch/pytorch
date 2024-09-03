@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 from __future__ import annotations
 
 import abc
@@ -40,6 +41,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pandas as pd
 import psutil
+import yaml
 from scipy.stats import gmean, ttest_ind
 from tqdm.auto import tqdm, trange
 
@@ -132,6 +134,11 @@ CI_SKIP_OPTIMIZER = {
     "PegasusForConditionalGeneration",  # OOM
 }
 
+try:
+    from .fb.common import INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY
+except ImportError:
+    INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY = set()
+
 CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "sam",
     # See https://github.com/mindee/doctr/blob/f2114758d529ed8d3d0030581638f0520b6b98d8/doctr/models/detection/core.py#L89
@@ -150,7 +157,8 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "detectron2_fasterrcnn_r_50_dc5",
     "detectron2_fasterrcnn_r_50_fpn",
     "hf_T5_generate",
-}
+    "Reformer",
+}.union(INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY)
 
 # These models currently fail accuracy with eager Adam optimizer
 # so we use SGD when running the full benchmarks
@@ -276,6 +284,36 @@ CI_PRESERVE_COMPILE_DEBUG = {
     # For example:
     # "mnasnet1_0": ["fail_accuracy"],
 }
+
+
+@functools.lru_cache(maxsize=1)
+def load_yaml_file(filename):
+    filepath = os.path.join(os.path.dirname(__file__), filename)
+
+    with open(filepath) as f:
+        data = yaml.safe_load(f)
+
+    internal_file_path = os.path.join(os.path.dirname(__file__), "fb", filename)
+    if os.path.exists(internal_file_path):
+        with open(internal_file_path) as f:
+            internal_data = yaml.safe_load(f)
+            data.update(internal_data)
+
+    def flatten(lst):
+        for item in lst:
+            if isinstance(item, list):
+                yield from flatten(item)
+            else:
+                yield item
+
+    def maybe_list_to_set(obj):
+        if isinstance(obj, dict):
+            return {k: maybe_list_to_set(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return set(flatten(obj))
+        return obj
+
+    return maybe_list_to_set(data)
 
 
 def model_specified_by_path(path_and_class_str):
@@ -1326,14 +1364,13 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            # TODO(angelayi): change this to predispatch
-            # https://github.com/pytorch/pytorch/issues/127513 needs to be fixed before changing
-            # to predispatch to avoid performance regressions
-            gm = torch.export._trace._export_to_torch_ir(
+            gm = torch.export._trace._export(
                 model,
                 example_args,
                 example_kwargs,
-            )
+                pre_dispatch=True,
+                strict=False,
+            ).module()
             with torch.no_grad():
                 so_path = torch._inductor.aot_compile(
                     gm, example_args, example_kwargs
@@ -1353,7 +1390,7 @@ def export(model, example_inputs):
 
     def opt_export(_, example_inputs):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return ep(*example_args, **example_kwargs)
+        return ep.module()(*example_args, **example_kwargs)
 
     return opt_export
 
@@ -1684,7 +1721,7 @@ class OnnxModelFromTorchScript(OnnxModel):
             torch_onnx.patch_torch(
                 error_report=True,
                 profile=True,
-                dump_exported_program=False,
+                dump_exported_program=True,
                 artifacts_dir=os.path.dirname(output_path),
             )
         else:
@@ -2016,7 +2053,7 @@ def optimize_onnx_ctx(
     test_data_dumped = False
 
     def run_n_iterations_onnx(model, inputs, n=2):
-        from torch.onnx._internal import exporter
+        from torch.onnx._internal import _exporter_legacy
         from torch.onnx._internal.fx import diagnostics
 
         # NOTE(bowbao): Capture all export & ort errors and diagnostics.
@@ -2050,7 +2087,7 @@ def optimize_onnx_ctx(
                 else:
                     outputs = onnx_model.run(inputs)
             return outputs
-        except exporter.OnnxExporterError as e:
+        except _exporter_legacy.OnnxExporterError as e:
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
             diagnostic_context = e.onnx_program.diagnostic_context
             for parsed_error in parser.parse_diagnostic_context(diagnostic_context):
@@ -3417,7 +3454,7 @@ def parse_args(args=None):
         "--total-partitions",
         type=int,
         default=1,
-        choices=range(1, 10),
+        choices=range(1, 16),
         help="Total number of partitions we want to divide the benchmark suite into",
     )
     parser.add_argument(
@@ -4393,7 +4430,15 @@ def run(runner, args, original_dir=None):
                 fullgraph=args.nopython,
                 mode=args.inductor_compile_mode,
             )
-            runner.model_iter_fn = baseline_ctx(runner.model_iter_fn)
+            model_iter_fn = baseline_ctx(runner.model_iter_fn)
+
+            # needed to avoid error that causes inconsistent timing due to:
+            # Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards
+            def model_iter_fn_and_mark_step(*args, **kwargs):
+                torch.compiler.cudagraph_mark_step_begin()
+                model_iter_fn(*args, **kwargs)
+
+            runner.model_iter_fn = model_iter_fn_and_mark_step
             optimize_ctx = torchao_optimize_ctx(args.quantization)
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
