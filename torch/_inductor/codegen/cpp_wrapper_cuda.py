@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
@@ -78,10 +78,16 @@ class DeferredCudaDefaultGrid:
         self.grid_callable = grid_callable
         self.grid_extra_kwargs = grid_extra_kwargs
 
+    def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
+        if isinstance(grid, (list, tuple)):
+            return [self._process_grid(e) for e in grid]
+        else:
+            return grid.inner_expr if isinstance(grid, SymbolicCallArg) else grid
+
     def __call__(self):
         grid = self.grid
         assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
-        grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
+        grid = self._process_grid(grid)
         grid_callable = self.grid_callable or default_grid
         if not self.grid_extra_kwargs:
             grid_fn = grid_callable(*grid)
@@ -145,7 +151,7 @@ class DeferredCudaGridLine(DeferredLineBase):
         grid_args_str = ", ".join(
             [cexpr(V.graph.sizevars.simplify(item)) for item in grid]
         )
-        return f"Grid {self.grid_var} = Grid({grid_args_str});"
+        return f"    Grid {self.grid_var} = Grid({grid_args_str});"
 
     def _new_line(self, line):
         return DeferredCudaGridLine(
@@ -251,9 +257,13 @@ class CppWrapperCuda(CppWrapperCpu):
         self.writeline(
             DeferredCudaKernelLine(
                 kernel_name,
-                kernel_var_name + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
+                """    """
+                + kernel_var_name
+                + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
                 if V.graph.aot_mode
-                else kernel_var_name + """ = loadKernel("%s", "%s", %s);""",
+                else """    """
+                + kernel_var_name
+                + """ = loadKernel("%s", "%s", %s);""",
                 keys,
             )
         )
@@ -404,7 +414,7 @@ class CppWrapperCuda(CppWrapperCpu):
         self.writeline(
             DeferredCudaKernelLine(
                 kernel_name,
-                r"launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
+                r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
                     kernel_var_name,
                     f"{grid_var}.grid_x",
                     f"{grid_var}.grid_y",

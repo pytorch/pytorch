@@ -3324,8 +3324,8 @@ class AOTInductorTestsTemplate:
             ]
         )
 
-        # test the default debug printing codegen
-        with config.patch({"aot_inductor.debug_intermediate_value_printer": 1}):
+        # test default debug printing all tensor values codegen
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
@@ -3345,11 +3345,11 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
-        # test the filtered kernel names printing codegen
+        # test printing selected kernel's tensor values codegen
         filtered_kernel_name = f"aoti_torch_{self.device}_addmm_out"
         with config.patch(
             {
-                "aot_inductor.debug_intermediate_value_printer": 1,
+                "aot_inductor.debug_intermediate_value_printer": "2",
                 "aot_inductor.filtered_kernel_names": filtered_kernel_name,
             }
         ):
