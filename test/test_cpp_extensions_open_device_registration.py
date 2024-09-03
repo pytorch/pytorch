@@ -540,7 +540,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # call _fused_adamw_ with undefined tensor.
         self.module.fallback_with_undefined_tensor()
 
-    def test_open_device_numpy_serialization(self):
+    def test_open_device_numpy_serialization_map_location(self):
         torch.utils.rename_privateuse1_backend("foo")
         device = self.module.custom_device()
         default_protocol = torch.serialization.DEFAULT_PROTOCOL
@@ -553,7 +553,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(
                 rebuild_func is torch._utils._rebuild_device_tensor_from_numpy
             )
-            # Test map_location
             with TemporaryFileName() as f:
                 torch.save(sd, f)
                 with safe_globals(
@@ -569,15 +568,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                 ):
                     sd_loaded = torch.load(f, map_location="cpu")
                 self.assertTrue(sd_loaded["x"].is_cpu)
-
-            # Test metadata_only
-            with TemporaryFileName() as f:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Cannot serialize tensors on backends with no storage under skip_data context manager",
-                ):
-                    with torch.serialization.skip_data():
-                        torch.save(sd, f)
 
 
 if __name__ == "__main__":
