@@ -1492,9 +1492,21 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
     ),
     skip(
+        "median",
+        variant_name="nonunique",
+        matcher=lambda sample: True,
+        reason="Non-deterministic output when inputs are nonunique",
+    ),
+    skip(
         "mm",
         matcher=lambda sample: torch.numel(sample.input) == 0,
         reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
+    ),
+    skip(
+        "nanmedian",
+        variant_name="nonunique",
+        matcher=lambda sample: True,
+        reason="Non-deterministic output when inputs are nonunique",
     ),
     xfail(
         "native_batch_norm",
