@@ -12,6 +12,7 @@ import enum
 import functools
 import importlib
 import inspect
+import itertools
 import linecache
 import logging
 import multiprocessing
@@ -2993,8 +2994,12 @@ def _builtin_function_ids() -> Dict[int, str]:
         }
     )
     rv.update(
+        {id(v): f"itertools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
+    )
+    rv.update(
         {
             id(cast): "typing.cast",
+            id(functools.reduce): "functools.reduce",
             id(copy.deepcopy): "copy.deepcopy",
         }
     )
@@ -3240,6 +3245,8 @@ MOD_INLINELIST = [
     "torch.distributions",
     "torch.export._tree_utils",
     "torch.fx._pytree",
+    "torch.fx._symbolic_trace",
+    "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.overrides",
@@ -3467,7 +3474,9 @@ def check_verbose(obj, is_inlined_call=False):
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: Set[str] = set()
-    rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
+    rule = torch._dynamo.trace_rules.lookup_inner(
+        fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons
+    )
     if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
         return SkipResult(
             False,
