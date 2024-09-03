@@ -392,7 +392,8 @@ class BlockMask:
 
     def __getitem__(self, index) -> "BlockMask":
         """
-        Returns a new BlockMask instance with the given index applied to all attributes.
+        Returns a new BlockMask instance by getting the mask for the given index position.
+        The query index must be 1D tensor with 1 element for decoding.
 
         Args:
             index: Index to apply to all attributes.
@@ -423,10 +424,21 @@ class BlockMask:
                 assert new_block_mask.kv_indices.shape == (2,1,4,4)
 
                 # slicing on batch, head, and query dimension
-                new_block_mask = block_mask[0:2, 1:2, 1:3]
-                assert new_block_mask.kv_num_blocks.shape == (2,1,2)
-                assert new_block_mask.kv_indices.shape == (2,1,2,4)
+                new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
+                assert new_block_mask.kv_num_blocks.shape == (2,1,1)
+                assert new_block_mask.kv_indices.shape == (2,1,1,4)
         """
+        if isinstance(index, tuple) and len(index) == self.kv_num_blocks.ndim:
+            if not (
+                isinstance(index[-1], torch.Tensor)
+                and index[-1].ndim == 1
+                and index[-1].numel() == 1
+            ):
+                raise NotImplementedError(
+                    "NYI: the query index must be 1D tensor with 1 element for decoding."
+                )
+            index[-1][0] //= self.BLOCK_SIZE[0]
+
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:

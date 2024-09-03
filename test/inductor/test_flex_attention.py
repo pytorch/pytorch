@@ -1860,12 +1860,12 @@ class TestBlockMask(InductorTestCase):
         assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
 
         # slicing on batch, head, and query dimension
-        new_block_mask = block_mask[0:2, 1:2, 1:3]
-        assert new_block_mask.kv_num_blocks.shape == (2, 1, 2)
-        assert new_block_mask.kv_indices.shape == (2, 1, 2, 4)
+        new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
+        assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
 
         # slicing on batch, head, and query dimension
-        q_index = torch.tensor([0])
+        q_index = torch.tensor([0], dtype=torch.int32)
         new_block_mask = block_mask[:, :, q_index]
 
         self.assertEqual(new_block_mask.kv_num_blocks.ndim, 3)
