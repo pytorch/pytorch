@@ -28,7 +28,9 @@ from torch.testing._internal.common_utils import (
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
-        torch.cuda.is_available() and torch.cuda.device_count() >= 2
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (8, 0)
+        and torch.cuda.device_count() >= 2
     )
     num_devices = torch.cuda.device_count()
     for i in range(num_devices - 1):

@@ -60,6 +60,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
+from torch._utils_internal import log_cache_bypass
 
 
 T = TypeVar("T")
@@ -68,7 +69,7 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
-    from .remote_cache import RemoteCacheBackend
+    from .remote_cache import JsonDataTy, RemoteCache
 
 
 """
@@ -142,16 +143,16 @@ if config.is_fbcode():
     )
 else:
 
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
+    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
+    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
+    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
-    def use_global_cache() -> bool:
+    def use_global_cache() -> bool:  # type: ignore[misc]
         return False
 
 
@@ -443,7 +444,7 @@ def write_text(text: str) -> str:
 
 
 def write_atomic(
-    path: str,
+    path_: str,
     content: Union[str, bytes],
     make_dirs: bool = False,
     encode_utf_8: bool = False,
@@ -453,7 +454,7 @@ def write_atomic(
     assert isinstance(
         content, (str, bytes)
     ), "Only strings and byte arrays can be saved in the cache"
-    path = Path(path)
+    path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
@@ -694,7 +695,7 @@ def torch_key() -> bytes:
 
     from libfb.py import parutil
 
-    return parutil.get_file_contents("torch/src_hash.txt").rstrip()
+    return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
 def get_inductor_root() -> str:
@@ -837,8 +838,10 @@ def cudagraph_post_compile(
 
         from .compile_fx import cudagraphify
 
+        current_callable = compiled_graph.current_callable
+        assert current_callable is not None
         compiled_graph.current_callable = cudagraphify(
-            compiled_graph.current_callable,
+            current_callable,
             static_input_idxs=static_input_idxs,
             device_index=next(iter(compiled_graph.device_idxs)),
             stack_traces=stack_traces,
@@ -1000,7 +1003,7 @@ class FxGraphCache:
         key: str,
         example_inputs: List[torch.Tensor],
         local: bool,
-        remote_cache: Optional[Any],
+        remote_cache: Optional[RemoteCache[JsonDataTy]],
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -1028,8 +1031,12 @@ class FxGraphCache:
 
             if remote_cache:
                 try:
-                    if (data := remote_cache.get(key)) is not None:
-                        yield pickle.loads(data)
+                    if (cache_data := remote_cache.get(key)) is not None:
+                        assert isinstance(cache_data, dict)
+                        data = cache_data["data"]
+                        assert isinstance(data, (str, bytes))
+                        content = base64.b64decode(data)
+                        yield pickle.loads(content)
                 except Exception:
                     log.warning(
                         "fx graph cache unable to load compiled graph", exc_info=True
@@ -1179,7 +1186,7 @@ class FxGraphCache:
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
         local: bool,
-        remote_cache: Optional[RemoteCacheBackend],
+        remote_cache: Optional[RemoteCache[JsonDataTy]],
     ) -> None:
         """
         Store a serialized CompiledFxGraph on disk.
@@ -1227,15 +1234,11 @@ class FxGraphCache:
 
             if remote_cache:
                 time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
-                cache_data = (
-                    {
-                        "data": content,
-                        "time_taken_ms": time_taken_ms,
-                    }
-                    if config.is_fbcode()
-                    else content
-                )
-                remote_cache.put(key, cache_data)  # type: ignore[arg-type]
+                cache_data: JsonDataTy = {
+                    "data": base64.b64encode(content).decode("ascii"),
+                    "time_taken_ms": time_taken_ms,
+                }
+                remote_cache.put(key, cache_data)
         except Exception:
             log.warning("fx graph unable to write to cache", exc_info=True)
             counters["inductor"]["fxgraph_cache_write_error"] += 1
@@ -1296,20 +1299,22 @@ class FxGraphCache:
             cache_info["key"] = key
             cache_info["components"] = debug_lines
 
-            remote_cache: Optional[RemoteCacheBackend] = None
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = None
             if remote:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from torch._inductor.fb.remote_cache import (
-                            FbRemoteFxGraphCacheBackend,
-                        )
+                        from torch._inductor.fb.remote_cache import FbRemoteFxGraphCache
 
-                        remote_cache = FbRemoteFxGraphCacheBackend(cache_id)
+                        remote_cache = FbRemoteFxGraphCache(cache_id)
                     else:
-                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
+                        from torch._inductor.remote_cache import RemoteFxGraphCache
 
-                        remote_cache = RedisRemoteCacheBackend(cache_id)
+                        remote_cache = RemoteFxGraphCache(cache_id)
+                except ModuleNotFoundError as e:
+                    # No need for a stack trace on this error
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache: %s", e)
                 except Exception:
                     remote_cache = None
                     log.warning("Unable to create a remote cache", exc_info=True)
@@ -1355,6 +1360,8 @@ class FxGraphCache:
             cache_state = "bypass"
             log.info("Bypassing FX Graph Cache because '%s'", e)
             cache_info["cache_bypass_reason"] = str(e)
+            if remote:
+                log_cache_bypass("bypass_fx_graph", str(e))
             cache_event_time = time_ns()
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(
@@ -1458,14 +1465,18 @@ class CompiledFxGraph:
         self.metrics_deltas = metrics_deltas
         self.counter_deltas = counter_deltas
         self.guards_expr = None
+        self.cudagraph_info = None
+        self.fx_kwargs = {}
+        self.inputs_to_check = ()
+        self.boxed_forward_device_index = None
 
     def __call__(self, inputs: List[Any]) -> Any:
         assert self.current_callable is not None
         return self.current_callable(inputs)
 
 
-def run_command_and_check(cmd: str) -> None:
-    cmd = shlex.split(cmd)
+def run_command_and_check(cmd_: str) -> None:
+    cmd = shlex.split(cmd_)
     try:
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
