@@ -58,7 +58,7 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
-SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
 
@@ -199,6 +199,33 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
 
 @functools.lru_cache(None)
+def _is_intel_compiler(cpp_compiler: str) -> bool:
+    try:
+        output_msg = (
+            subprocess.check_output(
+                [cpp_compiler, "--version"], stderr=subprocess.DEVNULL
+            )
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+        is_intel_compiler = "Intel" in output_msg.splitlines()[0]
+        if is_intel_compiler:
+            if _IS_WINDOWS:
+                if re.search(r"((icx$)|(icx-cc$))", cpp_compiler):
+                    raise RuntimeError(
+                        "Please use icx-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
+                    )
+        return is_intel_compiler
+    except FileNotFoundError as exc:
+        return False
+    except subprocess.SubprocessError:
+        # --version args not support.
+        return False
+
+    return False
+
+
+@functools.lru_cache(None)
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
@@ -206,6 +233,11 @@ def is_gcc() -> bool:
 @functools.lru_cache(None)
 def is_clang() -> bool:
     return _is_clang(get_cpp_compiler())
+
+
+@functools.lru_cache(None)
+def is_intel_compiler() -> bool:
+    return _is_intel_compiler(get_cpp_compiler())
 
 
 @functools.lru_cache(None)
@@ -798,6 +830,37 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
         pass
 
 
+@functools.lru_cache(None)
+def perload_icx_libomp_win(cpp_compiler: str) -> None:
+    def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
+        try:
+            output = subprocess.check_output(
+                [cpp_compiler, f"-print-file-name={lib_name}"],
+                stderr=subprocess.DEVNULL,
+            ).decode(*SUBPROCESS_DECODE_ARGS)
+            omp_path = output.rstrip()
+            if os.path.isfile(omp_path):
+                os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+                omp_module = cdll.LoadLibrary(omp_path)
+                return True
+        except subprocess.SubprocessError:
+            pass
+        return False
+
+    """
+    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    We need preload them like openmp library.
+    """
+    preload_list = [
+        "libiomp5md.dll",  # openmp
+        "svml_dispmd.dll",  # svml library
+        "libmmd.dll",  # libm
+    ]
+
+    for lib_name in preload_list:
+        _load_icx_built_in_lib_by_name(cpp_compiler, lib_name)
+
+
 def _get_openmp_args(
     cpp_compiler: str,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
@@ -854,10 +917,28 @@ def _get_openmp_args(
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
     elif _IS_WINDOWS:
+        """
+        On Windows, `clang` and `icx` have their specific openmp implenmention.
+        And the openmp lib is in compiler's some sub-directory.
+        For dynamic library(DLL) load, the Windows native APIs are `LoadLibraryA` and `LoadLibraryExA`, and their search
+        dependencies have some rules:
+        https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-loadlibraryexa#searching-for-dlls-and-dependencies
+        In some case, the rules may not include compiler's sub-directories.
+        So, it can't search and load compiler's openmp library correctly.
+        And then, the whole application would be broken.
+
+        To avoid the openmp load failed, we can automatic locate the openmp binary and preload it.
+        1. For clang, the function is `perload_clang_libomp_win`.
+        2. For icx, the function is `perload_icx_libomp_win`.
+        """
         if _is_clang(cpp_compiler):
             cflags.append("openmp")
             libs.append("libomp")
             perload_clang_libomp_win(cpp_compiler, "libomp.dll")
+        elif _is_intel_compiler(cpp_compiler):
+            cflags.append("Qiopenmp")
+            libs.append("libiomp5md")
+            perload_icx_libomp_win(cpp_compiler)
         else:
             # /openmp, /openmp:llvm
             # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
@@ -878,6 +959,8 @@ def _get_openmp_args(
                 # TODO: fix issue, can't find omp.h
                 cflags.append("fopenmp")
                 libs.append("gomp")
+            elif _is_intel_compiler(cpp_compiler):
+                cflags.append("fiopenmp")
             else:
                 cflags.append("fopenmp")
                 libs.append("gomp")

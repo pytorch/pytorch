@@ -262,7 +262,7 @@ class FXGraphCacheLoadable:
         # That is, AOTAutograd and Inductor never create new guards based on symints with different sources
         # than those passed to it by inductor.
         result = FxGraphCache._lookup_graph(
-            self.fx_graph_cache_key, example_inputs, local=True, remote_cache=False
+            self.fx_graph_cache_key, example_inputs, local=True, remote_cache=None
         )
         if result is None:
             log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
