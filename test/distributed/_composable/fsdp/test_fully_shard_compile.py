@@ -168,6 +168,24 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
+    def _maybe_check_no_fsdp_copy_or_resize_in_graph(self, fullgraph):
+        if fullgraph:
+            def _run_checks(graph):
+                # Check no `fsdp.copy_` and `.resize_` ops in the graph.
+                self.assertFalse(
+                    _is_op_in_graph(graph, torch.ops.fsdp.copy_.default),
+                    f"`fsdp.copy_` is used in graph: {graph}",
+                )
+                self.assertFalse(
+                    _is_op_in_graph(
+                        graph, torch.ops.inductor.resize_storage_bytes_.default
+                    ),
+                    f"`inductor.resize_storage_bytes_` is used in graph: {graph}",
+                )
+            return _run_checks
+        else:
+            return lambda graph: None
+
     def _reinplace_all_gather_with_optional_checks(self, fullgraph):
         def _run_with_checks(graph, orig_fn):
             self.assertTrue(
@@ -550,7 +568,10 @@ class TestFullyShardCompile(FSDPTest):
         for fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
-            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(fullgraph):
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(fullgraph), torch._inductor.config.patch(
+                joint_custom_pre_pass=self._maybe_check_no_fsdp_copy_or_resize_in_graph(fullgraph),
+                post_grad_custom_pre_pass=self._maybe_check_no_fsdp_copy_or_resize_in_graph(fullgraph),
+            ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
                         *self._create_nested_fully_shard_factory_fns(
@@ -754,6 +775,9 @@ class TestFullyShardCompile(FSDPTest):
                 fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
                 fullgraph
+            ), torch._inductor.config.patch(
+                joint_custom_pre_pass=self._maybe_check_no_fsdp_copy_or_resize_in_graph(fullgraph),
+                post_grad_custom_pre_pass=self._maybe_check_no_fsdp_copy_or_resize_in_graph(fullgraph),
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
