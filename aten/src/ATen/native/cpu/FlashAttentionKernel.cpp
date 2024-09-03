@@ -388,7 +388,7 @@ void cpu_flash_attention(
   // we need to split headSize with packb_size for packing v
   // TODO Simplify the check when oneDNN supports fused pack with transpose and has better performance
   if (with_pack) {
-    need_pack = num_head >= 4 && headSize % packb_size == 0;
+    need_pack = num_head >= 4 && headSize % packb_size == 0 && kvSize >= packb_size;
     if (need_pack) {
       float pack_size = batchSize * num_head * kvSize * headSize / 1024;
       float gemm_size_per_thread =
@@ -398,7 +398,7 @@ void cpu_flash_attention(
       // When the number of gemm is much greater than the number of pack,
       // the pack and padding overhead can be overlaped.
       if (pack_size < 2688) {
-        need_pack = gsize >= 36 || (gsize >= 24 && headSize > packb_size && kvSize >= packb_size);
+        need_pack = gsize >= 36 || (gsize >= 24 && headSize > packb_size);
       } else if (pack_size < 16384) {
         need_pack = gsize >= (is_causal ? 54 : 52);
       } else {
