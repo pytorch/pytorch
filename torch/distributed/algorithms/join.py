@@ -28,7 +28,6 @@ class JoinHook:
 
         Training iteration i.e., in one forward pass, backward pass, and optimizer step.
         """
-        ...
 
     def post_hook(self, is_last_joiner: bool) -> None:
         r"""
@@ -40,7 +39,6 @@ class JoinHook:
             is_last_joiner (bool): ``True`` if the rank is one of the last to
                 join; ``False`` otherwise.
         """
-        ...
 
 
 class Joinable(ABC):

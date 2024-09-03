@@ -75,7 +75,7 @@ std::vector<at::Tensor> unpack_tensors(
     } else if (
         *ivalue_arg.real_type() ==
         *c10::getTypePtr<std::optional<at::Tensor>>()) {
-      // ivalue is c10::optional<at::Tensor>
+      // ivalue is std::optional<at::Tensor>
       unpack_optional_tensor_ivalue(ivalue, device, inputs);
     }
   }
