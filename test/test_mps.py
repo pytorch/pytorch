@@ -1222,9 +1222,9 @@ class TestAutocastMPS(TestCase):
 
         self.assertEqual(autocast_output_tensor.dtype, torch.float16, "Autocast output tensor was not expected type float16")
         self.assertEqual(autocast_output_tensor,
-                         output_tensor.to(torch.float16),
+                         output_tensor.to(torch.bfloat16),
                          f"Autocast & non-autocast tensors did not match, \
-                         got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
+                         got:\n{autocast_output_tensor} \n{output_tensor.to(torch.bfloat16)}")
 
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
