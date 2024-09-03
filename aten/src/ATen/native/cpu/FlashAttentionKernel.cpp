@@ -394,16 +394,15 @@ void cpu_flash_attention(
       float gemm_size_per_thread =
           (batchSize * num_head * qSlice + num_thread - 1) / num_thread *
           qSplitSize * (is_causal ? qSize : kvSize) * headSize / 1024;
+      float gsize = gemm_size_per_thread / pack_size;    
       // When the number of gemm is much greater than the number of pack,
       // the pack and padding overhead can be overlaped.
-      if (pack_size < 512) {
-        need_pack = false;
-      } else if (pack_size < 2688) {
-        need_pack = gemm_size_per_thread / pack_size >= 32 && headSize > packb_size;
+      if (pack_size < 2688) {
+        need_pack = gsize >= 36 || (gsize >= 24 && headSize > packb_size && kvSize >= packb_size);
       } else if (pack_size < 16384) {
-        need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 54 : 52);
+        need_pack = gsize >= (is_causal ? 54 : 52);
       } else {
-        need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 54 : 40);
+        need_pack = gsize >= (is_causal ? 54 : 40);
       }
     }
   }
