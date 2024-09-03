@@ -104,7 +104,7 @@ networkx==2.8.8
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
 numba==0.49.0 ; python_version < "3.9"
-numba==0.54.1 ; python_version == "3.9"
+numba==0.55.2 ; python_version == "3.9"
 numba==0.55.2 ; python_version == "3.10"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.54.1, 0.49.0, <=0.49.1
