@@ -25,6 +25,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
     noop_mask,
     or_masks,
+    PagedCache,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -2093,6 +2094,34 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
 
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=1e-3, rtol=0.0)
+
+
+class TestBlockMask(InductorTestCase):
+    @supported_platform
+    @common_utils.parametrize("compile", [False, True])
+    def test_page_allocation(self, compile: bool):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads = (3, 4, 8, 5, 10, 2)
+        paged_cache = PagedCache(n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads)
+
+        allocate = paged_cache.allocate
+        if compile:
+            # No need to support compiling `deallocate`` since it's not on hot path
+            allocate = torch.compile(allocate, backend="inductor")
+
+        batch_idx, head_idx = torch.tensor([0]), torch.tensor([0])
+        for logical_block_idx in range(n_pages):
+            allocate(batch_idx, head_idx, torch.tensor([logical_block_idx]))
+
+        new_batch_idx, new_head_idx, new_logical_block_idx = torch.tensor([1]), torch.tensor([0]), torch.tensor([0])
+        with self.assertRaisesRegex(
+            AssertionError, "empty_pages must have at least 1 element for allocation"
+        ):
+            allocate(new_batch_idx, new_head_idx, new_logical_block_idx)
+
+        paged_cache.deallocate(batch_idx, head_idx, torch.tensor([0]))
+        allocate(new_batch_idx, new_head_idx, new_logical_block_idx)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)

@@ -558,6 +558,10 @@ def _round_up_to_multiple(x, multiple):
     return (x + multiple - 1) // multiple * multiple
 
 
+def cdiv(x, multiple):
+    return (x + multiple - 1) // multiple
+
+
 def _convert_mask_to_block_mask(
     mask: Tensor,
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
@@ -823,7 +827,38 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
-class PagedKVCache(nn.Module):
+class PagedCache(torch.nn.Module):
+    def __init__(self, n_pages: int, page_size: int, head_dim: int, max_batch_size: int, max_seq_len: int, n_heads: int, dtype=torch.bfloat16):
+        super().__init__()
+        self.page_size = page_size
+
+        cache_shape = (n_pages, page_size, head_dim)
+        self.register_buffer("cache", torch.zeros(cache_shape, dtype=dtype))
+
+        # Page Table: [batch, head, logical_block_idx] -> (physical_page_idx, n_filled, ref_count)
+        max_seq_pages = cdiv(max_seq_len, page_size)
+        page_table_shape = (max_batch_size, n_heads, max_seq_pages, 3)
+        self.page_table = -torch.ones(page_table_shape, dtype=torch.int64)
+
+        self.empty_pages = list(range(n_pages-1, -1, -1))
+
+    def allocate(self, batch: Tensor, head: Tensor, logical_block_idx: Tensor):
+        # batch, head, and logical_block_idx are 1D tensor with 1 element.
+        assert self.empty_pages, "empty_pages must have at least 1 element for allocation"
+        new_page_idx = self.empty_pages.pop()
+        self.page_table[batch, head, logical_block_idx] = torch.tensor([new_page_idx, 0, 1])
+
+    def deallocate(self, batch: Tensor, head: Tensor, logical_block_idx: Tensor):
+        # batch, head, and logical_block_idx are 1D tensor with 1 element.
+        self.page_table[batch, head, logical_block_idx, 2] -= 1
+        if self.page_table[batch, head, logical_block_idx, 2] < 1:
+            page_idx = self.page_table[batch, head, logical_block_idx, 0].item()
+            self.page_table[batch, head, logical_block_idx, 0] = -1
+            self.empty_pages.append(page_idx)
+
+
+# TODO
+class PagedKVCache(torch.nn.Module):
     # We assume a 1:1 mapping between sparse kv block and page block.
     def __init__(self, max_batch_size: int, max_seq_len: int, n_heads: int, head_dim: int, n_pages: int, page_size: int, dtype=torch.bfloat16):
         super().__init__()
@@ -838,6 +873,10 @@ class PagedKVCache(nn.Module):
         self.register_buffer("kv_page_table", -torch.ones(page_table_shape, dtype=torch.int))
 
     def allocate(self) -> int:
+        # TODO
+        return
+
+    def deallocate(self):
         # TODO
         return
 
