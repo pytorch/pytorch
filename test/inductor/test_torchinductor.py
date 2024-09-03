@@ -7257,6 +7257,24 @@ class CommonTemplate:
             [torch.randn(8, 384, 20, 20).to(memory_format=torch.channels_last)],
         )
 
+    def test_exact_stride(self):
+        full = torch.randn((16, 16), device=self.device)
+        view = torch.as_strided(full, (16, 8), full.stride())
+
+        def fn(x):
+            result = x + x
+            result_strided = torch.empty_strided(
+                x.size(), x.stride(), device=self.device
+            )
+            result_strided[:] = result
+            return result_strided
+
+        self.common(fn, [view])
+        reference_out = fn(view)
+        compiled_fn = torch.compile(fn)
+        actual_out = compiled_fn(view)
+        self.assertEqual(reference_out.stride(), actual_out.stride())
+
     def test_like_channels_last(self):
         def foo():
             randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
@@ -7951,7 +7969,6 @@ class CommonTemplate:
         out = [torch.empty_like(x) for _ in range(2)]
         y = g(x)
 
-    @expectedFailureXPU
     def test_functionalize_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But
         # currently the plan is to introduce these operators at the partitioner
@@ -8116,6 +8133,17 @@ class CommonTemplate:
             return torch.rand_like(x), torch.randn_like(x)
 
         self.common(fn, [torch.zeros([20, 20])])
+
+    @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
+    def test_check_stack_no_cycles(self):
+        @torch.compile()
+        def fn(x):
+            return x * 3
+
+        r = fn(torch.randn(2, device=self.device, requires_grad=True))
+        # Backward compilation isn't hooked into cprofile, it probably
+        # should...
+        # r.sum().backward()
 
     def test_like_rands2(self):
         # rand_like with kwargs `device` of str type
@@ -10614,8 +10642,8 @@ class CommonTemplate:
             with torch.no_grad():
                 self.common(fn, (inp,), check_lowp=False)
 
-            # Dynamic shapes invalidate this test case
-            if torch._dynamo.config.assume_static_by_default:
+            # Dynamic shapes and rocm invalidate this test case
+            if torch._dynamo.config.assume_static_by_default and not TEST_WITH_ROCM:
                 # For this test to be valid, Inductor must have changed the conv
                 # to be channels-last. If this assertion ever fails then we need
                 # a new test case.
@@ -10857,6 +10885,7 @@ class CommonTemplate:
         fn(a, b)
 
     # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
+    @slowTest
     def test_fuse_large_params(self):
         def pt2_optimizer_step(optimizer):
             @torch.compile()
@@ -11022,7 +11051,6 @@ class CommonTemplate:
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
 
-    @skipIfWindows(msg="torch._dynamo.exc.BackendCompilerFailed")  # TODO: FIX IT
     def test_randint_int64_mod(self):
         # This used to not compile due to a wrong return type of randint64_cpu
         # See https://github.com/pytorch/pytorch/issues/117435
@@ -11396,6 +11424,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
+    @instantiate_parametrized_tests
     class TritonCodeGenTests(TestCase):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -11899,6 +11928,20 @@ if HAS_GPU and not TEST_WITH_ASAN:
             # we are asserting that when inductor allocates this tensor,
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
+
+        @requires_gpu()
+        @parametrize("upcast_to_fp32", [False, True])
+        def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
+            @torch.compile
+            def func(a, b):
+                return a * b
+
+            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 2
+            with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                fp32_cast_in_code = "to(tl.float32)" in code
+                self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
