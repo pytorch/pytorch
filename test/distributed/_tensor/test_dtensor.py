@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+from itertools import permutations
 
 from numpy.testing import assert_array_equal
 
@@ -825,19 +826,21 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dtensor_2d.full_tensor(), global_tensor1)
         global_tensor2 = torch.randn(4)
         dtensor_1d = distribute_tensor(global_tensor2, mesh["dp"], [Shard(0)])
-        dtensor_list = [dtensor_2d, dtensor_1d]
+        dtensor_lists = permutations([dtensor_2d, dtensor_1d])
+        tensor_lists = permutations([global_tensor1, global_tensor2])
 
-        # Check without implicit replication, cross mesh error raises.
-        with self.assertRaisesRegex(
-            RuntimeError, "DTensor does not support cross-mesh operation yet!"
-        ):
-            torch._foreach_mul(dtensor_list, 2.0)
+        for dtensor_list, tensor_list in zip(dtensor_lists, tensor_lists):
+            # Check dtensor result matches tensor result.
+            with implicit_replication():
+                dtensor_result = torch._foreach_mul(dtensor_list, 2.0)
+                self.assertEqual(dtensor_result[0].full_tensor(), tensor_list[0] * 2.0)
+                self.assertEqual(dtensor_result[1].full_tensor(), tensor_list[1] * 2.0)
 
-        # Check dtensor result matches tensor result.
-        with implicit_replication():
-            torch._foreach_mul_(dtensor_list, 2.0)
-            self.assertEqual(dtensor_list[0].full_tensor(), global_tensor1 * 2.0)
-            self.assertEqual(dtensor_list[1].full_tensor(), global_tensor2 * 2.0)
+            # Check without implicit replication, cross mesh error raises.
+            with self.assertRaisesRegex(
+                RuntimeError, "DTensor does not support cross-mesh operation yet!"
+            ):
+                torch._foreach_mul(dtensor_list, 2.0)
 
         mesh_1d = DeviceMesh.from_group(mesh["tp"].get_group(), self.device_type)
         dtensor_1d = distribute_tensor(global_tensor2, mesh_1d, [Shard(0)])
