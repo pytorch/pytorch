@@ -304,8 +304,12 @@ class ProcessGroupVariable(DistributedVariable):
 
 # TODO(yf225): is there prior art for how to handle this?
 def _get_example_value(x):
+    if isinstance(x, variables.TupleVariable):
+        return tuple(_get_example_value(x) for x in x.items)
     if isinstance(x, variables.TensorVariable):
-        return x.proxy.node.meta["example_value"]
+        example_value = x.proxy.node.meta["example_value"]
+        print(f"_get_example_value: TensorVariable: {example_value}")
+        return example_value
     return x.as_python_constant()
 
 
@@ -390,7 +394,7 @@ class ForwardPreHookUnderCheckpoint(variables.functions.UserFunctionVariable):
                 # tuple([arg.as_proxy()[0] for arg in args[1:]]),
                 {},
             ),
-            example_value=tuple([_get_example_value(x) for x in hook_args.items]),
+            example_value=_get_example_value(hook_args),
             source=self.source,
         )
 
@@ -466,20 +470,27 @@ class ForwardHookUnderCheckpoint(variables.functions.UserFunctionVariable):
         def call_hook(hook_proxy, *args, **kwargs):
             return hook_proxy(None, *args, **kwargs)
 
+        def get_proxy(var):
+            if isinstance(var, variables.TupleVariable):
+                return [var.as_proxy()]
+            if isinstance(var, variables.TensorVariable):
+                return [(var.proxy,)]
+            return [(var.as_proxy(),)]
+
         assert len(args) == 3
         hook_args = args[1]
         assert isinstance(hook_args, variables.TupleVariable)  # hook args
         hook_outputs = args[2]
-        assert isinstance(hook_outputs, variables.TupleVariable)  # hook outputs
+        assert isinstance(hook_outputs, (variables.TupleVariable, variables.TensorVariable)), f"Expected TupleVariable, got: {type(hook_outputs)}"  # hook outputs
         new_hook_outputs = wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
                 "call_function",
                 call_hook,
-                tuple([hook_proxy] + list(hook_args.as_proxy()) + list(hook_outputs.as_proxy())),
+                tuple([hook_proxy] + [hook_args.as_proxy()] + [hook_outputs.as_proxy()]),
                 {},
             ),
-            example_value=tuple([_get_example_value(x) for x in hook_outputs.items]),
+            example_value=_get_example_value(hook_outputs),
             source=self.source,
         )
 

@@ -456,6 +456,7 @@ class OutputGraph:
             )
             self.backward_state_proxy.node.meta["grapharg"] = BackwardStateGraphArg()
             assert self.backward_state_obj
+            self.backward_state_obj.proxy = self.backward_state_proxy
             set_example_value(self.backward_state_proxy.node, self.backward_state_obj)
         return self.backward_state_proxy
 

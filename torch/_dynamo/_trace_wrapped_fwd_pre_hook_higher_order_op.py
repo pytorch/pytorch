@@ -54,7 +54,7 @@ def inner_trace(mode, *args, bw_state=None, **kwargs):
         name="trace_wrapped_fwd_pre_hook",
     )
 
-    print(f"inner_trace: args: {args}")
+    print(f"fwd_pre_hook: inner_trace: args: {args}")
     new_args = args[1]
     track_tensor_tree(new_args, new_args_proxy, constant=None, tracer=mode.tracer)
     return new_args
@@ -62,7 +62,7 @@ def inner_trace(mode, *args, bw_state=None, **kwargs):
 
 @_trace_wrapped_fwd_pre_hook_op.py_impl(FakeTensorMode)
 def inner_fake(*args, **kwargs):
-    print(f"inner_fake: args: {args}")
+    print(f"fwd_pre_hook: inner_fake: args: {args}")
     return args[2]  # args[0] is hook, args[1] is module, args[2] is args tuple
 
 
