@@ -197,8 +197,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         ):
             self.module.register_generator_second()
 
-        if self.module.is_register_hook() is False:
-            self.module.register_hook()
         default_gen = self.module.default_generator(0)
         self.assertTrue(
             default_gen.device.type == torch._C._get_privateuse1_backend_name()

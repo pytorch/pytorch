@@ -578,54 +578,39 @@ void set_custom_device_index(c10::DeviceIndex device_index) {
   custom_device_index = device_index;
 }
 
+namespace at {
 // a global flag used for dummy pin_memory of custom device
 bool custom_pinned_flag = false;
 
-struct FooHooksArgs : public at::PrivateUse1HooksArgs {};
-
 struct FooHooksInterface : public at::PrivateUse1HooksInterface {
-    FooHooksInterface(FooHooksArgs) {}
-    ~FooHooksInterface() override = default;
-    const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) const override {
-      static auto device_gen = make_generator_privateuse1(device_index);
-      return device_gen;
-    }
-    // this is a simple implementation, custom_pinned_flag will be set as true
-    // once tensor.pin_memory() is called. And then tensor.is_pinned()
-    // always return true no matter what tensor it's called on.
-    bool isPinnedPtr(const void* data) const override {
-      return custom_pinned_flag;
-    }
-    c10::Allocator* getPinnedMemoryAllocator() const override {
-      custom_pinned_flag = true;
-      return c10::GetCPUAllocator();
-    }
+  FooHooksInterface() {}
+  ~FooHooksInterface() override = default;
+
+  virtual bool hasPrivateUse1() const {
+    return true;
+  }
+
+  const at::Generator& getDefaultGenerator(
+      c10::DeviceIndex device_index) const override {
+    static auto device_gen = make_generator_privateuse1(device_index);
+    return device_gen;
+  }
+
+  // this is a simple implementation, custom_pinned_flag will be set as true
+  // once tensor.pin_memory() is called. And then tensor.is_pinned()
+  // always return true no matter what tensor it's called on.
+  bool isPinnedPtr(const void* data) const override {
+    return custom_pinned_flag;
+  }
+
+  c10::Allocator* getPinnedMemoryAllocator() const override {
+    custom_pinned_flag = true;
+    return c10::GetCPUAllocator();
+  }
 };
 
-TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs);
-C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs)
-// Using Create function to get PrivateUse1HooksInterface point from PrivateUse1HooksRegistry class.
-C10_REGISTER_TYPED_CLASS(PrivateUse1HooksRegistry, "FooHooks", FooHooksInterface)
-
-static at::PrivateUse1HooksInterface* privateuse1_hooks_local = nullptr;
-static at::PrivateUse1HooksInterface* get_private_hooks() {
-  static c10::once_flag once;
-  c10::call_once(once, [] {
-    privateuse1_hooks_local = PrivateUse1HooksRegistry()->Create("FooHooks", {}).release();
-    if (!privateuse1_hooks_local) {
-      privateuse1_hooks_local = new FooHooksInterface(FooHooksArgs{});
-    }
-  });
-  return privateuse1_hooks_local;
-}
-
-void register_hook() {
-  at::RegisterPrivateUse1HooksInterface(get_private_hooks());
-}
-
-bool is_register_hook() {
-  return privateuse1_hooks_local != nullptr;
-}
+REGISTER_PRIVATEUSE1_HOOKS(FooHooksInterface)
+} // namespace at
 
 const at::Generator& default_generator(c10::DeviceIndex device_index) {
   return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
@@ -690,8 +675,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_set_backend_meta", &custom_set_backend_meta, "a fake set tensor BackendMeta function");
     m.def("check_backend_meta", &check_backend_meta, "check if BackendMeta serialization correctly");
     m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
-    m.def("register_hook", &register_hook, "register_hook for privateuse1");
-    m.def("is_register_hook", &is_register_hook, "is_register_hook for privateuse1");
     m.def("default_generator", &default_generator, "default_generator for privateuse1");
     m.def("fallback_with_undefined_tensor", &fallback_with_undefined_tensor, "fallback_with_undefined_tensor for privateuse1");
 

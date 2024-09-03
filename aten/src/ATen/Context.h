@@ -150,6 +150,9 @@ class TORCH_API Context {
   static bool hasMPS() {
     return detail::getMPSHooks().hasMPS();
   }
+  static bool hasPrivateUse1() {
+    return detail::getPrivateUse1Hooks().hasPrivateUse1();
+  }
   static bool hasIPU() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::IPU);
   }
@@ -180,11 +183,7 @@ class TORCH_API Context {
     c10::call_once(th_mtia_init, [&] { detail::getMTIAHooks().initMTIA(); });
   }
   void lazyInitPrivateUse1() {
-    c10::call_once(thp_init, [&] {
-      if (isPrivateUse1HooksRegistered()) {
-        at::detail::getPrivateUse1Hooks().initPrivateUse1();
-      }
-    });
+    c10::call_once(thp_init, [&] { at::detail::getPrivateUse1Hooks().initPrivateUse1(); });
   }
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();

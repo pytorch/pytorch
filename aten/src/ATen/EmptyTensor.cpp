@@ -20,7 +20,7 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
       return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
     } else if (at::globalContext().hasXPU()) {
       return at::detail::getXPUHooks().getPinnedMemoryAllocator();
-    } else if(at::isPrivateUse1HooksRegistered()) {
+    } else if(at::globalContext().hasPrivateUse1()) {
       return at::detail::getPrivateUse1Hooks().getPinnedMemoryAllocator();
     } else {
       TORCH_CHECK(false, "Need to provide pin_memory allocator to use pin memory.")
