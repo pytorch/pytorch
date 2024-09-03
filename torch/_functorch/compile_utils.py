@@ -58,6 +58,10 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             or n.op == "output"
             or n.op == "get_attr"
             or get_aten_target(n) in rand_ops
+            # aten.empty is non-deterministic, so don't CSE it.
+            # Also, aten.empty is almost always fusible into its consumer,
+            # so it's not worth CSEing.
+            or get_aten_target(n) is aten.empty
         ):
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
