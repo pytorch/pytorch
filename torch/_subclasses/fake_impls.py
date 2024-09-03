@@ -29,6 +29,7 @@ from torch.fx.operator_schemas import normalize_function
 from torch.utils._stats import count_label
 from torch.utils._sympy.value_ranges import bound_sympy
 
+
 pytree = torch.utils._pytree
 
 __all__ = [
@@ -468,7 +469,9 @@ def masked_select(fake_mode, func, self, mask):
                     num_elements *= size
                 elif isinstance(size, torch.SymInt):
                     sym_node = size.node
-                    sym_range = bound_sympy(sym_node.expr, sym_node.shape_env.var_to_range)
+                    sym_range = bound_sympy(
+                        sym_node.expr, sym_node.shape_env.var_to_range
+                    )
                     num_elements *= int(sym_range.upper)
     if num_elements > 2:
         maxval = num_elements
