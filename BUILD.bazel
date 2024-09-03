@@ -261,7 +261,6 @@ header_template_rule(
     include = "aten/src",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
-        "@AT_MKLDNN_UKERNEL_ENABLED@": "1",
         "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
