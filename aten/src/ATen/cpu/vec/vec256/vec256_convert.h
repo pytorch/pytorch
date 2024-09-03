@@ -44,10 +44,48 @@ struct VecConvert<BFloat16, 1, float, 1> {
 };
 
 template <>
+struct VecConvert<BFloat16, 1, float, 2> {
+  static inline VectorizedN<BFloat16, 1> apply(
+      const VectorizedN<float, 2>& src) {
+    VectorizedN<BFloat16, 1> result;
+    result[0] = convert_float_bfloat16(src[0], src[1]);
+    return result;
+  }
+};
+
+template <>
+struct VecConvert<float, 2, BFloat16, 1> {
+  static inline VectorizedN<float, 2> apply(
+      const VectorizedN<BFloat16, 1>& src) {
+    VectorizedN<float, 2> result;
+    std::tie(result[0], result[1]) = convert_bfloat16_float(src[0]);
+    return result;
+  }
+};
+
+template <>
 struct VecConvert<Half, 1, float, 1> {
   static inline VectorizedN<Half, 1> apply(const VectorizedN<float, 1>& src) {
     VectorizedN<Half, 1> result;
     result[0] = _mm256_castsi128_si256(cvtfp32_fp16(src[0]));
+    return result;
+  }
+};
+
+template <>
+struct VecConvert<Half, 1, float, 2> {
+  static inline VectorizedN<Half, 1> apply(const VectorizedN<float, 2>& src) {
+    VectorizedN<Half, 1> result;
+    result[0] = convert_float_half(src[0], src[1]);
+    return result;
+  }
+};
+
+template <>
+struct VecConvert<float, 2, Half, 1> {
+  static inline VectorizedN<float, 2> apply(const VectorizedN<Half, 1>& src) {
+    VectorizedN<float, 2> result;
+    std::tie(result[0], result[1]) = convert_half_float(src[0]);
     return result;
   }
 };
