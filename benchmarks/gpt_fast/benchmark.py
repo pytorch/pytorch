@@ -262,7 +262,13 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
     results = []
 
     for func in all_experiments:
-        lst = func("cuda" if torch.cuda.is_available() else "cpu")
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except AssertionError:
+            # This happens when torch is compiled with CUDA turning off completely
+            device = "cpu"
+
+        lst = func(device)
         for x in lst:
             results.append(dataclasses.astuple(x))
 
