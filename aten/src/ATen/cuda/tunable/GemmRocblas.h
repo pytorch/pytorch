@@ -7,6 +7,7 @@
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/util/StringUtil.h>
+#include <cstdio>
 
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
