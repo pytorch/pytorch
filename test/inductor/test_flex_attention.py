@@ -3099,7 +3099,6 @@ class TestPagedAttention(InductorTestCase):
         # flex_attention(q, k, v, block_mask=causal_mask, enable_gqa=True) works with paged cache
         return
 
-
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
 common_utils.instantiate_parametrized_tests(TestPagedAttention)
