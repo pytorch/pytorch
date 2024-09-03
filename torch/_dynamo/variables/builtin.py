@@ -1436,7 +1436,7 @@ class BuiltinVariable(VariableTracker):
         assert len(args) == 1
         arg = args[0]
         if isinstance(arg, variables.FrozensetVariable):
-            return arg.clone()
+            return FrozensetVariable([x.vt for x in arg.set_items])
         elif arg.has_unpack_var_sequence(tx):
             items = arg.unpack_var_sequence(tx)
             return FrozensetVariable(items)
