@@ -418,7 +418,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("out_features", (196,))
     @parametrize("bias", (True,))
     @dtypes(torch.float)
-    def test_linear_with_multiple_reindexers(
+    def test_linear_with_input_of_flexible_layout(
         self, batch_size, in_features, linear_in_features, out_features, bias, dtype
     ):
         # Reproducer from the resmlp_12_224 model in timm
