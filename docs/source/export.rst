@@ -720,3 +720,5 @@ API Reference
 .. automodule:: torch.export.custom_obj
 
 .. automodule:: torch.export.experimental
+.. automodule:: torch.export.passes
+.. autofunction:: torch.export.passes.move_to_device_pass

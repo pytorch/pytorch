@@ -76,6 +76,7 @@ from torch.utils.weak import TensorWeakRef
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
 from .source import (
+    AttrProxySource,
     AttrSource,
     ChainedSource,
     ConstDictKeySource,
@@ -575,6 +576,8 @@ class GuardBuilder(GuardBuilderBase):
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
 
+        self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
+
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
         if isinstance(dict_mgr, DictGuardManager):
@@ -1058,6 +1061,14 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x._type().qualified_name(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, AttrProxySource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.get_base(),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1663,6 +1674,13 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
+            # Check that the guard has not been inserted already
+            key = (ref_a, ref_b)
+            if key in self._cached_duplicate_input_guards:
+                return
+            self._cached_duplicate_input_guards.add((ref_a, ref_b))
+            self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
             install_object_aliasing_guard(
                 self.get_guard_manager(guard),
                 self.get_guard_manager_from_source(source_b),
