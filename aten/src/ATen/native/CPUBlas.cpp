@@ -44,7 +44,6 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #define ONEDNN_UKERNEL_ENABLED (DNNL_VERSION_MAJOR >=3 && DNNL_VERSION_MINOR >=5)
 
 #if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
-#include <ATen/Context.h>
 #include <oneapi/dnnl/dnnl_ukernel.hpp>
 #include <oneapi/dnnl/dnnl.hpp>
 #endif // oneDNN BRGEMM
