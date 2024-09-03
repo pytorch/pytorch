@@ -130,11 +130,31 @@ class TestExportAPIDynamo(common_utils.TestCase):
         os.environ["TORCH_ONNX_USE_EXPERIMENTAL_LOGIC"] = "1"
         assert os.environ.get("TORCH_ONNX_USE_EXPERIMENTAL_LOGIC") == "1"
 
-        torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             SampleModelForDynamicShapes(),
             torch.randn(2, 2, 3),
             torch.randn(2, 2, 3),
             export_options=torch.onnx.ExportOptions(dynamic_shapes=True),
+        )
+        assert onnx_program is not None
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_refine_dynamic_shapes_with_onnx_export(self):
+        # NOTE: From test/export/test_export.py
+
+        # refine lower, upper bound
+        class TestRefineDynamicShapeModel(torch.nn.Module):
+            def forward(self, x, y):
+                if x.shape[0] >= 6 and y.shape[0] <= 16:
+                    return x * 2.0, y + 1
+
+        inps = (torch.randn(16), torch.randn(12))
+        dynamic_shapes = {
+            "x": (torch.export.Dim("dx"),),
+            "y": (torch.export.Dim("dy"),),
+        }
+        self.assert_export(
+            TestRefineDynamicShapeModel(), inps, dynamic_shapes=dynamic_shapes
         )
 
 

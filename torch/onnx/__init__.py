@@ -55,7 +55,7 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-from typing import Any, Collection, Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
 
 import torch
 from torch import _C
@@ -114,7 +114,6 @@ from ._internal._exporter_legacy import (  # usort: skip. needs to be last to av
     InvalidExportOptionsError,
     OnnxExporterError,
     OnnxRegistry,
-    dynamo_export,
     enable_fake_mode,
 )
 
@@ -129,7 +128,6 @@ ExportOptions.__module__ = "torch.onnx"
 ONNXProgram.__module__ = "torch.onnx"
 ONNXProgramSerializer.__module__ = "torch.onnx"
 ONNXRuntimeOptions.__module__ = "torch.onnx"
-dynamo_export.__module__ = "torch.onnx"
 InvalidExportOptionsError.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 enable_fake_mode.__module__ = "torch.onnx"
@@ -394,6 +392,127 @@ def export(
             autograd_inlining=autograd_inlining,
         )
         return None
+
+
+def dynamo_export(
+    model: torch.nn.Module | Callable | torch.export.ExportedProgram,  # type: ignore[name-defined]
+    /,
+    *model_args,
+    export_options: ExportOptions | None = None,
+    **model_kwargs,
+) -> ONNXProgram | Any:
+    """Export a torch.nn.Module to an ONNX graph.
+
+    Args:
+        model: The PyTorch model to be exported to ONNX.
+        model_args: Positional inputs to ``model``.
+        model_kwargs: Keyword inputs to ``model``.
+        export_options: Options to influence the export to ONNX.
+
+    Returns:
+        An in-memory representation of the exported ONNX model.
+
+    **Example 1 - Simplest export**
+    ::
+
+        class MyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x, bias=None):
+                out = self.linear(x)
+                out = out + bias
+                return out
+
+
+        model = MyModel()
+        kwargs = {"bias": 3.0}
+        args = (torch.randn(2, 2, 2),)
+        onnx_program = torch.onnx.dynamo_export(model, *args, **kwargs).save(
+            "my_simple_model.onnx"
+        )
+
+    **Example 2 - Exporting with dynamic shapes**
+    ::
+
+        # The previous model can be exported with dynamic shapes
+        export_options = torch.onnx.ExportOptions(dynamic_shapes=True)
+        onnx_program = torch.onnx.dynamo_export(
+            model, *args, **kwargs, export_options=export_options
+        )
+        onnx_program.save("my_dynamic_model.onnx")
+
+
+    By printing input dynamic dimensions we can see the input shape is no longer (2,2,2)
+    ::
+
+        >>> print(onnx_program.model_proto.graph.input[0])
+        name: "arg0"
+        type {
+          tensor_type {
+            elem_type: 1
+            shape {
+              dim {
+                dim_param: "arg0_dim_0"
+              }
+              dim {
+                dim_param: "arg0_dim_1"
+              }
+              dim {
+                dim_param: "arg0_dim_2"
+              }
+            }
+          }
+        }
+    """
+
+    # NOTE: The new exporter is experimental and is not enabled by default.
+    import warnings
+
+    from torch.onnx import _flags
+
+    if _flags.USE_EXPERIMENTAL_LOGIC:
+        from torch.onnx._internal import exporter
+
+        if export_options is not None:
+            warnings.warn(
+                "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
+                "For a more comprehensive set of export options, including advanced features, please consider using "
+                "`torch.onnx.export(..., dynamo=True)`. ",
+                category=FutureWarning,
+            )
+
+        if export_options is not None and export_options.dynamic_shapes:
+            # Make all shapes dynamic
+            dynamic_shapes = []
+            for arg_order, model_arg in enumerate(model_args):
+                arg_dynamic_shapes = {}
+                rank = len(model_arg.shape)
+                for idx in range(rank):
+                    dim = torch.export.Dim(f"arg{arg_order}_dim_{idx}")
+                    arg_dynamic_shapes[idx] = dim
+                dynamic_shapes.append(arg_dynamic_shapes)
+        else:
+            dynamic_shapes = None
+
+        return exporter.export_compat(
+            model,  # type: ignore[arg-type]
+            model_args,
+            f=None,
+            kwargs=model_kwargs,
+            dynamic_shapes=dynamic_shapes,
+            opset_version=18,
+            external_data=True,
+            export_params=True,
+            fallback=True,
+        )
+    else:
+        from torch.onnx._internal._exporter_legacy import dynamo_export
+
+        return dynamo_export(
+            model, *model_args, export_options=export_options, **model_kwargs
+        )
 
 
 # TODO(justinchuby): Deprecate these logging functions in favor of the new diagnostic module.

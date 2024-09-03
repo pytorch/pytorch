@@ -1463,44 +1463,6 @@ def dynamo_export(
 
     _assert_dependencies(resolved_export_options)
 
-    # NOTE: The new exporter is experimental and is not enabled by default.
-    from torch.onnx import _flags
-
-    if _flags.USE_EXPERIMENTAL_LOGIC:
-        from torch.onnx._internal import exporter
-
-        warnings.warn(
-            "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
-            "For a more comprehensive set of export options, including advanced features, please consider using "
-            "`torch.onnx.export(..., dynamo=True)`. ",
-            category=FutureWarning,
-        )
-
-        if resolved_export_options.dynamic_shapes:
-            # Make all shapes dynamic
-            dynamic_shapes = []
-            for arg_order, model_arg in enumerate(model_args):
-                arg_dynamic_shapes = {}
-                rank = len(model_arg.shape)
-                for idx in range(rank):
-                    dim = torch.export.Dim(f"arg{arg_order}_dim_{idx}")
-                    arg_dynamic_shapes[idx] = dim
-                dynamic_shapes.append(arg_dynamic_shapes)
-        else:
-            dynamic_shapes = None
-
-        return exporter.export_compat(
-            model,  # type: ignore[arg-type]
-            model_args,
-            f=None,
-            kwargs=model_kwargs,
-            dynamic_shapes=dynamic_shapes,
-            opset_version=18,
-            external_data=True,
-            export_params=True,
-            fallback=True,
-        )
-
     try:
         from torch._dynamo import config as _dynamo_config
 
