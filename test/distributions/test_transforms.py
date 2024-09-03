@@ -239,6 +239,7 @@ def test_with_cache(transform, compile):
 def test_forward_inverse(transform, test_cached, compile):
     x = generate_data(transform).requires_grad_()
     assert transform.domain.check(x).all()  # verify that the input data are valid
+
     def transform_inv(y):
         return transform.inv(y)
 
@@ -344,15 +345,20 @@ def test_transformed_distribution_shapes(batch_shape, event_shape, dist):
     except NotImplementedError:
         pytest.skip("Not implemented.")
 
+
 def test_compile_transformed_dist_build():
     # We don't use cached distribution / transform to make sure that the constructor is called within compile
     # and dynamo sees it.
     def make_dist_and_test():
-        dist = TransformedDistribution(Normal(0, 1), ComposeTransform([AffineTransform(0, 1)]))
+        dist = TransformedDistribution(
+            Normal(0, 1), ComposeTransform([AffineTransform(0, 1)])
+        )
         s = dist.rsample((1,))
         return s, dist.log_prob(s)
+
     make_dist_and_test = torch.compile(make_dist_and_test, fullgraph=True)
     make_dist_and_test()
+
 
 @pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
 def test_jit_fwd(transform):
