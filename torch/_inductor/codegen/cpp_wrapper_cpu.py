@@ -1721,11 +1721,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 )
                 call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
                 dtype_name = str(dtype).split(".")[-1]
-                device_name = (
-                    data.layout.device.type
-                    if is_gpu(data.layout.device.type)
-                    else "cpu"
-                )
+                device_name = data.layout.device.type
                 get_dtype_function = f"aoti_torch_dtype_{dtype_name}"
                 dtypeview_function = f"aoti_torch_{device_name}_view_dtype"
                 call_strs.append(
