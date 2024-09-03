@@ -33,11 +33,18 @@ RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
     : data_{t.has_storage() ? t.storage().data() : nullptr},
       dtype_{t.scalar_type()},
       layout_{t.layout()},
-      dim_{static_cast<uint32_t>(t.sizes().size())} {
+      size_dim_{static_cast<uint32_t>(t.sizes().size())},
+      stride_dim_{static_cast<uint32_t>(t.strides().size())} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
       "Cannot profile Tensors of size > uint32 max. Got dim: ",
       t.sizes().size());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      t.sizes().size() != t.strides().size(),
+      "Tensor has mismatching sizes and strides. Sizes: ",
+      t.sizes().size(),
+      " Strides: ",
+      t.strides().size());
 }
 
 RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
@@ -181,14 +188,29 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
           ivals_it = ivalues_.begin(),
           io_type]() mutable {
     auto decode_tensor = [&]() -> TensorMetadata {
-      const auto& raw_metadata = *tensor_metadata_it++;
       std::vector<int64_t> sizes;
       std::vector<int64_t> strides;
-      for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+      if (tensor_metadata_it.exhausted()) {
+        LOG(WARNING)
+            << "Tensor metadata exhausted prematurely. Reported shapes may be inaccurate!";
+        return {RawTensorMetadata(), sizes, strides};
+      }
+      const auto& raw_metadata = *tensor_metadata_it++;
+      for (C10_UNUSED const auto _ : c10::irange(raw_metadata.size_dim_)) {
+        if (tensor_size_strides_it.exhausted()) {
+          LOG(WARNING)
+              << "Expected Tensor Size mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
+          return {raw_metadata, sizes, strides};
+        }
         sizes.push_back(*tensor_size_strides_it++);
       }
       if (raw_metadata.layout_ == at::kStrided) {
-        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.stride_dim_)) {
+          if (tensor_size_strides_it.exhausted()) {
+            LOG(WARNING)
+                << "Expected Tensor Strides mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
+            return {raw_metadata, sizes, strides};
+          }
           strides.push_back(*tensor_size_strides_it++);
         }
       }
