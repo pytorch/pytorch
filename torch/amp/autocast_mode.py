@@ -2,6 +2,7 @@
 import collections
 import functools
 import warnings
+import platform
 from typing import Any, Optional
 
 import torch
@@ -327,8 +328,12 @@ class autocast:
             if self.fast_dtype not in supported_dtype:
                 error_message = "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
                 error_message += (
-                    "MPS Autocast only supports dtype of torch.float16 currently."
+                    "MPS Autocast only supports dtype of torch.bfloat16 currently."
                 )
+                warnings.warn(error_message)
+                enabled = False
+            elif float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1) < 14.0:
+                error_message = "In MPS autocast, but autocast is not supported before MacOS 14.0. Disabling autocast\n"
                 warnings.warn(error_message)
                 enabled = False
         elif self.device == "xla":

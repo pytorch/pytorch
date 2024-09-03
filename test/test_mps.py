@@ -1203,6 +1203,7 @@ class MpsMemoryLeakCheck:
 
             raise RuntimeError(msg)
 
+@unittest.skipIf(product_version < 14.0, "Skipped on macOS < 14.0")
 class TestAutocastMPS(TestCase):
 
     def test_matmul_autocast(self):
@@ -1220,7 +1221,7 @@ class TestAutocastMPS(TestCase):
         output_tensor = torch.mm(tensor_A, tensor_B)
         output_tensor = torch.mm(tensor_A, output_tensor)
 
-        self.assertEqual(autocast_output_tensor.dtype, torch.float16, "Autocast output tensor was not expected type float16")
+        self.assertEqual(autocast_output_tensor.dtype, torch.bfloat16, "Autocast output tensor was not expected type float16")
         self.assertEqual(autocast_output_tensor,
                          output_tensor.to(torch.bfloat16),
                          f"Autocast & non-autocast tensors did not match, \
