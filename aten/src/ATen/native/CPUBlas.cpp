@@ -41,7 +41,9 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #include <fbgemm/FbgemmI64.h>
 #endif  // USE_FBGEMM
 
-#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#define ONEDNN_UKERNEL_ENABLED (DNNL_VERSION_MAJOR >=3 && DNNL_VERSION_MINOR >=5)
+
+#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 #include <ATen/Context.h>
 #include <oneapi/dnnl/dnnl_ukernel.hpp>
 #include <oneapi/dnnl/dnnl.hpp>
@@ -829,7 +831,7 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 }
 
 // oneDNN BRGEMM
-#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 struct BrgemmKey {
   int64_t M;
   int64_t N;
@@ -1076,12 +1078,8 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     if (dtype == ScalarType::Half) {
       static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
       return fp16_support;
-    } else if (dtype == ScalarType::BFloat16) {
-      static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
-      return bf16_support;
-    } else {
-      return false;
     }
+    return false;
   }
 };
 
@@ -1119,12 +1117,8 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     if (dtype == ScalarType::Half) {
       static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
       return fp16_pack;
-    } else if (dtype == ScalarType::BFloat16) {
-      static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
-      return bf16_pack;
-    } else {
-      return false;
-    }
+    } 
+    return false;
   }
 };
 #endif
@@ -1141,7 +1135,7 @@ void brgemm(
     const at::Half* A,
     const at::Half* B,
     float* C) {
-#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   if (Brgemm::device_check(ScalarType::Half)) {
     Brgemm::call<at::Half, at::Half, float>(
       M, N, K, ld_a, ld_b, ld_c, alpha, beta, A, B, C);
@@ -1164,15 +1158,8 @@ void brgemm(
     const at::BFloat16* A,
     const at::BFloat16* B,
     float* C) {
-#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
-  if (Brgemm::device_check(ScalarType::BFloat16)) {
-    Brgemm::call<at::BFloat16, at::BFloat16, float>(
-      M, N, K, ld_a, ld_b, ld_c, alpha, beta, A, B, C);
-    return;
-  }
-#endif
   TORCH_CHECK(false,
-  "BFloat16 Brgemm is only supported on X64 when oneDNN ukernel is enabled and avx512 is supported");
+  "BFloat16 Brgemm is currently not supported");
 }
 
 void brgemm(
@@ -1208,7 +1195,7 @@ void brgemm(
 }
 
 void brgemm_release() {
-#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   dnnl::ukernel::brgemm::release_hw_context();
 #endif
 }
@@ -1222,7 +1209,7 @@ void pack(
     ScalarType dt_out,
     const void* in,
     void* out) {
-#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   Pack::call(K, N, ld_in, ld_out, dt_in, dt_out, in, out);
 #else
   TORCH_CHECK(false, "pack is only supported on X64 with oneDNN ukernel enabled");
@@ -1230,7 +1217,7 @@ void pack(
 }
 
 bool need_pack(ScalarType dt_in) {
-#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   return Pack::need_pack(dt_in);
 #else
   return false;

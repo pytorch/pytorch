@@ -388,18 +388,7 @@ void cpu_flash_attention(
   // we need to split headSize with packb_size for packing v
   // TODO Simplify the check when oneDNN supports fused pack with transpose and has better performance
   if (with_pack) {
-    if (dtype == at::ScalarType::BFloat16) {
-      // BF16 requires better shapes as mkl_gemm_bf16bf16f32 is faster than mkl_gemm_f16f16f32
-      need_pack =
-          ((kvSize < 448 && kvSize % packb_size == 0) || kvSize >= 448) &&
-          (qSize % 2 == 0) && (num_thread >= 4) &&
-          (headSize % packb_size == 0 && headSize < 320);
-    } else {
-      need_pack =
-          ((kvSize < 448 && kvSize % packb_size == 0) || kvSize >= 448) &&
-          (num_thread >= 4) &&
-          (headSize % packb_size == 0 && headSize < 512);
-    }
+    need_pack = num_thread >= 4 && headSize % packb_size == 0;
     if (need_pack) {
       float pack_size = batchSize * num_head * kvSize * headSize / 1024;
       float gemm_size_per_thread =
@@ -407,18 +396,14 @@ void cpu_flash_attention(
           qSplitSize * (is_causal ? qSize : kvSize) * headSize / 1024;
       // When the number of gemm is much greater than the number of pack,
       // the pack and padding overhead can be overlaped.
-      if (dtype == at::ScalarType::BFloat16) {
-        need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 192 : 160);
+      if (pack_size < 512) {
+        need_pack = false;
+      } else if (pack_size < 2688) {
+        need_pack = gemm_size_per_thread / pack_size >= 32 && headSize > packb_size;
+      } else if (pack_size < 16384) {
+        need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 54 : 52);
       } else {
-        if (pack_size < 512) {
-          need_pack = false;
-        } else if (pack_size < 2688) {
-          need_pack = gemm_size_per_thread / pack_size >= 32 && headSize > packb_size;
-        } else if (pack_size < 16384) {
-          need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 54 : 52);
-        } else {
-          need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 54 : 40);
-        }
+        need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 54 : 40);
       }
     }
   }
@@ -1182,9 +1167,7 @@ void flash_attention_kernel_impl(
 
   // When q_seq_len and k_seq_len are long enough,
   // cpu_flash_attention with pack has better performance.
-  bool could_pack =
-      (query.scalar_type() == kBFloat16 && cpublas::need_pack(kBFloat16)) ||
-      (query.scalar_type() == kHalf && cpublas::need_pack(kHalf));
+  bool could_pack = (query.scalar_type() == kHalf && cpublas::need_pack(kHalf));
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
     if (!attn_mask.has_value()) {
