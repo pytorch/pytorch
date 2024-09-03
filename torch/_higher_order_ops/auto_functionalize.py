@@ -170,6 +170,7 @@ def read_view_information_from_args(
 # auto_functionalize_v2 is an improved version of auto_functionalize that better handle
 # re-inplacing views.
 
+
 class AutoFunctionalized(HigherOrderOperator):
     """auto_functionalized(_mutable_op, **kwargs)
 
@@ -214,8 +215,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
 
     This HOP runs a "functional" version of _mutable_op.
     Unlike AutoFunctionalized, this version is improved to better handle
-    view tensors that are passed _mutable_op. This version is only used in
-    non export mode.
+    view tensors. This version is only used in non export mode.
     """
 
     def __init__(self) -> None:
