@@ -959,6 +959,9 @@ def _get_openmp_args(
                 # TODO: fix issue, can't find omp.h
                 cflags.append("fopenmp")
                 libs.append("gomp")
+            elif _is_intel_compiler(cpp_compiler):
+                cflags.append("fiopenmp")
+                libs.append("libiomp5")
             else:
                 cflags.append("fopenmp")
                 libs.append("gomp")
