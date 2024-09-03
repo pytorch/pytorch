@@ -836,15 +836,15 @@ void flash_attention_kernel_impl(
     bool is_causal,
     std::optional<Tensor> attn_mask,
     std::optional<double> scale,
-    long q_zp,
+    int64_t q_zp,
     double q_scale,
-    long k_zp,
+    int64_t k_zp,
     double k_scale,
-    long v_zp,
+    int64_t v_zp,
     double v_scale,
-    long a_zp,
+    int64_t a_zp,
     double a_scale,
-    long o_zp,
+    int64_t o_zp,
     double o_scale) {
   auto q_seq_len = query.size(2);
 

@@ -694,15 +694,15 @@ Tensor scaled_dot_product_attention(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa,
-    long q_zp,
+    int64_t q_zp,
     double q_scale,
-    long k_zp,
+    int64_t k_zp,
     double k_scale,
-    long v_zp,
+    int64_t v_zp,
     double v_scale,
-    long a_zp,
+    int64_t a_zp,
     double a_scale,
-    long o_zp,
+    int64_t o_zp,
     double o_scale) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
@@ -806,15 +806,15 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
         const std::optional<Tensor>& dropout_mask, std::optional<double> scale, bool enable_gqa,
-        long q_zp,
+        int64_t q_zp,
         double q_scale,
-        long k_zp,
+        int64_t k_zp,
         double k_scale,
-        long v_zp,
+        int64_t v_zp,
         double v_scale,
-        long a_zp,
+        int64_t a_zp,
         double a_scale,
-        long o_zp,
+        int64_t o_zp,
         double o_scale) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
@@ -931,15 +931,15 @@ _scaled_dot_product_flash_attention_cpu(
     bool is_causal,
     const std::optional<Tensor>& attn_mask,
     std::optional<double> scale,
-    long q_zp,
+    int64_t q_zp,
     double q_scale,
-    long k_zp,
+    int64_t k_zp,
     double k_scale,
-    long v_zp,
+    int64_t v_zp,
     double v_scale,
-    long a_zp,
+    int64_t a_zp,
     double a_scale,
-    long o_zp,
+    int64_t o_zp,
     double o_scale) {
   const auto dtype = query.scalar_type();
   int64_t batchSize = query.size(0);
