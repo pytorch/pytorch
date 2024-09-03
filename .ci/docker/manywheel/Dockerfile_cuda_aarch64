@@ -34,7 +34,6 @@ RUN yum install -y \
   zstd \
   libgomp \
   sudo \
-  ninja-build \
   gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
 
 # Ensure the expected devtoolset is used
