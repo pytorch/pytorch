@@ -16,7 +16,9 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
+    check_unspec_or_constant_args,
     identity,
+    is_function,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -965,6 +967,15 @@ class PolyfilledFunctionVariable(VariableTracker):
         handler = self._get_polyfill_handlers().get(self.fn)
         if handler:
             assert callable(handler)
+            if getattr(
+                handler, "__torch_dynamo_can_constant_fold_through__", False
+            ) and check_unspec_or_constant_args(args, kwargs):
+                return ConstantVariable.create(
+                    self.fn(  # use the original function which is faster than the polyfill
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    )
+                )
             return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
 
         for candidate in ("__torch_dynamo_polyfill__", "__python_implementation__"):
@@ -981,6 +992,27 @@ class PolyfilledFunctionVariable(VariableTracker):
                     tx,
                     handler,
                 ).call_function(tx, args, kwargs)
+
+        return super().call_function(tx, args, kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__call__":
+            return self.call_function(tx, args, kwargs)
+
+        method = getattr(self.fn, name, None)
+        assert method is not None, f"Member {name} not found in {self.fn}"
+        assert is_function(method), f"Member {name} is not callable in {self.fn}"
+        options = {}
+        if self.source:
+            options["source"] = AttrSource(self.source, name)
+        member_variable = PolyfilledFunctionVariable(method, **options)
+        return member_variable.call_function(tx, args, kwargs)
 
     def as_python_constant(self):
         return self.fn

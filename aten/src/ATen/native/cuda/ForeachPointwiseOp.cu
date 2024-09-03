@@ -46,15 +46,18 @@ std::vector<Tensor> foreach_pointwise_op(
       "foreach_pointwise_op_cuda",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
-        multi_tensor_apply<4>(
-            tensor_lists,
-            PointwiseOpScalarFunctor<
-                scalar_t,
-                /* depth */ 4,
-                /* r_args_depth */ 3,
-                /* res_arg_index */ 3>(),
-            Op<opmath_t>(),
-            scalar.to<opmath_t>());
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<4>(
+              tensor_lists,
+              PointwiseOpScalarFunctor<
+                  scalar_t,
+                  /* depth */ 4,
+                  /* r_args_depth */ 3,
+                  /* res_arg_index */ 3,
+                  large_kernel_arg>(),
+              Op<opmath_t>(),
+              scalar.to<opmath_t>());
+        });
       });
 
   return tensor_lists[3];
@@ -78,15 +81,18 @@ void foreach_pointwise_op_(
       "foreach_pointwise_op__cuda",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
-        multi_tensor_apply<3>(
-            tensor_lists,
-            PointwiseOpScalarFunctor<
-                scalar_t,
-                /* depth */ 3,
-                /* r_args_depth */ 3,
-                /* res_arg_index */ 0>(),
-            Op<opmath_t>(),
-            scalar.to<opmath_t>());
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<3>(
+              tensor_lists,
+              PointwiseOpScalarFunctor<
+                  scalar_t,
+                  /* depth */ 3,
+                  /* r_args_depth */ 3,
+                  /* res_arg_index */ 0,
+                  large_kernel_arg>(),
+              Op<opmath_t>(),
+              scalar.to<opmath_t>());
+        });
       });
   increment_version(input);
 }
@@ -110,15 +116,18 @@ void foreach_pointwise_op_(
       "foreach_pointwise_op__cuda",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
-        multi_tensor_apply<3, opmath_t>(
-            tensor_lists,
-            scalars,
-            PointwiseOpScalarListFunctor<
-                scalar_t,
-                /* depth */ 3,
-                /* r_args_depth */ 3,
-                /* res_arg_index */ 0>(),
-            Op<opmath_t>());
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<3, opmath_t>(
+              tensor_lists,
+              scalars,
+              PointwiseOpScalarListFunctor<
+                  scalar_t,
+                  /* depth */ 3,
+                  /* r_args_depth */ 3,
+                  /* res_arg_index */ 0,
+                  large_kernel_arg>(),
+              Op<opmath_t>());
+        });
       });
   increment_version(input);
 }
@@ -149,15 +158,18 @@ std::vector<Tensor> foreach_pointwise_op(
       "foreach_pointwise_op_cuda",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
-        multi_tensor_apply<4, opmath_t>(
-            tensor_lists,
-            scalars,
-            PointwiseOpScalarListFunctor<
-                scalar_t,
-                /* depth */ 4,
-                /* r_args_depth */ 3,
-                /* res_arg_index */ 3>(),
-            Op<opmath_t>());
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<4, opmath_t>(
+              tensor_lists,
+              scalars,
+              PointwiseOpScalarListFunctor<
+                  scalar_t,
+                  /* depth */ 4,
+                  /* r_args_depth */ 3,
+                  /* res_arg_index */ 3,
+                  large_kernel_arg>(),
+              Op<opmath_t>());
+        });
       });
 
   return tensor_lists[3];
