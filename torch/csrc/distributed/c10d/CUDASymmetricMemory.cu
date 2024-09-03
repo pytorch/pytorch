@@ -878,6 +878,13 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       block->alloc_ref->handle,
       CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
       0));
+#elif defined (USE_ROCM)
+  C10_HIP_CHECK(hipMemExportToShareableHandle(
+      &block_fd, block->alloc_ref->handle, hipMemHandleTypePosixFileDescriptor, 0));
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
 
   auto local_req = RendezvousRequest{
       .device_idx = block->device_idx,
