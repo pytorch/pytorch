@@ -423,7 +423,6 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         opt_model = torch.compile(dynamic=True)(model)
         opt_model(torch.randn(20, 512), torch.tensor([12, 13]))
 
-    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/130534"
     @config.patch(optimize_ddp=True, capture_dynamic_output_shape_ops=True)
     def test_unbacked_symbol_splitting_no_binding(self):
         class Model(nn.Module):
