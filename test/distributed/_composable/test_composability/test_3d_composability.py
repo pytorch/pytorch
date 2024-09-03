@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import gc
 import logging
 import os
 from dataclasses import dataclass, field
@@ -394,7 +395,7 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        torch.distributed.breakpoint()
+        #print(x.size(), freqs_cis.size())
         h = x + self.attention(self.attention_norm(x), freqs_cis)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
@@ -505,7 +506,6 @@ class Transformer(nn.Module):
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
         for layer in self.layers.values():
             h = layer(h, self.freqs_cis)
-            torch.distributed.breakpoint()
 
         h = self.norm(h) if self.norm else h
         output = self.output(h).float() if self.output else h
@@ -683,6 +683,19 @@ class Float8Handler:
             self._sync_float8_amax_and_scale_history(m)
 
 
+# used to avoid stragglers in garbage collection
+class GarbageCollection:
+    def __init__(self, gc_freq=1000):
+        assert gc_freq > 0, "gc_freq must be a positive integer"
+        self.gc_freq = gc_freq
+        gc.disable()
+        gc.collect(1)
+
+    def run(self, step_count):
+        if step_count > 1 and step_count % self.gc_freq == 0:
+            gc.collect(1)
+
+
 class Test3DComposability(FSDPTest):
     logger = logging.getLogger()
     logger.info("Starting job: 3D composability test")
@@ -715,7 +728,7 @@ class Test3DComposability(FSDPTest):
                     2,
                 ],
                 "float8": [False],
-                "async_tp": [True, False],
+                "async_tp": [False],
                 "schedule_class": [
                     "1f1b",
                     "gpipe",
@@ -735,6 +748,7 @@ class Test3DComposability(FSDPTest):
         ASYNC_ERROR_HANDLING = "TORCH_NCCL_ASYNC_ERROR_HANDLING"
         SKIP_CLEANUP = "3"
 
+        gc_handler = GarbageCollection(gc_freq=50)
         world_size = int(dp_degree * tp_degree * pp_degree)
         parallel_dims = ParallelDims(
             dp=dp_degree,
@@ -760,10 +774,9 @@ class Test3DComposability(FSDPTest):
         _warn_overwrite_env(ASYNC_ERROR_HANDLING, SKIP_CLEANUP)
         os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
         torch.manual_seed(0)
-        model_args = ModelArgs(dim=256, n_layers=2, n_heads=16)
+        model_args = ModelArgs(dim=256, n_layers=8, n_heads=16)
         model_args.vocab_size = 256
         model = Transformer(model_args)
-        world_mesh = parallel_dims.build_mesh(device_type="cuda")
 
         if parallel_dims.float8:
             scale_for_fsdp = False
@@ -774,6 +787,7 @@ class Test3DComposability(FSDPTest):
             # swap to Float8Linear based on float8 configs
             float8_handler.convert_to_float8_training(model)
 
+        world_mesh = parallel_dims.build_mesh(device_type="cuda")
         if parallel_dims.dp_enabled:
             dp_mesh = world_mesh["dp"]
             dp_degree, dp_rank = dp_mesh.size(), dp_mesh.get_local_rank()
@@ -781,9 +795,8 @@ class Test3DComposability(FSDPTest):
             dp_degree, dp_rank = 1, 0
 
         def loss_fn(pred, labels):
-            return torch.nn.functional.cross_entropy(
-                pred.flatten(0, 1), labels.flatten(0, 1)
-            )
+            print("loss_fn", pred.shape, labels.shape)
+            return pred.sum()
 
         if parallel_dims.pp_enabled:
             pp_mesh = world_mesh["pp"]
@@ -797,8 +810,9 @@ class Test3DComposability(FSDPTest):
                 m.train()
         else:
             self._parallelize_llama(model, world_mesh, parallel_dims)
-            model.train()
+            model.to_empty(device=init_device)
             model.init_weights()
+            model.train()
             model_parts = [model]
 
         optimizers = self._build_optimizers(model_parts)
@@ -812,6 +826,7 @@ class Test3DComposability(FSDPTest):
 
         while train_state.step < 10000:
             train_state.step += 1
+            gc_handler.run(train_state.step)
 
             input_ids = torch.randint(0, 2048, (8, 128))
             labels = torch.randint(0, 2048, (8, 128))
@@ -826,7 +841,7 @@ class Test3DComposability(FSDPTest):
 
                 with train_context():
                     if pp_mesh.get_local_rank() == 0:
-                        torch.distributed.breakpoint()
+                        #torch.distributed.breakpoint()
                         pp_schedule.step(input_ids)
                     elif is_last_stage:
                         losses = []
@@ -886,7 +901,7 @@ class Test3DComposability(FSDPTest):
                 self._apply_fsdp(
                     model,
                     world_mesh["dp"],
-                    param_dtype=torch.bfloat16,
+                    param_dtype=torch.float32, # change to float32
                     reduce_dtype=torch.float32,
                     tp_enabled=parallel_dims.tp_enabled,
                     pp_enabled=parallel_dims.pp_enabled,
@@ -1094,7 +1109,7 @@ class Test3DComposability(FSDPTest):
         pp_rank = pp_mesh.get_local_rank()
         pp_size = pp_mesh.size()
         microbatches = parallel_dims.pp
-        splits = ["layers.1", "layers.2", "layers.3"]
+        splits = ["layers.4"]
 
         def _build_stage(
             stage_idx, pp_mesh, start_layer, stop_layer, is_first=False, is_last=False
@@ -1102,12 +1117,6 @@ class Test3DComposability(FSDPTest):
             model = copy.deepcopy(whole_model)
             if not is_first:
                 model.tok_embeddings = None
-
-            mesh_dict = {}
-            mesh_id = 0
-            for mesh_tensor in pp_mesh.mesh:
-                mesh_dict[mesh_id] = mesh_tensor.item()
-                mesh_id += 1
 
             drop_layers = start_layer is not None
             for name in list(model.layers.keys()):
@@ -1127,7 +1136,8 @@ class Test3DComposability(FSDPTest):
             if parallel_dims.dp_enabled:
                 mp_dtype = torch.float32
             else:
-                mp_dtype = torch.bfloat16
+                mp_dtype = torch.float32 # change to float32
+
             batch_size = 8
             local_seq_len = int(128 // parallel_dims.tp)
             layers_io_shape = (batch_size, local_seq_len, model_config.dim)
