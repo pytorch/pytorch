@@ -16,6 +16,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -334,37 +335,38 @@ static PyObject* THPStorage_pynew(
     allocator = reinterpret_cast<c10::Allocator*>(allocator_opt.value());
   } else if (device_opt.has_value()) {
     at::Device device = device_opt.value();
-    if (device.type() == at::kCPU) {
-      allocator = c10::GetDefaultCPUAllocator();
+    torch::utils::maybe_initialize_device(device);
+
+    switch (device.type()) {
+      case at::kCPU:
+        allocator = c10::GetDefaultCPUAllocator();
+        break;
 #ifdef USE_CUDA
-    } else if (device.type() == at::kCUDA) {
-      at::globalContext().lazyInitCUDA();
-      allocator = c10::cuda::CUDACachingAllocator::get();
+      case at::kCUDA:
+        allocator = c10::cuda::CUDACachingAllocator::get();
+        break;
 #endif
 #ifdef USE_MPS
-    } else if (device.type() == at::kMPS) {
-      allocator = at::mps::GetMPSAllocator();
+      case at::kMPS:
+        allocator = at::mps::GetMPSAllocator();
+        break;
 #endif
-      // NOLINTBEGIN(bugprone-branch-clone)
-    } else if (device.type() == at::DeviceType::XPU) {
-      allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::HPU) {
-      allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::Meta) {
-      allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::PrivateUse1) {
-      at::globalContext().lazyInitPrivateUse1();
-      allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::MAIA) {
-      allocator = c10::GetAllocator(device.type());
-    } else {
-      // NOLINTEND(bugprone-branch-clone)
-      TORCH_CHECK(
-          false,
-          THPStorageStr,
-          "(): Storage device not recognized: ",
-          device.type());
+      case at::DeviceType::XPU:
+      case at::DeviceType::HPU:
+      case at::DeviceType::Meta:
+      case at::DeviceType::PrivateUse1:
+      case at::DeviceType::MAIA:
+        allocator = c10::GetAllocator(device.type());
+        break;
+      default:
+        // NOLINTEND(bugprone-branch-clone)
+        TORCH_CHECK(
+            false,
+            THPStorageStr,
+            "(): Storage device not recognized: ",
+            device.type());
     }
+
     device_guard.reset_device(device);
   } else {
     allocator = c10::GetDefaultCPUAllocator();
