@@ -408,7 +408,7 @@ void cpu_flash_attention(
       // When the number of gemm is much greater than the number of pack,
       // the pack and padding overhead can be overlaped.
       if (dtype == at::ScalarType::BFloat16) {
-        need_pack = gemm_size_per_thread / pack_size >= 160;
+        need_pack = gemm_size_per_thread / pack_size >= (is_causal ? 192 : 160);
       } else {
         if (pack_size < 512) {
           need_pack = false;
@@ -741,10 +741,10 @@ void cpu_flash_attention(
                 dst_data + row * rHeadSize,
                 headSize);
             }
-            if (need_pack && kvBlockSize % 2 != 0) {
-              // Pad: [qSplitSize,kvSplitSize] -> [qSplitSize,kvSplitSize + 1]
-              *(qk_reduced_data + row * (1 + kvBlockSize) + kvBlockSize) = scalar_t(0);
-            }
+          }
+          if (need_pack && kvBlockSize % 2 != 0) {
+            // Pad: [qSplitSize,kvSplitSize] -> [qSplitSize,kvSplitSize + 1]
+            *(qk_reduced_data + row * (1 + kvBlockSize) + kvBlockSize) = scalar_t(0);
           }
         }
         // Calculate Softmax(q @ k.T) @ v
