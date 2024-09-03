@@ -1715,6 +1715,9 @@ class FakeTensorMode(TorchDispatchMode):
     ) -> Optional[FakeTensor]:
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
+        # DO NOT PUT LOGIC BEFORE UNRECOGNIZED TYPE CHECKING
+        # We must throw NotImplemented in case of unrecognized types to handle subclasses.
+        # Throwing the exception will pass the control to the next __torch_dispatch__.
         # See [subclass inputs] below
         # NB: If you're seeing a mysterious infinite loop involving fake
         # tensor, it might be related to this line.  Though I'm not sure
