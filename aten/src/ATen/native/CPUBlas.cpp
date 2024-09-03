@@ -1149,7 +1149,7 @@ void brgemm(
   }
 #endif
   TORCH_CHECK(false,
-  "Half Brgemm is only supported on X64 when mkldnn is enabled and avx512_fp16 is supported");
+  "Half Brgemm is only supported on X64 when oneDNN ukernel is enabled and avx512_fp16 is supported");
 }
 
 void brgemm(
@@ -1172,7 +1172,7 @@ void brgemm(
   }
 #endif
   TORCH_CHECK(false,
-  "BFloat16 Brgemm is only supported on X64 when mkldnn is enabled and avx512 is supported");
+  "BFloat16 Brgemm is only supported on X64 when oneDNN ukernel is enabled and avx512 is supported");
 }
 
 void brgemm(
@@ -1225,7 +1225,7 @@ void pack(
 #if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   Pack::call(K, N, ld_in, ld_out, dt_in, dt_out, in, out);
 #else
-  TORCH_CHECK(false, "pack is only supported on X64 with oneDNN enabled");
+  TORCH_CHECK(false, "pack is only supported on X64 with oneDNN ukernel enabled");
 #endif
 }
 
