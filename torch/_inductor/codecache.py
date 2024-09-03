@@ -1547,7 +1547,7 @@ class AotCodeCompiler:
         if config.is_fbcode():
             ld_command = build_paths.ld()
             if (
-                not (device_type == "cuda") and graph.aot_mode
+                device_type == "cpu" and graph.aot_mode
             ):  # Meta internal AOTInductor CPU
                 objcopy_command = build_paths.objcopy_fallback()
                 fbcode_aot_cpu_re = True
