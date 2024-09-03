@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
-
+import torch._inductor.config as inductor_config
 
 aten = torch.ops.aten
 
@@ -303,10 +303,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
 
     def test_multi_output_intermediate(self):
-        config = torch._inductor.config
         for requires_grad in [False, True]:
             for enable_v2 in [False, True]:
-                with config.patch({"enable_auto_functionalized_v2": enable_v2}):
+                with inductor_config.patch({"enable_auto_functionalized_v2": enable_v2}):
                     counters.clear()
 
                     def f(x):
@@ -353,9 +352,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(num_reinplacing_failures(), 0)
 
     def test_lists_functionalize_v2(self):
-        config = torch._inductor.config
-
-        with config.patch({"enable_auto_functionalized_v2": True}):
+        with inductor_config.patch({"enable_auto_functionalized_v2": True}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
             def mutate_op(y: List[Tensor]) -> None:
@@ -381,9 +378,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
 
     def test_lists_old_functionalize(self):
-        config = torch._inductor.config
-
-        with config.patch({"enable_auto_functionalized_v2": False}):
+        with inductor_config.patch({"enable_auto_functionalized_v2": False}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
             def mutate_op(y: List[Tensor]) -> None:
@@ -425,6 +420,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         ],
     )
     def test_partitioner_recomputes_factory(self, factory_op, sin_op):
+
         class MySin(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):

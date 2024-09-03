@@ -808,7 +808,6 @@ def solve_min_cut(
         print()
 
     def can_fuse_into_auto_functionalized(a, b):
-        # Do we need to handle auto_functionalized_v2 here?
         if (
             b.target != torch.ops.higher_order.auto_functionalized
             and b.target != torch.ops.higher_order.auto_functionalized_v2
