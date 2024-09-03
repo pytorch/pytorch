@@ -141,10 +141,9 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
                 )
                 self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
 
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
     def test_auto_functionalize_old(self):
-        with torch.library._scoped_library(
-            "mylib", "FRAGMENT"
-        ) as lib, inductor_config.patch({"enable_auto_functionalized_v2": False}):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> ()",
@@ -194,10 +193,9 @@ arg3_1 = arg1_1 = arg0_1 = foo_default = None
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
 
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
     def test_auto_functionalize_with_returns_old(self):
-        with torch.library._scoped_library(
-            "mylib", "FRAGMENT"
-        ) as lib, inductor_config.patch({"enable_auto_functionalized_v2": False}):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> (Tensor, Tensor)",
@@ -288,10 +286,9 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 y = f(x)
                 self.assertEqual(y, x.sin())
 
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
     def test_auto_functionalize_optional_old(self):
-        with torch.library._scoped_library(
-            "mylib", "FRAGMENT"
-        ) as lib, inductor_config.patch({"enable_auto_functionalized_v2": False}):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
                 "(Tensor(a!)? x, Tensor[] y, Tensor(b!)? z, SymInt w, Tensor n) -> ()",
@@ -339,6 +336,9 @@ arg2_1 = arg3_1 = arg1_1 = arg0_1 = foo_default = None
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     def test_unbacked_auto_functionalize_op(self):
         @torch.library.custom_op(
             "mylib::mk_image", mutates_args=("decoder",), device_types=["cpu"]
@@ -502,15 +502,15 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
-        # No stacktrace found for following nodes
         foo_default = torch.ops.mylib.foo.default(arg4_1, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg2_1 = arg3_1 = arg0_1 = None
         getitem_4: "f32[3][1]cpu" = foo_default[0]
         getitem_5: "f32[3][1]cpu" = foo_default[1];  foo_default = None
 
-         # File: /home/lsakka/pytorch/test/inductor/test_auto_functionalize.py:218 in f, code: return torch.ops.mylib.foo(x, y, z, 2, n)
         copy_: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy_ = None
         copy__1: "f32[3][1]cpu" = torch.ops.aten.copy_.default(arg4_1, arg4_1);  arg4_1 = copy__1 = None
         return (getitem_4, getitem_5)""",  # noqa: B950
+                    ignore_comments=True,
+                    ignore_empty_lines=True,
                 )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
