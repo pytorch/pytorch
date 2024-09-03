@@ -40,7 +40,7 @@ def create_c10d_store(
     if use_libuv is not None:
         logger.warning(
             "argument use_libuv is deprecated and ignored. Set USE_LIBUV environment "
-            "variable to \"0\" to disable libuv, or \"1\" to enable it. If the env var "
+            'variable to "0" to disable libuv, or "1" to enable it. If the env var '
             "is not set, libuv will be used by default."
         )
 
