@@ -46,11 +46,8 @@ if TYPE_CHECKING:
 
     import onnx
 
-    import onnxruntime  # type: ignore[import]
-    import onnxscript  # type: ignore[import]
-    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-        registration as torchlib_registry,
-    )
+    import onnxruntime
+    import onnxscript
 
     from torch._subclasses import fake_tensor
     from torch.onnx._internal.fx import diagnostics
@@ -110,10 +107,6 @@ class OnnxRegistry:
         self._registry: dict[registration.OpName, list[registration.ONNXFunction]] = (
             defaultdict(list)
         )
-        # FIXME: Avoid importing onnxscript into torch
-        from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
-            registration,
-        )
 
         # opset_version is unused for now, since torchlib only supports opset18.
         # TODO: get opset version from torchlib
@@ -123,8 +116,7 @@ class OnnxRegistry:
             "different opset version, please register them with register_custom_op."
         )
 
-        # Initialize registry from torchlib
-        self._initiate_registry_from_torchlib(registration.default_registry)
+        self._initiate_registry_from_torchlib()
 
     @property
     def opset_version(self) -> int:
@@ -134,33 +126,25 @@ class OnnxRegistry:
 
         return self._opset_version
 
-    def _initiate_registry_from_torchlib(
-        self, torchlib_registry: torchlib_registry.Registry
-    ):
+    def _initiate_registry_from_torchlib(self) -> None:
         """Populates the registry with ATen functions from torchlib.
 
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
-        for aten_name, aten_overloads_func in torchlib_registry.items():
-            internal_name_instance = registration.OpName.from_qualified_name(aten_name)
-            for overload_func in aten_overloads_func.overloads:
-                symbolic_function = registration.ONNXFunction(
-                    onnx_function=overload_func,
-                    op_full_name=internal_name_instance.qualified_name(),
-                    is_custom=False,
-                    is_complex=False,
-                )
-                self._register(internal_name_instance, symbolic_function)
+        import onnxscript._framework_apis.torch_2_5 as onnxscript_apis
 
-            for complex_func in aten_overloads_func.complex:
-                symbolic_function = registration.ONNXFunction(
-                    onnx_function=complex_func,
-                    op_full_name=internal_name_instance.qualified_name(),
-                    is_custom=False,
-                    is_complex=True,
-                )
-                self._register(internal_name_instance, symbolic_function)
+        for meta in onnxscript_apis.get_torchlib_ops():
+            internal_name_instance = registration.OpName.from_qualified_name(
+                meta.qualified_name
+            )
+            symbolic_function = registration.ONNXFunction(
+                onnx_function=meta.function,  # type: ignore[arg-type]
+                op_full_name=internal_name_instance.qualified_name(),
+                is_custom=False,
+                is_complex=meta.is_complex,
+            )
+            self._register(internal_name_instance, symbolic_function)
 
     def _register(
         self,
