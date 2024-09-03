@@ -266,7 +266,9 @@ def run_llama2_7b_bf16(device: str = "cuda"):
         1253,
         162,
     )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
+        model, device=device
+    )
     return [
         Experiment(
             model.name,
@@ -314,7 +316,9 @@ def run_llama2_7b_int8(device: str = "cuda"):
         957,
         172,
     )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
+        model, device=device
+    )
     return [
         Experiment(
             model.name,
@@ -363,7 +367,9 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         1130,
         162,
     )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
+        model, device=device
+    )
     return [
         Experiment(
             model.name,
