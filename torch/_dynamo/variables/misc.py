@@ -4,7 +4,6 @@ import dataclasses
 import functools
 import inspect
 import itertools
-import os
 import random
 import re
 import sys
@@ -15,7 +14,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, polyfills, variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
@@ -30,7 +29,6 @@ from ..source import (
 )
 from ..utils import (
     check_unspec_or_constant_args,
-    hashable,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
@@ -48,10 +46,6 @@ from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObject
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-
-POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS = {
-    os.fspath: polyfills.fspath,
-}
 
 
 class NO_SUCH_SUBOBJ:
@@ -1166,12 +1160,6 @@ class PythonModuleVariable(VariableTracker):
             attr_value = getattr(self.value, name)
         else:
             attr_value = self.value.__dict__[name]
-
-        if hashable(attr_value):
-            if polyfill_fn := POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS.get(
-                attr_value, None
-            ):
-                return variables.UserFunctionVariable(polyfill_fn)
 
         if self.source:
             new_source = AttrSource(self.source, name)
