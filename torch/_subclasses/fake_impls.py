@@ -27,6 +27,7 @@ from torch._subclasses.fake_tensor import (
 )
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._stats import count_label
+from torch.utils._sympy.numbers import IntInfinity
 from torch.utils._sympy.value_ranges import bound_sympy
 
 
@@ -472,6 +473,9 @@ def masked_select(fake_mode, func, self, mask):
                     sym_range = bound_sympy(
                         sym_node.expr, sym_node.shape_env.var_to_range
                     )
+                    if isinstance(sym_range.upper, IntInfinity):
+                        num_elements = sys.maxsize - 1
+                        break
                     num_elements *= int(sym_range.upper)
     if num_elements > 2:
         maxval = num_elements
