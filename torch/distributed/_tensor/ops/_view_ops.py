@@ -511,12 +511,12 @@ def propagate_shape_and_sharding(
             seen_input_dims.add(cmd.input_dim)
         for inp in cmd.inputs():
             collect_used_inputs(inp)
-    
+
     for cmd in rule:
         collect_used_inputs(cmd)
     for dim in range(len(local_in_shape)):
         shardable_dims[dim] = [dim in seen_input_dims] * mesh_ndim
-    
+
     def get_in_dim_to_shard(cmd: DimSpec) -> Optional[InputDim]:
         if isinstance(cmd, InputDim):
             return cmd
