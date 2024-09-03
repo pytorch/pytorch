@@ -405,7 +405,7 @@ jobs:
     needs:
       - wheel-py3_9-cuda11_8-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -654,7 +654,7 @@ jobs:
     needs:
       - wheel-py3_9-cuda12_1-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -903,7 +903,7 @@ jobs:
     needs:
       - wheel-py3_9-cuda12_4-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1398,7 +1398,7 @@ jobs:
     needs:
       - wheel-py3_10-cuda11_8-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1647,7 +1647,7 @@ jobs:
     needs:
       - wheel-py3_10-cuda12_1-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1896,7 +1896,7 @@ jobs:
     needs:
       - wheel-py3_10-cuda12_4-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2391,7 +2391,7 @@ jobs:
     needs:
       - wheel-py3_11-cuda11_8-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2640,7 +2640,7 @@ jobs:
     needs:
       - wheel-py3_11-cuda12_1-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2889,7 +2889,7 @@ jobs:
     needs:
       - wheel-py3_11-cuda12_4-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3384,7 +3384,7 @@ jobs:
     needs:
       - wheel-py3_12-cuda11_8-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3633,7 +3633,7 @@ jobs:
     needs:
       - wheel-py3_12-cuda12_1-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3882,7 +3882,7 @@ jobs:
     needs:
       - wheel-py3_12-cuda12_4-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch

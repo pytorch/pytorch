@@ -897,7 +897,7 @@ Tensor logsumexp_backward(
     grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
     result = unsqueeze_multiple(result, dim, self.sym_sizes().size());
   }
-  return grad * (self - result).exp();
+  return grad * (self - result).exp().conj();
 }
 
 Tensor logcumsumexp_backward(
@@ -6689,7 +6689,8 @@ Tensor logsumexp_jvp(
   // forward
   auto self_p_exp = [&self_p, &dim]() {
     if (self_p.sym_numel() > 0) {
-      return (self_p - at::amax(self_p, dim, true))
+      // Use only the real part for complex tensors
+      return (self_p - at::amax(at::real(self_p), dim, true))
           .exp(); // Use the exp-normalize trick
     } else {
       // amax fails if numel() == 0, in which case it doesn't matter anyway
