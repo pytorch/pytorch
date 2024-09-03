@@ -2217,8 +2217,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
 
         test(op, (torch.arange(12), torch.zeros(12, dtype=torch.long)), in_dims=(0, 0))
-        test(op, (torch.arange(12).view(3, 4), torch.zeros(12, dtype=torch.long).view(3, 4)), in_dims=(0, 0))
-        test(op, (torch.arange(12).view(3, 4), torch.zeros(12, dtype=torch.long).view(3, 4)), in_dims=(1, 1))
+        test(
+            op,
+            (torch.arange(12).view(3, 4), torch.zeros(12, dtype=torch.long).view(3, 4)),
+            in_dims=(0, 0),
+        )
+        test(
+            op,
+            (torch.arange(12).view(3, 4), torch.zeros(12, dtype=torch.long).view(3, 4)),
+            in_dims=(1, 1),
+        )
         test(op, (torch.arange(12), torch.arange(3)), in_dims=(None, 0))
 
         op = lambda x, y: torch.Tensor.index_select(x, 1, y)
