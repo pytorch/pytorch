@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-MAX_CYCLE = 3000
+MAX_ITERATOR_LIMIT = 100 * 1024  # 100k
 
 
 class ItertoolsVariable(VariableTracker):
@@ -51,14 +51,6 @@ class ItertoolsVariable(VariableTracker):
             items = []
             for item in itertools.product(*seqs):
                 items.append(variables.TupleVariable(list(item)))
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
-        elif (
-            self.value is itertools.chain
-            and not kwargs
-            and all(arg.has_unpack_var_sequence(tx) for arg in args)
-        ):
-            seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = list(itertools.chain.from_iterable(seqs))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
@@ -174,12 +166,6 @@ class ItertoolsVariable(VariableTracker):
                     from_exc=e,
                 )
             return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
-        elif self.value is itertools.islice:
-            from .builder import SourcelessBuilder
-
-            return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfills.islice), args, kwargs
-            )
         elif self.value is itertools.repeat:
             if len(args) < 2:
                 return variables.RepeatIteratorVariable(
@@ -266,7 +252,7 @@ class CycleIteratorVariable(IteratorVariable):
         if self.iterator is not None:
             try:
                 new_item = self.iterator.next_variable(tx)
-                if len(self.saved) > MAX_CYCLE:
+                if len(self.saved) > MAX_ITERATOR_LIMIT:
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
                     )
