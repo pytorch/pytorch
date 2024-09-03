@@ -961,7 +961,6 @@ def _get_openmp_args(
                 libs.append("gomp")
             elif _is_intel_compiler(cpp_compiler):
                 cflags.append("fiopenmp")
-                libs.append("libiomp5")
             else:
                 cflags.append("fopenmp")
                 libs.append("gomp")
