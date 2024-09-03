@@ -146,7 +146,8 @@ class SideEffects:
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
             return True
-        # TODO(yf225): skip check only if traced FSDP2 and this is FSDP2 pre-forward / post-forward hook
+        # TODO(yf225): skip check only if traced FSDP2 and this is FSDP2 pre-forward / post-forward hook.
+        # Look at https://github.com/pytorch/pytorch/pull/134310 for inspiration on how to implement this.
         # if not is_side_effect_safe(item.mutable_local):
         #     unimplemented(
         #         "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
