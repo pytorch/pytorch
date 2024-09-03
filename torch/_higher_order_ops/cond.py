@@ -123,7 +123,7 @@ def cond(pred, true_fn, false_fn, operands):
             lambda t: not isinstance(t, torch.Tensor), operands
         ):
             raise RuntimeError(
-                "Expect operands to be a tuple of possibly nested dict/list/tuple that only"
+                "Expect operands to be a tuple of possibly nested dict/list/tuple that only "
                 f"consists of tensor leaves, but got {operands}."
             )
 
