@@ -222,7 +222,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
     char buf[256];
     int ret;
 
-    ret = snprintf(buf, 256, "GemmTunableOp_%s_%c_%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
+    ret = snprintf(buf, 256, "GemmTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
 
     TORCH_CHECK(ret > 0 && ret < 256, "TunableOp: Signature formatting error occured. Return value = ", ret);
 
