@@ -23,7 +23,6 @@
 
 #if USE_X86_SIMD_SORT && (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2))
 #define XSS_COMPILE_TIME_SUPPORTED
-#define XSS_USE_OPENMP
 #include <src/x86simdsort-static-incl.h>
 #endif
 
@@ -194,6 +193,15 @@ static bool can_use_xss_sort(const TensorBase& values, const TensorBase& indices
   return true;
 }
 
+static bool xss_sort_preferred(const TensorBase& values, const bool descending) {
+#if defined(XSS_USE_OPENMP) || !defined(USE_FBGEMM)
+    return true;
+#else
+    // Without OpenMP support for x86-simd-sort, fbgemm radix sort is faster when it can be used
+    return !can_use_radix_sort(values, descending);
+#endif
+}
+
 static void xss_sort_kernel(
     const TensorBase& values,
     const TensorBase& indices,
@@ -290,7 +298,7 @@ static void sort_kernel(
   }
 
 #if defined(XSS_COMPILE_TIME_SUPPORTED)
-  if (can_use_xss_sort(values, indices, dim, stable)){
+  if (can_use_xss_sort(values, indices, dim, stable) && xss_sort_preferred(values, descending)){
     xss_sort_kernel(values, indices, dim, descending);
     return;
   }
