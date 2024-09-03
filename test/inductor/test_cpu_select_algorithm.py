@@ -412,6 +412,77 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (8,))
+    @parametrize("in_features", (3,))
+    @parametrize("linear_in_features", (384,))
+    @parametrize("out_features", (196,))
+    @parametrize("bias", (True,))
+    @dtypes(torch.float)
+    def test_linear_with_input_of_flexible_layout(
+        self, batch_size, in_features, linear_in_features, out_features, bias, dtype
+    ):
+        # Reproducer from the resmlp_12_224 model in timm
+        flatten_BS = int(batch_size * linear_in_features)
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_features,
+                    linear_in_features,
+                    kernel_size=16,
+                    padding=0,
+                    stride=16,
+                    dilation=1,
+                    groups=1,
+                )
+                self._frozen_param151 = torch.randn(1, 1, linear_in_features)
+                self._frozen_param3 = torch.randn(1, 1, linear_in_features)
+                self._frozen_param2 = torch.randn(linear_in_features)
+
+                self.linear = torch.nn.Linear(out_features, out_features, bias)
+
+            def forward(self, arg150_1):
+                _convolution_pointwise_default = self.conv(arg150_1)
+                view_73 = torch.ops.aten.reshape.default(
+                    _convolution_pointwise_default,
+                    [batch_size, linear_in_features, out_features],
+                )
+                _convolution_pointwise_default = None
+                permute_62 = torch.ops.aten.permute.default(view_73, [0, 2, 1])
+                view_73 = None
+                mul_111 = torch.ops.aten.mul.Tensor(self._frozen_param151, permute_62)
+                add_73 = torch.ops.aten.add.Tensor(self._frozen_param3, mul_111)
+                permute_63 = torch.ops.aten.permute.default(add_73, [0, 2, 1])
+                add_73 = None
+                view_74 = torch.ops.aten.reshape.default(
+                    permute_63, [flatten_BS, out_features]
+                )
+                permute_63 = None
+                _mkl_linear_36 = self.linear(view_74)
+                view_75 = torch.ops.aten.reshape.default(
+                    _mkl_linear_36, [batch_size, linear_in_features, out_features]
+                )
+                _mkl_linear_36 = None
+                permute_65 = torch.ops.aten.permute.default(view_75, [0, 2, 1])
+                view_75 = None
+                mul_112 = torch.ops.aten.mul.Tensor(self._frozen_param2, permute_65)
+                _frozen_param2 = permute_65 = None
+                add_74 = torch.ops.aten.add.Tensor(permute_62, mul_112)
+                permute_62 = mul_112 = None
+                return add_74
+
+        v = torch.randn(batch_size, in_features, 224, 224).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (384, 385))
