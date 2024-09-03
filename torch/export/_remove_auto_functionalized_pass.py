@@ -10,7 +10,6 @@ import torch
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
-    get_mutable_args,
 )
 from torch._inductor.fx_passes.post_grad import decompose_auto_functionalized
 from torch.export import ExportedProgram
@@ -44,7 +43,6 @@ def unsafe_remove_auto_functionalized_pass(
                 ):
                     func = node.args[0]
                     assert isinstance(func, torch._ops.OpOverload)
-                    mutable_args_names, _ = get_mutable_args(func)
                     # re-inplace everything
                     node.meta["only_clone_these_tensors"] = []
             decompose_auto_functionalized(ep.graph)

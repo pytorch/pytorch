@@ -3,6 +3,7 @@
 from typing import List
 
 import torch
+import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
 from torch._dynamo.utils import counters
@@ -20,7 +21,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
-import torch._inductor.config as inductor_config
+
 
 aten = torch.ops.aten
 
@@ -305,7 +306,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     def test_multi_output_intermediate(self):
         for requires_grad in [False, True]:
             for enable_v2 in [False, True]:
-                with inductor_config.patch({"enable_auto_functionalized_v2": enable_v2}):
+                with inductor_config.patch(
+                    {"enable_auto_functionalized_v2": enable_v2}
+                ):
                     counters.clear()
 
                     def f(x):
@@ -420,7 +423,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         ],
     )
     def test_partitioner_recomputes_factory(self, factory_op, sin_op):
-
         class MySin(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):

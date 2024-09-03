@@ -483,7 +483,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
             return True
         elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
-            # This should never happens in auto_functionalize non-inference mode,
+            # This should never happens in auto_functionalize_v2 non-inference mode,
             # since all mutated_arg are bases.
 
             # If mutated arg is view of any of the inputs of the graph,

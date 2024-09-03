@@ -18,6 +18,137 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
+@dataclass
+class ViewInfo:
+    base_index: int
+    size: Any = None
+    stride: Any = None
+    storage_offset: Any = None
+    # When is_view is false, the tensor is the base, and
+    # size, stride and storage_offset are all None.
+    is_view: bool = True
+
+    def regenerate_view(self, bases_list: List[Tensor]):
+        if not self.is_view:
+            return bases_list[self.base_index]
+        return torch.as_strided(
+            bases_list[self.base_index],
+            self.size,
+            self.stride,
+            self.storage_offset,
+        )
+
+
+def write_view_information_to_args(
+    mutable_arg_names: List[str],
+    mutable_arg_types: List[torch.Type],
+    kwargs: Dict[str, Any],
+    arg_to_base_index: Dict[str, Any],
+):
+    """
+    This function writes the view information into kwargs. It reads mutable_args from kwargs.
+    and uses arg_to_base_index and tensor information to write ViewInfo into kwargs.
+    mutable_arg_names: mutable custom operator arg names.
+    mutable_arg_types: mutable custom operator arg types.
+    kwargs: the original custom operator args.
+    arg_to_base_index: maps mutable_arg_name to int | [int] that refers to the base tensor that
+                       corresponds to the input tensor
+    """
+
+    def write_single_view(prefix: str, tensor: Tensor, base_index: int):
+        assert f"{prefix}_base_index" not in kwargs
+        assert f"{prefix}_size" not in kwargs
+        assert f"{prefix}_stride" not in kwargs
+        assert f"{prefix}_storage_offset" not in kwargs
+
+        if tensor is None:
+            kwargs[f"{prefix}_base_index"] = None
+        elif tensor._base is None:
+            # if the tensor is the base (not view), for simplicity we do not serialize view meta.
+            kwargs[f"{prefix}_base_index"] = base_index
+        else:
+            kwargs[f"{prefix}_base_index"] = base_index
+            kwargs[f"{prefix}_size"] = tensor.size()
+            kwargs[f"{prefix}_stride"] = tensor.stride()
+            kwargs[f"{prefix}_storage_offset"] = tensor.storage_offset()
+
+    for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
+        arg = kwargs[arg_name]
+        if isinstance(arg_type, torch.ListType):
+            if arg is None:
+                kwargs[f"_{arg_name}_length"] = None
+
+            kwargs[f"_{arg_name}_length"] = len(arg)
+            for i, elem in enumerate(arg):
+                write_single_view(
+                    f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
+                )
+
+        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+            write_single_view(
+                f"_{arg_name}",
+                kwargs[arg_name],
+                arg_to_base_index.get(arg_name, None),
+            )
+        else:
+            raise RuntimeError(f"Unsupported type {arg_type}")
+
+
+# Returns a dict of arg_name -> ViewInfo | [ViewInfo]
+def read_view_information_from_args(
+    mutable_arg_names: List[str],
+    mutable_arg_types: List[torch.Type],
+    kwargs: Dict[str, Any],
+    all_bases: List[Tensor],
+):
+    """
+    This reads the view information added by `write_view_information_to_args` from kwargs, pop them,
+    and returns a dict arg_name -> ViewInfo | [ViewInfo](if the input is list). that maps each mutable arg
+    to its view information.
+    mutable_arg_names: mutable custom operator arg names.
+    mutable_arg_types: mutable custom operator arg types.
+    kwargs : args of auto_functionalize(custom_op, kwargs)
+    """
+
+    def get_arg(name):
+        return kwargs.pop(name)
+
+    def read_single_view(prefix):
+        base_index = get_arg(f"{prefix}_base_index")
+        if base_index is None:
+            return None
+        elif f"{prefix}_size" not in kwargs:
+            assert f"{prefix}_stride" not in kwargs
+            assert f"{prefix}_storage_offset" not in kwargs
+
+            # This means that the argument is the base tensor
+            return ViewInfo(base_index, all_bases[base_index], is_view=False)
+
+        else:
+            size = get_arg(f"{prefix}_size")
+            stride = get_arg(f"{prefix}_stride")
+            storage_offset = get_arg(f"{prefix}_storage_offset")
+            return ViewInfo(base_index, size, stride, storage_offset, is_view=True)
+
+    args_view_info: Dict[str, Any] = {}
+    for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
+        if isinstance(arg_type, torch.ListType):
+            length = get_arg(f"_{arg_name}_length")
+            if length is None:
+                # The whole list is None.
+                args_view_info[arg_name] = None
+            else:
+                args_view_info[arg_name] = [
+                    read_single_view(f"_{arg_name}_{i}") for i in range(length)
+                ]
+
+        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+            args_view_info[arg_name] = read_single_view(f"_{arg_name}")
+        else:
+            raise RuntimeError(f"Unsupported type {arg_type}")
+    return args_view_info
+
+
 # NOTE: [auto-functionalizing custom ops]
 # Users may wish to torch.compile custom ops that mutate their inputs.
 # torch.compile will automatically support this op without anyone needing
@@ -155,137 +286,6 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
     if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), "Functionalize"):
         return False
     return True
-
-
-@dataclass
-class ViewInfo:
-    base_index: int
-    size: Any = None
-    stride: Any = None
-    storage_offset: Any = None
-    # When is_view is false, the tensor is the base, and
-    # size, stride and storage_offset are all None.
-    is_view: bool = True
-
-    def regenerate_view(self, bases_list: List[Tensor]):
-        if not self.is_view:
-            return bases_list[self.base_index]
-        return torch.as_strided(
-            bases_list[self.base_index],
-            self.size,
-            self.stride,
-            self.storage_offset,
-        )
-
-
-def write_view_information_to_args(
-    mutable_arg_names: List[str],
-    mutable_arg_types: List[torch.Type],
-    kwargs: Dict[str, Any],
-    arg_to_base_index: Dict[str, Any],
-):
-    """
-    This function writes the view information into kwargs. It reads mutable_args from kwargs.
-    and uses arg_to_base_index and tensor information to write ViewInfo into kwargs.
-    mutable_arg_names: mutable custom operator arg names.
-    mutable_arg_types: mutable custom operator arg types.
-    kwargs: the original custom operator args.
-    arg_to_base_index: maps mutable_arg_name to int | [int] that refers to the base tensor that
-                       corresponds to the input tensor
-    """
-
-    def write_single_view(prefix: str, tensor: Tensor, base_index: int):
-        assert f"{prefix}_base_index" not in kwargs
-        assert f"{prefix}_size" not in kwargs
-        assert f"{prefix}_stride" not in kwargs
-        assert f"{prefix}_storage_offset" not in kwargs
-
-        if tensor is None:
-            kwargs[f"{prefix}_base_index"] = None
-        elif tensor._base is None:
-            # if the tensor is the base (not view), for simplicity we do not serialize view meta.
-            kwargs[f"{prefix}_base_index"] = base_index
-        else:
-            kwargs[f"{prefix}_base_index"] = base_index
-            kwargs[f"{prefix}_size"] = tensor.size()
-            kwargs[f"{prefix}_stride"] = tensor.stride()
-            kwargs[f"{prefix}_storage_offset"] = tensor.storage_offset()
-
-    for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
-        arg = kwargs[arg_name]
-        if isinstance(arg_type, torch.ListType):
-            if arg is None:
-                kwargs[f"_{arg_name}_length"] = None
-
-            kwargs[f"_{arg_name}_length"] = len(arg)
-            for i, elem in enumerate(arg):
-                write_single_view(
-                    f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
-                )
-
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
-            write_single_view(
-                f"_{arg_name}",
-                kwargs[arg_name],
-                arg_to_base_index.get(arg_name, None),
-            )
-        else:
-            raise RuntimeError(f"Unsupported type {arg_type}")
-
-
-# Returns a dict of arg_name -> ViewInfo | [ViewInfo]
-def read_view_information_from_args(
-    mutable_arg_names: List[str],
-    mutable_arg_types: List[torch.Type],
-    kwargs: Dict[str, Any],
-    all_bases: List[Tensor],
-):
-    """
-    This reads the view information added by `write_view_information_to_args` from kwargs, pop them,
-    and returns a dict arg_name -> ViewInfo | [ViewInfo](if the input is list). that maps each mutable arg
-    to its view information.
-    mutable_arg_names: mutable custom operator arg names.
-    mutable_arg_types: mutable custom operator arg types.
-    kwargs : args of auto_functionalize(custom_op, kwargs)
-    """
-
-    def get_arg(name):
-        return kwargs.pop(name)
-
-    def read_single_view(prefix):
-        base_index = get_arg(f"{prefix}_base_index")
-        if base_index is None:
-            return None
-        elif f"{prefix}_size" not in kwargs:
-            assert f"{prefix}_stride" not in kwargs
-            assert f"{prefix}_storage_offset" not in kwargs
-
-            # This means that the argument is the base tensor
-            return ViewInfo(base_index, all_bases[base_index], is_view=False)
-
-        else:
-            size = get_arg(f"{prefix}_size")
-            stride = get_arg(f"{prefix}_stride")
-            storage_offset = get_arg(f"{prefix}_storage_offset")
-            return ViewInfo(base_index, size, stride, storage_offset, is_view=True)
-
-    args_view_info: Dict[str, Any] = {}
-    for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
-        if isinstance(arg_type, torch.ListType):
-            length = get_arg(f"_{arg_name}_length")
-            if length is None:
-                # The whole list is None.
-                args_view_info[arg_name] = None
-            else:
-                args_view_info[arg_name] = [
-                    read_single_view(f"_{arg_name}_{i}") for i in range(length)
-                ]
-
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
-            args_view_info[arg_name] = read_single_view(f"_{arg_name}")
-        else:
-            raise RuntimeError(f"Unsupported type {arg_type}")
-    return args_view_info
 
 
 def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.Type]]:

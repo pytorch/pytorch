@@ -890,7 +890,7 @@ def decompose_auto_functionalized(graph):
     for node in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
     ):
-        raise AssertionError("auto_functionalized was not removed")
+        raise AssertionError("auto_functionalized_v2 was not removed")
 
     for node in graph.find_nodes(
         op="call_function",
