@@ -196,9 +196,14 @@ auto GetRocBlasGemmTypeStringAndOps() {
   std::sort(solutions.begin(), solutions.end());
 
   std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmParams<T>>>>> ret;
+  const int buf_len = 32;
+  char buf[buf_len];
+  int val;
   for (size_t i = 0; i < solutions.size(); ++i) {
     auto callable = std::make_unique<RocblasGemmOp<T>>(solutions[i]);
-    ret.emplace_back(std::make_pair(c10::str("Gemm_Rocblas_", solutions[i]), std::move(callable)));
+    val = snprintf(buf, buf_len, "Gemm_Rocblas_%d", solutions[i]);
+    TORCH_CHECK(val > 0 && val < buf_len, "TunableOp: Signature formatting error occured. Return value = ", val);
+    ret.emplace_back(std::make_pair(std::string(buf), std::move(callable)));
   }
   return ret;
 }
