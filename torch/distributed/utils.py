@@ -232,10 +232,10 @@ def _apply_to_tensors(fn, container):
             return fn(x)
         elif hasattr(x, "__dataclass_fields__"):
             dc = dataclasses.replace(x)
-            for f in dataclasses.fields(dc):
-                name = f.name
-                setattr(dc, name, apply(getattr(dc, name)))
-            return dc
+            changes = {
+                f.name: apply(getattr(dc, f.name)) for f in dataclasses.fields(dc)
+            }
+            return dataclasses.replace(dc, **changes)
         elif isinstance(x, OrderedDict):
             od = x.__class__()
             for key, value in x.items():
