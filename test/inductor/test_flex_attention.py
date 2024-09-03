@@ -1507,7 +1507,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         out, lse = flex(query, key, value, block_mask=block_mask, return_lse=True)
         self.assertEqual(out[:, :, M:, :].sum(), 0)
-        self.assertTrue((lse[:, :, M:] == 0.0).all())
+        self.assertTrue((lse[:, :, M:] == -float("inf")).all())
 
         loss = out.sum() + lse.sum()
         loss.backward()
@@ -1640,6 +1640,86 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out_compiled, lse_compiled = flex_compile(query, key, value, return_lse=True)
 
         torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
+
+    @supported_platform
+    @common_utils.parametrize("backend", ["flex_attention", "flex_decode", "eager"])
+    def test_lse_masked_output(self, backend):
+        if backend == "flex_decode":
+            kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
+            flex_call = torch.compile(flex_attention, fullgraph=True)
+        elif backend == "flex_attention":
+            kernel_options = {"FORCE_USE_FLEX_ATTENTION": True}
+            flex_call = torch.compile(flex_attention, fullgraph=True)
+        else:
+            kernel_options = {}
+            flex_call = flex_attention
+
+        N_CTX = 96
+        SLIDING_WINDOW = 64
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, N_CTX, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+
+        def sliding_window_causal(b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            window_mask = q_idx - kv_idx <= SLIDING_WINDOW
+            return causal_mask & window_mask
+
+        def global_causal(b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            window_mask = q_idx - kv_idx > SLIDING_WINDOW
+            return causal_mask & window_mask
+
+        sliding_window_causal = torch.nn.attention.flex_attention.create_block_mask(
+            sliding_window_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+        )
+        global_causal = torch.nn.attention.flex_attention.create_block_mask(
+            global_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+        )
+
+        local_attn = functools.partial(
+            flex_call,
+            block_mask=sliding_window_causal,
+            return_lse=True,
+            kernel_options=kernel_options,
+        )
+        global_attn = functools.partial(
+            flex_call,
+            block_mask=global_causal,
+            return_lse=True,
+            kernel_options=kernel_options,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        gradOut = make_tensor(requires_grad=False)
+
+        x_local, lse_local = local_attn(q, k, v)
+        x_global, lse_global = global_attn(q, k, v)
+
+        max_lse = torch.maximum(lse_local, lse_global)
+        lse_global = lse_global - max_lse
+        lse_local = lse_local - max_lse
+        lse_global = torch.exp(lse_global)
+        lse_local = torch.exp(lse_local)
+        x = ((x_local * lse_local[..., None]) + (x_global * lse_global[..., None])) / (
+            lse_global[..., None] + lse_local[..., None]
+        )
+        x.backward(gradOut)
+        flex_q_grad, flex_k_grad, flex_v_grad = q.grad, k.grad, v.grad
+        q.grad = None
+        k.grad = None
+        v.grad = None
+
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True)
+        out.backward(gradOut)
+
+        torch.testing.assert_close(x, out, atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(flex_q_grad, q.grad, atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(flex_k_grad, k.grad, atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(flex_v_grad, v.grad, atol=3e-3, rtol=2e-3)
 
     @supported_platform
     def test_small_q_kv_len(self):
