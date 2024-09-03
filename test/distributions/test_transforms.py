@@ -217,11 +217,14 @@ def test_equality(x, y):
 
 
 @pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-def test_with_cache(transform):
+@pytest.mark.parametrize("compile", [False, True])
+def test_with_cache(transform, compile):
     if transform._cache_size == 0:
         transform = transform.with_cache(1)
     assert transform._cache_size == 1
     x = generate_data(transform).requires_grad_()
+    if compile:
+        transform = torch.compile(transform, fullgraph=True)
     try:
         y = transform(x)
     except NotImplementedError:
@@ -232,23 +235,32 @@ def test_with_cache(transform):
 
 @pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
 @pytest.mark.parametrize("test_cached", [True, False])
-def test_forward_inverse(transform, test_cached):
+@pytest.mark.parametrize("compile", [False, True])
+def test_forward_inverse(transform, test_cached, compile):
     x = generate_data(transform).requires_grad_()
     assert transform.domain.check(x).all()  # verify that the input data are valid
+    def transform_inv(y):
+        return transform.inv(y)
+
+    if compile:
+        transform_call = torch.compile(transform, fullgraph=True)
+        transform_inv = torch.compile(transform_inv, fullgraph=True)
+    else:
+        transform_call = transform
     try:
-        y = transform(x)
+        y = transform_call(x)
     except NotImplementedError:
         pytest.skip("Not implemented.")
     assert y.shape == transform.forward_shape(x.shape)
     if test_cached:
-        x2 = transform.inv(y)  # should be implemented at least by caching
+        x2 = transform_inv(y)  # should be implemented at least by caching
     else:
         try:
-            x2 = transform.inv(y.clone())  # bypass cache
+            x2 = transform_inv(y.clone())  # bypass cache
         except NotImplementedError:
             pytest.skip("Not implemented.")
     assert x2.shape == transform.inverse_shape(y.shape)
-    y2 = transform(x2)
+    y2 = transform_call(x2)
     if transform.bijective:
         # verify function inverse
         assert torch.allclose(x2, x, atol=1e-4, equal_nan=True), "\n".join(
@@ -332,6 +344,15 @@ def test_transformed_distribution_shapes(batch_shape, event_shape, dist):
     except NotImplementedError:
         pytest.skip("Not implemented.")
 
+def test_compile_transformed_dist_build():
+    # We don't use cached distribution / transform to make sure that the constructor is called within compile
+    # and dynamo sees it.
+    def make_dist_and_test():
+        dist = TransformedDistribution(Normal(0, 1), ComposeTransform([AffineTransform(0, 1)]))
+        s = dist.rsample((1,))
+        return s, dist.log_prob(s)
+    make_dist_and_test = torch.compile(make_dist_and_test, fullgraph=True)
+    make_dist_and_test()
 
 @pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
 def test_jit_fwd(transform):

@@ -124,7 +124,8 @@ class Transform:
             inv = self._inv()
         if inv is None:
             inv = _InverseTransform(self)
-            self._inv = weakref.ref(inv)
+            if not torch.compiler.is_dynamo_compiling():
+                self._inv = weakref.ref(inv)
         return inv
 
     @property
@@ -343,8 +344,13 @@ class ComposeTransform(Transform):
             inv = self._inv()
         if inv is None:
             inv = ComposeTransform([p.inv for p in reversed(self.parts)])
-            self._inv = weakref.ref(inv)
-            inv._inv = weakref.ref(self)
+            if not torch.compiler.is_dynamo_compiling():
+                self._inv = weakref.ref(inv)
+                inv._inv = weakref.ref(self)
+            else:
+                # We need inv.inv to be equal to self, but weakref can cause a graph break
+                inv._inv = lambda out=self: out
+
         return inv
 
     def with_cache(self, cache_size=1):
