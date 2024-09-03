@@ -921,12 +921,12 @@ inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
 }
 
 template<typename key_t>
-struct UnsafeUkernelHasher {
+struct UnsafeUkernelKeyHasher {
   std::size_t operator()(const key_t& key) const;
 };
 
 template<>
-std::size_t UnsafeUkernelHasher<BrgemmKey>::operator()(const BrgemmKey& key) const {
+std::size_t UnsafeUkernelKeyHasher<BrgemmKey>::operator()(const BrgemmKey& key) const {
   // Use beta, M, N, and K to compute hash to reduce the overhead as
   // batch size, alpha, and data types are unlikely to change within the same kernel and
   // leading dimensions are likely to be related to M, K, N or use fixed values.
@@ -939,7 +939,7 @@ std::size_t UnsafeUkernelHasher<BrgemmKey>::operator()(const BrgemmKey& key) con
 }
 
 template<>
-std::size_t UnsafeUkernelHasher<PackKey>::operator()(const PackKey& key) const {
+std::size_t UnsafeUkernelKeyHasher<PackKey>::operator()(const PackKey& key) const {
   // Use K and N to compute hash to reduce the overhead as
   // data types are unlikely to change and
   // ld_in/ld_out is likely to be related to K, N or use fixed values
@@ -950,7 +950,7 @@ std::size_t UnsafeUkernelHasher<PackKey>::operator()(const PackKey& key) const {
 
 template <typename key_t, typename value_t>
 struct KernelCache  {
-  using kstore_t = std::unordered_map<key_t, std::shared_ptr<value_t>, UnsafeUkernelHasher<key_t>>;
+  using kstore_t = std::unordered_map<key_t, std::shared_ptr<value_t>, UnsafeUkernelKeyHasher<key_t>>;
   static inline std::shared_ptr<value_t>&& fetch_or_create(
       const key_t& key,
       const std::function<std::shared_ptr<value_t>()>& callback) {
