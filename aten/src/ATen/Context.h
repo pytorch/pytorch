@@ -183,7 +183,8 @@ class TORCH_API Context {
     c10::call_once(th_mtia_init, [&] { detail::getMTIAHooks().initMTIA(); });
   }
   void lazyInitPrivateUse1() {
-    c10::call_once(thp_init, [&] { at::detail::getPrivateUse1Hooks().initPrivateUse1(); });
+    c10::call_once(
+        thp_init, [&] { at::detail::getPrivateUse1Hooks().initPrivateUse1(); });
   }
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
