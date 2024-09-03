@@ -261,6 +261,7 @@ header_template_rule(
     include = "aten/src",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
+        "@AT_MKLDNN_UKERNEL_ENABLED@": "1",
         "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
@@ -575,7 +576,7 @@ cu_library(
     name = "torch_cuda",
     srcs = [
         "torch/csrc/distributed/c10d/intra_node_comm.cu",
-        "torch/csrc/distributed/c10d/Utils.cu",
+        "torch/csrc/distributed/c10d/NanCheck.cu",
         "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
     ],
     copts = torch_cuda_half_options,
@@ -723,7 +724,7 @@ cc_library(
             "torch/csrc/distributed/c10d/intra_node_comm.cu",
             "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
             "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
-            "torch/csrc/distributed/c10d/Utils.cu",
+            "torch/csrc/distributed/c10d/NanCheck.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
     )) + torch_sources,

@@ -8,7 +8,7 @@
 #include <c10/core/Scalar.h>
 
 #include <ATen/Config.h>
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 #include <ATen/Context.h>
 #include <oneapi/dnnl/dnnl_ukernel.hpp>
 #include <oneapi/dnnl/dnnl.hpp>
@@ -193,7 +193,7 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy);
 void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
 void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 template <typename key_t, typename value_t>
 struct KernelCache  {
   using kstore_t = std::unordered_map<key_t, std::shared_ptr<value_t>>;
@@ -306,7 +306,7 @@ struct PackKey {
   }
 };
 
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 // Helper struct for convenient brgemm configuration
 struct GemmHelper {
   GemmHelper(
@@ -550,7 +550,7 @@ bool need_pack(ScalarType dt_in);
 
 } // namespace at::native::cpublas
 
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if AT_MKLDNN_UKERNEL_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 namespace std {
 template <>
 struct hash<at::native::cpublas::BrgemmKey> {
