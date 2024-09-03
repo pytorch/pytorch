@@ -3,6 +3,8 @@
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <torch/library.h>
 
+#include <iostream>
+
 using namespace at::native::onednn;
 namespace at {
 namespace native{
@@ -55,10 +57,10 @@ class QConvoneDNNXPU final {
     } else {
       TORCH_CHECK(
           attr == "none" || attr == "relu" || attr == "hardtanh" ||
-              attr == "hardswish",
+              attr == "hardswish" || attr=="swish",
           "none post_op or post_op relu/hardtanh/hardswish is supported for quantized pointwise conv2d. Got unary_post_op: ",
           attr,
-          ".")
+          ".");
     }
 
     bool is_channels_last_suggested= use_channels_last_for_conv(act, weight);
@@ -81,7 +83,6 @@ class QConvoneDNNXPU final {
     Tensor output = at::empty(
         dst_tz, device(c10::kXPU).dtype(output_dtype).memory_format(mfmt));
     
-
     return quantized_convolution_pt2(
         act,
         act_scale,
