@@ -12,7 +12,7 @@ Hardware Prerequisite
      - Supported OS
    * - Intel® Data Center GPU Max Series
      - Linux
-   * - (Prototype Support) Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (MTL-H)
+   * - (Prototype Support) Intel Client GPU
      - Windows/Linux
 
 
