@@ -3,7 +3,12 @@ import csv
 import dataclasses
 import os
 
-from generate import run_llama2_7b_bf16, run_llama2_7b_int8, run_mixtral_8x7b_int8
+from generate import (
+    get_arch_name,
+    run_llama2_7b_bf16,
+    run_llama2_7b_int8,
+    run_mixtral_8x7b_int8,
+)
 
 import torch
 import torch.nn as nn
@@ -24,6 +29,7 @@ class Experiment:
     actual: float
     dtype: str
     device: str
+    arch: str  # GPU name for CUDA or CPU arch for CPU
     is_model: bool = False
 
 
@@ -84,6 +90,7 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
                 f"{flops_utilization:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
@@ -121,6 +128,7 @@ def run_layer_norm(device: str = "cuda"):
                 f"{memory_bandwidth:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
@@ -166,6 +174,7 @@ def run_gather_gemv(device: str = "cuda"):
                 f"{memory_bandwidth:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
@@ -207,6 +216,7 @@ def run_gemv(device: str = "cuda"):
                 f"{memory_bandwidth:.02f}",
                 dtype_str,
                 device,
+                get_arch_name(),
             )
         )
     return results
@@ -252,7 +262,7 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
     results = []
 
     for func in all_experiments:
-        lst = func()
+        lst = func("cuda" if torch.cuda.is_available() else "cpu")
         for x in lst:
             results.append(dataclasses.astuple(x))
 
