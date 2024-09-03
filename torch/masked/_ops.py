@@ -418,9 +418,16 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
         return torch.tensor(0, dtype=dtype, device=device)
     elif op_name in {"prod", "cumprod"}:
         return torch.tensor(1, dtype=dtype, device=device)
-    elif op_name in {"amax", "argmax", "logsumexp"}:
+    elif op_name in {"amax", "argmax", "logaddexp"}:
         if torch.is_floating_point(input):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
+        elif torch.is_signed(input) or dtype == torch.uint8:
+            return torch.tensor(torch.iinfo(dtype).min, dtype=dtype, device=device)
+    elif op_name in {"logsumexp"}:
+        if torch.is_floating_point(input):
+            return torch.tensor(-torch.inf, dtype=dtype, device=device)
+        elif torch.is_complex(input):
+            return torch.tensor(-torch.inf + 0j, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
             return torch.tensor(torch.iinfo(dtype).min, dtype=dtype, device=device)
     elif op_name in {"amin", "argmin"}:
@@ -1523,8 +1530,8 @@ def logaddexp(
     if dtype is None:
         dtype = input.dtype
     if input.layout == torch.strided and other.layout == torch.strided:
-        mask_input = _combine_input_and_mask(logsumexp, input, input_mask)
-        mask_other = _combine_input_and_mask(logsumexp, other, other_mask)
+        mask_input = _combine_input_and_mask(logaddexp, input, input_mask)
+        mask_other = _combine_input_and_mask(logaddexp, other, other_mask)
         return torch.logaddexp(mask_input, mask_other).to(dtype=dtype)
     else:
         raise ValueError(
