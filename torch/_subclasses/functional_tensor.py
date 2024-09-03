@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 
 import torch
+import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
@@ -434,6 +435,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         from torch._higher_order_ops.auto_functionalize import (
             can_auto_functionalize,
             do_auto_functionalize,
+            do_auto_functionalize_v2,
         )
 
         if can_auto_functionalize(
@@ -444,7 +446,10 @@ class FunctionalTensorMode(TorchDispatchMode):
             # it doesn't matter what mode we use here because
             # the implementation of do_auto_functionalize doesn't
             # interact with FunctionalTensorMode at all
-            return do_auto_functionalize(func, args, kwargs)
+            if self.export or not inductor_config.enable_auto_functionalized_v2:
+                return do_auto_functionalize(func, args, kwargs)
+            else:
+                return do_auto_functionalize_v2(func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 

@@ -9,6 +9,7 @@
 import torch
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
+    auto_functionalized_v2,
     get_mutable_args,
 )
 from torch._inductor.fx_passes.post_grad import decompose_auto_functionalized
@@ -36,12 +37,16 @@ def unsafe_remove_auto_functionalized_pass(
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in ep.graph.nodes:
-                if node.op == "call_function" and node.target is auto_functionalized:
+                if (
+                    node.op == "call_function" and node.target is auto_functionalized
+                ) or (
+                    node.op == "call_function" and node.target is auto_functionalized_v2
+                ):
                     func = node.args[0]
                     assert isinstance(func, torch._ops.OpOverload)
                     mutable_args_names, _ = get_mutable_args(func)
                     # re-inplace everything
-                    node.meta["only_clone_these_bases"] = []
+                    node.meta["only_clone_these_tensors"] = []
             decompose_auto_functionalized(ep.graph)
             remove_self_clone(ep.graph)
             ep.graph.eliminate_dead_code()

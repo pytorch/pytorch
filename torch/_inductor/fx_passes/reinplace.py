@@ -517,7 +517,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, auto_functionalize=False
+        old_tensors_to_clone, kwargs, node_name, auto_functionalize_v2=False
     ):
         tensors_to_clone: List[str] = []
         storage_of_reinplaced_args = set()
@@ -553,11 +553,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
-                if not auto_functionalize:
+                if not auto_functionalize_v2:
                     for user in node.users:
-                        # For auto_functionalize, arg is the index of the base, where base at index i corresponds to
+                        # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
                         # output atindex size(out)+i.
-                        # This used to compare string with integers before for auto_functionalize. Not sure
+                        # This used to compare string with integers before for auto_functionalize_v2. Not sure
                         # if it was needed for inplaceable_triton_ops?
                         if user.target == operator.getitem and user.args[1] == arg:
                             replace_dict[user] = mutated_arg
@@ -591,7 +591,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
-        elif node.target == torch.ops.higher_order.auto_functionalized:
+        elif node.target == torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
 
@@ -599,12 +599,35 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             bases_to_clone = range(len(all_bases))
             base_tensors_dct = dict(enumerate(all_bases))
             new_bases_to_clone: List[int] = reinplace_and_refine_tensors_to_clone(
-                bases_to_clone, base_tensors_dct, node.target, auto_functionalize=True
+                bases_to_clone,
+                base_tensors_dct,
+                node.target,
+                auto_functionalize_v2=True,
             )
             # Stash the metadata. There is a pass later on where we decompose
             # auto_functionalized into clones + a mutable op; this metadata
             # tells the decomp to only clone the following inputs
-            node.meta["only_clone_these_bases"] = new_bases_to_clone
+            node.meta["only_clone_these_tensors"] = new_bases_to_clone
+        elif node.target == torch.ops.higher_order.auto_functionalized:
+            _mutable_op = node.args[0]
+            from torch._higher_order_ops.auto_functionalize import get_mutable_args
+
+            tensors_to_clone, _ = get_mutable_args(_mutable_op)
+            # Don't try to reinplace Optional[Tensor] args that are None.
+            tensors_to_clone = [
+                t for t in tensors_to_clone if node.kwargs[t] is not None
+            ]
+            tensors_to_clone = reinplace_and_refine_tensors_to_clone(
+                tensors_to_clone,
+                node.kwargs,
+                _mutable_op._name,
+                auto_functionalize_v2=False,
+            )
+
+            # Stash the metadata. There is a pass later on where we decompose
+            # auto_functionalized into clones + a mutable op; this metadata
+            # tells the decomp to only clone the following inputs
+            node.meta["only_clone_these_tensors"] = tensors_to_clone
         elif node.target in inplaceable_triton_ops:
             kernel_idx = node.kwargs["kernel_idx"]
             kernel = kernel_side_table.get_kernel(kernel_idx)
