@@ -164,7 +164,15 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         if isinstance(snode, FusedSchedulerNode):
             for x in snode.snodes:
+                # op node
                 buf_to_fx_node[x.get_name()] = fx_node
+                # buf node
+                if x.node and hasattr(x.node, "name"):
+                    buf_to_fx_node[x.node.name] = fx_node
+        else:
+            if snode.node and hasattr(snode.node, "name"):
+                buf_to_fx_node[snode.node.name] = fx_node
+        # op node
         buf_to_fx_node[name] = fx_node
 
         if first_node is None:
