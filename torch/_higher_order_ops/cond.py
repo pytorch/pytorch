@@ -320,7 +320,8 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         isinstance(i, torch.Tensor) for i in inputs
     ), "Cond inputs must be a list of tensors"
 
-    pred_ = get_unwrapped(pred) if is_batchedtensor(pred) else pred
+    pred_is_batched = isinstance(pred, torch.Tensor) and is_batchedtensor(pred)
+    pred_ = get_unwrapped(pred) if pred_is_batched else pred
 
     # unbatched tensors are not vmapped
     tensors, in_dims = zip(
@@ -330,7 +331,7 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         ]
     )
 
-    if is_batchedtensor(pred):
+    if pred_is_batched:
         # prepend "pred" and vmap everything
         tensors = (pred_,) + tensors
         in_dims = (0,) + in_dims
