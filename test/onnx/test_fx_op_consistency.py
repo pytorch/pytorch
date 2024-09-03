@@ -944,6 +944,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "nn.functional.grid_sample",
+        dtypes=(torch.float16,),
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
