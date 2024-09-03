@@ -156,6 +156,7 @@ def aot_dispatch_base_graph(
         updated_flat_args_subclasses_desugared,
         aot_config=aot_config,
     )
+    joint_graph.remove_fsdp2_unsharded_param_graph_input_usage(fw_module.graph)
 
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # We update metadata to consider any assigned buffers as buffer mutations.
