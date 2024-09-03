@@ -237,10 +237,9 @@ C10_HOST_DEVICE inline T nextafter(T from, T to) {
   // Reference:
   // https://git.musl-libc.org/cgit/musl/tree/src/math/nextafter.c
   using int_repr_t = uint16_t;
-  using float_t = T;
   constexpr uint8_t bits = 16;
   union {
-    float_t f;
+    T f;
     int_repr_t i;
   } ufrom = {from}, uto = {to};
 
