@@ -478,6 +478,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
+    @unittest.skip(
+        "Fixme: arange in torchlib does not support dynamic start and end yet."
+    )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
