@@ -87,7 +87,6 @@ IF(NOT MKLDNN_FOUND)
 
   IF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
     MESSAGE("-- Will build oneDNN UKERNEL")
-    SET(MKLDNN_UKERNEL_FOUND ON)
     SET(DNNL_EXPERIMENTAL_UKERNEL ON CACHE BOOL "" FORCE)
   ENDIF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
 
