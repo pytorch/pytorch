@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import contextlib
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -8,7 +7,6 @@ from typing import Any, Callable
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -123,12 +121,7 @@ def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
     bit restrictive as the branch must be traceable.
     """
     try:
-        ignore_fresh_unbacked = contextlib.nullcontext()
-        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env:
-            ignore_fresh_unbacked = fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-
-        with ignore_fresh_unbacked:
-            gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
+        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
@@ -168,12 +161,7 @@ def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
     bit restrictive as the branch must be traceable.
     """
     try:
-        ignore_fresh_unbacked = contextlib.nullcontext()
-        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env:
-            ignore_fresh_unbacked = fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-
-        with ignore_fresh_unbacked:
-            gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
+        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized

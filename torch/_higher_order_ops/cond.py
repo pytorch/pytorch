@@ -204,23 +204,15 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
                     f"Got types {[type(out) for out in fw_outputs_false]}."
                 )
 
-            ignore_fresh_unbacked = contextlib.nullcontext()
-            if (fake_mode := detect_fake_mode()) and fake_mode.shape_env:
-                ignore_fresh_unbacked = (
-                    fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                )
-
-            with ignore_fresh_unbacked:
-                # TODO: There is a major issue that the create_fw_bw in the higher_order_op is invoked twice:
-                # Once in the forward path (as it should) and once in the backward path, where it shouldn't be called
-                # If we can get rid of the second invokation, it would simplify this function
-                fw_true_graph, joint_true_graph = create_fw_bw_graph(
-                    true_fn, False, fw_inputs, fw_outputs_true
-                )
-
-                fw_false_graph, joint_false_graph = create_fw_bw_graph(
-                    false_fn, False, fw_inputs, fw_outputs_false
-                )
+            # TODO: There is a major issue that the create_fw_bw in the higher_order_op is invoked twice:
+            # Once in the forward path (as it should) and once in the backward path, where it shouldn't be called
+            # If we can get rid of the second invokation, it would simplify this function
+            fw_true_graph, joint_true_graph = create_fw_bw_graph(
+                true_fn, False, fw_inputs, fw_outputs_true
+            )
+            fw_false_graph, joint_false_graph = create_fw_bw_graph(
+                false_fn, False, fw_inputs, fw_outputs_false
+            )
 
         return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph
 
