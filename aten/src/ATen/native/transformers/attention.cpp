@@ -737,7 +737,8 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::math:
-      if (query_.device().type() == DeviceType::MPS && dropout_p == 0.0
+      if ((!GradMode::is_enabled() || (!query_.requires_grad() && !key.requires_grad() && !value.requires_grad()))
+          && query_.device().type() == DeviceType::MPS && dropout_p == 0.0
           && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()
           && !query_.is_nested() && !key.is_nested() && !value.is_nested()) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
