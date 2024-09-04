@@ -15,6 +15,7 @@ import subprocess
 import sys
 import sysconfig
 import warnings
+from ctypes import cdll
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
@@ -57,7 +58,7 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
-SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +132,9 @@ def check_compiler_exist_windows(compiler: str) -> None:
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+    except subprocess.SubprocessError:
+        # Expected that some compiler(clang, clang++) is exist, but they not support `/help` args.
+        pass
 
 
 def get_cpp_compiler() -> str:
@@ -139,7 +143,9 @@ def get_cpp_compiler() -> str:
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
-            return build_paths.cc()
+            return (
+                build_paths.cc() if torch.version.hip is None else build_paths.clang()
+            )
         if isinstance(config.cpp.cxx, (list, tuple)):
             search = tuple(config.cpp.cxx)
         else:
@@ -158,6 +164,13 @@ def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
         return _is_apple_clang(cpp_compiler)
+    elif _IS_WINDOWS:
+        # clang suite have many compilers, and only clang-cl is supported.
+        if re.search(r"((clang$)|(clang\+\+$))", cpp_compiler):
+            raise RuntimeError(
+                "Please use clang-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
+            )
+        return bool(re.search(r"(clang-cl)", cpp_compiler))
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
@@ -186,6 +199,33 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
 
 @functools.lru_cache(None)
+def _is_intel_compiler(cpp_compiler: str) -> bool:
+    try:
+        output_msg = (
+            subprocess.check_output(
+                [cpp_compiler, "--version"], stderr=subprocess.DEVNULL
+            )
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+        is_intel_compiler = "Intel" in output_msg.splitlines()[0]
+        if is_intel_compiler:
+            if _IS_WINDOWS:
+                if re.search(r"((icx$)|(icx-cc$))", cpp_compiler):
+                    raise RuntimeError(
+                        "Please use icx-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
+                    )
+        return is_intel_compiler
+    except FileNotFoundError as exc:
+        return False
+    except subprocess.SubprocessError:
+        # --version args not support.
+        return False
+
+    return False
+
+
+@functools.lru_cache(None)
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
@@ -193,6 +233,11 @@ def is_gcc() -> bool:
 @functools.lru_cache(None)
 def is_clang() -> bool:
     return _is_clang(get_cpp_compiler())
+
+
+@functools.lru_cache(None)
+def is_intel_compiler() -> bool:
+    return _is_intel_compiler(get_cpp_compiler())
 
 
 @functools.lru_cache(None)
@@ -412,7 +457,9 @@ def _get_cpp_std_cflag(std_num: str = "c++17") -> List[str]:
         """
         On Windows, only c++20 can support `std::enable_if_t`.
         Ref: https://learn.microsoft.com/en-us/cpp/overview/cpp-conformance-improvements-2019?view=msvc-170#checking-for-abstract-class-types # noqa: B950
-        TODO: discuss upgrade pytorch to c++20.
+        Note:
+            Only setup c++20 for Windows inductor. I tried to upgrade all project to c++20, but it is failed:
+            https://github.com/pytorch/pytorch/pull/131504
         """
         std_num = "c++20"
         return [f"std:{std_num}"]
@@ -598,11 +645,6 @@ def _use_fb_internal_macros() -> List[str]:
             create_tensor_from_blob_v1 = "AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
 
             fb_internal_macros.append(create_tensor_from_blob_v1)
-
-            # TODO: remove comments later:
-            # Moved to _get_openmp_args
-            # openmp_lib = build_paths.openmp_lib()
-            # return [f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"]
             return fb_internal_macros
         else:
             return []
@@ -625,10 +667,20 @@ def _setup_standard_sys_libs(
 
     if config.is_fbcode():
         cflags.append("nostdinc")
-        include_dirs.append(build_paths.sleef())
-        include_dirs.append(build_paths.cc_include())
-        include_dirs.append(build_paths.libgcc())
-        include_dirs.append(build_paths.libgcc_arch())
+        # Note that the order of include paths do matter, as a result
+        # we need to have several branches interleaved here
+        if torch.version.hip is None:
+            include_dirs.append(build_paths.sleef())
+        include_dirs.append(build_paths.openmp())
+        include_dirs.append(build_paths.python())
+        if torch.version.hip is not None:
+            include_dirs.append(build_paths.clang_include())
+            include_dirs.append(build_paths.gcc_include())
+            include_dirs.append(build_paths.gcc_install_tools_include())
+        else:
+            include_dirs.append(build_paths.cc_include())
+            include_dirs.append(build_paths.libgcc())
+            include_dirs.append(build_paths.libgcc_arch())
         include_dirs.append(build_paths.libgcc_backward())
         include_dirs.append(build_paths.glibc())
         include_dirs.append(build_paths.linux_kernel())
@@ -764,6 +816,51 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+@functools.lru_cache(None)
+def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
+    try:
+        output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
+            "utf8"
+        )
+        omp_path = os.path.join(output.rstrip(), omp_name)
+        if os.path.isfile(omp_path):
+            os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+            omp_module = cdll.LoadLibrary(omp_path)
+    except subprocess.SubprocessError:
+        pass
+
+
+@functools.lru_cache(None)
+def perload_icx_libomp_win(cpp_compiler: str) -> None:
+    def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
+        try:
+            output = subprocess.check_output(
+                [cpp_compiler, f"-print-file-name={lib_name}"],
+                stderr=subprocess.DEVNULL,
+            ).decode(*SUBPROCESS_DECODE_ARGS)
+            omp_path = output.rstrip()
+            if os.path.isfile(omp_path):
+                os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+                omp_module = cdll.LoadLibrary(omp_path)
+                return True
+        except subprocess.SubprocessError:
+            pass
+        return False
+
+    """
+    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    We need preload them like openmp library.
+    """
+    preload_list = [
+        "libiomp5md.dll",  # openmp
+        "svml_dispmd.dll",  # svml library
+        "libmmd.dll",  # libm
+    ]
+
+    for lib_name in preload_list:
+        _load_icx_built_in_lib_by_name(cpp_compiler, lib_name)
+
+
 def _get_openmp_args(
     cpp_compiler: str,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
@@ -820,11 +917,34 @@ def _get_openmp_args(
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
     elif _IS_WINDOWS:
-        # /openmp, /openmp:llvm
-        # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
-        # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
-        cflags.append("openmp")
-        cflags.append("openmp:experimental")  # MSVC CL
+        """
+        On Windows, `clang` and `icx` have their specific openmp implenmention.
+        And the openmp lib is in compiler's some sub-directory.
+        For dynamic library(DLL) load, the Windows native APIs are `LoadLibraryA` and `LoadLibraryExA`, and their search
+        dependencies have some rules:
+        https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-loadlibraryexa#searching-for-dlls-and-dependencies
+        In some case, the rules may not include compiler's sub-directories.
+        So, it can't search and load compiler's openmp library correctly.
+        And then, the whole application would be broken.
+
+        To avoid the openmp load failed, we can automatic locate the openmp binary and preload it.
+        1. For clang, the function is `perload_clang_libomp_win`.
+        2. For icx, the function is `perload_icx_libomp_win`.
+        """
+        if _is_clang(cpp_compiler):
+            cflags.append("openmp")
+            libs.append("libomp")
+            perload_clang_libomp_win(cpp_compiler, "libomp.dll")
+        elif _is_intel_compiler(cpp_compiler):
+            cflags.append("Qiopenmp")
+            libs.append("libiomp5md")
+            perload_icx_libomp_win(cpp_compiler)
+        else:
+            # /openmp, /openmp:llvm
+            # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
+            # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
+            cflags.append("openmp")
+            cflags.append("openmp:experimental")  # MSVC CL
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp())
@@ -1043,7 +1163,9 @@ def get_cpp_torch_cuda_options(
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
+        os.environ["CUDA_HOME"] = (
+            build_paths.rocm() if torch.version.hip else build_paths.cuda()
+        )
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
@@ -1059,7 +1181,7 @@ def get_cpp_torch_cuda_options(
                 libraries += ["amdhip64"]
             else:
                 libraries += ["c10_hip", "torch_hip"]
-                definations.append(" __HIP_PLATFORM_AMD__")
+            definations.append(" __HIP_PLATFORM_AMD__")
         else:
             if config.is_fbcode():
                 libraries += ["cuda"]
@@ -1085,10 +1207,11 @@ def get_cpp_torch_cuda_options(
         else:
             include_dirs.append(os.path.join(build_paths.cuda(), "include"))
 
-    if aot_mode and cuda and config.is_fbcode() and not compile_only:
-        if torch.version.hip is None:
-            # TODO: make static link better on Linux.
-            passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+        if aot_mode and cuda:
+            if torch.version.hip is None:
+                if not compile_only:
+                    # Only add link args, when compile_only is false.
+                    passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
 
     return (
         definations,
@@ -1237,13 +1360,6 @@ class CppBuilder:
         self._use_absolute_path = BuildOption.get_use_absolute_path()
         self._aot_mode = BuildOption.get_aot_mode()
 
-        """
-        TODO: validate and remove:
-        if len(output_dir) == 0:
-            self._output_dir = os.path.dirname(os.path.abspath(__file__))
-        else:
-            self._output_dir = output_dir
-        """
         self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
