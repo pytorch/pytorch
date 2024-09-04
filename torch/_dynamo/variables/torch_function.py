@@ -8,26 +8,16 @@ from typing import Deque, Dict, List, TYPE_CHECKING
 import torch._C
 import torch.utils._pytree as pytree
 from torch._guards import Source
-from torch.overrides import (
-    _get_overloaded_args,
-    get_default_nowrap_functions,
-    TorchFunctionMode,
-)
+from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from torch.utils._device import DeviceContext
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..polyfills import NoEnterDeviceTorchFunctionMode, NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
-from ..utils import (
-    class_has_getattribute,
-    get_safe_global_name,
-    has_torch_function,
-    is_tensor_base_attr_getter,
-)
+from ..utils import get_safe_global_name, has_torch_function, is_tensor_base_attr_getter
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import GenericContextWrappingVariable
+from .ctx_manager import ContextWrappingVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
@@ -198,23 +188,7 @@ class TorchFunctionModeStackVariable(VariableTracker):
         return ind + cls.offset
 
 
-class TorchFunctionModeVariable(GenericContextWrappingVariable):
-    @staticmethod
-    def is_supported_torch_function_mode(ty):
-        # Supported in this sense means we can support graph breaks under the
-        # context.
-        # We are able to trace custom modes but if there are graph breaks under them
-        # and they have a custom __enter__/__exit__ we don't handle this for the
-        # same reason we don't handle generic context managers: there may be side effects
-        # that are now affected by executing the funtion across two frames instead of one
-        # Today we support the enter/exit of the default TorchFunctionMode as well as
-        # DeviceContext (which is used for set_default_device)
-        return isinstance(ty, (DeviceContext, NoEnterTorchFunctionMode)) or (
-            not class_has_getattribute(ty)
-            and inspect.getattr_static(ty, "__enter__") == TorchFunctionMode.__enter__
-            and inspect.getattr_static(ty, "__exit__") == TorchFunctionMode.__exit__
-        )
-
+class TorchFunctionModeVariable(ContextWrappingVariable):
     def __init__(self, value, source=None, **kwargs):
         super().__init__(value, **kwargs)
         self.value = value
@@ -235,14 +209,6 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
     def python_type(self):
         return type(self.value)
 
-    def enter(self, tx):
-        tx.push_torch_function_mode_stack(self)
-        return ConstantVariable.create(None)
-
-    def exit(self, tx, *args):
-        tx.pop_torch_function_mode_stack()
-        return ConstantVariable.create(None)
-
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         return call_torch_function(
             tx,
@@ -252,23 +218,6 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
             types,
             args,
             kwargs,
-        )
-
-    def reconstruct_type(self, codegen):
-        ty = (
-            NoEnterDeviceTorchFunctionMode
-            if isinstance(self.value, DeviceContext)
-            else NoEnterTorchFunctionMode
-        )
-        # codegen(
-        #    AttrSource(
-        #        codegen.tx.import_source(torch._dynamo.polyfills.__name__), ty.__name__),
-        #    )
-        codegen(
-            AttrSource(
-                codegen.tx.import_source(self.value.__module__),
-                type(self.value).__name__,
-            )
         )
 
 
