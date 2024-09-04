@@ -19,7 +19,21 @@ class JobConfig:
         )
 
         self.parser.add_argument(
-            "-d", "--dir", help="Directory with flight recorder dumps"
+            "-d", "--dir", required=True, help="Directory with flight recorder dumps"
+        )
+        self.parser.add_argument(
+            "--selected-ranks",
+            default=None,
+            nargs="+",
+            type=int,
+            help="List of ranks we want to show traces for.",
+        )
+        self.parser.add_argument(
+            "--pg-filters",
+            default=None,
+            nargs="+",
+            type=str,
+            help="List of filter strings",
         )
         self.parser.add_argument("-o", "--output", default=None)
         self.parser.add_argument(
@@ -34,4 +48,13 @@ class JobConfig:
     def parse_args(
         self: "JobConfig", args: Optional[Sequence[str]]
     ) -> argparse.Namespace:
-        return self.parser.parse_args(args)
+        args = self.parser.parse_args(args)
+        if args.selected_ranks is not None:
+            assert (
+                args.just_print_entries
+            ), "Not support selecting ranks without printing entries"
+        if args.pg_filters is not None:
+            assert (
+                args.just_print_entries
+            ), "Not support selecting pg filters without printing entries"
+        return args
