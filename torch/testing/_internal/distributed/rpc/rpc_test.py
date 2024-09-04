@@ -3121,7 +3121,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Wait for all init to complete.
         dist.barrier()
 
-        rpc.remote(
+        rref = rpc.remote(
             worker_name((self.rank + 1) % self.world_size),
             torch.add,
             args=(torch.ones(2, 2), 1),
@@ -5741,6 +5741,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_missing_config_not_timeout(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
@@ -5964,7 +5967,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             RuntimeError,
             "Expected all tensors to be on the same device, but found at least two devices"
         ):
-            rpc.rpc_sync(
+            rets = rpc.rpc_sync(
                 dst,
                 TensorPipeAgentCudaRpcTest._gpu_add_wrong_gpus,
                 args=(x, y)
@@ -6275,22 +6278,22 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_int(self):
-        Future(devices=[0])
+        fut = Future(devices=[0])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_str(self):
-        Future(devices=["cuda:0"])
+        fut = Future(devices=["cuda:0"])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_device(self):
-        Future(devices=[torch.device("cuda", 0)])
+        fut = Future(devices=[torch.device("cuda", 0)])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_not_cuda(self):
         with self.assertRaisesRegex(
             ValueError, "Expected devices to have indices, got cpu"
         ):
-            Future(devices=["cpu"])
+            fut = Future(devices=["cpu"])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_cuda_tensor(self):
