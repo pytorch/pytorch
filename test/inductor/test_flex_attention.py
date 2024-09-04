@@ -1914,6 +1914,63 @@ class TestBlockMask(InductorTestCase):
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
 
     @supported_platform
+    def test_getitem(self):
+        offset = torch.zeros(8, device="cuda")
+
+        def causal_mask(b, h, q, kv):
+            return (q + (offset[b] * 128)) >= kv
+
+        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512)
+        assert block_mask.kv_num_blocks.shape == (4, 2, 4)
+        assert block_mask.kv_indices.shape == (4, 2, 4, 4)
+
+        # Index on batch dimension
+        new_block_mask = block_mask[0]
+        assert new_block_mask.kv_num_blocks.shape == (2, 4)
+        assert new_block_mask.kv_indices.shape == (2, 4, 4)
+
+        # Index on batch and head dimension
+        new_block_mask = block_mask[0, 1]
+        assert new_block_mask.kv_num_blocks.shape == (4,)
+        assert new_block_mask.kv_indices.shape == (4, 4)
+
+        # slicing on batch and head dimension
+        new_block_mask = block_mask[0:2, 1:2]
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
+        assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
+
+        # slicing on batch, head, and query dimension
+        new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
+        assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
+
+        # slicing on batch, head, and query dimension
+        q_index = torch.tensor([0], dtype=torch.int32)
+        new_block_mask = block_mask[:, :, q_index]
+
+        self.assertEqual(new_block_mask.kv_num_blocks.ndim, 3)
+        self.assertEqual(new_block_mask.kv_indices.ndim, 4)
+        torch.testing.assert_close(
+            new_block_mask.kv_num_blocks,
+            block_mask.kv_num_blocks[:, :, q_index],
+        )
+        torch.testing.assert_close(
+            new_block_mask.kv_indices, block_mask.kv_indices[:, :, q_index, :]
+        )
+
+        if block_mask.full_kv_num_blocks is not None:
+            assert new_block_mask.full_kv_num_blocks is not None
+            assert new_block_mask.full_kv_indices is not None
+            torch.testing.assert_close(
+                new_block_mask.full_kv_num_blocks,
+                block_mask.full_kv_num_blocks[:, :, q_index],
+            )
+            torch.testing.assert_close(
+                new_block_mask.full_kv_indices,
+                block_mask.full_kv_indices[:, :, q_index, :],
+            )
+
+    @supported_platform
     def test_block_mask_device_change(self):
         offset = torch.zeros(8, device="cuda")
 
