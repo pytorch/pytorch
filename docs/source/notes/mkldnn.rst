@@ -41,8 +41,9 @@ for `float32` operators.
   torch.backends.mkldnn.rnn.fp32_precision = "default"
 
 Note that besides matmuls and convolutions themselves, functions and nn modules that internally uses
-matmuls or convolutions are also affected. These include `nn.Linear`, `nn.Conv*`, cdist, tensordot,
-affine grid and grid sample, adaptive log softmax, GRU and LSTM.
+matmuls or convolutions are also affected. These include :class:`torch.nn.Linear`, :class:`torch.nn._ConvNd`, :func:`torch.cdist`,
+:func:`torch.tensordot`, :func:`torch.nn.functional.affine_grid` and :func:`torch.nn.functional.grid_sample`,
+:class:`torch.nn.AdaptiveLogSoftmaxWithLoss`, :class:`torch.nn.GRU` and  :class:`torch.nn.LSTM`.
 
 To get an idea of the precision and speed, see the example code and benchmark data (on SPR) below:
 
@@ -81,7 +82,7 @@ If full FP32 precision is needed, users can disable BF16 by:
   torch.backends.mkldnn.conv.fp32_precision = 'default'
   torch.backends.mkldnn.rnn.fp32_precision = 'default'
 
-To toggle the TF32 flags off in C++, you can do
+To toggle the BF16 flags off in C++, you can do
 
 .. code:: C++
 
