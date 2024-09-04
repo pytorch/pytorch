@@ -828,98 +828,128 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
 
 
 class PagedCache(torch.nn.Module):
-    def __init__(self, n_pages: int, page_size: int, head_dim: int, max_batch_size: int, max_seq_len: int, n_heads: int, dtype=torch.bfloat16):
+    def __init__(
+        self,
+        n_pages: int,
+        page_size: int,
+        head_dim: int,
+        max_batch_size: int,
+        max_seq_len: int,
+        n_heads: int,
+        dtype=torch.bfloat16,
+    ):
         super().__init__()
         self.page_size = page_size
+        self.n_heads = n_heads
 
-        cache_shape = (n_pages, page_size, head_dim)
+        cache_shape = (n_pages * page_size, head_dim)
         self.register_buffer("cache", torch.zeros(cache_shape, dtype=dtype))
 
-        # page table: [batch, head, logical_block_idx] -> (physical_page_idx, n_filled, ref_count)
+        # page table: [batch, head, logical_block_idx] -> physical_page_idx
         max_seq_pages = _cdiv(max_seq_len, page_size)
-        page_table_shape = (max_batch_size, n_heads, max_seq_pages, 3)
+        page_table_shape = (max_batch_size, n_heads, max_seq_pages)
         self.page_table = -torch.ones(page_table_shape, dtype=torch.int64)
+        self.page_table_ref_cnt = torch.zeros(page_table_shape, dtype=torch.int64)
 
         # index of empty pages that is available for allocation
-        self.empty_pages = list(range(n_pages-1, -1, -1))
+        self.empty_pages = list(range(n_pages - 1, -1, -1))
 
-        # current sequence length for a specific batch index
-        self.cur_seq_len = torch.zeros(max_batch_size)
+        # current allocated sequence length for a specific batch index
+        self.allocated_seq_len = torch.zeros(max_batch_size)
 
-    def allocate(self, batch: Tensor, head: Tensor, logical_block_idx: Tensor):
-        # batch, head, and logical_block_idx are 1D tensor with 1 element.
-        assert len(self.empty_pages) > 0, "empty_pages must have at least 1 element for allocation"
-        new_page_idx = self.empty_pages.pop()
-        self.page_table[batch, head, logical_block_idx] = torch.tensor([new_page_idx, 0, 1])
+    def allocate(self, batch_idx: int, num_pages_to_allocate: int, start_page_idx: int):
+        num = num_pages_to_allocate * self.n_heads
+        assert len(self.empty_pages) >= num
+        end_page_idx = start_page_idx + num_pages_to_allocate
+        allocated_pages = torch.tensor(self.empty_pages[-num:])
+        self.page_table[
+            batch_idx,
+            :,
+            start_page_idx:end_page_idx,
+        ] = allocated_pages.view(self.n_heads, num_pages_to_allocate)
+        self.page_table_ref_cnt[
+            batch_idx,
+            :,
+            start_page_idx:end_page_idx,
+        ] = 1
+        self.empty_pages = self.empty_pages[:-num]
 
-    def deallocate(self, batch: Tensor, head: Tensor, logical_block_idx: Tensor):
-        # batch, head, and logical_block_idx are 1D tensor with 1 element.
-        self.page_table[batch, head, logical_block_idx, 2] -= 1
-        if self.page_table[batch, head, logical_block_idx, 2] < 1:
-            page_idx = self.page_table[batch, head, logical_block_idx, 0].item()
-            self.page_table[batch, head, logical_block_idx, 0] = -1
-            self.empty_pages.append(page_idx)
+    def batch_allocate(self, num_pages_to_allocate: Tensor):
+        # num_pages_to_allocate: [B]
+        (B,) = num_pages_to_allocate.shape
+        last_allocated_page_idx = self.allocated_seq_len // self.page_size
+        for b in range(B):
+            self.allocate(
+                b, num_pages_to_allocate[b].item(), last_allocated_page_idx[b].item()
+            )
 
     def batch_deallocate(self,  batch: Tensor):
         # batch is a 1D tensor with 1 element
-        self.page_table[batch, :, :, 2] -= 1
-        zero_ref_pages = page_table[batch, :, :, 2] < 1
+        self.page_table_ref_cnt[batch] -= 1
+        zero_ref_pages = self.page_table_ref_cnt[batch] < 1
 
         # return deallocated pages to `empty_pages`
-        deallocate_candidates = self.page_table[batch][zero_ref_pages][:,0]
+        deallocate_candidates = self.page_table[batch][zero_ref_pages]
         allocated_pages = deallocate_candidates != -1
         self.empty_pages += deallocate_candidates[allocated_pages].tolist()
 
         # deallocate all pages with 0 reference
         self.page_table[batch][zero_ref_pages] = -1
 
-    def insert(self, batch: Tensor, value: Tensor):
-        # batch: [1], value: []
-        return
+    def get_num_pages_to_allocate(self, target_seq_len: Tensor):
+        (B,) = target_seq_len.shape
+        return (
+            torch.maximum(target_seq_len - self.allocated_seq_len[:B], torch.zeros(B))
+            + self.page_size
+            - 1
+        ) // self.page_size  # [B]
+
+    def update(self, input_pos: Tensor, val: Tensor):
+        # input_pos: [B, S], val: [B, H, S, D]
+        B, H, S, D = val.shape
+
+        # find logical block
+        input_pos = input_pos.unsqueeze(1).expand(B, H, S)
+        logical_block_idx = input_pos // self.page_size  # [B, H, S]
+        logical_block_offset = input_pos % self.page_size  # [B, H, S]
+
+        physical_block_idx = torch.empty((B, H, S)).scatter_(
+            self.page_table, 2, logical_block_idx
+        )
+
+        # update
+        addr = torch.flatten(
+            physical_block_idx * self.page_size + logical_block_idx % self.page_size
+        )  # [BxHxS]
+        self.cache[addr] = val.view(B * H * S, D)
 
 
 # TODO
 class PagedKVCache(torch.nn.Module):
     # We assume a 1:1 mapping between sparse kv block and page block.
-    def __init__(self, max_batch_size: int, max_seq_len: int, n_heads: int, head_dim: int, n_pages: int, page_size: int, dtype=torch.bfloat16):
+    def __init__(
+        self,
+        max_batch_size: int,
+        max_seq_len: int,
+        n_heads: int,
+        head_dim: int,
+        n_pages: int,
+        page_size: int,
+        dtype=torch.bfloat16,
+    ):
         super().__init__()
         cache_shape = (n_pages, page_size, head_dim)
         self.register_buffer("physical_k_cache", torch.zeros(cache_shape, dtype=dtype))
         self.register_buffer("physical_v_cache", torch.zeros(cache_shape, dtype=dtype))
         self.page_size = page_size
-        
+
         # Page Table: [b, h, logical_block_idx] -> (physical_page_idx, n_filled, ref_count)
         max_seq_pages = (max_seq_len + page_size - 1) // page_size
         page_table_shape = (max_batch_size, n_heads, max_seq_pages, 3)
-        self.register_buffer("kv_page_table", -torch.ones(page_table_shape, dtype=torch.int))
+        self.register_buffer(
+            "kv_page_table", -torch.ones(page_table_shape, dtype=torch.int)
+        )
 
-    def clean(self):
-        # TODO
-        return
-
-    def update(self, input_pos_start: int, input_pos_end: int, k_val: torch.Tensor, v_val: torch.Tensor):
-        B, H, S, D = k_val.shape
-        assert input_pos_end > input_pos_start and input_pos_end - input_pos_start == k_val.shape[2]
-
-        block_n_start = input_pos_start // self.page_size
-        offset = input_pos_start % self.page_size
-        row_idx = 0
-        while block_n_start * self.page_size < input_pos_end:
-            end = self.page_size if input_pos_end > (block_n_start + 1) * self.page_size else input_pos_end - block_n_start * self.page_size
-            for b in range(B):
-                for h in range(H):
-                    (physical_page_idx, n_filled, ref_count) = self.k_page_table[b, h, block_n_start]
-                    if physical_page_idx == -1:
-                        physical_page_idx = self.allocate()
-                    self.physical_k_cache[physical_page_idx, offset:end] = k_val[b, h, row_idx:row_idx+(end-offset)]
-
-                    (physical_page_idx, n_filled, ref_count) = self.v_page_table[b, h, block_n_start]
-                    if physical_page_idx == -1:
-                        physical_page_idx = self.allocate()
-                    self.physical_v_cache[physical_page_idx, offset:end] = v_val[b, h, row_idx:row_idx+(end-offset)]
-            block_n_start += 1 
-            offset = 0
-            row_idx += (end-offset)
 
     def convert_logical_block_mask(self, block_mask: BlockMask):
         assert block_mask.BLOCK_SIZE[1] == self.page_size
@@ -930,16 +960,23 @@ class PagedKVCache(torch.nn.Module):
             for h in range(H):
                 for r in range(ROWS):
                     for c in range(MAX_BLOCKS_IN_COL):
-                        new_kv_indices[b][h][r][c] = self.kv_page_table[b][h][block_mask.kv_indices[b,h,r,c]]
+                        new_kv_indices[b][h][r][c] = self.kv_page_table[b][h][
+                            block_mask.kv_indices[b, h, r, c]
+                        ]
 
+        new_full_kv_num_blocks = None
+        new_full_kv_indices = None
         if block_mask.full_kv_num_blocks is not None:
+            assert block_mask.full_kv_indices is not None
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
             new_full_kv_indices = torch.empty_like(block_mask.full_kv_indices)
             for b in range(B):
                 for h in range(H):
                     for r in range(ROWS):
                         for c in range(MAX_BLOCKS_IN_COL):
-                            new_full_kv_indices[b][h][r][c] = self.kv_page_table[b][h][block_mask.full_kv_indices[b,h,r,c]]
+                            new_full_kv_indices[b][h][r][c] = self.kv_page_table[b][h][
+                                block_mask.full_kv_indices[b, h, r, c]
+                            ]
 
         return BlockMask.from_kv_blocks(
             new_kv_num_blocks,
@@ -950,7 +987,7 @@ class PagedKVCache(torch.nn.Module):
             block_mask.mask_mod,
         )
 
-    def get_paged_score_mod():
+    def get_paged_score_mod(self):
         # TODO
         return
 
