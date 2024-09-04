@@ -48,3 +48,12 @@
   - "module: dynamic shapes"
   then:
   - "oncall: pt2"
+# For dependabot PRs, the practice is for PyTorch-repo admins to merge the PR
+# instead of using pytorchbot so that the vulnerability issue can be marked as
+# resolved. This rule is here to ensure that we don't forget to add ciflow/trunk
+# to such PRs and cause trunk failure, i.e. #135068
+- any:
+  # This is the default label that dependabot adds to all its PR
+  - "dependency issue"
+  then:
+  - "ciflow/trunk"
