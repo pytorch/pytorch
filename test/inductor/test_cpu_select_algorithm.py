@@ -412,6 +412,168 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (8,))
+    @parametrize("in_features", (3,))
+    @parametrize("linear_in_features", (384,))
+    @parametrize("out_features", (196,))
+    @parametrize("bias", (True,))
+    @dtypes(torch.float)
+    def test_linear_with_input_of_flexible_layout(
+        self, batch_size, in_features, linear_in_features, out_features, bias, dtype
+    ):
+        # Reproducer from the resmlp_12_224 model in timm
+        flatten_BS = int(batch_size * linear_in_features)
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_features,
+                    linear_in_features,
+                    kernel_size=16,
+                    padding=0,
+                    stride=16,
+                    dilation=1,
+                    groups=1,
+                )
+                self._frozen_param151 = torch.randn(1, 1, linear_in_features)
+                self._frozen_param3 = torch.randn(1, 1, linear_in_features)
+                self._frozen_param2 = torch.randn(linear_in_features)
+
+                self.linear = torch.nn.Linear(out_features, out_features, bias)
+
+            def forward(self, arg150_1):
+                _convolution_pointwise_default = self.conv(arg150_1)
+                view_73 = torch.ops.aten.reshape.default(
+                    _convolution_pointwise_default,
+                    [batch_size, linear_in_features, out_features],
+                )
+                _convolution_pointwise_default = None
+                permute_62 = torch.ops.aten.permute.default(view_73, [0, 2, 1])
+                view_73 = None
+                mul_111 = torch.ops.aten.mul.Tensor(self._frozen_param151, permute_62)
+                add_73 = torch.ops.aten.add.Tensor(self._frozen_param3, mul_111)
+                permute_63 = torch.ops.aten.permute.default(add_73, [0, 2, 1])
+                add_73 = None
+                view_74 = torch.ops.aten.reshape.default(
+                    permute_63, [flatten_BS, out_features]
+                )
+                permute_63 = None
+                _mkl_linear_36 = self.linear(view_74)
+                view_75 = torch.ops.aten.reshape.default(
+                    _mkl_linear_36, [batch_size, linear_in_features, out_features]
+                )
+                _mkl_linear_36 = None
+                permute_65 = torch.ops.aten.permute.default(view_75, [0, 2, 1])
+                view_75 = None
+                mul_112 = torch.ops.aten.mul.Tensor(self._frozen_param2, permute_65)
+                _frozen_param2 = permute_65 = None
+                add_74 = torch.ops.aten.add.Tensor(permute_62, mul_112)
+                permute_62 = mul_112 = None
+                return add_74
+
+        v = torch.randn(batch_size, in_features, 224, 224).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("batch_size", (8,))
+    @parametrize("in_features", (128,))
+    @parametrize("in_features_2", (196,))
+    @parametrize("out_features", (256,))
+    @parametrize(
+        "bias",
+        (True,),
+    )
+    @dtypes(torch.float32)
+    def test_linear_with_multiple_reindexers(
+        self,
+        batch_size,
+        in_features,
+        in_features_2,
+        out_features,
+        bias,
+        dtype,
+    ):
+        flatten_BS = int(batch_size * in_features_2)
+
+        # Reproducer from the levit_128 model in timm
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    64,
+                    128,
+                    kernel_size=3,
+                    padding=1,
+                    stride=2,
+                    dilation=1,
+                    groups=1,
+                )
+                self.linear = torch.nn.Linear(in_features, out_features, bias=False)
+                self._frozen_param221 = torch.randn(out_features)
+                self._frozen_param389 = torch.randn(out_features)
+                self._frozen_param20 = torch.randn(out_features)
+                self._frozen_param21 = torch.randn(out_features)
+
+            def forward(self, view_368):
+                _mkl_linear_57 = self.linear(view_368)
+                view_369 = torch.ops.aten.reshape.default(
+                    _mkl_linear_57, [batch_size, in_features_2, out_features]
+                )
+                _mkl_linear_57 = None
+
+                view_370 = torch.ops.aten.reshape.default(
+                    view_369, [flatten_BS, out_features]
+                )
+                view_369 = None
+                sub_85 = torch.ops.aten.sub.Tensor(view_370, self._frozen_param221)
+                view_370 = _frozen_param221 = None
+                mul_261 = torch.ops.aten.mul.Tensor(sub_85, self._frozen_param389)
+                sub_85 = _frozen_param389 = None
+                mul_262 = torch.ops.aten.mul.Tensor(mul_261, self._frozen_param20)
+                mul_261 = _frozen_param20 = None
+                add_219 = torch.ops.aten.add.Tensor(mul_262, self._frozen_param21)
+                mul_262 = _frozen_param21 = None
+                view_371 = torch.ops.aten.reshape.default(
+                    add_219, [batch_size, in_features_2, out_features]
+                )
+                add_219 = None
+
+                add_220 = torch.ops.aten.add.Tensor(view_371, 3)
+                clamp_min_35 = torch.ops.aten.clamp_min.default(add_220, 0)
+                add_220 = None
+                clamp_max_35 = torch.ops.aten.clamp_max.default(clamp_min_35, 6)
+                clamp_min_35 = None
+                mul_263 = torch.ops.aten.mul.Tensor(view_371, clamp_max_35)
+                view_371 = clamp_max_35 = None
+                div_51 = torch.ops.aten.div.Tensor(mul_263, 6)
+                mul_263 = None
+
+                return div_51
+
+        view_368 = torch.randn(flatten_BS, in_features)
+
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(
+                mod,
+                (view_368,),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (384, 385))

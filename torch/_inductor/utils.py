@@ -1254,7 +1254,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
+        and (
+            isinstance(mat1.layout, ir.FixedLayout) and mat1.get_stride()[-1] == 1
+        )  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
     )
