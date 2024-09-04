@@ -438,6 +438,7 @@ def mps_ops_modifier(ops):
         'logical_not',
         'logical_or',
         'logical_xor',
+        'logsumexp',
         'long',
         'masked_fill',
         'masked.mean',
@@ -445,6 +446,7 @@ def mps_ops_modifier(ops):
         'masked.std',
         'masked.sum',
         'masked.var',
+        'masked.logsumexp',
         'matmul',
         'mean',
         'mm',
@@ -1913,6 +1915,20 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
+
+    @xfailIf(product_version < 15.0)
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_large_bmm(self, dtype):
+        batch1 = torch.randn(11, 20064, 128, dtype=dtype, device='mps')
+        batch2 = torch.randn(11, 128, 20064, dtype=dtype, device='mps')
+        output_cpu = torch.bmm(batch1.cpu(), batch2.cpu())
+        output_mps = torch.bmm(batch1, batch2)
+
+        # Using the low precision comparison for FP16
+        tol = 1e-2 if dtype == torch.float16 else None
+        self.assertEqual(output_cpu, output_mps, atol=tol, rtol=tol)
+        self.assertEqual(output_cpu.size(), output_mps.size())
+
 
     def test_addr(self):
         A = torch.ones(5, 10).to("mps")
@@ -6521,6 +6537,18 @@ class TestMPS(TestCaseMPS):
 
             log_result = torch.logaddexp2(x, y)
             log_result_cpu = torch.logaddexp2(cpu_x, cpu_y)
+
+            self.assertEqual(log_result, log_result_cpu)
+
+        helper((2, 8, 4, 5))
+
+    def test_logsumexp(self):
+        def helper(shape):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            x = cpu_x.detach().clone().to('mps')
+
+            log_result = torch.logsumexp(x, -1)
+            log_result_cpu = torch.logsumexp(cpu_x, -1)
 
             self.assertEqual(log_result, log_result_cpu)
 

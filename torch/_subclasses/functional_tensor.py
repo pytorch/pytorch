@@ -342,6 +342,23 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        if self.export:
+            # We need to make sure that we don't decompose to() as usual in export mode,
+            # because it can get optimized away. Instead we always replace it with _to_copy().
+            if func == torch.ops.aten.to.dtype_layout:
+                kwargs.pop("copy", None)
+                return self.__torch_dispatch__(
+                    torch.ops.aten._to_copy.default, types, args, kwargs
+                )
+            if func == torch.ops.aten.to.dtype:
+                schema = tuple(arg.name for arg in func._schema.arguments)
+                for arg, name in zip(args[1:], schema[1:]):
+                    kwargs[name] = arg
+                kwargs.pop("copy", None)
+                return self.__torch_dispatch__(
+                    torch.ops.aten._to_copy.default, types, args[:1], kwargs
+                )
+
         unrecognized_types = [
             t
             for t in types

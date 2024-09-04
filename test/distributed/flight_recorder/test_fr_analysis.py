@@ -46,13 +46,16 @@ class FlightRecorderEventTest(TestCase):
             "all_reduce", ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
         )
         membership = {"0": {0, 1}}
-        self.assertEqual(match_one_event(e1, e1, membership), MatchState.FULLY_MATCHED)
+        self.assertEqual(
+            match_one_event(e1, e1, membership, "0"), MatchState.FULLY_MATCHED
+        )
 
         e2 = create_one_event(
             "all_gather", ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
         )
         self.assertEqual(
-            match_one_event(e1, e2, membership), MatchState.COLLECTIVE_TYPE_MISMATCH
+            match_one_event(e1, e2, membership, "0"),
+            MatchState.COLLECTIVE_TYPE_MISMATCH,
         )
 
         e3 = create_one_event(
@@ -61,34 +64,35 @@ class FlightRecorderEventTest(TestCase):
         e4 = create_one_event(
             "all_to_all", ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
         )
-        self.assertEqual(match_one_event(e3, e4, membership), MatchState.UNDECIDED)
+        self.assertEqual(match_one_event(e3, e4, membership, "0"), MatchState.UNDECIDED)
 
         e5 = create_one_event(
             "all_reduce", ("0", "default"), [[5, 4]], [[4, 4]], "scheduled", 1, 1
         )
         self.assertEqual(
-            match_one_event(e1, e5, membership), MatchState.SIZE_OR_SYNTAX_MISMATCH
+            match_one_event(e1, e5, membership, "0"), MatchState.SIZE_OR_SYNTAX_MISMATCH
         )
 
         e6 = create_one_event(
             "all_reduce", ("0", "default"), [[4, 4]], [[5, 4]], "scheduled", 1, 2
         )
         self.assertEqual(
-            match_one_event(e1, e6, membership), MatchState.SIZE_OR_SYNTAX_MISMATCH
+            match_one_event(e1, e6, membership, "0"), MatchState.SIZE_OR_SYNTAX_MISMATCH
         )
 
         e7 = create_one_event(
             "all_reduce", ("0", "default"), [[4, 4]], [[5, 4]], "scheduled", 2
         )
         self.assertEqual(
-            match_one_event(e7, e7, membership), MatchState.SIZE_OR_SYNTAX_MISMATCH
+            match_one_event(e7, e7, membership, "0"), MatchState.SIZE_OR_SYNTAX_MISMATCH
         )
 
         e9 = create_one_event(
             "all_reduce", ("0", "default"), [[4, 4]], [[4, 4]], "completed", 1
         )
         self.assertEqual(
-            match_one_event(e1, e9, membership), MatchState.COLLECTIVE_STATE_MISMATCH
+            match_one_event(e1, e9, membership, "0"),
+            MatchState.COLLECTIVE_STATE_MISMATCH,
         )
 
         e10 = create_one_event(
@@ -101,7 +105,8 @@ class FlightRecorderEventTest(TestCase):
             output_dtypes="float16",
         )
         self.assertEqual(
-            match_one_event(e10, e9, membership), MatchState.COLLECTIVE_DTYPE_MISMATCH
+            match_one_event(e10, e9, membership, "0"),
+            MatchState.COLLECTIVE_DTYPE_MISMATCH,
         )
 
 
