@@ -76,6 +76,7 @@ from torch.utils.weak import TensorWeakRef
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
 from .source import (
+    AttrProxySource,
     AttrSource,
     ChainedSource,
     ConstDictKeySource,
@@ -1060,6 +1061,14 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x._type().qualified_name(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, AttrProxySource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.get_base(),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

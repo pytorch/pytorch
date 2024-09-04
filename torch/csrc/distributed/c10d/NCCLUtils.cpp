@@ -21,7 +21,7 @@ constexpr int64_t kCommInitBusyWaitMillis = 10;
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
-  std::unique_lock<std::mutex> lock(mutex_);
+  C10D_LOCK_GUARD(lock, mutex_);
   if (aborted_) {
     auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
@@ -391,7 +391,7 @@ std::optional<size_t> NCCLTraceBuffer::record(
   }
   auto traceback =
       torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
-  std::lock_guard<std::mutex> guard(mutex_);
+  C10D_LOCK_GUARD(guard, mutex_);
 
   auto te = Entry{
       id_,
@@ -448,7 +448,7 @@ void NCCLTraceBuffer::record_pg_ranks(
   if (!enabled_) {
     return;
   }
-  std::lock_guard<std::mutex> guard(mutex_);
+  C10D_LOCK_GUARD(guard, mutex_);
   pg_name_to_ranks_[pg_name] = ranks;
 }
 
@@ -468,7 +468,7 @@ void NCCLTraceBuffer::update_state(Entry& r) {
 }
 
 std::vector<NCCLTraceBuffer::Entry> NCCLTraceBuffer::dump_entries() {
-  std::lock_guard<std::mutex> guard(mutex_);
+  C10D_LOCK_GUARD(guard, mutex_);
   std::vector<Entry> result;
   result.reserve(entries_.size());
   result.insert(result.end(), entries_.begin() + next_, entries_.end());
@@ -493,7 +493,7 @@ void NCCLTraceBuffer::retire_id(
   Event* endEvent = nullptr;
   std::optional<float> duration = std::nullopt;
 
-  std::unique_lock<std::mutex> guard(mutex_);
+  C10D_LOCK_GUARD(guard, mutex_);
 
   Entry* entry = &entries_.at(*id % max_entries_);
   if (entry->id_ == *id) {
@@ -534,6 +534,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     bool includeStacktraces,
     bool onlyActive) {
   auto entries = new_list();
+  // Entries are returned in the order they were recorded
   auto result = dump_entries();
   std::vector<torch::CapturedTraceback*> tracebacks;
   torch::SymbolizedTracebacks stracebacks;

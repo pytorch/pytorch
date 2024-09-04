@@ -198,6 +198,12 @@ T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a ^ b;
   return T::set(a, out, tail_size);
 }
+
+template <typename T1, typename T2>
+T1 any_masked_reduce(const T1& a, const T2& b, const int64_t tail_size) {
+  T1 out = a | b;
+  return T1::set(a, out, tail_size);
+}
 #endif
 
 // Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
