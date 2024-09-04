@@ -14,8 +14,7 @@ import torch
 
 # It is 1000 by default. But the call depth for dig_node can be larger than this number. @TODO: FIXME
 sys.setrecursionlimit(5000)
-# By default, we use the same mechanism with the original default stream assignment, which take the stream{device_index} as default stream id. It is initialized in stream_schedule
-DEFAULT_STREAM_ID = None
+
 UNASSIGNED_STREAM_ID = -1
 
 
@@ -123,6 +122,8 @@ class SSGraph:
         self.skip_cpu_nodes = True
         self.to_output_nodes = []
         self.build_graph(snodes)
+        # By default, we use the same mechanism with the original default stream assignment, which take the stream{device_index} as default stream id. 
+        self.DEFAULT_STREAM_ID = V.graph.scheduler.get_current_device_or_throw().index
 
     def build_graph(self, snodes):
         for snode in snodes:
@@ -158,8 +159,8 @@ class SSGraph:
     def pattern_distributed(self):
         tmp_queue = self.to_output_nodes
         for ssnode in self.ssnodes:
-            ssnode.stream_id = DEFAULT_STREAM_ID
-            self.stream_pool[DEFAULT_STREAM_ID] += 1
+            ssnode.stream_id = self.DEFAULT_STREAM_ID
+            self.stream_pool[self.DEFAULT_STREAM_ID] += 1
 
     def stream_pool_pop(self, predecessor=None):
         if predecessor is not None:
@@ -179,6 +180,7 @@ class SSGraph:
                 if successor.stream_id != ssnode.stream_id:
                     ssnode.cuda_event = True
                     break
+                # TODO: double check how we process nop nodes now.
                 if successor.is_nop_node:
                     for successor_successor in successor.successors:
                         if successor_successor.stream_id != ssnode.stream_id:
@@ -200,34 +202,9 @@ class SSGraph:
         while not check_all_nodes_assigned():
             pass
 
-    def dfs_search(self, cur_node: SSNode):
-        # sort the predecessors by their stream_id and sort from large to small
-        if len(cur_node.predecessors) != 0:
-            sorted_predecessors = sorted(
-                cur_node.predecessors.values(), key=lambda x: x.stream_id, reverse=True
-            )
-            for predecesor in sorted_predecessors:
-                if predecesor not in self.final_order:
-                    self.dfs_search(predecesor)
-        if cur_node not in self.final_order:
-            self.final_order.append(cur_node)
-        if len(cur_node.successors) != 0:
-            sorted_successors = sorted(
-                cur_node.successors.values(), key=lambda x: x.stream_id, reverse=True
-            )
-            if self.op_to_ssnode["OUTPUT"] in sorted_successors:
-                sorted_successors.remove(self.op_to_ssnode["OUTPUT"])
-                sorted_successors.append(self.op_to_ssnode["OUTPUT"])
-
-            for successor in sorted_successors:
-                if successor not in self.final_order:
-                    self.dfs_search(successor)
-
 
 def stream_schedule(snodes):
-    global DEFAULT_STREAM_ID
     # Need to be same with where calls `write_get_raw_stream`
-    DEFAULT_STREAM_ID = V.graph.scheduler.get_current_device_or_throw().index
     ssgraph = SSGraph(snodes)
     ssgraph.stream_assign()
     ssgraph.event_assign()

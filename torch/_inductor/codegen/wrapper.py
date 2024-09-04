@@ -56,7 +56,6 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
-from ..stream_scheduler import DEFAULT_STREAM_ID
 
 if TYPE_CHECKING:
     import triton
@@ -408,6 +407,7 @@ class AllocateLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
+        DEFAULT_STREAM_ID = V.graph.stream_graph.DEFAULT_STREAM_ID
         line = self.wrapper.make_buffer_allocation(self.node)
         # if self has attribution named user_streams, it is used by multiple streams
         if hasattr(self, "user_streams"):
