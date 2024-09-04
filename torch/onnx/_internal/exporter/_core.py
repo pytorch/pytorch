@@ -14,19 +14,17 @@ import traceback
 import typing
 from typing import Any, Callable, Literal, Sequence
 
-import onnx
-
 import onnxscript
 import onnxscript.evaluator
 import onnxscript.function_libs
 import onnxscript.function_libs.torch_lib
-import onnxscript.function_libs.torch_lib.registration
 from onnxscript import ir
 from onnxscript.ir import convenience as ir_convenience
 
 import torch
 import torch.fx
 from torch.export import graph_signature
+from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import (
     _analysis,
     _building,
@@ -34,7 +32,6 @@ from torch.onnx._internal.exporter import (
     _dispatching,
     _fx_passes,
     _ir_passes,
-    _isolated,
     _onnx_program,
     _registration,
     _reporting,
@@ -165,7 +162,11 @@ def _set_shape_types(
 
 def _set_shape_type(
     value: ir.Value,
-    meta_val: torch.Tensor | tuple[torch.Tensor],
+    meta_val: torch.Tensor
+    | torch.SymBool
+    | torch.SymInt
+    | torch.SymFloat
+    | tuple[torch.Tensor],
     complex_to_float: bool,
 ) -> None:
     # TODO: Consider using meta["tensor_meta"] for this? Would it be faster?
@@ -691,13 +692,7 @@ def exported_program_to_ir(
         registry: The registry of all ONNX Script decomposition.
     """
     if registry is None:
-        # Trigger op registration
-        from onnxscript.function_libs.torch_lib import ops  # noqa: F401
-
-        del ops
-        registry = _registration.ONNXRegistry.from_torchlib(
-            onnxscript.function_libs.torch_lib.registration.default_registry  # type: ignore[arg-type]
-        )
+        registry = _registration.ONNXRegistry.from_torchlib()
     if lower != "none":
         exported_program = _prepare_exported_program_for_export(
             exported_program, registry=registry
@@ -768,7 +763,7 @@ def _exported_program_to_onnx_program(
             },
         ),
         ir_version=9,
-        producer_name="torch",
+        producer_name="pytorch",
         producer_version=torch.__version__,
     )
 
@@ -981,6 +976,8 @@ def export(
     program: torch.export.ExportedProgram | None = None
     # Step 1: Export the model with torch.export.export if the model is not already an ExportedProgram
     if isinstance(model, torch.export.ExportedProgram):
+        # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
+        # are not used.
         program = model
         export_status.torch_export = True
     else:
@@ -1071,13 +1068,7 @@ def export(
     try:
         # Build the ONNX function registry
         if registry is None:
-            # Trigger op registration
-            from onnxscript.function_libs.torch_lib import ops
-
-            del ops
-            registry = _registration.ONNXRegistry.from_torchlib(
-                onnxscript.function_libs.torch_lib.registration.default_registry  # type: ignore[arg-type]
-            )
+            registry = _registration.ONNXRegistry.from_torchlib()
 
         # Process the exported program to run decompositions and type promotions etc.
         decomposed_program = _prepare_exported_program_for_export(
@@ -1197,11 +1188,12 @@ def export(
                     if not failed_results
                     else _format_exceptions_for_all_strategies(failed_results),
                     onnx_program.exported_program,
-                    profile_result=profile_result,
-                    export_status=export_status,
                     decomp_comparison=_reporting.format_decomp_comparison(
                         pre_decomp_unique_ops, post_decomp_unique_ops
                     ),
+                    export_status=export_status,
+                    profile_result=profile_result,
+                    model=onnx_program.model,
                     registry=registry,
                 )
                 verbose_print(f"Export report has been saved to '{report_path}'.")
@@ -1214,28 +1206,13 @@ def export(
 
     # Step 3: (verify=True) Check the ONNX model with ONNX checker
     try:
-        verbose_print("Run `onnx.checker` on the ONNX model...")
-
-        # TODO: Handle when model is >2GB
-
-        model_proto = onnx_program.model_proto
-        byte_size = model_proto.ByteSize()
-        if byte_size < 2 * 1024 * 1024 * 1024:
-            # The checker may segfault so we need to run it in a separate process
-            _isolated.safe_call(
-                onnx.checker.check_model,  # type:ignore[attr-defined]
-                onnx_program.model_proto,
-                full_check=True,
-            )
-            export_status.onnx_checker = True
-            verbose_print("Run `onnx.checker` on the ONNX model... ✅")
-        else:
-            verbose_print(
-                f"Run `onnx.checker` on the ONNX model... ⚠️  Skipped because model is too large ({byte_size})."
-            )
+        verbose_print("Check the ONNX model...")
+        onnxscript_apis.check_model(onnx_program.model)
+        export_status.onnx_checker = True
+        verbose_print("Check the ONNX model... ✅")
     except Exception as e:
         export_status.onnx_checker = False
-        verbose_print("Run `onnx.checker` on the ONNX model... ❌")
+        verbose_print("Check the ONNX model... ❌")
         if report:
             try:
                 assert pre_decomp_unique_ops is not None
