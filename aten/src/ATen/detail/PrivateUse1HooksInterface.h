@@ -12,7 +12,7 @@ namespace at {
 struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
   ~PrivateUse1HooksInterface() override = default;
   virtual const at::Generator& getDefaultGenerator(
-      c10::DeviceIndex device_index) {
+      c10::DeviceIndex device_index) const {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDefaultGenerator`.");
@@ -24,24 +24,26 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDeviceFromPtr`.");
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  virtual bool isPinnedPtr(const void* data) const override {
     return false;
   }
 
-  Allocator* getPinnedMemoryAllocator() const override {
+  virtual Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getPinnedMemoryAllocator`.");
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `hasPrimaryContext`.");
   }
 
   virtual void initPrivateUse1() const {}
-  virtual void resizePrivateUse1Bytes(const c10::Storage &storage, size_t newsize) const {
+  virtual void resizePrivateUse1Bytes(
+      const c10::Storage& storage,
+      size_t newsize) const {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `resizePrivateUse1Bytes`.");
@@ -52,8 +54,6 @@ struct TORCH_API PrivateUse1HooksArgs {};
 
 TORCH_API void RegisterPrivateUse1HooksInterface(
     at::PrivateUse1HooksInterface* hook_);
-
-TORCH_API at::PrivateUse1HooksInterface* GetPrivateUse1HooksInterface();
 
 TORCH_API bool isPrivateUse1HooksRegistered();
 
