@@ -3435,6 +3435,18 @@ class CPUReproTests(TestCase):
                 # 2 generated kernels (one for var_mean, the other for result)
                 check_metrics_vec_kernel_count(2)
 
+            # check loop split optimization
+            if fmt == torch.channels_last:
+                torch._dynamo.reset()
+                metrics.reset()
+                with torch.no_grad():
+                    opt_mod = torch.compile(mod)
+                    _, code = run_and_get_cpp_code(opt_mod, x)
+                # check that there are no non_contiguous loads
+                FileCheck().check_count("__at_align__ std::array", 0, exactly=True).run(
+                    code
+                )
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
