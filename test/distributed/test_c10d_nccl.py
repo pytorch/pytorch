@@ -407,6 +407,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
         c10d.broadcast(x, src=0)
         c10d.all_reduce(t)
+        c10d.barrier()
         c10d.destroy_process_group()
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"

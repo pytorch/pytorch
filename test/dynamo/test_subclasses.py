@@ -1429,9 +1429,25 @@ s1 > 3""",
         )
 
     def test_subclass_constructor_proxying(self):
+        import dataclasses
+        from typing import Any
+        from collections import namedtuple
+
+        @dataclasses.dataclass(frozen=True)
+        class SubclassTensorArgs:
+            original_shape: torch.Size
+            device: torch.device
+            inner_meta: Any
+
+        SubclassTensorArgs2 = namedtuple("SubclassTensorArgs2", [
+            "original_shape",
+            "device",
+            "inner_meta", 
+        ])
+
         class SubclassTensor(torch.Tensor):
             @staticmethod
-            def __new__(cls, a):
+            def __new__(cls, a, meta):
                 shape = a.shape
                 kwargs = {}
                 kwargs["strides"] = a.stride()
@@ -1443,21 +1459,21 @@ s1 > 3""",
                 out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
                 return out
 
-            def __init__(self, a):
+            def __init__(self, a, meta):
                 self.a = a
+                self.meta = meta
 
             def __repr__(self):
                 a_repr = repr(self.a)
                 return f"SubclassTensor({a_repr})"
 
             def __tensor_flatten__(self):
-                return ["a"], None
+                return ["a"], self.meta
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, _, __):
-                assert meta is None
                 a = inner_tensors["a"]
-                return SubclassTensor(a)
+                return SubclassTensor(a, meta)
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1471,18 +1487,28 @@ s1 > 3""",
                 )
                 out_a = func(*args_a, **kwargs_a)
                 out = pytree.tree_map(
-                    lambda x: SubclassTensor(x) if isinstance(x, torch.Tensor) else x,
+                    lambda x: SubclassTensor(x, SubclassTensorArgs2(x.shape, x.device, None)) if isinstance(x, torch.Tensor) else x,
                     out_a,
                 )
                 return return_and_correct_aliasing(func, args, kwargs, out)
 
         @torch.compile(fullgraph=True)
-        def f(x):
-            out = SubclassTensor(x)
+        def f1(x):
+            meta = SubclassTensorArgs(x.shape, x.device, SubclassTensorArgs(x.shape, x.device, None))
+            out = SubclassTensor(x, meta)
             return out * out
 
-        x = torch.randn(3, 4)
-        f(x)
+        x = torch.randn(3, 3)
+        f1(x)
+
+        @torch.compile(fullgraph=True)
+        def f1(x):
+            meta = SubclassTensorArgs2(x.shape, x.device, SubclassTensorArgs2(x.shape, x.device, None))
+            out = SubclassTensor(x, meta)
+            return out * out
+
+        x = torch.randn(3, 3)
+        f1(x)
 
     def test_torch_function_subclass_survives_into_aot_autograd(self):
         # If you have a tensor subclass that relies on dispatch into the same op
