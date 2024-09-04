@@ -2121,6 +2121,22 @@ class TestBlockMask(InductorTestCase):
         paged_cache.deallocate(batch_idx, head_idx, torch.tensor([0]))
         allocate(new_batch_idx, new_head_idx, new_logical_block_idx)
 
+    @supported_platform
+    def test_batch_deallocation(self):
+        n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads = (5, 4, 8, 5, 10, 2)
+        paged_cache = PagedCache(n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads)
+
+        # params: [batch, head, logical_block_idx]
+        paged_cache.allocate(torch.tensor([0]), torch.tensor([0]), torch.tensor([0]))
+        paged_cache.allocate(torch.tensor([0]), torch.tensor([0]), torch.tensor([1]))
+        paged_cache.allocate(torch.tensor([1]), torch.tensor([0]), torch.tensor([0]))
+        paged_cache.allocate(torch.tensor([2]), torch.tensor([0]), torch.tensor([0]))
+        paged_cache.allocate(torch.tensor([0]), torch.tensor([0]), torch.tensor([2]))
+
+        breakpoint()
+        paged_cache.batch_deallocate(torch.tensor([0]))
+        
+        # expected_page_table = torch.
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)

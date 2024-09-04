@@ -558,7 +558,7 @@ def _round_up_to_multiple(x, multiple):
     return (x + multiple - 1) // multiple * multiple
 
 
-def cdiv(x, multiple):
+def _cdiv(x, multiple):
     return (x + multiple - 1) // multiple
 
 
@@ -835,12 +835,16 @@ class PagedCache(torch.nn.Module):
         cache_shape = (n_pages, page_size, head_dim)
         self.register_buffer("cache", torch.zeros(cache_shape, dtype=dtype))
 
-        # Page Table: [batch, head, logical_block_idx] -> (physical_page_idx, n_filled, ref_count)
-        max_seq_pages = cdiv(max_seq_len, page_size)
+        # page table: [batch, head, logical_block_idx] -> (physical_page_idx, n_filled, ref_count)
+        max_seq_pages = _cdiv(max_seq_len, page_size)
         page_table_shape = (max_batch_size, n_heads, max_seq_pages, 3)
         self.page_table = -torch.ones(page_table_shape, dtype=torch.int64)
 
+        # index of empty pages that is available for allocation
         self.empty_pages = list(range(n_pages-1, -1, -1))
+
+        # current sequence length for a specific batch index
+        self.cur_seq_len = torch.zeros(max_batch_size)
 
     def allocate(self, batch: Tensor, head: Tensor, logical_block_idx: Tensor):
         # batch, head, and logical_block_idx are 1D tensor with 1 element.
@@ -855,6 +859,23 @@ class PagedCache(torch.nn.Module):
             page_idx = self.page_table[batch, head, logical_block_idx, 0].item()
             self.page_table[batch, head, logical_block_idx, 0] = -1
             self.empty_pages.append(page_idx)
+
+    def batch_deallocate(self,  batch: Tensor):
+        # batch is a 1D tensor with 1 element
+        self.page_table[batch, :, :, 2] -= 1
+        zero_ref_pages = page_table[batch, :, :, 2] < 1
+
+        # return deallocated pages to `empty_pages`
+        deallocate_candidates = self.page_table[batch][zero_ref_pages][:,0]
+        allocated_pages = deallocate_candidates != -1
+        self.empty_pages += deallocate_candidates[allocated_pages].tolist()
+
+        # deallocate all pages with 0 reference
+        self.page_table[batch][zero_ref_pages] = -1
+
+    def insert(self, batch: Tensor, value: Tensor):
+        # batch: [1], value: []
+        return
 
 
 # TODO
@@ -871,14 +892,6 @@ class PagedKVCache(torch.nn.Module):
         max_seq_pages = (max_seq_len + page_size - 1) // page_size
         page_table_shape = (max_batch_size, n_heads, max_seq_pages, 3)
         self.register_buffer("kv_page_table", -torch.ones(page_table_shape, dtype=torch.int))
-
-    def allocate(self) -> int:
-        # TODO
-        return
-
-    def deallocate(self):
-        # TODO
-        return
 
     def clean(self):
         # TODO
