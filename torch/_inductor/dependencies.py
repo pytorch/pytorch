@@ -6,7 +6,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -55,6 +55,9 @@ class Dep(abc.ABC):
     def is_contiguous(self) -> bool:
         pass
 
+    def normalize_with_stride_order(self, prefix="t"):
+        return self
+
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
@@ -67,11 +70,86 @@ class MemoryDep(Dep):
     def __repr__(self) -> str:
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}, {self.mode})"
 
+    @property
+    def num_vars(self):
+        return len(self.var_names)
+
+    def decide_loop_order_to_match(self, other):
+        """
+        Can return None if not able to decide loop orders.
+        """
+        assert self.num_vars == other.num_vars
+
+        # ignore broadcast for now since broadcast causes extra 0 strides
+        # which makes it hard to decide the correct loop orders.
+        if self.num_vars != len(self.index.free_symbols):
+            return None
+        if other.num_vars != len(other.index.free_symbols):
+            return None
+
+        # bail out if any size is 0 or 1
+        # For size == 0, it's an empty tensor, any strides for that dimension
+        # are equivalent. Skip for simplicity and it may not matter that much.
+        #
+        # For size == 1, it cause cause tie for strides of different dimensions.
+        # Also when we first time create LoopBody in ComputedBuffer.simplify_and_reorder
+        # we can dependencies.index_vars_squeeze which should already sqeeuze
+        # the size == 1 dimensions.
+        if any(s == 0 or s == 1 for s in itertools.chain(self.size, other.size)):
+            return None
+
+        # Extract strides for both expression
+        self_strides = V.graph.sizevars.stride_hints(self.index, self.var_names)
+        other_strides = V.graph.sizevars.stride_hints(other.index, other.var_names)
+
+        # Even if the shape contains no 0/1, some complex index expression may
+        # still have duplicate stride values. Here is an example:
+        # https://gist.github.com/shunting314/511a7e1ec88aa2e1a8ec85d8445ab129
+        # We don't reorder the loop for these cases for now, but in theory
+        # we could improve the algorithm to detect the correct loop orders.
+        if len(set(self_strides)) != len(self_strides) or len(
+            set(other_strides)
+        ) != len(other_strides):
+            log.debug(
+                "unable to decide loop order. self_dep=%s v.s. other_dep=%s, self_strides=%s v.s. other_strides=%s",
+                self,
+                other,
+                self_strides,
+                other_strides,
+            )
+            return None
+
+        # May hanppen if self and other are as follows
+        # MemoryDep('addmm_6', 393216*d0 + 768*d1 + d2, {d0: 16, d1: 512, d2: 768}, None)
+        # MemoryDep('addmm_6', 98304*d0 + d1 + 768*d2, {d0: 64, d1: 768, d2: 128}, None)
+        if set(self_strides) != set(other_strides):
+            return None
+
+        stride_to_index = {s: i for i, s in enumerate(self_strides)}
+        order = []
+        for s in other_strides:
+            order.append(stride_to_index[s])
+
+        assert set(order) == set(range(0, self.num_vars))
+        return order
+
     def get_offset(self):
         """
         Return the offset by setting every variable to be 0.
         """
         return sympy_subs(self.index, dict.fromkeys(self.var_names, 0))
+
+    def normalize(self) -> "MemoryDep":
+        """
+        Normalize by merging loops. The different to normalize_with_stride_order is,
+        this method does not reorder loops while normalize_with_stride_order reorder
+        loops based on stride order.
+        """
+        return MemoryDep(
+            self.name,
+            *_RecordLoadStoreInner._normalize(self.index, self.ranges),  # type: ignore[arg-type]
+            self.mode,
+        )
 
     def normalize_with_stride_order(self, prefix="t"):
         r"""
@@ -292,10 +370,12 @@ class ReadWrites:
             op_counts=self.op_counts,
         )
 
-    def with_read(self, dep: Dep) -> "ReadWrites":
-        assert isinstance(dep, (WeakDep, StarDep))
+    def with_read(self, dep: Union[Dep, Set[Dep]]) -> "ReadWrites":
+        assert isinstance(dep, (WeakDep, StarDep, set))
+        if not isinstance(dep, set):
+            dep = {dep}
         return ReadWrites(
-            OrderedSet.union(self.reads, [dep]),
+            OrderedSet.union(self.reads, dep),
             self.writes,
             self.index_exprs,
             self.range_vars,
@@ -358,31 +438,32 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._writes: OrderedSet[MemoryDep] = OrderedSet()
         self._index_exprs: OrderedSet[IndexExprDep] = OrderedSet()
         self._var_ranges: VarRanges = var_ranges
-        self._normalize: bool = normalize
+        self._should_normalize: bool = normalize
 
-    def canonicalize(
-        self, index: sympy.Expr
+    @staticmethod
+    def drop_unused_symbols(index, var_names, sizes):
+        """
+        Reduction has last (reduced) dim in its sizes, but
+        downstream users won't.  Normalize this away.
+        """
+        if not isinstance(index, sympy.Expr):
+            # index can be an int
+            return
+        free_symbols = index.free_symbols
+        while var_names and var_names[-1] not in free_symbols:
+            var_names.pop()
+            sizes.pop()
+
+    @classmethod
+    def _normalize(
+        cls, index: sympy.Expr, var_ranges: VarRanges
     ) -> Tuple[sympy.Expr, Tuple[sympy.Symbol, ...], Tuple[sympy.Expr, ...]]:
-        if not self._normalize:
-            sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
-            var_names = tuple(
-                k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
-            )
-            sizes = tuple(v for v in sizes if v != 1)
-            return index, var_names, sizes  # type: ignore[return-value]
-
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
         free_symbols = index.free_symbols
-        var_ranges = {
-            k: V.graph.sizevars.simplify(v)
-            for k, v in self._var_ranges.items()
-            # TODO(jansel): explore this further normalization
-            # if k in free_symbols
-        }
         index_vars = [*var_ranges.keys()]
-        sizes = tuple(var_ranges.values())
+        sizes = tuple(var_ranges.values())  # type: ignore[assignment]
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
@@ -397,13 +478,27 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]
-        free_symbols = index.free_symbols
-        while new_vars and new_vars[-1] not in free_symbols:
-            # Reduction has last (reduced) dim in its sizes, but
-            # downstream users won't.  Normalize this away.
-            new_vars.pop()
-            new_sizes.pop()
+        cls.drop_unused_symbols(index, new_vars, new_sizes)
         return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
+
+    def canonicalize(
+        self, index: sympy.Expr
+    ) -> Tuple[sympy.Expr, Tuple[sympy.Symbol, ...], Tuple[sympy.Expr, ...]]:
+        if not self._should_normalize:
+            sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
+            var_names = [k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1]
+            sizes = [v for v in sizes if v != 1]
+
+            self.drop_unused_symbols(index, var_names, sizes)
+
+            return index, tuple(var_names), tuple(sizes)  # type: ignore[return-value, arg-type]
+        var_ranges = {
+            k: V.graph.sizevars.simplify(v)
+            for k, v in self._var_ranges.items()
+            # TODO(jansel): explore this further normalization
+            # if k in free_symbols
+        }
+        return self._normalize(index, var_ranges)
 
     def load(self, name: str, index: sympy.Expr) -> str:
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
