@@ -939,7 +939,7 @@ def _compile(
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
-            raise InternalTorchDynamoError(str(e)).with_traceback(
+            raise InternalTorchDynamoError(f"{type(e).__qualname__}: {fail_reason}").with_traceback(
                 e.__traceback__
             ) from None
         finally:
