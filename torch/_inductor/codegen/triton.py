@@ -22,7 +22,6 @@ from typing import (
     Union,
 )
 
-import metrics
 import sympy
 
 import torch
@@ -39,6 +38,11 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
+from ..metrics import (
+    generated_kernel_count,
+    is_metric_table_enabled,
+    log_kernel_metadata,
+)
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
@@ -3185,8 +3189,8 @@ class TritonScheduling(SIMDScheduling):
             # log kernel metadata for offline analysis.
             # E.g. one can find all unaligned inner reduction and check if
             # padding helps with the perf kernel by kernel.
-            if metrics.is_metric_table_enabled("kernel_metadata"):
-                metrics.log_kernel_metadata(kernel_name, kernel_path, src_code)
+            if is_metric_table_enabled("kernel_metadata"):
+                log_kernel_metadata(kernel_name, kernel_path, src_code)
 
         return kernel_name
 
@@ -3381,9 +3385,10 @@ def debug_triton_code(node: Union[SchedulerNode, FusedSchedulerNode]) -> List[st
         # Don't increment kernel count when generating debug string.
         # This will confuse some unit tests that check the number of
         # generated kernels.
-        old_generated_kernel_count = metrics.generated_kernel_count
+        global generated_kernel_count
+        old_generated_kernel_count = generated_kernel_count
         triton_code = backend.generate_kernel_code_from_nodes(snodes).strip()
-        metrics.generated_kernel_count = old_generated_kernel_count
+        generated_kernel_count = old_generated_kernel_count
 
         lines.append(f"{node.get_name()} Triton code:")
         lines.append(textwrap.indent(triton_code, "    "))
