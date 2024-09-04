@@ -45,6 +45,24 @@ namespace c10d {
 //
 class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  public:
+  // ProcessGroup Options is a base struct that defines the basic options
+  // when constructing a ProcessGroup. Each ProcessGroup subclass should
+  // extend this struct and define its options if it wants to provide more
+  // config options (beyond basic ones defined here) to end user.
+  struct TORCH_API Options : torch::CustomClassHolder {
+    explicit Options(
+        std::string backend,
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
+        : timeout(timeout), backend(std::move(backend)) {}
+    ~Options() override = default;
+
+    std::chrono::milliseconds timeout;
+
+    // backend name
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+    const std::string backend;
+  };
+
   enum BackendType : uint8_t {
     UNDEFINED = 0,
     GLOO = 1,
@@ -54,23 +72,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     CUSTOM = 5,
   };
 
-  static std::string backendTypeToString(BackendType type) {
-    switch (type) {
-      case BackendType::GLOO:
-        return "gloo";
-      case BackendType::NCCL:
-        return "nccl";
-      case BackendType::UCC:
-        return "ucc";
-      case BackendType::MPI:
-        return "mpi";
-      case BackendType::UNDEFINED:
-        return "undefined";
-      default:
-        return "custom";
-    }
-  };
-
   // Not used, set for backwards compatibility and only used for TypeDef in
   // Ops.cpp
   explicit ProcessGroup(int rank, int size);
@@ -78,7 +79,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   explicit ProcessGroup(
       const c10::intrusive_ptr<::c10d::Store>& store,
       int rank,
-      int size);
+      int size,
+      c10::intrusive_ptr<Options> options);
   ~ProcessGroup() override;
 
   int getRank() const {
@@ -101,7 +103,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual const std::string getBackendName() const {
-    return backendTypeToString(backendType_);
+    return options_->backend;
   };
 
   BackendType getBackendType() const {
@@ -607,6 +609,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.timeout.count());
   }
 
+  c10::intrusive_ptr<Options> getOptions() {
+    return options_;
+  }
+
   bool hasBackends() {
     return !deviceTypeToBackendType_.empty();
   }
@@ -645,10 +651,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         getBackendName(),
         ".");
     return backendTypeToBackend_.at(backendType_);
-  }
-
-  void setDefaultBackend(const BackendType& backendType) {
-    backendType_ = backendType;
   }
 
   c10::intrusive_ptr<Backend> getBackend(c10::DeviceType deviceType);
@@ -723,7 +725,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int size_;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  BackendType backendType_;
+  const c10::intrusive_ptr<Options> options_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+  const BackendType backendType_;
   std::string pg_desc_;
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
