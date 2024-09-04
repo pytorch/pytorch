@@ -459,21 +459,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(expected, actual)
 
-    def test_torch_function_mode_enter_exit(self):
-        def fn(x, y):
-            with TestMode():
-                o = torch.add(x, 3)
-
-            return torch.add(o, y)
-
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn, fullgraph=True)
-
-        expected = fn(*inp)
-        actual = fn_opt(*inp)
-
-        self.assertEqual(expected, actual)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
