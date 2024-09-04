@@ -16,7 +16,7 @@ from torch._inductor.codegen.debug_utils import IntermediateValueDebuggingLevel
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
-from ..utils import _align, ALIGN_BYTES, cache_on_self, is_gpu, sympy_product
+from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
@@ -1153,6 +1153,10 @@ class CppWrapperCpu(WrapperCodeGen):
         # If we pass at::Tensor, the compilation will be too slow.
         wrapper_body += """
                     input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
+        """
+        # Release the inputs for memory reuse.
+        wrapper_body += """
+                    args.clear()
         """
 
         # unwrap output tensor back to python scalar

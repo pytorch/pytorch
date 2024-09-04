@@ -36,7 +36,6 @@ if not is_available():
 
 
 else:
-    from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _find_pg_by_ranks_and_tag,
         _get_default_group,
@@ -67,7 +66,7 @@ else:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
             self.mesh_dim_group_options: Dict[
-                int, Tuple[str, Optional[C10dBackend.Options]]
+                int, Tuple[str, Optional[ProcessGroup.Options]]
             ] = {}
             self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
@@ -280,7 +279,7 @@ else:
             self,
             dim: int,
             backend: str,
-            pg_options: Optional[C10dBackend.Options] = None,
+            pg_options: Optional[ProcessGroup.Options] = None,
         ) -> None:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
 
