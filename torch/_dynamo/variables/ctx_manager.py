@@ -54,6 +54,46 @@ class ContextMangerState:
         self.cleanup()
 
 
+def call_enter(self, tx):
+    source = None if self.source is None else AttrSource(self.source, "__enter__")
+    try:
+        return variables.UserMethodVariable(
+            self.cm_obj.__enter__.__func__,
+            self,
+            source=source,
+        ).call_function(tx, [], {})
+    except Unsupported as e:
+        unimplemented(
+            f"Unsupported context manager {self.cm_obj}'s __enter__ function",
+            from_exc=e,
+        )
+
+
+def call_exit(self, tx: "InstructionTranslator", *args):
+    source = None if self.source is None else AttrSource(self.source, "__exit__")
+    try:
+        x = variables.UserMethodVariable(
+            self.cm_obj.__exit__.__func__,
+            self,
+            source=source,
+        ).call_function(
+            tx,
+            [
+                variables.ConstantVariable.create(None),
+                variables.ConstantVariable.create(None),
+                variables.ConstantVariable.create(None),
+            ],
+            {},
+        )
+    except Unsupported as e:
+        unimplemented(
+            f"Unsupported context manager {self.cm_obj}'s __exit__ function",
+            from_exc=e,
+        )
+
+    return x
+
+
 class ContextWrappingVariable(VariableTracker):
     _nonvar_fields = {
         "cm_obj",
@@ -145,41 +185,10 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return type(self.cm_obj).__name__
 
     def enter(self, tx):
-        source = None if self.source is None else AttrSource(self.source, "__enter__")
-        try:
-            return variables.UserMethodVariable(
-                self.cm_obj.__enter__.__func__,
-                self,
-                source=source,
-            ).call_function(tx, [], {})
-        except Unsupported as e:
-            unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __enter__ function",
-                from_exc=e,
-            )
+        return call_enter(self, tx)
 
     def exit(self, tx: "InstructionTranslator", *args):
-        source = None if self.source is None else AttrSource(self.source, "__exit__")
-        try:
-            x = variables.UserMethodVariable(
-                self.cm_obj.__exit__.__func__,
-                self,
-                source=source,
-            ).call_function(
-                tx,
-                [
-                    variables.ConstantVariable.create(None),
-                    variables.ConstantVariable.create(None),
-                    variables.ConstantVariable.create(None),
-                ],
-                {},
-            )
-        except Unsupported as e:
-            unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __exit__ function",
-                from_exc=e,
-            )
-
+        x = call_exit(self, tx, *args)
         tx.generic_context_manager_depth -= 1
         return x
 

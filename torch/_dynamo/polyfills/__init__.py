@@ -11,6 +11,8 @@ import math
 from typing import Any, Callable, Sequence
 
 import torch
+from torch.overrides import TorchFunctionMode
+from torch.utils._device import DeviceContext
 
 
 def index(iterator, item, start=0, end=None):
@@ -130,6 +132,29 @@ def zip_longest(*iterables, fillvalue=None):
             break
         result.append(tuple(row))
     return result
+
+
+# These classes handle support for TorchFunctionModes across
+# graph breaks
+# Today the TorchFunctionMode enter (for the classes we support)
+# simply pushes the mode onto the stack. Since after this occurs
+# the stack is mutated, and we replay these mutations, we don't need
+# any cleanup logic to be run once the graph break occurs, we simply replay
+# these mutations to ensure at the graph break the torch function mode stack is correct
+#  and reconstruct the torch function mode stack normally
+# when we compile the resume function on the other side of the break.
+# However, to ensure we exit properly
+# in the resume function, we need to re-enter the contexts as we do other contexts.
+# These contexts do nothing on enter, but provide the correct exit logic to ensure
+# the stack state is correct.
+class NoEnterTorchFunctionMode(TorchFunctionMode):
+    def __enter__(self):
+        pass
+
+
+class NoEnterDeviceTorchFunctionMode(DeviceContext):
+    def __enter__(self):
+        pass
 
 
 def getattr_and_trace(*args, **kwargs):
