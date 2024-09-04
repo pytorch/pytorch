@@ -810,7 +810,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query, key, value, block_mask=block_mask, enable_gqa=True, return_lse=True
         )
         self.assertEqual(out[:, :, M:, :].sum(), 0)
-        self.assertTrue((lse[:, :, M:] == 0.0).all())
+        self.assertTrue((lse[:, :, M:] == -float("inf")).all())
 
         loss = out.sum() + lse.sum()
         loss.backward()
