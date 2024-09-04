@@ -10,30 +10,20 @@ import unittest
 from typing import Callable
 from unittest.mock import patch
 
-import numpy as np
-import sympy
-
 import torch
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
-from torch._inductor.codegen.common import OptimizationContext
-from torch._inductor.codegen.cpp import (
-    CppOverrides,
-    CppVecKernelChecker,
-    CppVecOverrides,
-)
+from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
     complex_memory_overlap,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import timed
-from torch._inductor.virtualized import V
 from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
@@ -2374,230 +2364,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.cpp_to_dtype_count == 2
         check_metrics_vec_kernel_count(1)
-
-    @requires_vectorization
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_cpp_vec_constant_checker(self):
-        _graph: torch.fx.Graph = torch.fx.Graph()
-        a: torch.fx.Node = _graph.create_node("placeholder", "ops")
-        iv: torch.fx.Node = _graph.create_node("placeholder", "iv")
-        fv: torch.fx.Node = _graph.create_node("placeholder", "fv")
-        b: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "constant",
-            args=(
-                a,
-                iv,
-                torch.int64,
-            ),
-        )
-        c: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "constant",
-            args=(
-                a,
-                fv,
-                torch.double,
-            ),
-        )
-        d: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "ge",
-            args=(
-                a,
-                b,
-                b,
-            ),
-        )
-        _graph.output((d, c))
-
-        def get_index():
-            return ""
-
-        submodules = {"get_index": get_index}
-
-        graph_lowering = GraphLowering(
-            torch.fx.GraphModule(submodules, _graph),
-            shape_env=None,
-        )
-
-        def set_opt_dtype(graph):
-            for node in graph.nodes:
-                if node.target == "constant":
-                    if OptimizationContext.key in node.meta:
-                        opt_ctx = node.meta[OptimizationContext.key]
-                    else:
-                        opt_ctx = OptimizationContext()
-                    opt_ctx.dtype = node.args[-1]
-                    node.meta[OptimizationContext.key] = opt_ctx
-
-        with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
-            graph_lowering
-        ):
-            # The moset inner loop variable is used in the index_expr
-            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-                i32_iinfo = np.iinfo(np.int32)
-                f32_iinfo = np.finfo(np.float32)
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, np.inf
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, -np.inf
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-    @requires_vectorization
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_cpp_vec_index_expr_checker(self):
-        _graph: torch.fx.Graph = torch.fx.Graph()
-        a: torch.fx.Node = _graph.create_node("placeholder", "ops")
-        b: torch.fx.Node = _graph.create_node("call_module", "get_index", args=())
-        c: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "index_expr",
-            args=(
-                a,
-                b,
-                torch.int64,
-            ),
-        )
-        d: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "ge",
-            args=(
-                a,
-                c,
-                c,
-            ),
-        )
-        _graph.output(d)
-
-        def get_index():
-            return ""
-
-        submodules = {"get_index": get_index}
-        graph_lowering = GraphLowering(
-            torch.fx.GraphModule(submodules, _graph),
-            shape_env=None,
-        )
-        with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
-            graph_lowering
-        ):
-            itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
-
-            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
-            # The most inner loop variable is used in the index_expr
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
-
-                ranges = [0, 100, 200]
-                vec_checker.itervars = itervars[:2]
-                vec_checker.ranges = ranges[:2]
-                submodules = {"get_index": get_index}
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
-
-            # Most inner loop variable irrevalant
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
-
-                ranges = [0, 100, 200]
-                vec_checker.itervars = itervars
-                vec_checker.ranges = ranges
-                submodules = {"get_index": get_index}
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
-
-            i32_iinfo = np.iinfo(np.int32)
-            _max_value = i32_iinfo.max + 1
-            ranges = [_max_value, _max_value, _max_value]
-            # Most inner loop variable irrevalant but max value is greater than
-            # the max value of INT32
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return itervars[0]
-
-                submodules = {"get_index": get_index}
-                vec_checker.itervars = itervars
-                vec_checker.ranges = ranges
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
-
-            # Most inner loop variable irrevalant but min value is greater than
-            # the min value of INT32
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return -itervars[0] - 2
-
-                submodules = {"get_index": get_index}
-                vec_checker.itervars = itervars
-                vec_checker.ranges = ranges
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
