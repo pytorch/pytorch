@@ -30,9 +30,6 @@ class ItertoolsVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"ItertoolsVariable({self.value})"
 
-    def python_type(self):
-        return type(self.value)
-
     def as_python_constant(self):
         return self.value
 
