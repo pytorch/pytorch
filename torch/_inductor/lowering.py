@@ -533,7 +533,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
         def group_args(arg_pairs):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
-                use_foreach = not is_dynamic(*args)
+                use_foreach = (
+                    not is_dynamic(*args) or config.combo_kernel_foreach_dynamic_shapes
+                )
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
@@ -2210,7 +2212,6 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 
 # Need templated kernel
 make_fallback(aten.addbmm)
-make_fallback(aten.addmv, warn=False)
 make_fallback(aten._addmm_activation, warn=False)
 
 # Need templated kernel. Probably impossible to write efficiently
