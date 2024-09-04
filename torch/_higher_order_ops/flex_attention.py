@@ -207,7 +207,7 @@ def math_attention(
     # Set fully masked rows' sumexp to 0.0
     logsumexp = post_mod_scores.logsumexp(dim=-1)
     masked_rows = torch.all(post_mod_scores == -float("inf"), dim=-1)
-    logsumexp = torch.where(masked_rows, 0.0, logsumexp)
+    logsumexp = torch.where(masked_rows, -float("inf"), logsumexp)
 
     post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
 
@@ -419,11 +419,13 @@ def flex_attention_fake_tensor_mode(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     with mode:
-        batch_size, num_heads, seq_len_q, head_dim = query.shape
+        v_head_dim = value.size(-1)
+        batch_size, num_heads, seq_len_q, q_head_dim = query.shape
         logsumexp = query.new_empty(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
-        return torch.empty_like(query), logsumexp
+        out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
+        return query.new_empty(out_shape), logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------
@@ -703,7 +705,9 @@ def sdpa_dense_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    masked_out_rows = logsumexp == -float("inf")
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
+    softmax_scores = torch.where(masked_out_rows.unsqueeze(-1), 0, softmax_scores)
 
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 
@@ -817,7 +821,7 @@ def trace_flex_attention_backward(
         )
     assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     block_mask = block_mask[:-1] + (mask_graph,)
-    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
+    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)  # type: ignore[arg-type]
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     proxy_mode.tracer.root.register_module("mask_graph", mask_graph)
     node_args = (

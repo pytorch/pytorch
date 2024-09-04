@@ -136,6 +136,10 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(dp_mesh.get_local_rank(), mesh_2d.get_local_rank("dp"))
         self.assertEqual(tp_mesh.get_local_rank(), mesh_2d.get_local_rank("tp"))
 
+        # Verify flattened mesh local rank correctness.
+        flattened_mesh = mesh_2d["dp", "tp"]._flatten()
+        self.assertEqual(flattened_mesh.get_local_rank(), self.rank)
+
     @with_comms
     def test_device_mesh_2d(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
@@ -563,7 +567,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         with self.assertRaisesRegex(
             KeyError,
-            "Valid mesh_dim_names should be a subsequence of",
+            "Invalid mesh_dim_names",
         ):
             cp_dp_mesh = mesh_3d["cp", "dp"]
 
@@ -604,6 +608,39 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             "dp_tp"
         ]
         self.assertEqual(flatten_mesh_root_dims, (0, 2))
+
+        # Test flatten with a flattened mesh_dim_name
+        cp_tp_mesh = mesh_3d["cp", "tp"]
+        cp_tp_mesh._flatten("dummy")
+        self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
+
+    @with_comms
+    def test_reconstruct_mesh_with_flatten_dim(self):
+        mesh_3d = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("replicate", "shard", "cp")
+        )
+        shard_cp_mesh = mesh_3d["shard", "cp"]._flatten()
+        hsdp_mesh = mesh_3d["replicate", "shard_cp"]
+        expected_mesh_tensor = torch.tensor(
+            [[0, 1, 2, 3], [4, 5, 6, 7]], dtype=torch.int
+        )
+        self.assertEqual(hsdp_mesh.mesh, expected_mesh_tensor)
+        self.assertEqual(shard_cp_mesh.get_group(), mesh_3d["shard_cp"].get_group())
+        self.assertEqual(
+            shard_cp_mesh.get_group(), mesh_3d.get_group(mesh_dim="shard_cp")
+        )
+
+        mesh_3d = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+        )
+        dp_cp_mesh = mesh_3d["dp", "cp"]._flatten()
+        spmd_mesh = mesh_3d["dp_cp", "tp"]
+        expected_mesh_tensor = torch.tensor(
+            [[0, 1], [2, 3], [4, 5], [6, 7]], dtype=torch.int
+        )
+        self.assertEqual(spmd_mesh.mesh, expected_mesh_tensor)
+        self.assertEqual(dp_cp_mesh.get_group(), mesh_3d["dp_cp"].get_group())
+        self.assertEqual(dp_cp_mesh.get_group(), mesh_3d.get_group(mesh_dim="dp_cp"))
 
 
 class TestMeshEnv(DTensorTestBase):
@@ -658,6 +695,17 @@ class TestMeshEnv(DTensorTestBase):
 
         self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "DP"), 0)
         self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "TP"), 1)
+
+    @with_comms
+    def test_get_all_submeshes(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, 4), mesh_dim_names=("replicate", "shard")
+        )
+        all_submeshes = _mesh_resources._get_all_submeshes(mesh_2d, "replicate")
+        self.assertEqual(len(all_submeshes), 4)
+        self.assertEqual(
+            all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True
+        )
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):
