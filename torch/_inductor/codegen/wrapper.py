@@ -56,7 +56,7 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
-
+from ..stream_scheduler import DEFAULT_STREAM_ID
 
 if TYPE_CHECKING:
     import triton
@@ -790,7 +790,7 @@ class WrapperCodeGen(CodeGen):
         """
         Yueming: is it better to move the dependency detection to streamscheduler?
         """
-        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        ssnode = V.graph.stream_graph.op_to_ssnode[node_name]
 
         def update_event_dependency(tmp_ssnode):
             dependent_buffers = set()
@@ -820,13 +820,13 @@ class WrapperCodeGen(CodeGen):
                 update_event_dependency(predecessor)
 
     def cuda_event_create(self, node_name, kernel_IndentedBuffer):
-        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        ssnode = V.graph.stream_graph.op_to_ssnode[node_name]
         kernel_IndentedBuffer.writeline(
             f"event_{ssnode.get_name()} = torch.cuda.Event()"
         )
 
     def cuda_event_record(self, node_name, kernel_IndentedBuffer):
-        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        ssnode = V.graph.stream_graph.op_to_ssnode[node_name]
         kernel_IndentedBuffer.writeline(
             f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)"
         )
@@ -840,7 +840,7 @@ class WrapperCodeGen(CodeGen):
         """
         kernel_IndentedBuffer = IndentedBuffer()
         self.cuda_event_dependency(node_name, kernel_IndentedBuffer)
-        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        ssnode = V.graph.stream_graph.op_to_ssnode[node_name]
         if ssnode.cuda_event:
             self.cuda_event_create(node_name, kernel_IndentedBuffer)
         stream_id = ssnode.stream_id
@@ -1994,7 +1994,7 @@ class WrapperCodeGen(CodeGen):
         new_allocateline = AllocateLine(self, buffer)
         # when the node is nop node, get users from its predecessors
         if config.multiple_streams:
-            ssnode = V.graph.stream_graph.name_mapping[buffer.get_name()]
+            ssnode = V.graph.stream_graph.buf_to_ssnode[buffer.get_name()]
             new_allocateline.set_user_stream(ssnode.stream_id)
             user_streams = set()
             if ssnode.is_nop_node:
