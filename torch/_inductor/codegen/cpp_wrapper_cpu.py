@@ -12,6 +12,7 @@ from sympy import Expr
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from torch._inductor.codegen.debug_utils import IntermediateValueDebuggingLevel
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
@@ -71,7 +72,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def generate_kernel_call(
         self,
-        name,
+        kernel_name: str,
         call_args,
         grid=None,
         device_index=None,
@@ -81,6 +82,8 @@ class CppWrapperCpu(WrapperCodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        autotune_configs=None,
+        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
@@ -93,14 +96,18 @@ class CppWrapperCpu(WrapperCodeGen):
         """
         if cuda:
             return super().generate_kernel_call(
-                name,
+                kernel_name,
                 call_args,
                 grid,
                 device_index,
                 cuda,
                 triton,
                 arg_types,
+                raw_args,
                 grid_fn,
+                triton_meta,
+                autotune_configs,
+                grid_extra_kwargs,
             )
         else:
             if config.abi_compatible:
@@ -118,9 +125,9 @@ class CppWrapperCpu(WrapperCodeGen):
                     else:
                         # arg is a scalar
                         new_args.append(arg)
-                self.writeline(self.wrap_kernel_call(name, new_args))
+                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
             else:
-                self.writeline(self.wrap_kernel_call(name, call_args))
+                self.writeline(self.wrap_kernel_call(kernel_name, call_args))
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -151,12 +158,9 @@ class CppWrapperCpu(WrapperCodeGen):
             )
 
         if config.abi_compatible:
-            if config.c_shim_version == "1":
-                self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
-            else:
-                self.header.splice(
-                    f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
-                )
+            self.header.splice(
+                f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
+            )
             self.header.splice(
                 """
                 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
@@ -187,6 +191,12 @@ class CppWrapperCpu(WrapperCodeGen):
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
             )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if config.profiler_mark_wrapper_call or enable_kernel_profile:
+            self.header.splice("#include <ATen/record_function.h>")
 
         self.header.splice("typedef at::Half half;")
         self.header.splice("typedef at::BFloat16 bfloat16;")
@@ -1145,6 +1155,10 @@ class CppWrapperCpu(WrapperCodeGen):
         wrapper_body += """
                     input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
         """
+        # Release the inputs for memory reuse.
+        wrapper_body += """
+                    args.clear()
+        """
 
         # unwrap output tensor back to python scalar
         if all(x for x in self.output_is_tensor.values()):
@@ -1185,20 +1199,8 @@ class CppWrapperCpu(WrapperCodeGen):
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
-        if config.c_shim_version == "1":
-            # For sdpa, we need the v2 version since v1 didn't consider optional arg
-            # FIXME: no need to do this after we switch to the torchgen-ed C shim
-            if kernel_suffix == "_scaled_dot_product_flash_attention":
-                shim_fn = "aoti_torch__scaled_dot_product_flash_attention_v2"
-            elif kernel_suffix == "_scaled_mm":
-                shim_fn = "aoti_torch__scaled_mm_v2"
-            elif kernel_suffix.startswith("wrapped_fbgemm"):
-                assert self.device == "cpu", "Using wrapped_fbgemm out of CPU!"
-                shim_fn = f"aoti_torch_cpu_{kernel_suffix}"
-            else:
-                shim_fn = f"aoti_torch_{kernel_suffix}"
-        else:
-            shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
+
+        shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
         return shim_fn
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
@@ -1208,6 +1210,15 @@ class CppWrapperCpu(WrapperCodeGen):
         self.allow_stack_allocation = False
 
         wrapped_args = []
+
+        args_to_print_or_save = None
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        if (
+            debug_printer_manager.debug_printer_level
+            != IntermediateValueDebuggingLevel.OFF
+        ):
+            args_to_print_or_save = []
+
         for x in args:
             pieces = x.split(", ")
             for piece in pieces:
@@ -1220,13 +1231,25 @@ class CppWrapperCpu(WrapperCodeGen):
                 if isinstance(piece, str) and piece.startswith(
                     ("buf", "arg", "wrap_with_raii_handle_if_needed")
                 ):
+                    # TODO: The current way to find a 'tensor' type arg is hacky also as mentioned above
+                    # Find a more reliable way to detect tensor kernel args for extern kernel calls
+                    if (
+                        debug_printer_manager.debug_printer_level
+                        != IntermediateValueDebuggingLevel.OFF
+                    ):
+                        if piece.startswith(("buf", "arg")):
+                            args_to_print_or_save.append(piece)
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 
-        shim_fn = self.get_c_shim_func_name(kernel)
-        self.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
+        debug_printer_manager.set_printer_args(
+            args_to_print_or_save, kernel, None, None
         )
+        with debug_printer_manager:
+            shim_fn = self.get_c_shim_func_name(kernel)
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
+            )
 
     def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
         # registered output buffer name
@@ -1299,6 +1322,7 @@ class CppWrapperCpu(WrapperCodeGen):
         if config.abi_compatible:
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
+            # TODO: add debug printing info for non-abi compatible mode extern kernel call
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_scatter_fallback(
@@ -1314,19 +1338,11 @@ class CppWrapperCpu(WrapperCodeGen):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
-        # TODO: needs updates to use C shim v2
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
-            if config.c_shim_version == "1":
-                cpp_kernel_name = (
-                    "aoti_torch_scatter_reduce_out"
-                    if python_kernel_name.startswith("aten.scatter_reduce")
-                    else "aoti_torch_scatter_out"
-                )
-            else:
-                cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
-                # C shim only contains out-variant instead of inplace-variant
-                cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+            cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
+            # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
+            cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
             inputs_wrapped = [
                 f"convert_arrayref_tensor_to_tensor({x})"
                 if isinstance(x, str)
@@ -1354,7 +1370,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
-        # TODO: needs updates to use C shim v2
+        # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         if config.abi_compatible:
             # See the comment in codegen_reinterpret_view about why having something like
             # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
@@ -2440,12 +2456,7 @@ if (py_{buf_name}.get() == NULL) {{
                 else:
                     raise AssertionError("Can not map None to a known data type")
             else:
-                if isinstance(type_, torch.TensorType):
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"at::Tensor {var_name} = at::Tensor();")
-                    return var_name
-                else:
-                    return "std::nullopt"
+                return "std::nullopt"
 
         if isinstance(type_, torch.OptionalType):
             element_type = type_.getElementType()
@@ -2468,7 +2479,7 @@ if (py_{buf_name}.get() == NULL) {{
                             f"{self.c_type_for_prim_type(element_type)} {var_name} = {self.val_to_arg_str(val, element_type)};"
                         )
                         return f"&{var_name}"
-                elif config.c_shim_version == "2":
+                else:
                     # type_ is Optional[Tensor]
                     # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                     base_handle = self.val_to_arg_str(val, element_type)
