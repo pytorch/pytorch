@@ -87,14 +87,6 @@ if TEST_WITH_ROCM:
         }
     )
 if config.abi_compatible:
-    xfail_list = []
-    for test_name in xfail_list:
-        test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cpp_wrapper",), is_skip=False
-        )
-        test_failures_cpp_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
     skip_list = [
         "test_multihead_attention_cpu",
     ]

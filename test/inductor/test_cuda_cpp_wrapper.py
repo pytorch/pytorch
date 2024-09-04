@@ -16,6 +16,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 try:
     try:
         from . import (
+            test_combo_kernels,
             test_foreach,
             test_pattern_matcher,
             test_select_algorithm,
@@ -23,6 +24,8 @@ try:
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
+        import test_combo_kernels
+
         import test_foreach
         import test_pattern_matcher
         import test_select_algorithm
@@ -59,25 +62,6 @@ test_failures_cuda_wrapper = {
         ("cuda_wrapper",), is_skip=True
     ),
 }
-
-
-if config.abi_compatible:
-    xfail_list = []
-    for test_name in xfail_list:
-        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cuda_wrapper",), is_skip=False
-        )
-        test_failures_cuda_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
-    skip_list = []
-    for test_name in skip_list:
-        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cuda_wrapper",), is_skip=True
-        )
-        test_failures_cuda_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
 
 def make_test_case(
@@ -192,6 +176,14 @@ if RUN_CUDA:
             tests=test_foreach.ForeachTests(),
         ),  # test foreach
         BaseTest(
+            "test_enable_dynamic_shapes_cpp_wrapper",
+            tests=test_foreach.ForeachTests(),
+        ),
+        BaseTest(
+            "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
+            tests=test_combo_kernels.ComboKernelDynamicShapesTests(),
+        ),
+        BaseTest(
             "test_cat_slice_cat",
             tests=test_pattern_matcher.TestPatternMatcher(),
         ),
@@ -253,5 +245,6 @@ if RUN_CUDA:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
+    print(f"FS: run_cuda {RUN_CUDA}")
     if RUN_CUDA:
         run_tests(needs="filelock")
