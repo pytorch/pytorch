@@ -759,6 +759,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         use_local_acc = (
             self.layout.dtype != torch.float
+            or template_buffer_has_other_users
             or int8_gemm
             or self.padded_n != self.n
             or self.maybe_k_slicing()
