@@ -329,9 +329,9 @@ class TORCH_API Context {
 
   void setFloat32MatmulPrecision(const std::string& s);
   void setFloat32Precision(
-      const std::string& s,
       const std::string& backend,
-      const std::string& op);
+      const std::string& op,
+      const std::string& s);
   bool allowTF32CuDNN(const std::string& op = std::string()) const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
@@ -437,10 +437,7 @@ class TORCH_API Context {
   std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
       {"generic", {{"all", "default"}}},
       {"mkldnn",
-       {{"matmul",
-         float32_matmul_precision == at::Float32MatmulPrecision::MEDIUM
-             ? "bf16"
-             : "default"},
+       {{"matmul", "default"},
         {"conv", "default"},
         {"rnn", "default"},
         {"all", "default"}}},
@@ -449,8 +446,8 @@ class TORCH_API Context {
          float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
              ? "default"
              : "tf32"},
-        {"conv", allow_tf32_cudnn ? "tf32" : "default"},
-        {"rnn", allow_tf32_cudnn ? "tf32" : "default"},
+        {"conv", "tf32"},
+        {"rnn", "tf32"},
         {"all", "default"}}},
   };
 
