@@ -219,7 +219,6 @@ TORCH_API std::string getNcclVersion();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();
 int nccl_nonblocking_timeout();
-bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf);
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
