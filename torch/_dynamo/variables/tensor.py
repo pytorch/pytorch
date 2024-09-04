@@ -795,6 +795,20 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
         return self.call_method(tx, "size", [ConstantVariable.create(0)], {})
 
+    def method_addcmul_(self, tensor1, tensor2, *, value=None):
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        if value is not None:
+            from .. import polyfills
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(tx, polyfills.addcmul_inplace),
+                [self, tensor1, tensor2, value],
+                {},
+            )
+
     def method___setitem__(self, key, value):
         def has_bool_key(v):
             if isinstance(v, TensorVariable):
