@@ -2344,6 +2344,18 @@ def object_has_getattribute(value: Any):
     return False
 
 
+def class_has_getattribute(value: Any):
+    try:
+        if isinstance(
+            inspect.getattr_static(value, "__getattribute__"),
+            types.FunctionType,
+        ):
+            return True
+    except AttributeError:
+        pass
+    return False
+
+
 def get_custom_getattr(value: Any, ignore_nn_module_getattr: bool = False):
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")
