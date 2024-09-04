@@ -29,6 +29,9 @@ class ExecutorchCallDelegate(HigherOrderOperator):
     def __init__(self):
         super().__init__("executorch_call_delegate")
 
+    def __call__(self, lowered_module, *args):
+        return super().__call__(lowered_module, *args)
+
 
 executorch_call_delegate = ExecutorchCallDelegate()
 executorch_call_delegate.fallthrough(torch._C.DispatchKey.PythonDispatcher)
