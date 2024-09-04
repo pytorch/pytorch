@@ -171,20 +171,32 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             first_node = fx_node
 
     # create edges between nodes
+    buf_last_update_op: Dict[str, str] = {}
+    added: Dict[str, fx.node.Node] = {}
     for snode in snodes:
         name = snode.get_name()
-        deps = snode.unmet_dependencies
+        deps = snode.read_writes.reads
         fx_node = op_to_fx_node[name]
         new_args = []
         for dep in deps:
-            dep_name = V.graph.scheduler.name_to_buf[dep.name].defining_op.get_name()
-            if dep_name in op_to_fx_node:
-                dep_node = op_to_fx_node[dep_name]
+            last_update_op = buf_last_update_op.get(dep.name, None)
+            name_to_buf = V.graph.scheduler.name_to_buf.get(dep.name, None)
+            if last_update_op:
+                dep_node = op_to_fx_node[last_update_op]
+            elif name_to_buf and name_to_buf.defining_op.get_name() == name:
+                continue
             else:
-                with graph.inserting_before(first_node):
-                    dep_node = graph.placeholder(dep_name)
-                    op_to_fx_node[dep_name] = dep_node
+                if dep.name in added:
+                    dep_node = added[dep.name]
+                else:
+                    with graph.inserting_before(first_node):
+                        dep_node = graph.placeholder(dep.name)
+                        op_to_fx_node[dep.name] = dep_node
+                        added[dep.name] = dep_node
+
             new_args.append(dep_node)
+        for output in snode.outputs_by_name.keys():
+            buf_last_update_op[output] = name
 
         fx_node.args = tuple(new_args)
 
