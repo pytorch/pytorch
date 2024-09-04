@@ -4569,7 +4569,7 @@ class ShapeEnv:
         else:
             var_ranges = dict(var_to_range)
 
-        symbol_info = (
+        symbol_info = tuple(
             (s, var_ranges.get(s), self.var_to_val.get(s), s in self.size_like)
             for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
         )
