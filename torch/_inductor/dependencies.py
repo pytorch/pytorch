@@ -17,6 +17,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .codegen.common import index_prevent_reordering
 from .utils import (
+    cache_on_self,
     get_dtype_size,
     reduction_num_outputs,
     sympy_index_symbol,
@@ -139,6 +140,7 @@ class MemoryDep(Dep):
         """
         return sympy_subs(self.index, dict.fromkeys(self.var_names, 0))
 
+    @cache_on_self
     def normalize(self) -> "MemoryDep":
         """
         Normalize by merging loops. The different to normalize_with_stride_order is,
