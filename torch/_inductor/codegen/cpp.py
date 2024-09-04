@@ -1580,7 +1580,11 @@ class CppVecOverrides(CppOverrides):
             if n_vec == 1
             else f"at::vec::VectorizedN<{cdtype}, {n_vec}>"
         )
-        code.writeline(f"at::vec::Vectorized<int32_t> {exponent};")
+        code.writeline(
+            f"at::vec::Vectorized<int32_t> {exponent};"
+            if n_vec == 1
+            else f"at::vec::VectorizedN<int32_t, {n_vec}> {exponent};"
+        )
         code.writeline(f"{mantissa_t} {mantissa};")
         code.writeline("[&]()")
         with code.indent():
@@ -1597,6 +1601,8 @@ class CppVecOverrides(CppOverrides):
                 )
             code.writeline(
                 f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {size});"
+                if n_vec == 1
+                else f"{exponent} = at::vec::VectorizedN<int32_t, {n_vec}>::loadu(tmpbuf_exponent.data(), {size});"
             )
             code.writeline(
                 f"{mantissa} = {mantissa_t}::loadu(tmpbuf_mantissa.data(), {size});"
@@ -2691,7 +2697,9 @@ class CppVecKernel(CppKernel):
                     convert = f"{value}.template cast<bool,{self._get_num_vectors(torch.bool)}>()"
                 else:
                     if src_num_vectors == out_num_vectors == 1:
-                        convert = f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value})"
+                        convert = (
+                            f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value})"
+                        )
                     else:
                         convert = (
                             f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]},"
