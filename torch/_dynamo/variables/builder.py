@@ -19,6 +19,8 @@ import warnings
 import weakref
 from typing import (
     Any,
+    Callable,
+    Dict,
     FrozenSet,
     List,
     MutableMapping,
@@ -58,6 +60,7 @@ from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
+    AttrProxySource,
     AttrSource,
     CallMethodItemSource,
     ConstantSource,
@@ -483,7 +486,9 @@ class VariableBuilder:
 
     @classmethod
     @functools.lru_cache(None)
-    def _id_dispatch(cls):
+    def _id_dispatch(
+        cls,
+    ) -> Dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
         from ..comptime import comptime
 
         entries = [
@@ -1180,8 +1185,22 @@ class VariableBuilder:
             if item is value:
                 unimplemented("list elements are pointing to the list itself")
 
+        # Tuples are immutable objects, so we should mark its items static. This
+        # avoids wrapping of tuple items as symints. This helps for nn module
+        # attributes like conv2d strides, dilations.
+        if (
+            istype(value, tuple)
+            and all(ConstantVariable.is_literal(item) for item in value)
+            and self.source.guard_source().is_unspecialized_nn_module()
+        ):
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return TupleVariable([ConstantVariable.create(item) for item in value])
+
         output = [
-            LazyVariableTracker.create(item, source=GetItemSource(self.get_source(), i))
+            LazyVariableTracker.create(
+                item,
+                source=GetItemSource(self.get_source(), i),
+            )
             for i, item in enumerate(value)
         ]
 
@@ -1340,6 +1359,13 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
+
+            # Note [Tracing a torch.compiled function]
+            # when make_fx tracing a compiled function, we need
+            if isinstance(value, torch.fx.experimental.proxy_tensor._AttrProxy):
+                value = value.get_base()
+                self.source = AttrProxySource(self.source)
+
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
@@ -1355,7 +1381,9 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")) or getattr(
+                value.__class__, "_dynamo_marked_static", False
+            ):
                 result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
             else:
                 result = UnspecializedNNModuleVariable(value, source=self.source)
@@ -1719,6 +1747,15 @@ class VariableBuilder:
                             value,
                             frame_state_entry.scalar,
                         )
+                        if self.source.guard_source().is_unspecialized_nn_module():
+                            log.info(
+                                "%s",
+                                (
+                                    f"{name} is converted to a symbolic integer. It is an attribute of a "
+                                    "user defined nn module class. If you wish to keep it static, you can "
+                                    "mark the nn module class as `torch._dynamo.mark_static`."
+                                ),
+                            )
                         frame_state_entry.scalar = None
                 self.tx.output.frame_state[name] = frame_state_entry
 
@@ -2272,6 +2309,7 @@ def wrap_fx_proxy_cls(
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
     elif isinstance(example_value, bool) and proxy.node.target in [
+        torch._C._are_functorch_transforms_active,
         torch.backends.cuda.is_flash_attention_available,
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
@@ -2391,6 +2429,9 @@ def _automatic_dynamic(
 
     # Prep for automatic dynamic
     def update_frame_state(size, stride):
+        # Intentionally shadow e from parent scope so it is not accidentally
+        # called
+        e = None
         frame_state_entry = None
         if name not in tx.output.frame_state:
             # If there is no entry for this source, add the tensor to frame state with its current static size.
@@ -2401,13 +2442,13 @@ def _automatic_dynamic(
         else:
             frame_state_entry = tx.output.frame_state[name]
             if frame_state_entry.size is not None:
-                if e.ndim != len(frame_state_entry.size):
+                if len(size) != len(frame_state_entry.size):
                     # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
                     # E.g. {"x": [2, 3, 4]} -> {"x": None}
                     log.debug(
                         "automatic dynamic %s dim %s != %s",
                         name,
-                        e.ndim,
+                        len(size),
                         frame_state_entry.size,
                     )
                     frame_state_entry.size = None
@@ -2424,7 +2465,7 @@ def _automatic_dynamic(
                                 "automatic dynamic %s size(%s) %s != %s",
                                 name,
                                 i,
-                                e.size(i),
+                                size[i],
                                 dim,
                             )
                             frame_state_entry.size[i] = None
@@ -2454,7 +2495,7 @@ def _automatic_dynamic(
                                     "automatic dynamic %s stride(%s) %s != %s",
                                     name,
                                     i,
-                                    e.stride(i),
+                                    stride[i],
                                     dim,
                                 )
                                 frame_state_entry.stride[i] = None

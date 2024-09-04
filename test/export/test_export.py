@@ -2016,7 +2016,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             + re.escape(
                 "specified at `dynamic_shapes[0]['k']['k'][0]` "
                 "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                " where each dimension is None, an int, a Dim, Dim.AUTO, or Dim.STATIC)"
+                " where each dimension is an int, a Dim, Dim.AUTO, or Dim.STATIC)"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -4398,12 +4398,9 @@ def forward(self, b_a_buffer, x):
         f = Module()
         if is_non_strict_test(self._testMethodName):
             error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-            error_msg = r"Could not guard on data-dependent expression"
         else:
             error = torch._dynamo.exc.UserError
-            error_msg = (
-                r"Tried to use data-dependent value in the subsequent computation"
-            )
+        error_msg = r"Could not guard on data-dependent expression"
         with self.assertRaisesRegex(error, error_msg):
             _ = export(f, (torch.tensor(6),))
 
@@ -5602,7 +5599,6 @@ graph():
             )
         )
 
-    # Guard validation upsets the guard
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
