@@ -1717,6 +1717,7 @@ class FakeTensorMode(TorchDispatchMode):
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
         ) or any(isinstance(a, SymInt) for a in flat_args)
+        has_subclasses = any(is_traceable_wrapper_subclass(a) for a in flat_args)
 
         converter = self.fake_tensor_converter
 
@@ -1734,6 +1735,7 @@ class FakeTensorMode(TorchDispatchMode):
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
+            and not has_subclasses
         ):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
