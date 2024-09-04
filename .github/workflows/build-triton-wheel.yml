@@ -13,6 +13,7 @@ on:
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
 
 concurrency:
