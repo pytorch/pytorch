@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import sys
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
@@ -258,7 +259,15 @@ class AsyncCompile:
                 if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                     pbar.set_postfix_str(key)
                 if isinstance(result, (Future, CodeCacheFuture)):
-                    scope[key] = result.result()
+                    try:
+                        scope[key] = result.result()
+                    except BrokenProcessPool as e:
+                        raise RuntimeError(
+                            "A compilation subprocess exited unexpectedly. This "
+                            "is likely due to a crash. To facilitate debugging, "
+                            "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
+                            "to cause compilation to occur in the main process."
+                        ) from e
                     pbar.update(1)
 
         _compile_end()
