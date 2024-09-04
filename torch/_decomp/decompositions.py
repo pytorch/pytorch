@@ -1414,13 +1414,9 @@ def split_with_sizes(
     start_idx = 0
 
     # Avoid importing sympy at a module level
-    from torch.fx.experimental.symbolic_shapes import expect_true
 
     for i in range(num_splits):
         length = split_sizes[i]
-        # We know this is true thanks to the sum, but this assertion helps
-        # out our internal reasoning
-        expect_true(start_idx + length <= self.shape[dim])
         splits.append(self.narrow(dim, start_idx, length))
         start_idx += length
     return splits
@@ -3808,6 +3804,11 @@ def _reshape_alias(x, shape, *args):
 @register_decomposition([aten._unsafe_index])
 def _unsafe_index(x, indices):
     return aten.index(x, indices)
+
+
+@register_decomposition([aten._unsafe_index_put])
+def _unsafe_index_put(x, indices, value, accumulate=False):
+    return aten.index_put(x, indices, value, accumulate)
 
 
 @register_decomposition([aten._unsafe_masked_index])

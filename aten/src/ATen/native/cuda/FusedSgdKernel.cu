@@ -56,14 +56,15 @@ C10_DEVICE __forceinline__ void sgd_math(
   }
 }
 
-template <typename scalar_t, int depth>
+template <typename scalar_t, int depth, bool large_kernel_arg>
 struct FusedSgdMathFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   static_assert(
       depth == 2 || depth == 3,
       "depth of 2 for SGD w/ momentum == 0, 3 for SGD w/ momentum != 0");
   C10_DEVICE __forceinline__ void operator()(
       const int chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, large_kernel_arg>& tl,
       const double weight_decay,
       const double momentum,
       const float* lr_ptr,
@@ -172,19 +173,21 @@ void _fused_sgd_with_momentum_kernel_cuda_(
       params[0].scalar_type(),
       "fused_sgd_with_momentum_kernel_cuda",
       [&]() {
-        multi_tensor_apply<3>(
-            tensor_lists,
-            FusedSgdMathFunctor<scalar_t, 3>(),
-            weight_decay,
-            momentum,
-            lr_ptr,
-            lr,
-            dampening,
-            nesterov,
-            maximize,
-            is_first_step,
-            grad_scale_ptr,
-            found_inf_ptr);
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<3>(
+              tensor_lists,
+              FusedSgdMathFunctor<scalar_t, 3, large_kernel_arg>(),
+              weight_decay,
+              momentum,
+              lr_ptr,
+              lr,
+              dampening,
+              nesterov,
+              maximize,
+              is_first_step,
+              grad_scale_ptr,
+              found_inf_ptr);
+        });
       });
 }
 
@@ -246,19 +249,21 @@ void _fused_sgd_with_momentum_kernel_cuda_(
       params[0].scalar_type(),
       "fused_sgd_with_momentum_kernel_cuda",
       [&]() {
-        multi_tensor_apply<3>(
-            tensor_lists,
-            FusedSgdMathFunctor<scalar_t, 3>(),
-            weight_decay,
-            momentum,
-            lr.data_ptr<float>(),
-            1.0,
-            dampening,
-            nesterov,
-            maximize,
-            is_first_step,
-            grad_scale_ptr,
-            found_inf_ptr);
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<3>(
+              tensor_lists,
+              FusedSgdMathFunctor<scalar_t, 3, large_kernel_arg>(),
+              weight_decay,
+              momentum,
+              lr.data_ptr<float>(),
+              1.0,
+              dampening,
+              nesterov,
+              maximize,
+              is_first_step,
+              grad_scale_ptr,
+              found_inf_ptr);
+        });
       });
 }
 
@@ -312,19 +317,21 @@ void _fused_sgd_kernel_cuda_(
       params[0].scalar_type(),
       "fused_sgd_kernel_cuda",
       [&]() {
-        multi_tensor_apply<2>(
-            tensor_lists,
-            FusedSgdMathFunctor<scalar_t, 2>(),
-            weight_decay,
-            momentum,
-            lr_ptr,
-            lr,
-            dampening,
-            nesterov,
-            maximize,
-            /* is_first_step */ false,
-            grad_scale_ptr,
-            found_inf_ptr);
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<2>(
+              tensor_lists,
+              FusedSgdMathFunctor<scalar_t, 2, large_kernel_arg>(),
+              weight_decay,
+              momentum,
+              lr_ptr,
+              lr,
+              dampening,
+              nesterov,
+              maximize,
+              /* is_first_step */ false,
+              grad_scale_ptr,
+              found_inf_ptr);
+        });
       });
 }
 
@@ -404,19 +411,21 @@ void _fused_sgd_kernel_cuda_(
       params[0].scalar_type(),
       "fused_sgd_kernel_cuda",
       [&]() {
-        multi_tensor_apply<2>(
-            tensor_lists,
-            FusedSgdMathFunctor<scalar_t, 2>(),
-            weight_decay,
-            momentum,
-            lr.data_ptr<float>(),
-            1.0,
-            dampening,
-            nesterov,
-            maximize,
-            /* is_first_step */ false,
-            grad_scale_ptr,
-            found_inf_ptr);
+        DISPATCH_MULTI_TENSOR_APPLY([&]() {
+          multi_tensor_apply<2>(
+              tensor_lists,
+              FusedSgdMathFunctor<scalar_t, 2, large_kernel_arg>(),
+              weight_decay,
+              momentum,
+              lr.data_ptr<float>(),
+              1.0,
+              dampening,
+              nesterov,
+              maximize,
+              /* is_first_step */ false,
+              grad_scale_ptr,
+              found_inf_ptr);
+        });
       });
 }
 
