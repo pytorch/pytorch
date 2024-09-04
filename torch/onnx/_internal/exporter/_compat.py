@@ -32,6 +32,7 @@ def _from_dynamic_axes_to_dynamic_shapes(
     model,
     dynamic_axes=None,
     input_names: Sequence[str] | None = None,
+    output_names: Sequence[str] | None = None,
 ) -> dict[str, Any] | None:
     """
 
@@ -51,6 +52,9 @@ def _from_dynamic_axes_to_dynamic_shapes(
 
     if input_names is None:
         input_names = []
+
+    if output_names is None:
+        output_names = []
 
     sig = _signature(model)
     if len(input_names) > len(sig.parameters):
@@ -72,6 +76,9 @@ def _from_dynamic_axes_to_dynamic_shapes(
     for input_name, axes in dynamic_axes.items():
         # input_name can be either from inptu_names or from the model inputs
         if input_name not in input_names_to_model_inputs:
+            if input_name in output_names:
+                # User specified an output name as a dynamic axis, so we skip it
+                continue
             raise ValueError(
                 f"dynamix axis: {input_name} is not found in the input names: {input_names}"
             )
@@ -151,7 +158,7 @@ def export_compat(
         args, kwargs = _get_torch_export_args(args, kwargs)
         if dynamic_shapes is None and dynamic_axes is not None:
             dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
-                model, dynamic_axes, input_names
+                model, dynamic_axes, input_names, output_names
             )
 
     should_convert_version = False
