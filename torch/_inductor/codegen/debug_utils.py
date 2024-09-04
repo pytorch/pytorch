@@ -6,9 +6,10 @@ import logging
 from enum import Enum
 from typing import List, Optional
 
+from torch import dtype as torch_dtype
+
 from .. import config
 from ..virtualized import V
-from .common import TensorArg
 from .multi_kernel import MultiKernel
 
 
@@ -121,8 +122,9 @@ class DebugPrinterManager:
     ) -> None:
         for i, arg in enumerate(args_to_save):
             if arg_signatures is not None and not isinstance(
-                arg_signatures[i], TensorArg
+                arg_signatures[i], torch_dtype
             ):
+                # infer from the arg data type (has torch.dtype) to see if it is a tensor type
                 continue
             launch_prefix = "before_launch" if before_launch else "after_launch"
             if V.graph.cpp_wrapper:
@@ -146,8 +148,9 @@ class DebugPrinterManager:
     ) -> None:
         for i, arg in enumerate(args_to_print):
             if arg_signatures is not None and not isinstance(
-                arg_signatures[i], TensorArg
+                arg_signatures[i], torch_dtype
             ):
+                # infer from the arg data type (has torch.dtype) to see if it is a tensor type
                 continue
             if self.debug_printer_level == IntermediateValueDebuggingLevel.PRINT_ONLY:
                 # when debug printing is enabled i.e. IntermediateValueDebuggingLevel.PRINT_ONLY,

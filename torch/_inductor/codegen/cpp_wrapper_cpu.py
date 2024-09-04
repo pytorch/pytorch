@@ -1155,6 +1155,10 @@ class CppWrapperCpu(WrapperCodeGen):
         wrapper_body += """
                     input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
         """
+        # Release the inputs for memory reuse.
+        wrapper_body += """
+                    args.clear()
+        """
 
         # unwrap output tensor back to python scalar
         if all(x for x in self.output_is_tensor.values()):
@@ -1209,8 +1213,10 @@ class CppWrapperCpu(WrapperCodeGen):
 
         args_to_print_or_save = None
         debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_level = debug_printer_manager.debug_printer_level
-        if debug_printer_level != IntermediateValueDebuggingLevel.OFF:
+        if (
+            debug_printer_manager.debug_printer_level
+            != IntermediateValueDebuggingLevel.OFF
+        ):
             args_to_print_or_save = []
 
         for x in args:
@@ -1227,7 +1233,10 @@ class CppWrapperCpu(WrapperCodeGen):
                 ):
                     # TODO: The current way to find a 'tensor' type arg is hacky also as mentioned above
                     # Find a more reliable way to detect tensor kernel args for extern kernel calls
-                    if debug_printer_level != IntermediateValueDebuggingLevel.OFF:
+                    if (
+                        debug_printer_manager.debug_printer_level
+                        != IntermediateValueDebuggingLevel.OFF
+                    ):
                         if piece.startswith(("buf", "arg")):
                             args_to_print_or_save.append(piece)
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"

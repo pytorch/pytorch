@@ -5,7 +5,6 @@ from typing import Sequence
 from torchgen import local
 from torchgen.api.types import (
     ArgName,
-    ArrayCType,
     BaseCType,
     Binding,
     ConstRefCType,
@@ -88,7 +87,7 @@ def valuetype_type(
         if str(t.elem) == "bool":
             assert t.size is not None
             return NamedCType(
-                binds, ArrayCType(BaseCType(BaseTypeToCppMapping[BaseTy.bool]), t.size)
+                binds, ArrayRefCType(BaseCType(BaseTypeToCppMapping[BaseTy.bool]))
             )
         else:
             return None
