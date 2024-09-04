@@ -32,8 +32,8 @@ jobs:
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      build-environment: linux-jammy-py3.8-gcc11
-      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11
 
   docs-push:
     name: docs push
@@ -43,7 +43,7 @@ jobs:
       - get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.8-gcc11
+      build-environment: linux-jammy-py3.9-gcc11
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
       push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
       run-doxygen: true
