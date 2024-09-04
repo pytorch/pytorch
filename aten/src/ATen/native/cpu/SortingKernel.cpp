@@ -15,6 +15,7 @@
 #include <ATen/native/CompositeRandomAccessor.h>
 #include <ATen/native/TopKImpl.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/util/SmallBuffer.h>
 #include <c10/util/irange.h>
 
 #ifdef USE_FBGEMM
@@ -244,8 +245,8 @@ static void xss_sort_kernel(
           indices_data_bytes += strides[1];
         }
       }else{
-        std::vector<scalar_t> tmp_values(dim_size);
-        std::vector<index_t> tmp_indices(dim_size);
+        c10::SmallBuffer<scalar_t, 0> tmp_values(dim_size);
+        c10::SmallBuffer<index_t, 0> tmp_indices(dim_size);
 
         for (const auto i : c10::irange(n)) {
           TensorAccessor<scalar_t, 1> mode_values_acc(
