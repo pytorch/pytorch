@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
@@ -78,10 +78,16 @@ class DeferredCudaDefaultGrid:
         self.grid_callable = grid_callable
         self.grid_extra_kwargs = grid_extra_kwargs
 
+    def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
+        if isinstance(grid, (list, tuple)):
+            return [self._process_grid(e) for e in grid]
+        else:
+            return grid.inner_expr if isinstance(grid, SymbolicCallArg) else grid
+
     def __call__(self):
         grid = self.grid
         assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
-        grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
+        grid = self._process_grid(grid)
         grid_callable = self.grid_callable or default_grid
         if not self.grid_extra_kwargs:
             grid_fn = grid_callable(*grid)
@@ -389,9 +395,9 @@ class CppWrapperCuda(CppWrapperCpu):
             call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
             arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
 
-        call_args = self.generate_args_decl(call_args, arg_types)
+        call_args_str = self.generate_args_decl(call_args, arg_types)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-        self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+        self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
         stream = (
             "stream"
             if V.graph.aot_mode
@@ -404,19 +410,23 @@ class CppWrapperCuda(CppWrapperCpu):
         )
 
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
-        self.writeline(f"if ({grid_var}.is_non_zero()) {{")
-        self.writeline(
-            DeferredCudaKernelLine(
-                kernel_name,
-                r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
-                    kernel_var_name,
-                    f"{grid_var}.grid_x",
-                    f"{grid_var}.grid_y",
-                    f"{grid_var}.grid_z",
-                    kernel_args_var,
-                    stream,
+        # add debug printer code for all triton kernel related calls
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
+        with debug_printer_manager:
+            self.writeline(f"if ({grid_var}.is_non_zero()) {{")
+            self.writeline(
+                DeferredCudaKernelLine(
+                    kernel_name,
+                    r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
+                        kernel_var_name,
+                        f"{grid_var}.grid_x",
+                        f"{grid_var}.grid_y",
+                        f"{grid_var}.grid_z",
+                        kernel_args_var,
+                        stream,
+                    ),
+                    ("num_warps", "shared_mem"),
                 ),
-                ("num_warps", "shared_mem"),
-            ),
-        )
-        self.writeline("}")
+            )
+            self.writeline("}")

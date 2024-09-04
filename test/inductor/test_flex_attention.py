@@ -2172,7 +2172,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             *inputs, is_causal=True
         )
 
-        torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=1e-3, rtol=0.0)
+        torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)

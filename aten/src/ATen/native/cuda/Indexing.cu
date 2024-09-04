@@ -1350,7 +1350,7 @@ template <typename scalar_t>
 void index_select_out_cuda_impl(
     Tensor& out,
     const Tensor& self,
-    long dim,
+    uint64_t dim,
     const Tensor& index) {
   uint64_t numIndices = index.numel();
   uint64_t selfDims = self.dim() == 0 ? 1 : self.dim();
@@ -1511,13 +1511,13 @@ Tensor& index_select_out_cuda(
       self.qscheme() == kPerTensorAffine,
       "Only per_tensor quantized quantized tensors are supported by index_select.")
     AT_DISPATCH_QINT_TYPES(out.scalar_type(), "index_select_quant_cuda", [&] {
-      index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
+      index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index);
     });
   } else {
     AT_DISPATCH_V2(
         out.scalar_type(),
         "index_select_cuda",
-        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); }),
+        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index); }),
         AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
         kComplexHalf,
         kHalf,
