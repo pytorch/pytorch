@@ -5,7 +5,7 @@
 #include <torch/csrc/python_headers.h>
 
 struct THXPEvent : THPEvent {
-  PyObject_HEAD at::xpu::XPUEvent xpu_event;
+  at::xpu::XPUEvent xpu_event;
 };
 extern PyObject* THXPEventClass;
 

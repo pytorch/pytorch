@@ -6,7 +6,7 @@
 #include <torch/csrc/python_headers.h>
 
 struct THCPEvent : THPEvent {
-  PyObject_HEAD at::cuda::CUDAEvent cuda_event;
+  at::cuda::CUDAEvent cuda_event;
 };
 extern PyObject* THCPEventClass;
 
