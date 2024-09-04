@@ -1485,7 +1485,6 @@ def _maybe_evaluate_static_worker(
         new_expr = expr.xreplace(new_shape_env)
     except RecursionError:
         log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
-        self.counter["sympy_recursion_error"] += 1
         return None
 
     # We need to canonicalize, as after expand we may have something like `a + b = a` and
@@ -4562,7 +4561,7 @@ class ShapeEnv:
 
         fs = expr.free_symbols
 
-        if not fs:
+        if not fs and (expr.is_number or expr.is_Boolean):
             return expr
 
         if var_to_range is None:
@@ -4575,7 +4574,8 @@ class ShapeEnv:
             for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
         )
 
-        return _maybe_evaluate_static_worker(expr, symbol_info, unbacked_only, size_oblivious)
+        r = _maybe_evaluate_static_worker(expr, symbol_info, unbacked_only, size_oblivious)
+        return r
 
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
