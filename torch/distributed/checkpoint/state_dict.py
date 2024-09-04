@@ -358,6 +358,9 @@ def _verify_options(
             optim_state_dict_config,
         ):
             with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", message="FSDP.state_dict_type", category=FutureWarning
+                )
                 with FSDP.state_dict_type(
                     module=module,
                     state_dict_type=state_dict_type,
@@ -445,7 +448,7 @@ def _maybe_full_or_cpu_state_dict(
 ) -> Dict[str, Any]:
     if info.full_state_dict:
         ranks_only = (
-            tuple()
+            ()
             if (not info.cpu_offload or not torch.distributed.is_initialized())
             else (0,)
         )
@@ -458,6 +461,7 @@ def _maybe_full_or_cpu_state_dict(
         return state_dict
 
 
+@torch.no_grad()
 def _get_model_state_dict(
     model: nn.Module, info: _StateDictInfo
 ) -> Dict[str, ValueType]:
@@ -525,6 +529,7 @@ def _get_model_state_dict(
     return _maybe_full_or_cpu_state_dict(state_dict, info)
 
 
+@torch.no_grad()
 def _load_model_state_dict(
     model: nn.Module,
     state_dict: Dict[str, ValueType],
@@ -547,7 +552,8 @@ def _load_model_state_dict(
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
             local_state_dict[fqn_with_prefix] = value
 
-    if info.broadcast_from_rank0:
+    assign = False
+    if info.broadcast_from_rank0 or info.full_state_dict:
         device = None
         for key, value in local_state_dict.items():
             if torch.is_tensor(value) and value.dim() > 0:
@@ -556,9 +562,15 @@ def _load_model_state_dict(
                 else:
                     assert device == value.device
         assert device is not None
-        _broadcast_state_dict(
-            state_dict, local_state_dict, device=device, strict=info.strict
-        )
+        if device == torch.device("meta"):
+            device = dist.distributed_c10d._get_pg_default_device()
+            assign = True
+        if info.broadcast_from_rank0:
+            _broadcast_state_dict(
+                state_dict, local_state_dict, device=device, strict=info.strict
+            )
+        elif info.full_state_dict:
+            _distribute_state_dict(state_dict, local_state_dict, device=device)
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
@@ -566,7 +578,7 @@ def _load_model_state_dict(
         return cast(
             _IncompatibleKeys,
             _state_dict_fn(model, "load_state_dict")(
-                state_dict=state_dict, strict=info.strict
+                state_dict=state_dict, strict=info.strict, assign=assign
             ),
         )
 
@@ -718,6 +730,7 @@ def _unflatten_optim_state_dict(
     return return_osd
 
 
+@torch.no_grad()
 def _get_optim_state_dict(
     model: nn.Module,
     optimizers: Tuple[torch.optim.Optimizer, ...],
@@ -853,6 +866,7 @@ def _split_optim_state_dict(
     return return_osd
 
 
+@torch.no_grad()
 def _load_optim_state_dict(
     model: nn.Module,
     optimizers: Tuple[torch.optim.Optimizer, ...],
@@ -973,7 +987,7 @@ def get_model_state_dict(
     with _gc_context():
         info = _verify_options(
             model,
-            tuple(),
+            (),
             optim_only=False,
             submodules=submodules,
             options=options,
@@ -1183,7 +1197,7 @@ def set_model_state_dict(
         model, model_state_dict
     )
     with _gc_context():
-        info = _verify_options(model, tuple(), optim_only=False, options=options)
+        info = _verify_options(model, (), optim_only=False, options=options)
 
         _verify_state_dict(model_state_dict, {}, info)
         return _load_model_state_dict(model, model_state_dict, info)

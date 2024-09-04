@@ -3,13 +3,13 @@
 import itertools
 import os
 import re
-
 from collections import namedtuple
 
 import torch._C as C
 import torch.utils.cpp_extension
 from torch._python_dispatcher import PythonDispatcher
 from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
@@ -913,9 +913,9 @@ alias analysis kind: PURE_FUNCTION
 
     def test_multiple_fallback(self):
         global_m = C._dispatch_library("IMPL", "_", "XLA")
-        global_m.fallback_fallthrough(),
+        global_m.fallback_fallthrough()
         try:
-            global_m.fallback_fallthrough(),
+            global_m.fallback_fallthrough()
         except RuntimeError as e:
             self.assertExpectedInline(
                 str(e),
@@ -961,9 +961,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         )
         module = torch.utils.cpp_extension.load(
             name="dangling_impl_extension",
-            sources=[
-                extension_path,
-            ],
+            sources=[extension_path],
             extra_cflags=["-g"],
             verbose=True,
         )

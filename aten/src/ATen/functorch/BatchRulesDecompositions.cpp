@@ -48,6 +48,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(arctan2);
   OP_DECOMPOSE(arctan2_);
   OP_DECOMPOSE(argsort);
+  OP_DECOMPOSE2(argsort, stable);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
   OP_DECOMPOSE(adaptive_avg_pool1d);
@@ -260,6 +261,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(special_xlogy);
   OP_DECOMPOSE2(special_xlogy, other_scalar);
   OP_DECOMPOSE2(special_xlogy, self_scalar);
+  OP_DECOMPOSE(_scaled_dot_product_attention_math);
 
 
   m.impl("split.sizes", native::split_symint);

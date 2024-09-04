@@ -1,28 +1,29 @@
 # mypy: allow-untyped-defs
 from itertools import chain
 from operator import getitem
+from typing import Callable, Dict, Optional, Set, Tuple, Type, Union
+
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.ao.pruning.sparsifier.base_sparsifier import BaseSparsifier
 from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
-from typing import Type, Set, Dict, Callable, Tuple, Optional, Union
 
-from torch.ao.pruning import BaseSparsifier
-from .parametrization import FakeStructuredSparsity, BiasHook, module_contains_param
 from .match_utils import apply_match, MatchAllNode
+from .parametrization import BiasHook, FakeStructuredSparsity, module_contains_param
 from .prune_functions import (
-    prune_linear,
-    prune_linear_linear,
-    prune_linear_activation_linear,
     prune_conv2d,
-    prune_conv2d_conv2d,
     prune_conv2d_activation_conv2d,
     prune_conv2d_activation_pool_conv2d,
+    prune_conv2d_conv2d,
     prune_conv2d_pool_activation_conv2d,
     prune_conv2d_pool_flatten_linear,
-    prune_lstm_output_linear,
+    prune_linear,
+    prune_linear_activation_linear,
+    prune_linear_linear,
     prune_lstm_output_layernorm_linear,
+    prune_lstm_output_linear,
 )
 
 
@@ -89,10 +90,12 @@ def _get_supported_activation_modules():
     return SUPPORTED_ACTIVATION_MODULES
 
 
-def _get_default_structured_pruning_patterns() -> Dict[
-    Tuple[Union[Type[nn.Module], Callable, MatchAllNode, str], ...],
-    Callable[..., None],
-]:
+def _get_default_structured_pruning_patterns() -> (
+    Dict[
+        Tuple[Union[Type[nn.Module], Callable, MatchAllNode, str], ...],
+        Callable[..., None],
+    ]
+):
     """
     Returns the patterns for conv2d / linear conversion for each element in the activation functions/modules defined above.
     """
@@ -308,4 +311,4 @@ class BaseStructuredSparsifier(BaseSparsifier):
 
         self.traced.graph.lint()
         self.traced.recompile()
-        return self.traced
+        return self.traced  # type: ignore[return-value]

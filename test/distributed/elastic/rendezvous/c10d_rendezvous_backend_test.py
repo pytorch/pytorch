@@ -8,7 +8,6 @@
 
 import os
 import tempfile
-
 from base64 import b64encode
 from datetime import timedelta
 from typing import Callable, cast, ClassVar
@@ -17,7 +16,6 @@ from unittest import mock, TestCase
 from rendezvous_backend_test import RendezvousBackendTestMixin
 
 from torch.distributed import FileStore, TCPStore
-
 from torch.distributed.elastic.rendezvous import (
     RendezvousConnectionError,
     RendezvousError,
@@ -205,16 +203,6 @@ class CreateBackendTest(TestCase):
         del self._params.config["read_timeout"]
 
         self._expected_read_timeout = timedelta(seconds=60)
-
-        self._assert_create_backend_returns_backend()
-
-    def test_create_backend_returns_backend_with_libuv(self) -> None:
-        self._params.config["use_libuv"] = "true"
-
-        self._assert_create_backend_returns_backend()
-
-    def test_create_backend_returns_backend_without_libuv(self) -> None:
-        self._params.config["use_libuv"] = "false"
 
         self._assert_create_backend_returns_backend()
 

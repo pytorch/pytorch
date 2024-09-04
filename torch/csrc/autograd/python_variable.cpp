@@ -227,7 +227,7 @@ static bool check_has_torch_dispatch(PyObject* obj) {
       attr.ptr() != torch::disabled_torch_dispatch_impl());
 }
 
-// NOLINTNEXTLINE
+// NOLINTNEXTLINE(*-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyObject* device_to_py_class_[static_cast<size_t>(
     c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 
@@ -347,7 +347,7 @@ bool isResurrectable(THPVariable* self) {
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false) !=
-      c10::make_optional((PyObject*)self)) {
+      std::make_optional((PyObject*)self)) {
     return false;
   }
   return true;
@@ -455,7 +455,7 @@ static int THPVariable_clear(THPVariable* self) {
     if (!self->cdata.unsafeIsBorrowed() &&
         tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
             getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
-            c10::make_optional((PyObject*)self)) {
+            std::make_optional((PyObject*)self)) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -587,14 +587,14 @@ static PyObject* view_func_impl(
         auto& view_func = view_info.view_fn();
 
         // Determine new SymInt / tensor state as needed.
-        std::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
+        std::optional<std::vector<c10::SymInt>> new_symints = std::nullopt;
         if (symint_visitor_fn != Py_None) {
           new_symints = map_py_func(
               py::cast<py::function>(symint_visitor_fn),
               view_func.get_symints());
         }
 
-        std::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
+        std::optional<std::vector<at::Tensor>> new_tensors = std::nullopt;
         if (tensor_visitor_fn != Py_None) {
           new_tensors = map_py_func(
               py::cast<py::function>(tensor_visitor_fn),
@@ -887,8 +887,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
   END_HANDLE_TH_ERRORS
 }
 
-typedef PyObject* (*getter)(PyObject*, void*);
-typedef int (*setter)(PyObject*, PyObject*, void*);
+using getter = PyObject* (*)(PyObject*, void*);
+using setter = int (*)(PyObject*, PyObject*, void*);
 
 PyObject* THPVariable_get_python_dispatch(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
@@ -1084,15 +1084,13 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
         grad.options().type_equal(var.options()),
         "attempting to assign a gradient to a tensor that has data of a different type");
   }
-  if (var.is_cuda()) {
-    TORCH_CHECK(
-        grad.get_device() == var.get_device(),
-        "attempting to assign a gradient located on device with index '",
-        grad.get_device(),
-        "' to a tensor located on device with index '",
-        var.get_device(),
-        "'. Please ensure that the gradient and the tensor are on the same device");
-  }
+  TORCH_CHECK(
+      grad.get_device() == var.get_device(),
+      "attempting to assign a gradient located on device with index '",
+      grad.get_device(),
+      "' to a tensor located on device with index '",
+      var.get_device(),
+      "'. Please ensure that the gradient and the tensor are on the same device");
   TORCH_CHECK(
       grad.sym_sizes().equals(var.sym_sizes()),
       "attempting to assign a gradient of size '",
@@ -1222,7 +1220,7 @@ int THPVariable_set_names(PyObject* self, PyObject* names, void* unused) {
   }
   const auto& var = THPVariable_Unpack(self);
   if (names == Py_None) {
-    at::internal_set_names_inplace(var, at::nullopt);
+    at::internal_set_names_inplace(var, std::nullopt);
   } else {
     TORCH_CHECK(
         THPUtils_checkDimnameList(names),
@@ -2161,14 +2159,9 @@ static int traverse_slots(
     PyObject* self,
     visitproc visit,
     void* arg) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t i, n;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyMemberDef* mp;
-
-  n = Py_SIZE(type);
-  mp = type->tp_members;
-  for (i = 0; i < n; i++, mp++) {
+  auto n = Py_SIZE(type);
+  auto mp = type->tp_members;
+  for (Py_ssize_t i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;

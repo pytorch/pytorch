@@ -1,9 +1,7 @@
 #include <c10/util/DeadlockDetection.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 RegisterWorkerInfoOnce::RegisterWorkerInfoOnce() {
   // WorkerInfo needs to be registered exactly once. Since the op registration
@@ -25,7 +23,7 @@ WorkerInfo::WorkerInfo(std::string name, int64_t id)
 
 WorkerInfo::WorkerInfo(std::string name, worker_id_t id)
     : name_(std::move(name)), id_(id) {
-  bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
+  bool validSize = name_.length() < MAX_NAME_LEN && !name_.empty();
   bool validChar =
       std::find_if(name_.begin(), name_.end(), [](char c) {
         return !(std::isalnum(c) || c == '-' || c == '_' || c == ':');
@@ -335,6 +333,4 @@ std::ostream& operator<<(std::ostream& os, const WorkerInfo& workerInfo) {
             << ", name=" << workerInfo.name_ << ")";
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

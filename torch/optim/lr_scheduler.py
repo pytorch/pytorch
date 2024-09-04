@@ -5,7 +5,7 @@ import types
 import warnings
 from bisect import bisect_right
 from collections import Counter
-from functools import partial
+from functools import partial, wraps
 from typing import (
     Any,
     Callable,
@@ -25,6 +25,7 @@ from weakref import ref
 from torch import inf, Tensor
 
 from .optimizer import Optimizer
+
 
 __all__ = [
     "LambdaLR",
@@ -129,6 +130,7 @@ class LRScheduler:
                 opt_ref = ref(self.optimizer)
                 func = step_fn.__func__
 
+                @wraps(func)
                 def wrapper(*args, **kwargs):
                     opt = opt_ref()
                     opt._opt_called = True  # type: ignore[union-attr]
@@ -245,8 +247,7 @@ class LRScheduler:
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
             if isinstance(param_group["lr"], Tensor):
-                lr_val = lr.item() if isinstance(lr, Tensor) else lr  # type: ignore[attr-defined]
-                param_group["lr"].fill_(lr_val)
+                param_group["lr"].fill_(lr)
             else:
                 param_group["lr"] = lr
 
@@ -1073,7 +1074,7 @@ class CosineAnnealingLR(LRScheduler):
         self,
         optimizer: Optimizer,
         T_max: int,
-        eta_min=0,
+        eta_min=0.0,
         last_epoch=-1,
         verbose="deprecated",
     ):  # noqa: D107
@@ -1740,7 +1741,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         optimizer: Optimizer,
         T_0: int,
         T_mult=1,
-        eta_min=0,
+        eta_min=0.0,
         last_epoch=-1,
         verbose="deprecated",
     ):  # noqa: D107
@@ -1938,7 +1939,7 @@ class OneCycleLR(LRScheduler):
     Example:
         >>> # xdoctest: +SKIP
         >>> data_loader = torch.utils.data.DataLoader(...)
-        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
         >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, steps_per_epoch=len(data_loader), epochs=10)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:

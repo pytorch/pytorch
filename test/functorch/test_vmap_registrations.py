@@ -5,7 +5,6 @@ import unittest
 from torch._C import (
     _dispatch_get_registrations_for_dispatch_key as get_registrations_for_dispatch_key,
 )
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -13,6 +12,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TestCase,
 )
+
 
 xfail_functorch_batched = {
     "aten::is_nonzero",
@@ -228,6 +228,8 @@ xfail_not_implemented = {
     "aten::var_mean.correction_names",
     "aten::var_mean.names_dim",
     "aten::where",
+    "aten::wrapped_linear_prepack",
+    "aten::wrapped_quantized_linear_prepacked",
 }
 
 
