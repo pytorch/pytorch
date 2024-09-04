@@ -230,7 +230,7 @@ def _apply_to_tensors(fn, container):
     def apply(x):
         if isinstance(x, torch.Tensor):
             return fn(x)
-        elif hasattr(x, "__dataclass_fields__"):
+        elif dataclasses.is_dataclass(x):
             dc = dataclasses.replace(x)
             changes = {
                 f.name: apply(getattr(dc, f.name)) for f in dataclasses.fields(dc)
