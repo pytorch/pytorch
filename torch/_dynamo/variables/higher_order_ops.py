@@ -1033,9 +1033,25 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
-        null_shape = SourcelessBuilder.create(tx, ())
         sub_args = [
-            leaf.call_method(tx, "new_empty", args=(null_shape,), kwargs={})
+            leaf.call_method(
+                tx,
+                "new_empty",
+                args=(
+                    SourcelessBuilder.create(
+                        tx,
+                        leaf.size
+                        if leaf.size is not None
+                        else BuiltinVariable(getattr)
+                        .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
+                        .items,
+                    ),
+                ),
+                kwargs={
+                    "dtype": SourcelessBuilder.create(tx, leaf.dtype),
+                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
+                },
+            )
             for leaf in itertools.chain(input.items, input.items)
         ]
         (
@@ -1076,11 +1092,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 unimplemented(
                     f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
                     + f"got {combine_result_meta.dtype}"
-                )
-
-            if combine_result_meta.shape != ():
-                unimplemented(
-                    f"Expected combine_fn to return a tensor with shape () but got {combine_result_meta.shape}"
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
@@ -1985,6 +1996,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
+            enable_grad=False,
             set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,

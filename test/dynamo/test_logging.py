@@ -741,6 +741,7 @@ exclusions = {
     "trace_shape_events",
     "cudagraph_static_inputs",
     "benchmarking",
+    "loop_ordering",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
