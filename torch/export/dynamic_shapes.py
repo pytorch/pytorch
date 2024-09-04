@@ -2,8 +2,8 @@
 import dataclasses
 import inspect
 import sys
-import weakref
 from collections import defaultdict
+from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -32,9 +32,19 @@ __all__ = [
     "Constraint",
     "Dim",
     "dims",
-    "dynamic_dim",
     "refine_dynamic_shapes_from_suggested_fixes",
 ]
+
+
+class _DimHint(Enum):
+    """
+    Enum for dynamic shape hints.
+    - AUTO means automatic inference of shape (static or dynamic).
+    - STATIC means static shape (always specialized).
+    """
+
+    AUTO = auto()
+    STATIC = auto()
 
 
 class _Dim(type):
@@ -205,6 +215,7 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     Returns:
         A type that can be used in dynamic shape specifications for tensors.
     """
+
     from torch.utils._sympy.numbers import int_oo
 
     _min = 0 if min is None else min
@@ -218,6 +229,10 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     return dim
 
 
+Dim.AUTO = _DimHint.AUTO  # type: ignore[attr-defined]
+Dim.STATIC = _DimHint.STATIC  # type: ignore[attr-defined]
+
+
 def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
     """
     Util to create multiple :func:`Dim` types.
@@ -228,61 +243,24 @@ def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
 @dataclasses.dataclass
 class _ConstraintTarget:
     """
-    This represents input tensor dimensions.  Don't create this
-    class directly; instead, use :func:`dynamic_dim`.
+    This represents input tensor dimensions.
     """
 
-    w_tensor: Any  # weakref to torch.Tensor
-    # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
 
 
-class _ConstraintFactory(type):
-    """
-    Metaclass that ensures a private constructor for :class:`_Constraint`
-    """
-
-    def __call__(cls, *args, **kwargs):
-        raise TypeError(
-            f"{cls.__module__}.{cls.__qualname__} has no public constructor. "
-            f"Please use torch.export.dynamic_dim() to create one"
-        )
-
-    def _create(
-        cls, w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
-    ):
-        return super().__call__(
-            w_tensor, t_id, dim, constraint_range, shared, debug_name
-        )
-
-
-def _create_constraint(
-    w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
-):
-    return _Constraint._create(
-        w_tensor, t_id, dim, constraint_range, shared, debug_name
-    )
-
-
 @dataclasses.dataclass
-class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
+class _Constraint(_ConstraintTarget):
+    """
+    This represents a Dim describing a constraint target.
+
+    `name` is the name of the Dim.
+    `constraint_range` contains the min/max bounds of the Dim.
     """
 
-    .. warning::
-        Do not construct :class:`_Constraint` directly, use :func:`dynamic_dim` instead.
-
-    This represents constraints on input tensor dimensions, e.g., requiring
-    them to be fully polymorphic or within some range.
-
-    """
-
-    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
+    name: str
     constraint_range: "StrictMinMaxConstraint"
-    # Represent that `constraint_range` is shared with another _ConstraintTarget, which
-    # typically arises because of a specified equality with another dynamic dimension.
-    shared: Optional[_ConstraintTarget] = None
-    debug_name: Optional[str] = None
 
     def _clone_with_range(self, lower=0, upper=None):
         # Import sympy locally
@@ -297,13 +275,11 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return _create_constraint(
-            self.w_tensor,
+        return _Constraint(
             self.t_id,
             self.dim,
+            self.name,
             constraint_range,
-            self.shared,
-            self.debug_name,
         )
 
     def __ge__(self, lower):
@@ -345,34 +321,6 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
             "max": self.constraint_range.vr.upper,
         }
 
-    def __eq__(self, other):
-        if not isinstance(other, _Constraint):
-            raise TypeError(
-                "A dynamic dim can be specified equal only to another dynamic dim. "
-                f"Equality with {type(other)} is not supported."
-            )
-
-        # import sympy locally
-        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-
-        constraint_range = StrictMinMaxConstraint(
-            vr=self.constraint_range.vr & other.constraint_range.vr,
-            warn_only=False,
-        )
-        if self.debug_name is None:
-            debug_name = other.debug_name
-        else:
-            assert other.debug_name is None or self.debug_name == other.debug_name
-            debug_name = self.debug_name
-        return _create_constraint(
-            self.w_tensor,
-            self.t_id,
-            self.dim,
-            constraint_range,
-            shared=_ConstraintTarget(other.w_tensor, other.t_id, other.dim),
-            debug_name=debug_name,
-        )
-
 
 @dataclasses.dataclass
 class _PhantomRoot:
@@ -398,23 +346,15 @@ class _DerivedConstraint(_ConstraintTarget):
     This represents a derived Dim, whose root is either a regular constraint target
     (which directly specifies the shape of some input dimension) or a phantom root
     (which does so indirectly).
+
+    It can be thought of as a subclass of `_Constraint`, except that it does not
+    support <, <=, >, >= operations.
     """
 
-    # NOTE: This is not currently a subclass of _Constraint because we do not support
-    # `shared` for derived `Dim`s. Indeed, sharing is a necessary concept only for
-    # legacy constraints based on `dynamic_dim`: equality can be expressed simply by
-    # reusing the same (derived or normal) `Dim`.
+    name: str
+    constraint_range: "StrictMinMaxConstraint"
     root: Union[_ConstraintTarget, _PhantomRoot]
     fn: Callable
-    constraint_range: "StrictMinMaxConstraint"
-    debug_name: Optional[str] = None
-
-    @property
-    def shared(self):
-        # Some code paths expect a union of _Constraint and _DerivedConstraint.
-        # Thus we expose a `shared` field that is always None.
-        # TODO(avik): clean this up
-        return None
 
     @property
     def serializable_spec(self):
@@ -430,114 +370,11 @@ class _DerivedConstraint(_ConstraintTarget):
 Constraint = Union[_Constraint, _DerivedConstraint]
 
 
-def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
-    """
-    .. warning::
-        (This feature is DEPRECATED. See :func:`Dim` instead.)
-
-    :func:`dynamic_dim` constructs a :class:`_Constraint` object that describes the dynamism of
-    a dimension ``index`` of tensor ``t``. :class:`_Constraint` objects should be passed to
-    ``constraints`` argument of :func:`export`.
-
-    Args:
-        t (torch.Tensor): Example input tensor that have dynamic dimension size(s)
-        index (int): Index of dynamic dimension
-
-    Returns:
-        A :class:`_Constraint` object that describes shape dynamism. It can be passed to :func:`export` so
-        that :func:`export` does not assume static size of specified tensor, i.e. keeping it dynamic
-        as a symbolic size rather than specializing according to size of example tracing input.
-
-    Specifically :func:`dynamic_dim` can be used to express following types of dynamism.
-
-    - Size of a dimension is dynamic and unbounded::
-
-        t0 = torch.rand(2, 3)
-        t1 = torch.rand(3, 4)
-
-        # First dimension of t0 can be dynamic size rather than always being static size 2
-        constraints = [dynamic_dim(t0, 0)]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Size of a dimension is dynamic with a lower bound::
-
-        t0 = torch.rand(10, 3)
-        t1 = torch.rand(3, 4)
-
-        # First dimension of t0 can be dynamic size with a lower bound of 5 (inclusive)
-        # Second dimension of t1 can be dynamic size with a lower bound of 2 (exclusive)
-        constraints = [
-            dynamic_dim(t0, 0) >= 5,
-            dynamic_dim(t1, 1) > 2,
-        ]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Size of a dimension is dynamic with an upper bound::
-
-        t0 = torch.rand(10, 3)
-        t1 = torch.rand(3, 4)
-
-        # First dimension of t0 can be dynamic size with a upper bound of 16 (inclusive)
-        # Second dimension of t1 can be dynamic size with a upper bound of 8 (exclusive)
-        constraints = [
-            dynamic_dim(t0, 0) <= 16,
-            dynamic_dim(t1, 1) < 8,
-        ]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Size of a dimension is dynamic and it is always equal to size of another dynamic dimension::
-
-        t0 = torch.rand(10, 3)
-        t1 = torch.rand(3, 4)
-
-        # Sizes of second dimension of t0 and first dimension are always equal
-        constraints = [
-            dynamic_dim(t0, 1) == dynamic_dim(t1, 0),
-        ]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Mix and match all types above as long as they do not express conflicting requirements
-
-    """
-    from torch._dynamo.exc import UserError, UserErrorType
-
-    if not isinstance(t, torch.Tensor):
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            f"Expected tensor as input to dynamic_dim but got {type(t)}",
-        )
-
-    if t.dim() < 1:
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM, "Cannot mark 0-dimension tensors to be dynamic"
-        )
-
-    if index >= t.dim():
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            f"Expected the dimension passed to dynamic_dim to be in the range [0:{t.dim()-1}]"
-            f" but got {index}, which is out of bounds for the given tensor.",
-        )
-
-    # Import sympy locally
-
-    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-    from torch.utils._sympy.numbers import int_oo
-    from torch.utils._sympy.value_ranges import ValueRanges
-
-    return _create_constraint(
-        weakref.ref(t),
-        id(t),
-        index,
-        StrictMinMaxConstraint(vr=ValueRanges(lower=0, upper=int_oo), warn_only=False),
-        debug_name=debug_name,
-    )
-
-
 def _process_equalities(
     constraint: Constraint,
     get_sources: Callable[[int, int], List["Source"]],
     shape_env: "ShapeEnv",
+    names: Dict[str, Tuple[int, int]],
     source_pairs: List[Tuple["Source", "Source"]],
     derived_equalities: List[Tuple["Source", Union["Source", "Symbol"], Callable]],
     phantom_symbols: Dict[str, "Symbol"],
@@ -547,19 +384,23 @@ def _process_equalities(
     fields of `EqualityConstraint`) based on a given input `constraint`.
     """
 
-    source, *other_sources = get_sources(constraint.t_id, constraint.dim)
+    sources = get_sources(constraint.t_id, constraint.dim)
+    if not sources:  # empty sources due to unused shapes
+        return
+
+    source, *other_sources = sources
     # When t.size()[dim] maps to src0, src1, ..., srcN, we add
     # constraints that make src0 "equal" to src1, ..., srcN.
     source_pairs.extend((source, other_source) for other_source in other_sources)
     if not isinstance(constraint, _DerivedConstraint):
-        if constraint.shared is not None:
-            # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
-            # and t'.size()[dim'] maps to src1', ..., srcN', we add
-            # constraints that also make src0 "equal" to src1', ..., srcN'.
-            other_sources = get_sources(constraint.shared.t_id, constraint.shared.dim)
+        if constraint.name in names:
+            shared_t_id, shared_dim = names[constraint.name]
+            other_sources = get_sources(shared_t_id, shared_dim)
             source_pairs.extend(
                 (source, other_source) for other_source in other_sources
             )
+        else:
+            names[constraint.name] = (constraint.t_id, constraint.dim)
     else:
         # branch based on the root of the _DerivedConstraint
         if not isinstance(constraint.root, _PhantomRoot):
@@ -805,6 +646,7 @@ def _check_dynamic_shapes(
     using combined args + kwargs as reference for inputs structure.
     """
     from torch._dynamo.exc import UserError, UserErrorType
+    from torch._export.non_strict_utils import _flatten_dynamic_shapes
 
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return
@@ -832,24 +674,24 @@ def _check_dynamic_shapes(
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
                     check_same_bounds(dim)
-                elif not isinstance(dim, int) and dim is not None:
+                elif not (isinstance(dim, (int, _DimHint)) or dim is None):
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
                         f"Unexpected dimension mapped to index {i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
-                        f"(expected None, an int, or a Dim, but got {dim} instead)",
+                        f"(expected None, an int, a Dim, Dim.AUTO, or Dim.STATIC, but got {dim} instead)",
                         case_name="dynamic_shapes_validation",
                     )
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
                 if isinstance(dim, _Dim):
                     check_same_bounds(dim)
-                elif not isinstance(dim, int) and dim is not None:
+                elif not (isinstance(dim, (int, _DimHint)) or dim is None):
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
                         f"Unexpected dimension #{i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
-                        f"(expected None, an int, or a Dim, but got {dim} instead)",
+                        f"(expected None, an int, a Dim, Dim.AUTO, or Dim.STATIC, but got {dim} instead)",
                         case_name="dynamic_shapes_validation",
                     )
         elif shape is not None:
@@ -857,7 +699,7 @@ def _check_dynamic_shapes(
                 UserErrorType.INVALID_INPUT,
                 f"Unexpected input tensor shape {shape} specified at `dynamic_shapes{keystr(path)}` "
                 f"(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                f" where each dimension is None, an int, or a Dim)",
+                f" where each dimension is None, an int, a Dim, Dim.AUTO, or Dim.STATIC)",
                 case_name="dynamic_shapes_validation",
             )
 
@@ -904,6 +746,150 @@ def _check_dynamic_shapes(
 
     _tree_map_with_path(check_shape, combined_args, dynamic_shapes, tree_name="inputs")
 
+    # raise user warning if both Dim.AUTO & Dims are specified in dynamic_shapes
+    flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
+    flatter_dynamic_shapes, _ = tree_flatten(flat_dynamic_shapes)
+    if any(isinstance(s, _Dim) for s in flatter_dynamic_shapes) and any(
+        s == _DimHint.AUTO for s in flatter_dynamic_shapes
+    ):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "Specifying both `Dim.AUTO` and `Dim` or `DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
+            "and can easily lead to constraint violation errors or obscure errors in torch.export. Dim/DerivedDims "
+            "expect all equal or related dimensions to be specified, and does not yet compose well with `Dim.AUTO`. "
+            "We suggest using `Dim.AUTO` mixed with `None` for auto-dynamic + static shapes, plus torch._check(dim >= min), "
+            "torch._check(dim <= max) calls in your program to specify min/max ranges, or `Dim`/`DerivedDim` mixed with `None` "
+            "if you want to assert on the exact specification of your program's dynamic shapes behavior.",
+            case_name="dynamic_shapes_validation",
+        )
+
+
+def _transform_shapes_for_default_dynamic(
+    combined_args: Dict[str, Any],
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
+) -> Union[Dict[str, Any], Tuple[Any], List[Any], None]:
+    """
+    In the long run this might not be needed, but this exists because export.export() and _dynamo.export()
+    historically have different semantics for how dynamic_shapes are specified, but go through the same
+    process of producing constraints, and now both use assume_static_by_default=False.
+
+    For _dynamo.export(), the semantics for dynamic_shapes are:
+    - None: dynamic, allocated a symbol
+    - Dim/DerivedDim: a strict assertion on the min/max range for this symbol, and require a specification
+      for all dims governed by this symbol (i.e. relations, equality, linear relations, etc.)
+
+    For export.export(), historically dynamism for unspecified dims has been undesirable, so the semantics are:
+    - Dim.AUTO: dynamic, allocated a symbol
+    - None/unspecified/Dim.STATIC: static
+    - Dim/DerivedDims: also a strict assertion
+
+    To allow both APIs to follow the same process for producing constraints, this function converts dynamic_shapes
+    for export.export() to be compatible with _process_dynamic_shapes() and assume_static_by_default=False, turning them
+    into essentially what they'd look like for _dynamo.export().
+
+    An example conversion might look like, for a 3-d input tensor:
+
+        input spec: {
+            0: Dim.AUTO,
+            1: None,  # or Dim.STATIC
+            2: Dim("dx"),
+        }
+        output spec: {
+            0: None,  # None: dynamic by default
+            1: 32,  # explicitly provide static shape
+            2: Dim("dx"),  # remains the same
+        }
+    """
+
+    def _tree_map_helper(tree, val):
+        """
+        If the user generally specifies dynamic_shapes=None for a pytree input,
+        we'd like to convert this into a tree of Nones following the input spec,
+        so we can explicitly specify static dims for all tensor dimensions.
+        Non-builtin types for pytree (e.g. custom dataclasses) creates some difficulty,
+        in which case the correct format is a list containing specs for each child attribute.
+        """
+        if (node_type := _get_node_type(tree)) not in SUPPORTED_NODES:  # is_leaf
+            return val
+        flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+        child_pytrees, context = flatten_fn(tree)  # flatten from whatever original type
+        unflatten_fn = SUPPORTED_NODES[
+            node_type if node_type in BUILTIN_TYPES else list
+        ].unflatten_fn
+        children = [_tree_map_helper(child, val) for child in child_pytrees]
+        return unflatten_fn(
+            children, context
+        )  # unflatten into original type, or list if not built-in type
+
+    if (
+        dynamic_shapes is None or len(dynamic_shapes) == 0
+    ):  # create pytree structure of static dim
+        dynamic_shapes = _tree_map_helper(combined_args, None)
+    if isinstance(dynamic_shapes, (tuple, list)):
+        combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
+
+    def transform_shapes(path, tensor, shape):
+        def _marked_dynamic(tensor, i):
+            # TODO(pianpwk): deprecate mark_dynamic() usage for export
+            return i in getattr(tensor, "_dynamo_dynamic_indices", set())
+
+        out: Union[None, List[Any], Dict[int, Any]] = None
+        if isinstance(shape, dict):
+            out = {}
+            for i, val in enumerate(tensor.shape):
+                dim = shape.get(i, None)
+                if _marked_dynamic(tensor, i) or dim == _DimHint.AUTO:
+                    # don't have to specify anything if dynamic
+                    # None also works, since assume_static_by_default=False
+                    if dim == _DimHint.AUTO:
+                        torch._dynamo.maybe_mark_dynamic(tensor, i)  # avoid duck sizing
+                    continue
+                elif isinstance(dim, _Dim):
+                    out[i] = dim
+                elif isinstance(dim, int):
+                    # important that this is dim and not val,
+                    # so we can raise error if user-specified dim != val
+                    out[i] = dim
+                else:
+                    # make explicitly static
+                    assert dim is None or dim == _DimHint.STATIC
+                    out[i] = val
+        elif isinstance(shape, (tuple, list)):
+            out = []
+            for i, val in enumerate(tensor.shape):
+                dim = shape[i]
+                if _marked_dynamic(tensor, i) or dim == _DimHint.AUTO:
+                    if dim == _DimHint.AUTO:
+                        torch._dynamo.maybe_mark_dynamic(tensor, i)  # avoid duck sizing
+                    out.append(None)
+                elif isinstance(dim, _Dim):
+                    out.append(dim)
+                elif isinstance(dim, int):
+                    out.append(dim)
+                else:
+                    assert dim is None or dim == _DimHint.STATIC
+                    out.append(val)
+            out = type(shape)(out)  # type: ignore[assignment]
+        else:
+            assert shape is None
+            if isinstance(tensor, torch.Tensor):
+                out = []
+                for i, val in enumerate(tensor.shape):
+                    out.append(None if _marked_dynamic(tensor, i) else val)
+                out = out or None
+            else:
+                out = None
+        return out
+
+    def transform_shape(path, t, dynamic_shape):
+        if isinstance(t, torch.Tensor):
+            return transform_shapes(path, t, dynamic_shape)
+
+    result = _tree_map_with_path(
+        transform_shape, combined_args, dynamic_shapes, tree_name="inputs"
+    )
+    return result
+
 
 def _process_dynamic_shapes(
     combined_args: Dict[str, Any],
@@ -915,6 +901,7 @@ def _process_dynamic_shapes(
     from torch._dynamo.exc import UserError, UserErrorType
 
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
+        # we run with dynamic by default, so no need to produce constraints
         return []
     if isinstance(dynamic_shapes, (tuple, list)):
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
@@ -929,7 +916,6 @@ def _process_dynamic_shapes(
         import sympy
 
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-        from torch.utils._sympy.numbers import int_oo
         from torch.utils._sympy.solve import try_solve
         from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -957,7 +943,6 @@ def _process_dynamic_shapes(
                 # root represents an input shape dimension
                 root_constraint = symbols[dim_root.__name__][0]
                 root = _ConstraintTarget(
-                    root_constraint.w_tensor,
                     root_constraint.t_id,
                     root_constraint.dim,
                 )
@@ -975,37 +960,38 @@ def _process_dynamic_shapes(
             else:
                 root = phantom_roots[dim_root.__name__]  # type: ignore[assignment]
             constraint = _DerivedConstraint(
-                weakref.ref(tensor),
                 id(tensor),
                 i,
-                root,
-                dim.fn,  # type: ignore[attr-defined]
+                dim.__name__,
                 StrictMinMaxConstraint(
                     vr=ValueRanges(lower=dim.min, upper=dim.max),
                     warn_only=False,
                 ),
-                debug_name=dim.__name__,
+                root,
+                dim.fn,  # type: ignore[attr-defined]
             )
             if isinstance(root, _PhantomRoot):
                 # NOTE(avik): since we have not processed all inputs yet, we may replace this
                 # with a root that does represent an input shape dimension later (see below)
                 derived_constraints_with_phantom_root.append(constraint)
         elif isinstance(dim, _StaticDim):
-            constraint = _create_constraint(
-                weakref.ref(tensor),
+            constraint = _Constraint(  # type: ignore[assignment]
                 id(tensor),
                 i,
+                dim.__name__,
                 StrictMinMaxConstraint(
                     vr=ValueRanges(lower=dim.value, upper=dim.value), warn_only=False  # type: ignore[attr-defined]
                 ),
-                debug_name=dim.__name__,
             )
         else:
-            constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
-            if dim.min != 0:
-                constraint = constraint >= dim.min
-            if dim.max != int_oo:
-                constraint = constraint <= dim.max
+            constraint = _Constraint(  # type: ignore[assignment]
+                id(tensor),
+                i,
+                dim.__name__,
+                StrictMinMaxConstraint(
+                    vr=ValueRanges(lower=dim.min, upper=dim.max), warn_only=False  # type: ignore[attr-defined]
+                ),
+            )
         return constraint
 
     def update_symbols(path, tensor, shape):
@@ -1047,17 +1033,7 @@ def _process_dynamic_shapes(
             derived_constraint_with_phantom_root.root = symbols[phantom_root_name][0]
 
     for dynamic_dims in symbols.values():
-        if all(
-            isinstance(dynamic_dim, _DerivedConstraint) for dynamic_dim in dynamic_dims
-        ):
-            constraints.extend(dynamic_dims)
-        else:
-            primary, *others = dynamic_dims
-            if others:
-                for other in others:
-                    constraints.append(primary == other)  # type: ignore[arg-type]
-            else:
-                constraints.append(primary)
+        constraints.extend(dynamic_dims)
 
     return constraints  # type: ignore[return-value]
 
@@ -1070,7 +1046,7 @@ def _get_dim_name_mapping(
         dynamic_shapes,
         is_leaf=lambda x: isinstance(x, _Dim),
     )[0]:
-        if dim is None or isinstance(dim, int):
+        if isinstance(dim, (int, _DimHint)) or dim is None:
             continue
         name_to_dim[dim.__name__] = dim
         if isinstance(dim, _DerivedDim):
@@ -1152,9 +1128,11 @@ def refine_dynamic_shapes_from_suggested_fixes(
             name, expr = fix.split(" = ")
             expr = sympy.sympify(expr)
             if isinstance(expr, sympy.Number):
-                shape_fixes[name] = int(expr)  # static, integer
+                # static, integer
+                shape_fixes[name] = int(expr)  # type: ignore[assignment]
             else:
-                shape_fixes[name] = expr  # relation or derived dim
+                # relation or derived dim
+                shape_fixes[name] = expr
 
     name_to_dim = _get_dim_name_mapping(dynamic_shapes)
 
