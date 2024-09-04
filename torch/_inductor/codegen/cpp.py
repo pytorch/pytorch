@@ -1990,6 +1990,7 @@ class CppKernel(Kernel):
         )
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):
+        assert isinstance(self, CppKernelProxy)
         threads = parallel_num_threads()
         assert self.call_ranges is not None
         if isinstance(loop_nest.kernel, OuterLoopFusedKernel):
