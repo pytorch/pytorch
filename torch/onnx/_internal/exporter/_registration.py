@@ -160,7 +160,7 @@ class ONNXRegistry:
                 if target is None:
                     continue
 
-                overload_func.signature = _schemas.OpSignature.from_function(
+                overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                     overload_func,
                     domain,
                     name,

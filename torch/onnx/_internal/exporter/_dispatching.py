@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from typing import Callable, Sequence
 
-import onnxscript
 from onnxscript import ir
 
 import torch
@@ -213,8 +212,8 @@ def _get_named_fx_node_args(node: torch.fx.Node) -> dict[str, torch.fx.node.Argu
 
 def get_matching_overload(
     node: torch.fx.Node,
-    overloads: Sequence[onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction],
-) -> tuple[onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction | None, str]:
+    overloads: Sequence[Callable],
+) -> tuple[Callable | None, str]:
     """Get the overload that matches the node's arguments.
 
     Args:
@@ -326,7 +325,7 @@ def _arg_has_complex_dtype(arg) -> bool:
 
 def dispatch(
     node: torch.fx.Node, registry: _registration.ONNXRegistry
-) -> tuple[onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction | None, str]:
+) -> tuple[Callable | None, str]:
     """Dispatch a node to an ONNX function based on the node's target and the ONNX registry.
 
     Args:
