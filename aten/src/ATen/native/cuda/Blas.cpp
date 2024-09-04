@@ -1102,7 +1102,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
                 BLASOP_A, BLASOP_B> scaledgemm{&params};                       \
             scaledgemm(&params);                                        \
           }                                                             \
-        } 
+        }
 #else
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
         if (mat1.scalar_type() == ScalarType::Float8_e4m3fn) {        \
