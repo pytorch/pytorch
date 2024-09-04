@@ -111,7 +111,10 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
     ]
 
-    def __new__(cls, elem):
+    # Used by auto_functionalize to determine base of tensors during inference mode.
+    _inference_mode_base = None
+
+    def __new__(cls, elem, mode):
         assert torch._is_functional_tensor(elem)
 
         # In general, we'd like our functional tensor subclass to only be in charge of functionalization,
@@ -158,6 +161,15 @@ class FunctionalTensor(torch.Tensor):
         )
         torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
+
+        if torch.is_inference_mode_enabled():
+            if out.isRootTensor():
+                out._inference_mode_base = None
+                mode._storage_to_base[out.elem.storage()._cdata] = out
+            else:
+                out._inference_mode_base = mode._storage_to_base[
+                    out.elem.storage()._cdata
+                ]
         return out
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -209,6 +221,7 @@ class FunctionalTensor(torch.Tensor):
     @staticmethod
     def to_functional(x):
         # We will do the wrapping for the user.
+
         assert not torch._is_functional_tensor(x)
         # The only autograd metadata we care about on the FunctionalTensor is:
         # - requires_grad (so autograd runs)
@@ -226,13 +239,16 @@ class FunctionalTensor(torch.Tensor):
 
         with functional_mode:
             torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
-            out = FunctionalTensor(x_functional)
+            out = FunctionalTensor(x_functional, functional_mode)
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
         return out
 
     def from_functional(self):
         torch._sync(self)
         return torch._from_functional_tensor(self.elem)
+
+    def isRootTensor(self) -> bool:
+        return torch._is_functional_tensor_root(self.elem)
 
     def replace_(self, output) -> None:
         torch._functionalize_replace(self.elem, output)
@@ -316,6 +332,8 @@ class FunctionalTensorMode(TorchDispatchMode):
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
 
+        self._storage_to_base = {}
+
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         def _get_prev_mode():
@@ -366,6 +384,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             if not issubclass(t, torch._subclasses.FakeTensor)
             and t not in [torch.Tensor, FunctionalTensor]
         ]
+
         if unrecognized_types:
             not_implemented_log.debug(
                 "FunctionalTensor unrecognized subclass(es): %s", unrecognized_types
@@ -417,16 +436,13 @@ class FunctionalTensorMode(TorchDispatchMode):
                 if r is not NotImplemented:
                     return r
 
-        def assert_is_functional(x):
-            assert torch._is_functional_tensor(x)
-
         def wrap(x):
             # Only wrap our outputs in subclasses if the inner functionalization call
             # also wrapped outputs into FunctionalTensorWrappers.
             # When can this happen? e.g. `torch.div(2, 2)`
             assert not isinstance(x, FunctionalTensor)
             if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
-                return FunctionalTensor(x)
+                return FunctionalTensor(x, self)
             return x
 
         def unwrap(x):
