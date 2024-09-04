@@ -675,7 +675,9 @@ class CppPackedGemmTemplate(CppTemplate):
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
 
-                candidate_nodes = [node for node in input_nodes if node not in new_input_nodes]
+                candidate_nodes = [
+                    node for node in input_nodes if node not in new_input_nodes
+                ]
                 for candidate_node in candidate_nodes:
                     # By using the new packed weight for the GEMM template, we can prune the
                     # old weight if it has no other users. This saves memory but makes the FX graph
