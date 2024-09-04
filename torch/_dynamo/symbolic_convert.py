@@ -1113,8 +1113,6 @@ class InstructionTranslatorBase(
         return VariableBuilder(self, module_source)(fglobals_value)
 
     def LOAD_GLOBAL(self, inst):
-        if inst.argval == "_pop_mode":
-            breakpoint()
         if sys.version_info >= (3, 11) and sys.version_info < (3, 13) and inst.arg % 2:
             self.PUSH_NULL(inst)
         self._load_global(inst)
@@ -2297,9 +2295,7 @@ class InstructionTranslatorBase(
         ):
             unimplemented(f"{inst.opname} {ctx}")
 
-        if isinstance(ctx, GenericContextWrappingVariable) and not isinstance(
-            ctx, TorchFunctionModeVariable
-        ):
+        if isinstance(ctx, GenericContextWrappingVariable):
             self.generic_context_manager_depth += 1
 
         # Need this redundant check for mypy

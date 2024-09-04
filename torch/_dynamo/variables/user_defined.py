@@ -410,27 +410,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
-            # import here to avoid an unfortunate circular dependency.
-            from torch.overrides import TorchFunctionMode
-
             from .ctx_manager import GenericContextWrappingVariable
-            from .torch_function import TorchFunctionModeVariable
-
-            if issubclass(
-                self.value, TorchFunctionMode
-            ) and TorchFunctionModeVariable.is_supported_torch_function_mode(
-                self.value
-            ):
-                var_cls = TorchFunctionModeVariable
-            else:
-                var_cls = GenericContextWrappingVariable
 
             cm_obj = tx.output.side_effects.track_object_new(
-                self.source, self.value, TorchFunctionModeVariable, {}
+                self.source, self.value, GenericContextWrappingVariable, {}
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
-
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
