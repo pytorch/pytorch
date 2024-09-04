@@ -259,6 +259,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "log1p",
     "log2",
     "logaddexp",
+    "logsumexp",
     "logcumsumexp",
     "reciprocal",
     "tan",

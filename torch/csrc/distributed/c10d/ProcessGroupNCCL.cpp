@@ -23,8 +23,8 @@
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/distributed/c10d/LockGuard.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/NanCheck.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
@@ -302,7 +302,7 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 //   hooks are called outside the scope of any PG, thus we need traverse
 //   communicators in all PGs.
 static std::unordered_map<std::shared_ptr<NCCLComm>, int> ncclCommDevIdxMap;
-static std::timed_mutex ncclCommDevIdxMapMutex;
+static std::mutex ncclCommDevIdxMapMutex;
 static bool allocatorHooksAttached = false;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
@@ -315,7 +315,7 @@ void cacheAllocatorRegisterHook(
     return;
   }
 
-  C10D_LOCK_GUARD(lock, ncclCommDevIdxMapMutex);
+  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
   for (auto& it : ncclCommDevIdxMap) {
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
@@ -333,7 +333,7 @@ void cacheAllocatorDeregisterHook(
     return;
   }
 
-  C10D_LOCK_GUARD(lock, ncclCommDevIdxMapMutex);
+  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
   for (auto& it : ncclCommDevIdxMap) {
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
@@ -536,7 +536,7 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   }
 
   auto exception_ptr = checkForNCCLErrors();
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
   if (exception_) {
     LOG(ERROR) << logPrefix() << "Collective " << *this
@@ -552,7 +552,7 @@ const std::string& ProcessGroupNCCL::WorkNCCL::logPrefix() const {
 
 void ProcessGroupNCCL::WorkNCCL::setException(
     std::exception_ptr exception_ptr) {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
 }
 
@@ -761,12 +761,12 @@ ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() {}
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
   auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
-    C10D_LOCK_GUARD(lock, this->cacheMutex_);
+    std::lock_guard<std::mutex> lock(this->cacheMutex_);
     this->eventsArray_[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
-    C10D_LOCK_GUARD(lock, cacheMutex_);
+    std::lock_guard<std::mutex> lock(cacheMutex_);
     auto events = eventsArray_[timing ? 1 : 0];
     if (!events.empty()) {
       event = events.back();
@@ -1071,9 +1071,8 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   while (true) {
     {
       std::lock(workMetaListMutex_, completedWorkListMutex_);
-      std::lock_guard<std::timed_mutex> lockWork(
-          workMetaListMutex_, std::adopt_lock);
-      std::lock_guard<std::timed_mutex> lockHook(
+      std::lock_guard<std::mutex> lockWork(workMetaListMutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> lockHook(
           completedWorkListMutex_, std::adopt_lock);
 
       if (workMetaList_.empty() && completedWorkList_.empty()) {
@@ -1148,6 +1147,10 @@ void ProcessGroupNCCL::abortCommsFromMap(
     at::cuda::OptionalCUDAGuard gpuGuard;
     at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
     if (deviceIndex >= 0) {
+      // For P2P comms, the deviceIndex could be -1 (invalid), as the keys in
+      // the map could be non deviceIndex, but rank to rank numbers. So we
+      // indeed need to check if deviceIndex >= 0
+      // TODO: fix `getIndexFromDeviceKey` or fix `DeviceKey`
       gpuGuard.set_index(deviceIndex);
     }
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
@@ -1182,7 +1185,7 @@ bool ProcessGroupNCCL::abort(std::optional<std::string> abortReason) {
   }
   ncclCommDevIdxMapMutex.unlock();
 
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   abortCommsFromMap(devNCCLCommMap_, abortReason);
   abortCommsFromMap(inInitializationCommMap_, abortReason);
   return true;
@@ -1251,8 +1254,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
-  static std::timed_mutex writeDebugInfoMutex;
-  C10D_LOCK_GUARD(lock, writeDebugInfoMutex);
+  static std::mutex writeDebugInfoMutex;
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
   LOG(ERROR) << logPrefix() << "ProcessGroupNCCL preparing to dump debug info.";
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
@@ -1331,7 +1334,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
     // somewhere else to avoid the deadlock.
-    C10D_LOCK_GUARD(lock, monitorMutex_);
+    std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
             lock, std::chrono::milliseconds(monitorPollInterval), [&] {
               return terminateHeartbeatMonitorThread_.load();
@@ -1656,7 +1659,7 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
 
 void ProcessGroupNCCL::addEphemeralTimeout(
     const std::chrono::milliseconds& timeout) {
-  C10D_LOCK_GUARD(timeoutLock, mtxTimeoutExtension_);
+  std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
   ephemeralTimeoutActive_ += timeout;
 }
 
@@ -1679,7 +1682,7 @@ void ProcessGroupNCCL::watchdogHandler() {
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
   while (!done || !terminateProcessGroup_.load()) {
-    C10D_LOCK_GUARD(lock, workMetaListMutex_);
+    std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
     // milliseconds as long as the atomic is True.
     workMetaListCV_.wait_for(
@@ -1851,7 +1854,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (work.isCompleted()) {
         {
           // Reset the timeout and first work if the work is completed.
-          C10D_LOCK_GUARD(timeoutLock, mtxTimeoutExtension_);
+          std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
           if (work.ownedEphermeralTimeout_.count() > 0) {
             ephemeralTimeoutActive_ -= work.ownedEphermeralTimeout_;
             ephemeralTimeoutInflight_ -= work.ownedEphermeralTimeout_;
@@ -1866,7 +1869,7 @@ void ProcessGroupNCCL::watchdogHandler() {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
           {
-            C10D_LOCK_GUARD(lock, completedWorkListMutex_);
+            const std::lock_guard<std::mutex> lock(completedWorkListMutex_);
             completedWorkList_.splice(
                 completedWorkList_.end(), workMetaList_, it++);
           }
@@ -1894,7 +1897,7 @@ void ProcessGroupNCCL::runHookLoop() {
 
   bool done = false;
   while (!done || !terminateProcessGroup_.load()) {
-    C10D_LOCK_GUARD(lock, completedWorkListMutex_);
+    std::unique_lock<std::mutex> lock(completedWorkListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
     // milliseconds as long as the atomic is True.
     completedWorkListCV_.wait_for(
@@ -2067,7 +2070,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
 }
 
 void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   if (devNCCLCommMap_.find(devNCCLCommMapKey) == devNCCLCommMap_.end()) {
     TORCH_INTERNAL_ASSERT(
         false,
@@ -2115,7 +2118,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   usedDeviceIdxs_.insert(device.index());
 
   {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     if (devNCCLCommMap_.find(deviceKey) != devNCCLCommMap_.end()) {
       // Reuse the cached communicator if there is one.
       return devNCCLCommMap_[deviceKey];
@@ -2141,7 +2144,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   bool batchP2P = ncclActiveGroupCounter_ > 0;
   bool singleP2POp = isP2POp(opType, batchP2P);
 
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  // Get the device index
+  auto deviceIndex = device.index();
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // [Group Start/End Note] This is used to ensure that nccl communicator will
   // be created before communication primitives are called. Let's look at this
@@ -2181,17 +2186,13 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     rank = p2pRank;
   }
 
-  // Get the device index
-  auto deviceIndex = device.index();
-  gpuGuard.set_index(deviceIndex);
-
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
     TORCH_CHECK(
         options_->split_color != 0,
         "Must specify a non-zero color when splitting");
     // Find a valid, healthy communicator to split from if possible.
-    C10D_LOCK_GUARD(lock, options_->split_from->mutex_);
+    std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
     auto dit = other_comms.find(getKeyFromDevice(device));
     if (dit != other_comms.end()) {
@@ -2245,7 +2246,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       options_->is_high_priority_stream || force_high);
 
   {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     inInitializationCommMap_.emplace(deviceKey, ncclComm);
   }
 
@@ -2495,7 +2496,7 @@ void ProcessGroupNCCL::assignTimeoutToWork(
     const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work,
     const c10::intrusive_ptr<ProcessGroupNCCL::Options>& option) {
   std::chrono::milliseconds timeout = option->timeout;
-  C10D_LOCK_GUARD(timeoutLock, mtxTimeoutExtension_);
+  std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
   if (ephemeralTimeoutActive_.count() > 0) {
     timeout += ephemeralTimeoutActive_;
   }
@@ -2508,7 +2509,7 @@ void ProcessGroupNCCL::assignTimeoutToWork(
 void ProcessGroupNCCL::workEnqueue(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   if (!terminateProcessGroup_.load()) {
-    C10D_LOCK_GUARD(lock, workMetaListMutex_);
+    std::lock_guard<std::mutex> lock(workMetaListMutex_);
     // Avoid view tensors to be processed in cleanup thread.
     // View tensors' destruction invokes autograd_meta, which
     // needs to be destructed in user thread. Otherwise will
@@ -2637,12 +2638,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle,
-    bool avoidRecordStreams) {
-  if (enableNanCheck_) {
-    checkForNan(input);
-  }
+    bool avoidRecordStreams,
+    bool nanCheck) {
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
+  nanCheck &= enableNanCheck_;
+
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   errorIfCapturingNonCapturableNCCL(capture_status);
@@ -2694,7 +2695,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     work->stashed_for_allocator_safety_->push_back(input);
   }
 
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  if (nanCheck) {
+    checkForNan(input, ncclStream);
+  }
 
   // Start event should only be recorded before the ncclGroupStart()
   if (work->timingEnabled_) {
@@ -2855,7 +2860,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
 
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // Start event should only be recorded before the ncclGroupStart() (which
   // happens inside AutoNcclGroup guard below)
@@ -2997,9 +3002,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     PreProcess pre,
     PostProcess post,
     const char* profilingTitle) {
-  if (enableNanCheck_) {
-    checkForNan(tensor);
-  }
   // avoidRecordStreams_ note:
   // send, recv, and irecv should be ok with avoidRecordStreams,
   // However, for isend, I don't think the API requires the user
@@ -3126,7 +3128,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   // is gpuGuard needed for the if block below, or can i swap them
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  // Only check for NaN for send ops, for recv ops `tensor` can be a random
+  // placeholder
+  if (enableNanCheck_ && opType == OpType::SEND) {
+    checkForNan(tensor, ncclStream);
+  }
 
   if (!coalescing_state_) {
     // Start event should only be recorded before the ncclGroupStart()
@@ -3221,7 +3229,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     Fn fn,
     OpType opType,
     const char* profilingTitle,
-    bool avoidRecordStreams) {
+    bool avoidRecordStreams,
+    bool nanCheck) {
   return collective(
       input,
       output,
@@ -3232,7 +3241,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
       opType,
       profilingTitle,
-      avoidRecordStreams);
+      avoidRecordStreams,
+      nanCheck);
 }
 
 template <typename Fn>
@@ -3482,6 +3492,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
   // avoidRecordStreams_ note: collective() will stash tensors.
   bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
 
+  const auto root = opts.rootRank + opts.rootTensor;
+  bool nanCheck = (root == rank_);
+
   return collective(
       tensor,
       tensor,
@@ -3489,7 +3502,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        const auto root = opts.rootRank + opts.rootTensor;
         return ncclBcast(
             input.data_ptr(),
             input.numel(),
@@ -3500,7 +3512,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       },
       OpType::BROADCAST,
       "nccl:broadcast",
-      avoidRecordStreams);
+      avoidRecordStreams,
+      nanCheck);
 }
 
 // _broadcast_oop adds an out-of-place broadcast in PGNCCL
@@ -3520,6 +3533,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
         "Tensor input and output of _broadcast_oop must have the same number of elements ");
   }
 
+  const auto root = opts.rootRank + opts.rootTensor;
+  bool nanCheck = (root == rank_);
+
   return collective(
       inputTensor,
       outputTensor,
@@ -3527,7 +3543,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        const auto root = opts.rootRank + opts.rootTensor;
         return ncclBroadcast(
             input.data_ptr(),
             output.data_ptr(),
@@ -3538,7 +3553,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
             stream.stream());
       },
       OpType::BROADCAST,
-      "nccl:_broadcast_oop");
+      "nccl:_broadcast_oop",
+      /*avoidRecordStreams=*/false,
+      nanCheck);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
@@ -4045,8 +4062,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   auto barDevice = at::Device(at::DeviceType::CUDA, barDevIdx);
 
   // Create a dummy tensor on the device
+  // Note: we use zeros() instead of empty() to prevent barrier from triggering
+  // alarm when NaN checker is enabled.
   at::Tensor barrierTensor =
-      at::empty({1}, at::TensorOptions().device(barDevice).dtype(at::kFloat));
+      at::zeros({1}, at::TensorOptions().device(barDevice).dtype(at::kFloat));
 
   // All reduce to achieve the barrier
   auto work = allreduce_impl(barrierTensor);
@@ -4489,6 +4508,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   // inputs, which == inputTensors[0] on the root rank where it matters.
   bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
 
+  const auto root = opts.rootRank;
+  bool nanCheck = (rank_ == root);
+
   return collective(
       outputTensor,
       inputs[0], // just to fit the collective interface
@@ -4496,7 +4518,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
           at::Tensor& /* unused */,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        const auto root = opts.rootRank;
         if (getRank() == root) {
           if (!avoidRecordStreams) {
             for (auto input : inputs) {
@@ -4510,7 +4531,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       },
       OpType::SCATTER,
       "nccl:scatter",
-      avoidRecordStreams);
+      avoidRecordStreams,
+      nanCheck);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
