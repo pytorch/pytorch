@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import collections
 import functools
-import warnings
 import platform
+import warnings
 from typing import Any, Optional
 
 import torch
@@ -332,7 +332,7 @@ class autocast:
                 )
                 warnings.warn(error_message)
                 enabled = False
-            elif float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1) < 14.0:
+            elif float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1) < 14.0:
                 error_message = "In MPS autocast, but autocast is not supported before MacOS 14.0. Disabling autocast\n"
                 warnings.warn(error_message)
                 enabled = False
