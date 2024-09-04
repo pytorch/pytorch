@@ -13,6 +13,7 @@ on:
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
 
 concurrency:
@@ -155,7 +157,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           # Download all available artifacts
           path: ${{ runner.temp }}/artifacts-all
@@ -271,7 +273,7 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           # Download all available artifacts
           path: ${{ runner.temp }}/artifacts-all

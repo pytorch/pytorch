@@ -468,6 +468,8 @@ combo_kernels_autotune = 1
 # Enable masking for combining kernels of mixed sizes: 0 - disable, 1 - enable
 # for all except for foreach, 2 - enable for all
 combo_kernel_allow_mixed_sizes = 1
+# Enable dynamic shapes for foreach kernels
+combo_kernel_foreach_dynamic_shapes = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -593,6 +595,34 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# The width of comprehensive padding, in bytes.
+# CUDA max memory transaction size is 128 bytes for a warp.
+padding_alignment_bytes = 128
+
+# Threshold on the minimum stride that will be padded.
+#
+# Don't align a too small stride since that causes too much memory increase.
+# Pad too small stride may also cause perf loss. We may result in many tiny data blocks
+# with gaps in between. That causes less coalesced GPU memory access!
+#
+# Initially we pick 320 as the threshold since for alignement=16,
+# that results in at most 5% memory cost.
+#
+# But later on we raise the threshold to 1024 to avoid interfere with persistent reduction.
+# Let's say an inner reduction has a row size 513. Inductor will generate
+# persistent reduction code.
+# If we do padding, the strides are not contiguous any more. Inductor
+# uses a much smaller threshold for persistent reduction in this case and
+# generates potentially worse non-persistent reduction code.
+#
+# This change turns HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
+# (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
+padding_stride_threshold = 1024
+
+# Enable padding outputs, even if they would not be padded in eager mode.
+# By default, we use the same strides as eager mode.
+pad_outputs = False
+
 # Whether to treat output of the backward graph as user visible.
 # For user visible outputs, inductor will make sure the stride matches with eager.
 bw_outputs_user_visible = True
@@ -673,6 +703,12 @@ assume_aligned_inputs: bool = False
 # ignoring the unsupported args may lead to unexpected autotuning behavior: don't
 # set unless you know what you're doing.
 unsafe_ignore_unsupported_triton_autotune_args: bool = False
+
+# When True, we will check in scheduler.py _codegen that there are no "loops"
+# in the call stack; that is to say, the same frame multiple times.  This
+# ensures that a cProfile trace to this frame will be a straight line without
+# any cycles.
+check_stack_no_cycles_TESTING_ONLY: bool = False
 
 
 # config specific to codegen/cpp.py
