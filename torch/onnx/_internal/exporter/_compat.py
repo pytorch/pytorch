@@ -30,9 +30,10 @@ def _signature(model) -> inspect.Signature:
 
 def _from_dynamic_axes_to_dynamic_shapes(
     model,
+    *,
     dynamic_axes=None,
+    output_names: set[str],
     input_names: Sequence[str] | None = None,
-    output_names: Sequence[str] | None = None,
 ) -> dict[str, Any] | None:
     """
 
@@ -52,9 +53,6 @@ def _from_dynamic_axes_to_dynamic_shapes(
 
     if input_names is None:
         input_names = []
-
-    if output_names is None:
-        output_names = []
 
     sig = _signature(model)
     if len(input_names) > len(sig.parameters):
@@ -158,7 +156,10 @@ def export_compat(
         args, kwargs = _get_torch_export_args(args, kwargs)
         if dynamic_shapes is None and dynamic_axes is not None:
             dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
-                model, dynamic_axes, input_names, output_names
+                model,
+                dynamic_axes=dynamic_axes,
+                input_names=input_names,
+                output_names=set(output_names or ()),
             )
 
     should_convert_version = False
