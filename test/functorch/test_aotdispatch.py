@@ -6010,6 +6010,18 @@ class TestAOTModuleSimplified(AOTTestCase):
         with self.assertRaisesRegex(AssertionError, "Unexpected fake"):
             aot_module_simplified(MockModule(), (fake_x,), nop)
 
+    def test_aot_test_subclasses_with_tensor_factories(self):
+        from torch.testing._internal.common_subclass import SubclassWithTensorFactory
+
+        inp = SubclassWithTensorFactory(torch.zeros(3, 5))
+
+        def fn(x):
+            return 2 * x
+
+        ref_out = fn(inp)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
+        self.assertEqual(ref_out, out)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
