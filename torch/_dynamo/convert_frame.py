@@ -925,7 +925,7 @@ def _compile(
             UncapturedHigherOrderOpError,
             BisectValidationException,
         ) as e:
-            fail_type = str(type(e))
+            fail_type = type(e).__qualname__
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
@@ -933,7 +933,7 @@ def _compile(
             )
             raise
         except Exception as e:
-            fail_type = str(type(e))
+            fail_type = type(e).__qualname__
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
