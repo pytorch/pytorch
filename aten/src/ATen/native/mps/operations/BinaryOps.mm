@@ -323,7 +323,6 @@ static const Tensor& tiled_add_sub_lerp(const Tensor& self,
       auto outputDesc = outputDesc_;
 
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      auto kernel = [[MPSNDArrayAddition alloc] initWithDevice:device];
 
       for (const auto i : c10::irange(requiredIterations)) {
         if (i == requiredIterations - 1 && lastBatchSize != 0) {
@@ -347,12 +346,28 @@ static const Tensor& tiled_add_sub_lerp(const Tensor& self,
             [[[MPSNDArray alloc] initWithBuffer:outputBuffer
                                          offset:(output.storage_offset() + outputArrayOffset) * outputElemSize
                                      descriptor:outputDesc] autorelease];
+                                        
+        string key = op_name + getTensorsStringKey({self, other, output});
 
-        [kernel encodeToCommandEncoder:computeEncoder
-                         commandBuffer:commandBuffer
-                          sourceArrays:@[ selfNDArray, otherNDArray ]
-                      destinationArray:outputNDArray];
-      }
+        auto cachedGraph = LookUpOrCreateCachedGraph<BinaryOpCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+          MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), selfShape);
+          MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(other), otherShape);
+
+          newCachedGraph->primaryTensor = selfTensor;
+          newCachedGraph->secondaryTensor = otherTensor;
+
+          auto outputTensor = [mpsGraph additionWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
+
+          newCachedGraph->outputTensor = outputTensor;
+        });
+        Placeholder selfPlaceholder = Placeholder(cachedGraph->primaryTensor, selfNDArray);
+        Placeholder otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, otherNDArray);
+        Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, outputNDArray);
+
+        auto feeds = dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder);
+        runMPSGraph(mpsStream, cachedGraph->graph(), feeds, outputPlaceholder);
+
+     }
     }
   });
   return output;
