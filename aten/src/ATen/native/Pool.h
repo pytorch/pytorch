@@ -120,7 +120,7 @@ inline std::pair<c10::SymInt, c10::SymInt> pooling_same_mode_padding_lr(
 inline void
 pool2d_shape_check(
   const Tensor& input,
-  int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
+  int64_t kH, int64_t kW, int64_t dH, int64_t dW, int64_t padH, int64_t padW, int64_t dilationH, int64_t dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
   int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)

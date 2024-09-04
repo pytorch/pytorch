@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/mobile/model_tracer/CustomClassTracer.h>
 #include <mutex>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 CustomClassTracer::CustomClassTracer() {
   auto recorder_cb =
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
@@ -25,6 +23,4 @@ c10::Synchronized<CustomClassTracer::custom_classes_type>& CustomClassTracer::
   return loaded_classes;
 }
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

@@ -20,7 +20,7 @@ namespace at {
  * The method should_include_kernel_dtype() returns true/false
  * based on whether the switching code for a specific dtype should be
  * included based on build time constants generated from tracing model
- * execution. This method will be implmeneted via code-generation and
+ * execution. This method will be implemented via code-generation and
  * included in this file when code-gen is ready.
  */
 inline constexpr bool should_include_kernel_dtype(

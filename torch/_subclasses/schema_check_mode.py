@@ -60,7 +60,7 @@ def clone_inputs(args):
 
 
 class SchemaCheckMode(TorchDispatchMode):
-    def __init__(self):
+    def __init__(self) -> None:
         # Information recorded for testing purposes. For example:
         #  - incorrect schemas
         #  - overly conservative schemas

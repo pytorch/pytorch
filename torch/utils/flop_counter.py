@@ -273,7 +273,7 @@ def _offsets_to_lengths(offsets, max_len):
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import FunctionalTensor
     if not isinstance(offsets, (FakeTensor, FunctionalTensor)):
-        return (offsets[1:] - offsets[:-1]).tolist()
+        return offsets.diff().tolist()
     return [max_len] * (offsets.size(0) - 1)
 
 
@@ -619,6 +619,7 @@ class FlopCounterMode(TorchDispatchMode):
             depth: int = 2,
             display: bool = True,
             custom_mapping: Optional[Dict[Any, Any]] = None):
+        super().__init__()
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
@@ -697,7 +698,7 @@ class FlopCounterMode(TorchDispatchMode):
         # if there are any FLOPs in there that aren't already fully contained by
         # a module.
         if 'Global' in self.flop_counts and not is_global_subsumed:
-            for idx, value in enumerate(values):
+            for idx in range(len(values)):
                 values[idx][0] = " " + values[idx][0]
 
             values = process_mod('Global', 0) + values

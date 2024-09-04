@@ -4,9 +4,6 @@ import weakref
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch.utils._pytree import tree_map_only
 
 from ..guards import GuardBuilder, install_guard
@@ -18,14 +15,16 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX
-
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
 
+
 if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
     from .base import VariableTracker
 
 
@@ -52,7 +51,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         static_tensor_names=None,
         tensor_to_source=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(value, **kwargs)
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
@@ -131,13 +130,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # and the state is not initialized
         def safe_to_set_capturable(group):
             all_uninitialized = True
-            all_cuda = True
+            all_gpu = True
 
             for p in group.get("params", []):
-                all_cuda &= p.is_cuda
+                all_gpu &= p.is_cuda or p.is_xpu
                 all_uninitialized &= p not in self.value.state
 
-            return "capturable" in group and all_uninitialized and all_cuda
+            return "capturable" in group and all_uninitialized and all_gpu
 
         # track indices to not set so we don't need to
         # in the variable tracker realize the whole state
@@ -256,7 +255,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                             break
 
             group_source = group_vt.source
-            params_vt = group_vt.getitem_const(ConstantVariable.create("params"))
+            params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
             for p_ind, (p, p_vt) in enumerate(
                 zip(group["params"], params_vt.unpack_var_sequence(tx))
             ):

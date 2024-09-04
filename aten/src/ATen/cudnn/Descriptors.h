@@ -22,7 +22,7 @@
 #define USE_CUDNN_RNN_V8_API
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 std::string cudnnTypeToString(cudnnDataType_t dtype);
 
@@ -111,7 +111,7 @@ class TORCH_CUDA_CPP_API Descriptor {
 protected:
   void init() {
     if (desc_ == nullptr) {
-      T* raw_desc;
+      T* raw_desc = nullptr;
       AT_CUDNN_CHECK(ctor(&raw_desc));
       desc_.reset(raw_desc);
     }
@@ -235,7 +235,7 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
   // WARNING: This function is very expensive, avoid calling this function!
   void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
     TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
-    size_t state_size;
+    size_t state_size = 0;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
     AT_ASSERT(options.device().type() == kCUDA);
     AT_ASSERT(options.dtype() == kByte);
@@ -405,4 +405,4 @@ union Constant
   }
 };
 
-}}  // namespace
+} // namespace

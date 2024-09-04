@@ -27,7 +27,7 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
 
     def test_upsample_bilinear2d(self):
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.upsample = torch.nn.Upsample(scale_factor=2, mode="bilinear")
 
@@ -51,7 +51,7 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
 
     def test_upsample_trilinear3d(self):
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.upsample = torch.nn.Upsample(scale_factor=2, mode="trilinear")
 

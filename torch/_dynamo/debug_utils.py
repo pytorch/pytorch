@@ -20,7 +20,6 @@ import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
 from torch import Tensor
-
 from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -28,6 +27,7 @@ from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
 from .utils import clone_inputs, get_debug_dir
+
 
 log = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ class NNModuleToString:
             """
             from torch.nn import *
             class Repro(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
             """
         )
@@ -361,7 +361,9 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")  # noqa: B904
+                raise RuntimeError(  # noqa: B904
+                    "Could not generate fp64 outputs, workaround with torch._dynamo.config.same_two_models_use_fp64 = False"
+                )
             log.warning("Could not generate fp64 outputs")
 
     try:
@@ -491,7 +493,7 @@ _is_leaf_or_default = _mk_defaulter(False)
 
 
 class NopInputReader:
-    def __init__(self):
+    def __init__(self) -> None:
         self.total = 0
 
     def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
@@ -647,6 +649,8 @@ class InputWriter:
         return v
 
     def tensor(self, name, t) -> None:
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
@@ -656,7 +660,9 @@ class InputWriter:
             args.append(str(tuple(t.stride())))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
-        if _storage_offset_or_default(None) != t.storage_offset():
+        if not statically_known_true(
+            _storage_offset_or_default(None) == t.storage_offset()
+        ):
             args.append(f"storage_offset={t.storage_offset()!r}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
@@ -715,7 +721,6 @@ def aot_graph_input_parser(
 
     class TensorContainer:
         "Container for tensors as attributes"
-        pass
 
     # Dictionary for tensors from annotations
     kwargs: Dict[str, Any] = {}
@@ -740,7 +745,8 @@ def aot_graph_input_parser(
                 resolved_shape.append(s)
                 dynamic_dims.append(i)
             else:
-                resolved_shape.append(int(dim))
+                if dim:
+                    resolved_shape.append(int(dim))
 
         constructor = torch.randn if dtype.is_floating_point else torch.zeros
         out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
