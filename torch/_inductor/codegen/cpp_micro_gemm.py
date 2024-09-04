@@ -332,8 +332,8 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
-    TORCH_CHECK(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
-    TORCH_CHECK(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
+    {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    {{kernel.assert_function}}(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
     // TODO(jgong5): loop unroll for M and N
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
@@ -364,7 +364,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
                     break;
 {%- endfor %}
                 default:
-                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                    {{kernel.assert_function}}(false, "Unsupported block_m: {{block_m}}");
                 }
             }
         }
@@ -509,8 +509,8 @@ class CppMicroGemmAMX(CppMicroGemm):
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
-    TORCH_CHECK(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
-    TORCH_CHECK(K % 2 == 0, "K dimension must be multiple of 2");
+    {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
     // TODO(jgong5): loop unroll for M and N
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});

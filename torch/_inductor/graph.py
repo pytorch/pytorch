@@ -247,7 +247,11 @@ def mark_nodes_dislike_padding(
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
-        if user_visible_outputs and cur.name in user_visible_outputs:
+        if (
+            not config.pad_outputs
+            and user_visible_outputs
+            and cur.name in user_visible_outputs
+        ):
             cur.meta["dislike_padding"] = True
 
 
@@ -850,7 +854,6 @@ class GraphLowering(torch.fx.Interpreter):
     def allocate_non_dup_const_name(
         self, name: Optional[str], data: Union[Tensor]
     ) -> str:
-        orig_name = name
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
                 if (
@@ -867,7 +870,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if name is None:
             name = f"constant{len(self.constants)}"
-        assert name is not None
+        orig_name = name
         if name[0].isdigit():
             name = f"constant_{name}"
         name = self.qualify_name(name)
@@ -1359,9 +1362,8 @@ class GraphLowering(torch.fx.Interpreter):
                 strides = n.meta["val"].stride()
                 if len(strides):
                     allow_padding = (
-                        n.name not in self.user_visible_outputs
-                        and not is_input_for_as_strided
-                    )
+                        config.pad_outputs or n.name not in self.user_visible_outputs
+                    ) and not is_input_for_as_strided
                     dense = torch._prims_common.is_non_overlapping_and_dense(
                         n.meta["val"]
                     )
