@@ -2256,6 +2256,30 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
+    def test_index_select(self):
+        def op(x, y): return torch.Tensor.index_select(x, 0, y)
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+
+        test(op, (torch.arange(12), torch.zeros(12, dtype=torch.long)), in_dims=(0, 0))
+        test(
+            op,
+            (torch.arange(12).view(3, 4), torch.zeros(12, dtype=torch.long).view(3, 4)),
+            in_dims=(0, 0),
+        )
+        test(
+            op,
+            (torch.arange(12).view(3, 4), torch.zeros(12, dtype=torch.long).view(3, 4)),
+            in_dims=(1, 1),
+        )
+        test(op, (torch.arange(12), torch.arange(3)), in_dims=(None, 0))
+
+        def op(x, y): return torch.Tensor.index_select(x, 1, y)
+        test(op, (torch.arange(12).view(1, 12), torch.arange(3)), in_dims=(None, 0))
+
+        x = torch.arange(12).view(3, 4)
+        def op(y): return torch.Tensor.index_select(x, 0, y)
+        test(op, (torch.arange(3),))
+
     def test_fill_and_zero_inplace(self):
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
         B0, B1 = 7, 11
