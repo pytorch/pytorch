@@ -697,6 +697,7 @@ exclusions = {
     "fusion",
     "overlap",
     "aot_graphs",
+    "aot_graphs_effects",
     "post_grad_graphs",
     "compiled_autograd",
     "compiled_autograd_verbose",

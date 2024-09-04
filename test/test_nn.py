@@ -39,10 +39,11 @@ from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_C
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
+from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
-    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types
+    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
+    skipMPSVersionIfLessThan, skipMeta, get_all_device_types
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
@@ -7919,6 +7920,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off()
     @bf32_on_and_off()
     def test_affine_2d_rotate0(self, device):
@@ -7959,6 +7961,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.001)
     @bf32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
@@ -8008,6 +8011,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.005)
     @bf32_on_and_off(0.005)
     def test_affine_2d_rotate45(self, device):
@@ -8085,6 +8089,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.005)
     @bf32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
@@ -8137,6 +8142,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @expectedFailureMPS  # aten::grid_sampler_3d not implemented https://github.com/pytorch/pytorch/issues/77764
     @tf32_on_and_off(0.005)
     @bf32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
@@ -8199,7 +8205,9 @@ class TestNNDeviceType(NNTestCase):
         data = torch.rand(880801, 1, 1, 1, device=device, dtype=dtype)
         out = bn(data).sum().backward()
 
+    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.complex128)
+    @dtypesIfMPS(torch.float, torch.bfloat16, torch.complex64)
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.complex128)
     def test_conv_empty_input(self, device, dtype):
         def help(input, conv, memory_format):
@@ -8576,6 +8584,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
+    @expectedFailureMPS  # TODO(hvaara): Investigate as possible bug.
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
@@ -8600,6 +8609,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
+    @expectedFailureMPS  # TODO(hvaara): Investigate as possible bug.
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
@@ -8938,9 +8948,11 @@ class TestNNDeviceType(NNTestCase):
                     else:
                         self.assertEqual(hx.grad, hx_device.grad)
 
-    def test_BatchNorm_empty(self, device):
+    @dtypesIfMPS(torch.float)
+    @dtypes(torch.double)
+    def test_BatchNorm_empty(self, device, dtype):
         mod = torch.nn.BatchNorm2d(3).to(device)
-        inp = torch.randn(0, 3, 2, 2, device=device)
+        inp = torch.randn(0, 3, 2, 2, device=device, dtype=dtype)
         _test_module_empty_input(self, mod, inp)
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
@@ -8967,7 +8979,7 @@ class TestNNDeviceType(NNTestCase):
     def test_one_hot(self, device):
         # cuda throws device assert for invalid data
         # xla ignores out of bound indices
-        if self.device_type != 'cuda' and self.device_type != 'xla':
+        if self.device_type not in ('cuda', 'mps', 'xla'):
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
 
@@ -9016,6 +9028,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(RuntimeError):
             torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
 
+    @expectedFailureMPS  # NotImplementedError: aten::rrelu_with_noise https://github.com/pytorch/pytorch/issues/77764
     def test_nn_empty(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
         def verify_scalars(input, output):
@@ -9031,6 +9044,7 @@ class TestNNDeviceType(NNTestCase):
                 output = m(input)
                 verify_scalars(input, output)
 
+    @expectedFailureMPS  # NotImplementedError: aten::rrelu_with_noise https://github.com/pytorch/pytorch/issues/77764
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
         def verify_scalars(input, output):
@@ -9209,6 +9223,9 @@ class TestNNDeviceType(NNTestCase):
 
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
+    # MPS: NotImplementedError: aten::rrelu_with_noise_ https://github.com/pytorch/pytorch/issues/77764
+    # MPS: NotImplementedError: aten::hardshrink.out https://github.com/pytorch/pytorch/issues/77764
+    @expectedFailureMPS
     def test_nonlinearity_propagate_nan(self, device):
         def test(nonlinearity, *args, **kwargs):
             x = torch.tensor([nan], device=device)
@@ -9241,6 +9258,7 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
+    @expectedFailureMPS  # TypeError: float64 the MPS framework doesn't support float64
     @parametrize_test("mode", ["nearest-exact", "nearest"])
     def test_upsamplingNearest1d(self, device, mode):
         # Forward AD does not support XLA because XLA tensors don't have storage
@@ -9319,6 +9337,7 @@ class TestNNDeviceType(NNTestCase):
             expected_out = in_t.repeat_interleave(2, dim=-1)
             self.assertEqual(out_t, expected_out)
 
+    @skipIfMps  # Partially passes https://github.com/pytorch/pytorch/issues/134430
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact1d_correctness(self, device, isize, osize):
         # Here we check if output matches Scikit-Image/Scipy-like result
@@ -9337,6 +9356,7 @@ class TestNNDeviceType(NNTestCase):
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
 
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["nearest", "nearest-exact"])
     def test_upsamplingNearest2d(self, device, memory_format, mode):
@@ -9425,6 +9445,7 @@ class TestNNDeviceType(NNTestCase):
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
 
+    @skipIfMps  # Partially passes https://github.com/pytorch/pytorch/issues/134430
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact2d_correctness(self, device, memory_format, isize, osize):
@@ -9448,6 +9469,7 @@ class TestNNDeviceType(NNTestCase):
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
 
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
     @parametrize_test("mode", ["nearest", "nearest-exact"])
     def test_upsamplingNearest3d(self, device, memory_format, mode):
@@ -9521,6 +9543,7 @@ class TestNNDeviceType(NNTestCase):
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
 
+    @expectedFailureMPS  # NotImplementedError: aten::_upsample_nearest_exact3d.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact3d_correctness(self, device, memory_format, isize, osize):
@@ -9643,6 +9666,7 @@ class TestNNDeviceType(NNTestCase):
         else:
             _ = F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
 
+    @expectedFailureMPS  # NotImplementedError: aten::_upsample_bilinear2d_aa.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBilinear2d_aa_correctness(self, device, memory_format):
         # NOTE: We expand the batch dim such that `b*c` is above the maximum
@@ -9663,6 +9687,8 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bilinear", align_corners=False, antialias=True)
         self.assertEqual(expected_out.expand([*shape[:2], 2, 2]), t_out)
 
+    # Partially passes. NotImplementedError: aten::upsample_bicubic2d.out https://github.com/pytorch/pytorch/issues/77764
+    @skipIfMps
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["bilinear", "bicubic"])
     @parametrize_test("antialias", [True, False])
@@ -9768,6 +9794,7 @@ class TestNNDeviceType(NNTestCase):
         )
         torch.testing.assert_close(output_f32, output_ui8, atol=1, rtol=0)
 
+    @expectedFailureMPS  # NotImplementedError: aten::upsample_bicubic2d.out https://github.com/pytorch/pytorch/issues/77764
     def test_upsamplingBicubic2d_correctness(self, device):
         # test output against known input: align_corners=False result must match opencv
         in_t = torch.arange(8., device=device).view(1, 2, 2, 2)
@@ -9785,6 +9812,7 @@ class TestNNDeviceType(NNTestCase):
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t, atol=1e-5, rtol=0)
 
+    @expectedFailureMPS  # NotImplementedError: aten::_upsample_bicubic2d_aa.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBicubic2d_aa_correctness(self, device, memory_format):
         t_in = torch.arange(3 * 8 * 8, dtype=torch.float, device=device).reshape(1, 3, 8, 8)
@@ -9801,6 +9829,7 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
 
+    @expectedFailureMPS  # NotImplementedError: aten::upsample_trilinear3d.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
     def test_upsamplingTrilinear3d(self, device, align_corners, memory_format):
@@ -10483,8 +10512,8 @@ class TestNNDeviceType(NNTestCase):
         tol = 2 * torch.finfo(dtype).eps
         self.assertEqual(logits_soft.grad, logits_hard.grad, atol=tol, rtol=0)
 
-    @skipIfMps
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
     @dtypes(torch.float, torch.double)
     def test_gumbel_softmax(self, device, dtype):
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=0, count_expected=1)
@@ -10512,6 +10541,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(grads, grads2)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.double)
     def test_rnn_retain_variables(self, device, dtype):
         self._test_rnn_retain_variables(device, dtype)
@@ -10561,6 +10591,7 @@ class TestNNDeviceType(NNTestCase):
 
     # Merge into OpInfo?
     @skipMeta  # LSTM cell reuses output which was resized
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @dtypes(torch.double)
     def test_LSTM_grad_and_gradgrad(self, device, dtype):
         hsize = 4
@@ -10570,6 +10601,7 @@ class TestNNDeviceType(NNTestCase):
             self._test_rnn_mod(mod, inp)
 
     @skipMeta  # GRU cell reuses output which was resized
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @dtypes(torch.double)
     def test_GRU_grad_and_gradgrad(self, device, dtype):
         hsize = 4
@@ -10738,6 +10770,7 @@ class TestNNDeviceType(NNTestCase):
         for ele in list_to_compare:
             self.assertEqual(expected, ele, atol=atol, rtol=rtol)
 
+    @expectedFailureMPS  # NotImplementedError: aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("reduction", ['none', 'mean', 'sum'])
     @parametrize_test("use_module_form", [True, False])
     def test_CTCLoss_no_batch_dim(self, device, reduction, use_module_form):
@@ -10868,6 +10901,7 @@ class TestNNDeviceType(NNTestCase):
             _assertGradAndGradgradChecks(self, F.batch_norm, (input, running_mean, running_var, weight, bias,
                                                               training, 0.1, 0.0001))
 
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     def test_batchnorm_grad(self, device):
         self._test_batchnorm_grad(device)
 
@@ -10906,6 +10940,7 @@ class TestNNDeviceType(NNTestCase):
         out_zero_bias = torch.layer_norm(input, normalized_shape, data, bias, eps)
         self.assertEqual(out_none_bias, out_zero_bias)
 
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device, dtype=torch.double) - 0.5) * 10
         inputs.requires_grad = True
@@ -11112,6 +11147,7 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
+    @expectedFailureMPS  # NotImplementedError aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     def test_CTCLoss_empty_target(self, device):
         target_lengths = [0, 0, 0]
         input_lengths = [50, 50, 50]
@@ -11132,6 +11168,7 @@ class TestNNDeviceType(NNTestCase):
     # Merge into OpInfo?
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
                           https://github.com/pytorch/pytorch/issues/34870""")
+    @expectedFailureMPS  # NotImplementedError aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101
@@ -11234,6 +11271,7 @@ class TestNNDeviceType(NNTestCase):
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
+    @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @tf32_on_and_off(0.005)
@@ -11509,6 +11547,7 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
 
+    @expectedFailureMPS  # RuntimeError: [srcBuf length] > 0 INTERNAL ASSERT FAILED https://github.com/pytorch/pytorch/issues/134431
     def test_nll_loss_empty_tensor_reduction_mean(self, device):
         nan = torch.tensor(float('nan'), device=device)
         self._nll_loss_helper([0, 3], "mean", nan, device)
@@ -11517,6 +11556,7 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device)
 
+    @expectedFailureMPS  # RuntimeError: [srcBuf length] > 0 INTERNAL ASSERT FAILED https://github.com/pytorch/pytorch/issues/134431
     def test_nll_loss_empty_tensor_reduction_sum(self, device):
         zero = torch.tensor(0, device=device)
         self._nll_loss_helper([0, 3], "sum", zero, device)
@@ -11525,6 +11565,7 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
 
+    @expectedFailureMPS  # AssertionError: Expected nan but got 0.0.
     def test_nll_loss_total_weight_is_zero(self, device):
 
         def helper(input_size):
@@ -11541,6 +11582,7 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
 
+    @expectedFailureMPS  # AssertionError: Expected nan but got 0.0.
     def test_nll_loss_all_ignored(self, device):
 
         def helper(input_size):
@@ -11722,6 +11764,7 @@ if __name__ == '__main__':
                                         r"label_smoothing must be between 0\.0"):
                 loss(*input_arg)
 
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @set_default_dtype(torch.double)
     def test_cross_entropy_label_smoothing_consistent_index_target_and_probs(self, device):
         N, C = 10, 4
@@ -11877,6 +11920,7 @@ if __name__ == '__main__':
                                     r'lambda must be greater or equal to 0, but found to be -1\.'):
             m(input)
 
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     def test_fold(self, device):
         def test_dtype(fn, input, dtype):
             input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
@@ -11915,6 +11959,7 @@ if __name__ == '__main__':
 
     # Check that clip_grad_norm_ raises an error if the total norm of the
     # parameters' gradients is non-finite
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     def test_clip_grad_norm_error_if_nonfinite(self, device):
         norms_pos = [0.1, 1, 2, 3.5, inf]
         norms_neg = [-0.1, -1, -2, -3.5]
@@ -12040,6 +12085,7 @@ if __name__ == '__main__':
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
+    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     def test_elu_inplace_overlap(self, device):
         x = torch.randn((1, 6), dtype=torch.bfloat16, device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -12082,6 +12128,7 @@ if __name__ == '__main__':
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.softplus(x, out=x)
 
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     def test_softplus_low_threshold(self, device):
         # Ensure gradients are computed correctly with a low threshold.
         model = torch.nn.Softplus(threshold=1).double()
@@ -12103,6 +12150,7 @@ if __name__ == '__main__':
             F.leaky_relu_(x)
 
     # Merge into OpInfo?
+    @expectedFailureMPS  # NotImplementedError: aten::rrelu_with_noise_ https://github.com/pytorch/pytorch/issues/77764
     def test_leaky_relu_inplace_with_neg_slope(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), -2)
@@ -12115,6 +12163,7 @@ if __name__ == '__main__':
             b.backward(torch.ones(2, device=device))
 
     # Merge into OpInfo?
+    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     def test_leaky_relu_inplace_with_zero_slope(self, device):
         a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
@@ -12238,15 +12287,13 @@ if __name__ == '__main__':
             self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
             self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
 
-    def test_to_complex(self, device):
+    @dtypesIfMPS(torch.cfloat, torch.float)
+    @dtypes(torch.cfloat, torch.cdouble, torch.float)
+    def test_to_complex(self, device, dtype):
         m = nn.Linear(3, 5).to(device)
         self.assertIs(m, m.to(device))
-        m.to(torch.cfloat)
-        self.assertIs(m.weight.dtype, torch.cfloat)
-        m.to(torch.cdouble)
-        self.assertIs(m.weight.dtype, torch.cdouble)
-        m.to(torch.float)
-        self.assertIs(m.weight.dtype, torch.float)
+        m.to(dtype)
+        self.assertIs(m.weight.dtype, dtype)
         with warnings.catch_warnings(record=True) as w:
             # Trigger warning
             m.to(torch.cfloat)
@@ -12255,6 +12302,7 @@ if __name__ == '__main__':
             self.assertTrue("Complex modules are a new feature" in str(w[-1].message))
 
     @skipMeta
+    @dtypesIfMPS(torch.float32)
     @dtypes(torch.float32, torch.float64)
     def test_module_to_empty(self, device, dtype):
         class MyModule(nn.Module):
@@ -12338,6 +12386,7 @@ if __name__ == '__main__':
         self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
         self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
+    @skipIfMps  # TODO(hvaara): Investigate as possible bug. macOS 13 passes, while 14 and 15 fails.
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
     def test_transformerencoderlayer(self, device, dtype):
@@ -12643,6 +12692,7 @@ if __name__ == '__main__':
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 
+    @skipIfMps  # RuntimeError: foreach=True was passed, but can't use the foreach API on mps tensors
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -12670,6 +12720,7 @@ if __name__ == '__main__':
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
+    @skipIfMps  # TypeError: the MPS framework doesn't support float64
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):
@@ -12768,6 +12819,7 @@ if __name__ == '__main__':
         self.assertEqual(x.grad, x_cpu.grad)
 
     @skipMeta
+    @expectedFailureMPS  # NotImplementedError: aten::channel_shuffle https://github.com/pytorch/pytorch/issues/77764
     def test_channel_shuffle(self, device):
         #  3D tensor
         x = torch.tensor(
@@ -12940,7 +12992,8 @@ class TestUtils(TestCase):
         self.assertEqual(list(state_dict.keys()), list(ddp_state_dict.keys()))
         self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
 
-instantiate_device_type_tests(TestNNDeviceType, globals())
+
+instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
 
 if __name__ == '__main__':

@@ -280,7 +280,6 @@ class FSDPParamGroup:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
-        logger.info("calling reshard")
         if self._training_state == TrainingState.FORWARD:
             if not self._reshard_after_forward:
                 return

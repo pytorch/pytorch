@@ -30,6 +30,7 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    PolyfilledFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -82,6 +83,7 @@ from .misc import (
     UnknownVariable,
 )
 from .nn_module import (
+    FSDPManagedNNModuleVariable,
     NNModuleVariable,
     UnspecializedBuiltinNNModuleVariable,
     UnspecializedNNModuleVariable,
@@ -144,6 +146,7 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "PlacementVariable",
+    "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "RegexPatternVariable",
