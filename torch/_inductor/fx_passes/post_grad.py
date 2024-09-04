@@ -811,7 +811,7 @@ def decompose_auto_functionalized(graph):
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
         pass_dict=graph_pass,
     )
-    def replacement(match: Match, *args, **kwargs):
+    def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
         only_clone_these_tensors = tuple(
@@ -849,11 +849,42 @@ def decompose_auto_functionalized(graph):
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.auto_functionalize import (
+            auto_functionalized_v2_dense,
+        )
+
+        only_clone_these_bases = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return auto_functionalized_v2_dense(*args, only_clone_these_bases, **kwargs)
+
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
     graph_pass.apply(graph)
+
     for node in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
     ):
         raise AssertionError("auto_functionalized was not removed")
+
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        raise AssertionError("auto_functionalized_v2 was not removed")
+
     for node in graph.find_nodes(
         op="call_function",
         target=torch.ops.higher_order.triton_kernel_wrapper_functional,
