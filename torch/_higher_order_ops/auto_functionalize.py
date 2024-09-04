@@ -631,7 +631,7 @@ def auto_functionalized_v2_dense(
         if t is None:
             return None
         if i in _only_clone_these_bases:
-            return t.clone()
+            return clone_preserve_strides(t)
         else:
             return t
 

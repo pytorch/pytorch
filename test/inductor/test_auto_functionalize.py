@@ -976,11 +976,15 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
 def forward(self, arg0_1: "f32[2][1]cpu"):
         select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1)
-        clone_default: "f32[][]cpu" = torch.ops.aten.clone.default(select);  select = None
-        clone_default_1: "f32[][]cpu" = torch.ops.aten.clone.default(select_1);  select_1 = None
-        foo_default = torch.ops.mylib.foo.default(clone_default, clone_default_1);  foo_default = None
-        select_scatter_default: "f32[2][1]cpu" = torch.ops.aten.select_scatter.default(arg0_1, clone_default, 0, 0);  clone_default = None
-        select_scatter_default_1: "f32[2][1]cpu" = torch.ops.aten.select_scatter.default(select_scatter_default, clone_default_1, 0, 1);  select_scatter_default = clone_default_1 = None
+        as_strided_default: "f32[1][1]cpu" = torch.ops.aten.as_strided.default(select, [1], [1], 0);  select = None
+        clone_default: "f32[1][1]cpu" = torch.ops.aten.clone.default(as_strided_default);  as_strided_default = None
+        as_strided_default_1: "f32[][]cpu" = torch.ops.aten.as_strided.default(clone_default, [], [], 0);  clone_default = None
+        as_strided_default_2: "f32[2][1]cpu" = torch.ops.aten.as_strided.default(select_1, [2], [1], 0);  select_1 = None
+        clone_default_1: "f32[2][1]cpu" = torch.ops.aten.clone.default(as_strided_default_2);  as_strided_default_2 = None
+        as_strided_default_3: "f32[][]cpu" = torch.ops.aten.as_strided.default(clone_default_1, [], [], 1);  clone_default_1 = None
+        foo_default = torch.ops.mylib.foo.default(as_strided_default_1, as_strided_default_3);  foo_default = None
+        select_scatter_default: "f32[2][1]cpu" = torch.ops.aten.select_scatter.default(arg0_1, as_strided_default_1, 0, 0);  as_strided_default_1 = None
+        select_scatter_default_1: "f32[2][1]cpu" = torch.ops.aten.select_scatter.default(select_scatter_default, as_strided_default_3, 0, 1);  select_scatter_default = as_strided_default_3 = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, select_scatter_default_1);  arg0_1 = select_scatter_default_1 = copy_ = None
         return ()""",  # noqa: B950
                     ignore_comments=True,
@@ -998,6 +1002,33 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_dynamic3_v2(self):
         self.test_auto_functionalize_extra2(_dynamic=True)
+
+    # foo takes two views on the same input, function does not have return.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_graph_input_is_view(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x):
+                pass
+
+            @torch.compile(fullgraph=True, dynamic=False, backend="aot_eager")
+            def f(x):
+                a = x[0]
+                torch.ops.mylib.foo(a)
+                return
+
+            x = torch.tensor([[1, 2], [3, 4]])
+            # This would fail if auto_functionalized_v2 uses clone and not clone_preserve_strides
+            # to clone not-inplaced args.
+            f(x[1])
 
 
 if __name__ == "__main__":
