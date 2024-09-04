@@ -811,7 +811,7 @@ class _FindNodesLookupTable:
         self.table[self._key(node)][node] = None
 
     def remove(self, node: Node) -> None:
-        self.table[self._key(node)].pop(node, None)
+        self.table[self._key(node)].pop(node)
 
     def find_nodes(self, *, op: str, target: Optional['Target'] = None):
         if op == "call_function":
