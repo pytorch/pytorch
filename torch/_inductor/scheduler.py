@@ -918,16 +918,28 @@ class SchedulerNode(BaseSchedulerNode):
             log.fatal("Error in codegen for %s", self.node)
             raise
 
-    def pointwise_read_writes(self) -> dependencies.ReadWrites:
+    def pointwise_or_reduction_read_writes(self, pointwise=True) -> dependencies.ReadWrites:
         """
-        Get the memory dependencies in the non-reduction axis.
+        Get the memory dependencies in either the pointwise or the reduction axes.
         """
-        sizes, reduction_sizes = self._sizes
+        keep_sizes, ignore_sizes = self._sizes if pointwise else reversed(self._sizes)
 
         def fn(index: Sequence[sympy.Symbol]) -> str:
-            return self._body(index, [sympy.Integer(0) for _ in reduction_sizes])
+            return self._body(index, [sympy.Integer(0) for _ in ignore_sizes])
 
-        return dependencies.extract_read_writes(fn, sizes)
+        return dependencies.extract_read_writes(fn, keep_sizes)
+
+    def pointwise_read_writes(self) -> dependencies.ReadWrites:
+        """
+        Get the memory dependencies in the non-reduction axes.
+        """
+        return self.pointwise_or_reduction_read_writes(pointwise=True)
+
+    def reduction_read_writes(self) -> dependencies.ReadWrites:
+        """
+        Get the memory dependencies in the reduction axes.
+        """
+        return self.pointwise_or_reduction_read_writes(pointwise=False)
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
         if self.is_template():
