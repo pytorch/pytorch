@@ -3076,8 +3076,10 @@ class Scheduler:
             if read_name in self.mutation_renames:
                 read_name = self.mutation_renames[read_name]
 
-            if read.num_vars != write.num_vars:
-                # merge loops
+            if config.loop_ordering_after_fusion and read.num_vars != write.num_vars:
+                # Need merge loops if we do loop ordering after fusion since
+                # we have not merged the loops yet when creating the scheduler
+                # nodes.
                 read = read.normalize()
                 write = write.normalize()
 
