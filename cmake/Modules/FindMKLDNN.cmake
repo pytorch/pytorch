@@ -43,9 +43,7 @@ IF(NOT MKLDNN_FOUND)
       endif()
     endif()
     if(LINUX)
-      set(DNNL_CXX_FLAGS "-fpreview-breaking-changes")
-    else()
-      set(DNNL_CXX_FLAGS "/EHsc")
+      set(DNNL_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fpreview-breaking-changes")
     endif()
     ExternalProject_Add(xpu_mkldnn_proj
       SOURCE_DIR ${MKLDNN_ROOT}
