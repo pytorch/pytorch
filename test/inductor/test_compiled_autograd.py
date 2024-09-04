@@ -172,6 +172,26 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_graph_break_custom_op(self):
+        @torch.library.custom_op("mylib::sin", mutates_args={})
+        def sin(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * x.cos()
+
+        sin.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        y = sin(x.clone()).sum()
+        with compiled_autograd.enable(compiler_fn):
+            y.backward()
+
     def test_tensor_grad_hook1(self):
         def fn():
             for _ in range(3):
