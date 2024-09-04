@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
-
+import atexit
 import copy
+import cProfile
 import functools
 import getpass
 import inspect
@@ -10,6 +11,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 from collections import Counter
@@ -782,3 +784,35 @@ def aot_graph_input_parser(
             setattr(container, attr_name, gen_tensor(shape, dtype))
 
     return kwargs
+
+
+def profile_to_file(filename: str) -> Callable[[T], T]:
+    prof = cProfile.Profile()
+    filename = os.path.abspath(os.path.expanduser(filename))
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            prof.enable()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                prof.disable()
+
+        return wrapper
+
+    def save_it():
+        prof.dump_stats(filename)
+        sys.stderr.write(
+            textwrap.dedent(
+                f"""\
+                Wrote profile to {filename}, view with:
+
+                    snakeviz {filename}
+
+                """
+            )
+        )
+
+    atexit.register(save_it)
+    return decorator
