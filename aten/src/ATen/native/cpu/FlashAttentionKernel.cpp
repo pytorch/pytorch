@@ -394,7 +394,7 @@ void cpu_flash_attention(
       float gemm_size_per_thread =
           (batchSize * num_head * qSlice + num_thread - 1) / num_thread *
           qSplitSize * (is_causal ? qSize : kvSize) * headSize / 1024;
-      float gsize = gemm_size_per_thread / pack_size;    
+      float gsize = gemm_size_per_thread / pack_size;
       // When the number of gemm is much greater than the number of pack,
       // the pack and padding overhead can be overlaped.
       if (pack_size < 2688) {
@@ -601,22 +601,24 @@ void cpu_flash_attention(
         int64_t rkvBlockSize = kvBlockSize == kvSplitSize ? rkvSplitSize : rkvTail;
         // Calculate scale * q @ k.T
         if (need_pack) {
-          for (int64_t b = 0; b < kvBlockSize; b += packb_size) {
-            cpublas::brgemm(
-                qBlockSize,
-                packb_size,
-                eheadSize,
-                headSize_even ? qStrideM : eheadSize,
-                packb_size,
-                rkvBlockSize,
-                1.f,
-                0.f,
-                !headSize_even
-                    ? query_t_padding_ptr
-                    : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
-                key_reorder_ptr + i * num_head * eheadSize * rkvSize +
-                    j * eheadSize * rkvSize + n * eheadSize + b * eheadSize,
-                qk_data + b);
+          if constexpr (std::is_same_v<scalar_t, at::Half>) {
+            for (int64_t b = 0; b < kvBlockSize; b += packb_size) {
+              cpublas::brgemm(
+                  qBlockSize,
+                  packb_size,
+                  eheadSize,
+                  headSize_even ? qStrideM : eheadSize,
+                  packb_size,
+                  rkvBlockSize,
+                  1.f,
+                  0.f,
+                  !headSize_even
+                      ? query_t_padding_ptr
+                      : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+                  key_reorder_ptr + i * num_head * eheadSize * rkvSize +
+                      j * eheadSize * rkvSize + n * eheadSize + b * eheadSize,
+                  qk_data + b);
+            }
           }
         } else {
           cpublas::gemm(
@@ -734,22 +736,24 @@ void cpu_flash_attention(
         // Calculate Softmax(q @ k.T) @ v
         if (need_pack) {
           int64_t psize = n / kvSplitSize * ekvSplitSize;
-          for (int64_t b = 0; b < headSize; b += packb_size) {
-            cpublas::brgemm(
-                qBlockSize,
-                packb_size,
-                ekvBlockSize,
-                ekvBlockSize,
-                packb_size,
-                rHeadSize,
-                1.0,
-                n == 0 ? 0.f : 1.f,
-                qk_reduced_data,
-                value_reorder_ptr +
-                    i * num_head * kv_padding_size * rHeadSize +
-                    j * kv_padding_size * rHeadSize + psize * rHeadSize +
-                    b * ekvBlockSize,
-                dst_data + b);
+          if constexpr (std::is_same_v<scalar_t, at::Half>) {
+            for (int64_t b = 0; b < headSize; b += packb_size) {
+              cpublas::brgemm(
+                  qBlockSize,
+                  packb_size,
+                  ekvBlockSize,
+                  ekvBlockSize,
+                  packb_size,
+                  rHeadSize,
+                  1.0,
+                  n == 0 ? 0.f : 1.f,
+                  qk_reduced_data,
+                  value_reorder_ptr +
+                      i * num_head * kv_padding_size * rHeadSize +
+                      j * kv_padding_size * rHeadSize + psize * rHeadSize +
+                      b * ekvBlockSize,
+                  dst_data + b);
+            }
           }
         } else {
           cpublas::gemm(
