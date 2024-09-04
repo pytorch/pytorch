@@ -1364,14 +1364,13 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            # TODO(angelayi): change this to predispatch
-            # https://github.com/pytorch/pytorch/issues/127513 needs to be fixed before changing
-            # to predispatch to avoid performance regressions
-            gm = torch.export._trace._export_to_torch_ir(
+            gm = torch.export._trace._export(
                 model,
                 example_args,
                 example_kwargs,
-            )
+                pre_dispatch=True,
+                strict=False,
+            ).module()
             with torch.no_grad():
                 so_path = torch._inductor.aot_compile(
                     gm, example_args, example_kwargs
