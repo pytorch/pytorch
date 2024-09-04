@@ -72,6 +72,28 @@ class TestExportAPIDynamo(common_utils.TestCase):
             },
         )
 
+    def test_dynamic_axes_supports_output_names(self):
+        self.assert_export(
+            SampleModelForDynamicShapes(),
+            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
+            dynamic_axes={
+                "b": [0, 1, 2],
+            },
+        )
+        onnx_program = torch.onnx.export(
+            SampleModelForDynamicShapes(),
+            (
+                torch.randn(2, 2, 3),
+                torch.randn(2, 2, 3),
+            ),
+            input_names=["x", "b"],
+            output_names=["x_out", "b_out"],
+            dynamic_axes={"b": [0, 1, 2], "b_out": [0, 1, 2]},
+            dynamo=True,
+        )
+        assert onnx_program is not None
+        onnx_testing.assert_onnx_program(onnx_program)
+
     def test_saved_f_exists_after_export(self):
         with common_utils.TemporaryFileName(suffix=".onnx") as path:
             _ = torch.onnx.export(
