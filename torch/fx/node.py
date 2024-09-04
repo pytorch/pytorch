@@ -209,7 +209,6 @@ class Node(_NodeBase):
                 annotation of values in the generated code or for other types
                 of analyses.
         """
-        super().__init__()
         assert op in _legal_ops
         if op == 'call_function':
             if not callable(target):
@@ -219,49 +218,54 @@ class Node(_NodeBase):
             if not isinstance(target, str):
                 raise ValueError(f'Node [graph = {graph}, name = \'{name}\'] target {target} has type {torch.typename(target)} '
                                  'but a str is expected')
+        super().__init__()
 
-        # Node has a custom  `__setattr__` that results in a bunch of thrashing if we set attributes one-by-one
-        self.__dict__.update({
-            "graph": graph,
-            "name": name,  # unique name of value being created
-            "op": op,  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
+        # bypass Node.__setattr__ for perf and so that it doesn't need to handle half-built objects
+        assign = object.__setattr__
 
-            "target": target,  # for method/module/function, the name of the method/module/function/attr
-            # being invoked, e.g add, layer1, or torch.add
+        assign(self, "graph", graph)
+        assign(self, "name", name)  # unique name of value being created
+        assign(self, "op", op)  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
 
-            # All `Node`-valued inputs. Key is the Node, value is don't-care.
-            # The public API for this is `all_input_nodes`, this private attribute
-            # should not be accessed directly.
-            "_input_nodes" : {},
+        assign(self, "target", target)  # for method/module/function, the name of the method/module/function/attr
+        # being invoked, e.g add, layer1, or torch.add
 
-            # All of the nodes that use the value produced by this Node
-            # Note one user may correspond to several uses, e.g. the node fo ``x + x``
-            # would appear once here, but represents two uses.
-            #
-            # Is a dict to act as an "ordered set". Keys are significant, value dont-care
-            "users": {},
-            # Type expression representing the output value of this node.
-            # This should contain the same class of Type objects that would appear
-            # as type annotations for function inputs/outputs.
-            #
-            # For placeholder nodes, this value will be used to type-annotate the
-            # generated function parameters.
-            # For the return node, this value will be used to type-annotate the
-            # generated function return type. (Note this is a special case. ``return``
-            # does not produce a value, it's more of a notation. Thus, this value
-            # describes the type of args[0] in the ``return`` node.
-            "type": return_type,
-            "_sort_key": (),
-
-            # If set, use this fn to print this node
-            "_repr_fn": None,
-
-            # Dictionary to store metadata passes need to do their
-            # transformations. This metadata is preserved across node copies
-            "meta": {},
-        })
-
+        # All `Node`-valued inputs. Key is the Node, value is don't-care.
+        # The public API for this is `all_input_nodes`, this private attribute
+        # should not be accessed directly.
+        assign(self, "_input_nodes", {})
         self.__update_args_kwargs(args, kwargs)
+
+        # All of the nodes that use the value produced by this Node
+        # Note one user may correspond to several uses, e.g. the node fo ``x + x``
+        # would appear once here, but represents two uses.
+        #
+        # Is a dict to act as an "ordered set". Keys are significant, value dont-care
+        assign(self, "users", {})
+
+        # Type expression representing the output value of this node.
+        # This should contain the same class of Type objects that would appear
+        # as type annotations for function inputs/outputs.
+        #
+        # For placeholder nodes, this value will be used to type-annotate the
+        # generated function parameters.
+        # For the return node, this value will be used to type-annotate the
+        # generated function return type. (Note this is a special case. ``return``
+        # does not produce a value, it's more of a notation. Thus, this value
+        # describes the type of args[0] in the ``return`` node.
+        assign(self, "type", return_type)
+        assign(self, "_sort_key", ())
+
+        # If set, use this fn to print this node
+        assign(self, "_repr_fn", None)
+
+        # Dictionary to store metadata passes need to do their
+        # transformations. This metadata is preserved across node copies
+        assign(self, "meta", {})
+
+        table = getattr(graph, "_find_nodes_lookup_table", None)
+        if table:
+            table.insert(self)
 
 
     def __getstate__(self) -> Dict[str, Any]:
@@ -504,15 +508,10 @@ class Node(_NodeBase):
                 n.users.setdefault(self)
             return n
 
-        if self in getattr(self.graph, "_find_nodes_lookup_table", ()):
-            self.graph._find_nodes_lookup_table.remove(self)
-
         # Clear prior users and input_nodes
         for old_use in self._input_nodes.keys():
             old_use.users.pop(self)
-
-        # bypass self.__setattr__ to only update _find_nodes_lookup_table once
-        object.__setattr__(self, "_input_nodes", {})
+        object.__setattr__(self, "_input_nodes", {})  # bypass Node.__setattr__
 
         # We do three things in a single pass of the args
         # - Normalize list->immutable_list, dict->immutable_dict, etc
@@ -520,9 +519,6 @@ class Node(_NodeBase):
         # - Populate arg.users[self] for each arg
         object.__setattr__(self, "_args", map_aggregate(new_args, update_users_and_input_nodes))
         object.__setattr__(self, "_kwargs", map_aggregate(new_kwargs, update_users_and_input_nodes))
-
-        if hasattr(self.graph, "_find_nodes_lookup_table"):
-            self.graph._find_nodes_lookup_table.insert(self)
 
     def __repr__(self) -> str:
         if self._repr_fn:
@@ -765,23 +761,23 @@ class Node(_NodeBase):
         self.graph._graph_namespace._rename_object(self, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name == 'name' and hasattr(self, "name"):
+        if name in _setattr_custom_handling:
             m = self.graph.owning_module
             if getattr(m, "_replace_hook", None):
                 assert isinstance(value, str)
                 for user in self.users:
                     m._replace_hook(old=self, new=value, user=user)
-        update = False
-        if (
-                hasattr(self, name) and
-                hasattr(self.graph, "_find_nodes_lookup_table") and
-                self in self.graph._find_nodes_lookup_table
-        ):
-            update = True
-            self.graph._find_nodes_lookup_table.remove(self)
-        object.__setattr__(self, name, value)
-        if update:
-            self.graph._find_nodes_lookup_table.insert(self)
+
+            table = getattr(self.graph, "_find_nodes_lookup_table", None)
+            if table:
+                self.graph._find_nodes_lookup_table.remove(self)
+            object.__setattr__(self, name, value)
+            if table:
+                self.graph._find_nodes_lookup_table.insert(self)
+        else:
+            object.__setattr__(self, name, value)
+
+_setattr_custom_handling = dict.fromkeys(["name", "op", "target"])
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
