@@ -39,8 +39,6 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
-    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
-    _fake_device: _Optional[torch.device] = None
 
     def __init__(self, *args, **kwargs):
         pass
@@ -651,8 +649,6 @@ def _get_device_from_module(module: str):
 
 class TypedStorage:
     is_sparse: _bool = False
-    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
-    _fake_device: _Optional[torch.device] = None
 
     dtype: torch.dtype
 
