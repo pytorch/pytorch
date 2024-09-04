@@ -3324,8 +3324,8 @@ class AOTInductorTestsTemplate:
             ]
         )
 
-        # test the default debug printing codegen
-        with config.patch({"aot_inductor.debug_intermediate_value_printer": 1}):
+        # test default debug printing all tensor values codegen
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
@@ -3345,11 +3345,11 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
-        # test the filtered kernel names printing codegen
+        # test printing selected kernel's tensor values codegen
         filtered_kernel_name = f"aoti_torch_{self.device}_addmm_out"
         with config.patch(
             {
-                "aot_inductor.debug_intermediate_value_printer": 1,
+                "aot_inductor.debug_intermediate_value_printer": "2",
                 "aot_inductor.filtered_kernel_names": filtered_kernel_name,
             }
         ):
@@ -3377,6 +3377,49 @@ class AOTInductorTestsTemplate:
             for kernel_name, _ in kernel_calls_not_to_print:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
+
+    def test_aoti_debug_printer_user_defined_triton_kernel(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                add_kernel[(4,)](x, y, out, n_elements=4, BLOCK_SIZE=16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        )
+
+        kernel_calls = [
+            ("add_kernel_0", 3),
+        ]
+
+        # test the default debug printing codegen
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+
+            # check the c shim print_tensor_handle call is triggered by the config and injected the cpp output code as expected
+            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+
+            # check the codegen for debug printing around the actual kernel call is expected
+
+            for kernel_call, count in kernel_calls:
+                FileCheck().check_count(
+                    f"before_launch - {kernel_call}",
+                    count,
+                ).run(code)
+                FileCheck().check_count(
+                    f"after_launch - {kernel_call}",
+                    count,
+                ).run(code)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
@@ -3584,8 +3627,6 @@ CUDA_TEST_FAILURES = {
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
     # fp8 to be re-enabled for AOTI
     "test_fp8": fail_cuda(is_skip=True),
-    # non-abi compatible mode debug printer is not supported yet
-    "test_aoti_debug_printer_codegen": fail_non_abi_compatible_cuda(is_skip=True),
     "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
     "test_custom_op_missing_arg_with_default_value": fail_non_abi_compatible_cuda(
         is_skip=True
@@ -3595,6 +3636,11 @@ CUDA_TEST_FAILURES = {
         is_skip=True
     ),
     "test_custom_op_with_multiple_outputs": fail_non_abi_compatible_cuda(is_skip=True),
+    # non-abi compatible mode aoti debug printer is not supported yet
+    "test_aoti_debug_printer_codegen": fail_non_abi_compatible_cuda(is_skip=True),
+    "test_aoti_debug_printer_user_defined_triton_kernel": fail_non_abi_compatible_cuda(
+        is_skip=True
+    ),
 }
 
 
@@ -3651,6 +3697,9 @@ if not IS_FBCODE:
     CUDA_TEST_FAILURES.update(
         {
             "test_aoti_debug_printer_codegen": fail_cuda(is_skip=True),
+            "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(
+                is_skip=True
+            ),
         }
     )
 

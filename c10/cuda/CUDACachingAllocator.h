@@ -48,6 +48,10 @@ C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
 namespace c10::cuda::CUDACachingAllocator {
 
+// Preserved only for BC reasons
+// NOLINTNEXTLINE(misc-unused-using-decls)
+using c10::CachingDeviceAllocator::DeviceStats;
+
 extern const size_t kLargeBuffer;
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();

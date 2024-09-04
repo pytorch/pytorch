@@ -23,8 +23,8 @@
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/distributed/c10d/LockGuard.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/NanCheck.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
@@ -302,7 +302,7 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 //   hooks are called outside the scope of any PG, thus we need traverse
 //   communicators in all PGs.
 static std::unordered_map<std::shared_ptr<NCCLComm>, int> ncclCommDevIdxMap;
-static std::timed_mutex ncclCommDevIdxMapMutex;
+static std::mutex ncclCommDevIdxMapMutex;
 static bool allocatorHooksAttached = false;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
@@ -315,7 +315,7 @@ void cacheAllocatorRegisterHook(
     return;
   }
 
-  C10D_LOCK_GUARD(lock, ncclCommDevIdxMapMutex);
+  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
   for (auto& it : ncclCommDevIdxMap) {
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
@@ -333,7 +333,7 @@ void cacheAllocatorDeregisterHook(
     return;
   }
 
-  C10D_LOCK_GUARD(lock, ncclCommDevIdxMapMutex);
+  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
   for (auto& it : ncclCommDevIdxMap) {
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
@@ -420,22 +420,6 @@ std::future<bool> launchAsyncGilCheck() {
   workerThread.detach();
 
   return resultFuture;
-}
-
-// Return CUDA device with ordinal given by input rank.  If we aren't
-// bound to a specific device, there is no strict guarantee that this
-// heuristic is the correct assignment of ranks to GPUs that Python
-// layers use, but in practice it tends to be.  Fortunately we don't
-// rely on this for correctness of any tensor operations, just for
-// ancillary uses like barriers.
-at::Device ProcessGroupNCCL::guessDeviceForRank() const {
-  TORCH_CHECK_WITH(ValueError, rank_ >= 0, "Invalid rank ", rank_);
-  if (getBoundDeviceId()) {
-    return *getBoundDeviceId();
-  } else {
-    int16_t deviceIdx = static_cast<int16_t>(rank_ % localDeviceCount_);
-    return at::Device(at::DeviceType::CUDA, deviceIdx);
-  }
 }
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
@@ -552,7 +536,7 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   }
 
   auto exception_ptr = checkForNCCLErrors();
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
   if (exception_) {
     LOG(ERROR) << logPrefix() << "Collective " << *this
@@ -568,7 +552,7 @@ const std::string& ProcessGroupNCCL::WorkNCCL::logPrefix() const {
 
 void ProcessGroupNCCL::WorkNCCL::setException(
     std::exception_ptr exception_ptr) {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
 }
 
@@ -777,12 +761,12 @@ ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() {}
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
   auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
-    C10D_LOCK_GUARD(lock, this->cacheMutex_);
+    std::lock_guard<std::mutex> lock(this->cacheMutex_);
     this->eventsArray_[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
-    C10D_LOCK_GUARD(lock, cacheMutex_);
+    std::lock_guard<std::mutex> lock(cacheMutex_);
     auto events = eventsArray_[timing ? 1 : 0];
     if (!events.empty()) {
       event = events.back();
@@ -1087,9 +1071,8 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   while (true) {
     {
       std::lock(workMetaListMutex_, completedWorkListMutex_);
-      std::lock_guard<std::timed_mutex> lockWork(
-          workMetaListMutex_, std::adopt_lock);
-      std::lock_guard<std::timed_mutex> lockHook(
+      std::lock_guard<std::mutex> lockWork(workMetaListMutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> lockHook(
           completedWorkListMutex_, std::adopt_lock);
 
       if (workMetaList_.empty() && completedWorkList_.empty()) {
@@ -1202,7 +1185,7 @@ bool ProcessGroupNCCL::abort(std::optional<std::string> abortReason) {
   }
   ncclCommDevIdxMapMutex.unlock();
 
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   abortCommsFromMap(devNCCLCommMap_, abortReason);
   abortCommsFromMap(inInitializationCommMap_, abortReason);
   return true;
@@ -1271,8 +1254,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
-  static std::timed_mutex writeDebugInfoMutex;
-  C10D_LOCK_GUARD(lock, writeDebugInfoMutex);
+  static std::mutex writeDebugInfoMutex;
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
   LOG(ERROR) << logPrefix() << "ProcessGroupNCCL preparing to dump debug info.";
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
@@ -1351,7 +1334,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
     // somewhere else to avoid the deadlock.
-    C10D_LOCK_GUARD(lock, monitorMutex_);
+    std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
             lock, std::chrono::milliseconds(monitorPollInterval), [&] {
               return terminateHeartbeatMonitorThread_.load();
@@ -1676,7 +1659,7 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
 
 void ProcessGroupNCCL::addEphemeralTimeout(
     const std::chrono::milliseconds& timeout) {
-  C10D_LOCK_GUARD(timeoutLock, mtxTimeoutExtension_);
+  std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
   ephemeralTimeoutActive_ += timeout;
 }
 
@@ -1699,7 +1682,7 @@ void ProcessGroupNCCL::watchdogHandler() {
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
   while (!done || !terminateProcessGroup_.load()) {
-    C10D_LOCK_GUARD(lock, workMetaListMutex_);
+    std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
     // milliseconds as long as the atomic is True.
     workMetaListCV_.wait_for(
@@ -1871,7 +1854,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (work.isCompleted()) {
         {
           // Reset the timeout and first work if the work is completed.
-          C10D_LOCK_GUARD(timeoutLock, mtxTimeoutExtension_);
+          std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
           if (work.ownedEphermeralTimeout_.count() > 0) {
             ephemeralTimeoutActive_ -= work.ownedEphermeralTimeout_;
             ephemeralTimeoutInflight_ -= work.ownedEphermeralTimeout_;
@@ -1886,7 +1869,7 @@ void ProcessGroupNCCL::watchdogHandler() {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
           {
-            C10D_LOCK_GUARD(lock, completedWorkListMutex_);
+            const std::lock_guard<std::mutex> lock(completedWorkListMutex_);
             completedWorkList_.splice(
                 completedWorkList_.end(), workMetaList_, it++);
           }
@@ -1914,7 +1897,7 @@ void ProcessGroupNCCL::runHookLoop() {
 
   bool done = false;
   while (!done || !terminateProcessGroup_.load()) {
-    C10D_LOCK_GUARD(lock, completedWorkListMutex_);
+    std::unique_lock<std::mutex> lock(completedWorkListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
     // milliseconds as long as the atomic is True.
     completedWorkListCV_.wait_for(
@@ -2087,7 +2070,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
 }
 
 void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
-  C10D_LOCK_GUARD(lock, mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   if (devNCCLCommMap_.find(devNCCLCommMapKey) == devNCCLCommMap_.end()) {
     TORCH_INTERNAL_ASSERT(
         false,
@@ -2135,7 +2118,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   usedDeviceIdxs_.insert(device.index());
 
   {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     if (devNCCLCommMap_.find(deviceKey) != devNCCLCommMap_.end()) {
       // Reuse the cached communicator if there is one.
       return devNCCLCommMap_[deviceKey];
@@ -2209,7 +2192,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
         options_->split_color != 0,
         "Must specify a non-zero color when splitting");
     // Find a valid, healthy communicator to split from if possible.
-    C10D_LOCK_GUARD(lock, options_->split_from->mutex_);
+    std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
     auto dit = other_comms.find(getKeyFromDevice(device));
     if (dit != other_comms.end()) {
@@ -2263,7 +2246,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       options_->is_high_priority_stream || force_high);
 
   {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     inInitializationCommMap_.emplace(deviceKey, ncclComm);
   }
 
@@ -2513,7 +2496,7 @@ void ProcessGroupNCCL::assignTimeoutToWork(
     const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work,
     const c10::intrusive_ptr<ProcessGroupNCCL::Options>& option) {
   std::chrono::milliseconds timeout = option->timeout;
-  C10D_LOCK_GUARD(timeoutLock, mtxTimeoutExtension_);
+  std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
   if (ephemeralTimeoutActive_.count() > 0) {
     timeout += ephemeralTimeoutActive_;
   }
@@ -2526,7 +2509,7 @@ void ProcessGroupNCCL::assignTimeoutToWork(
 void ProcessGroupNCCL::workEnqueue(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   if (!terminateProcessGroup_.load()) {
-    C10D_LOCK_GUARD(lock, workMetaListMutex_);
+    std::lock_guard<std::mutex> lock(workMetaListMutex_);
     // Avoid view tensors to be processed in cleanup thread.
     // View tensors' destruction invokes autograd_meta, which
     // needs to be destructed in user thread. Otherwise will
@@ -4036,40 +4019,54 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
-  std::vector<at::Device> devices;
+  // Device to use for barrier
+  int barDevIdx = -1;
 
-  // Use user defined GPU device ids if provided
+  // Select device to use for barrier
+  // 1st choice: Use user defined GPU device ids if provided
   if (!opts.device_ids.empty()) {
-    for (auto device : opts.device_ids) {
-      devices.emplace_back(at::DeviceType::CUDA, device);
-    }
-  } else if (usedDeviceIdxs_.empty()) {
+    // Use the first device id because PG NCCL is single-device now
+    barDevIdx = opts.device_ids[0];
+  } else if (getBoundDeviceId()) {
+    // 2nd choice: Use the bound GPU device id if available.
+    // Bounded device id can be passed to `init_process_group`.
+    barDevIdx = (*getBoundDeviceId()).index();
+  } else if (!usedDeviceIdxs_.empty()) {
+    // 3rd choice: infer the device id from the used device ids.
+    barDevIdx = *usedDeviceIdxs_.begin();
+  } else {
     // This means there is not yet a NCCL collective being called
     // Here we have to use the best guesses and will use a single GPU to call
     // allreduce to achieve barrier.
     // In case the multiple processes fall into the same node, we use rank to
     // ensure that each process is on a different GPU
-    auto numGPUs = at::cuda::getNumGPUs();
-    int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
-    LOG(INFO)
+    // Note: it is better to use global rank because the group-local rank can be
+    // offset wrt the device id if intra-node GPUs are sharded into multiple
+    // dimensions.
+    barDevIdx = static_cast<int16_t>(globalRank() % localDeviceCount_);
+    LOG(WARNING)
         << logPrefix()
         << c10::str(
                " using GPU ",
-               deviceIdx,
+               barDevIdx,
                " to perform barrier as devices used by this process are currently unknown. ",
                "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
-               "Specify device_ids in barrier() to force use of a particular device.");
-    devices.emplace_back(guessDeviceForRank());
-  } else {
-    for (auto usedDeviceIdx : usedDeviceIdxs_) {
-      devices.emplace_back(at::DeviceType::CUDA, usedDeviceIdx);
-    }
+               "Specify device_ids in barrier() to force use of a particular device,",
+               "or call init_process_group() with a device_id.");
   }
 
-  // Use one device only
-  auto device = devices.back();
+  TORCH_CHECK_WITH(
+      ValueError,
+      barDevIdx >= 0,
+      "Failed to infer a GPU device id to perform barrier. ");
+  auto barDevice = at::Device(at::DeviceType::CUDA, barDevIdx);
+
+  // Create a dummy tensor on the device
+  // Note: we use zeros() instead of empty() to prevent barrier from triggering
+  // alarm when NaN checker is enabled.
   at::Tensor barrierTensor =
-      at::empty({1}, at::TensorOptions().device(device).dtype(at::kFloat));
+      at::zeros({1}, at::TensorOptions().device(barDevice).dtype(at::kFloat));
+
   // All reduce to achieve the barrier
   auto work = allreduce_impl(barrierTensor);
 
