@@ -3,7 +3,6 @@
 # Owner(s): ["module: numpy"]
 
 import sys
-
 from itertools import product
 
 import numpy as np
@@ -17,7 +16,6 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
-
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
@@ -329,13 +327,7 @@ class TestNumPyInterop(TestCase):
 
         # list of list or numpy array.
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
-            torch.tensor(
-                [
-                    [1, 2, 3],
-                    np.random.random(size=(2,)),
-                ],
-                device=device,
-            )
+            torch.tensor([[1, 2, 3], np.random.random(size=(2,))], device=device)
 
     @onlyCPU
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
@@ -476,13 +468,18 @@ class TestNumPyInterop(TestCase):
                 self.assertTrue(r2.requires_grad)
 
     @onlyCPU
-    def test_parse_numpy_int(self, device):
+    @skipIfTorchDynamo()
+    def test_parse_numpy_int_overflow(self, device):
+        # assertRaises uses a try-except which dynamo has issues with
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
         self.assertRaisesRegex(
             RuntimeError,
             "(Overflow|an integer is required)",
             lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
         )  # type: ignore[call-overload]
+
+    @onlyCPU
+    def test_parse_numpy_int(self, device):
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
             scalar = 3

@@ -40,10 +40,6 @@ int64_t incrementKernel(const Tensor& tensor, int64_t input) {
   return input + 1;
 }
 
-int64_t decrementKernel(const Tensor& tensor, int64_t input) {
-  return input - 1;
-}
-
 void expectCallsIncrement(DispatchKey dispatch_key) {
   at::AutoDispatchBelowAutograd mode;
 
@@ -53,17 +49,6 @@ void expectCallsIncrement(DispatchKey dispatch_key) {
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
-}
-
-void expectCallsDecrement(DispatchKey dispatch_key) {
-  at::AutoDispatchBelowAutograd mode;
-
-  // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
-  ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(4, result[0].toInt());
 }
 
 TEST(OperatorRegistrationTestLegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
@@ -808,9 +793,9 @@ TEST(OperatorRegistrationTestLegacyFunctionBasedKernel, givenFallbackKernelWitho
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-std::optional<Tensor> called_arg2 = c10::nullopt;
-std::optional<int64_t> called_arg3 = c10::nullopt;
-std::optional<std::string> called_arg4 = c10::nullopt;
+std::optional<Tensor> called_arg2 = std::nullopt;
+std::optional<int64_t> called_arg3 = std::nullopt;
+std::optional<std::string> called_arg4 = std::nullopt;
 
 void kernelWithOptInputWithoutOutput(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
   called = true;

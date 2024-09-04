@@ -90,12 +90,6 @@ new_local_repository(
     path = "third_party/onnx",
 )
 
-new_local_repository(
-    name = "foxi",
-    build_file = "//third_party:foxi.BUILD",
-    path = "third_party/foxi",
-)
-
 local_repository(
     name = "com_google_protobuf",
     path = "third_party/protobuf",
@@ -166,6 +160,18 @@ new_local_repository(
     name = "opentelemetry-cpp",
     build_file = "//third_party::opentelemetry-cpp.BUILD",
     path = "third_party/opentelemetry-cpp",
+)
+
+new_local_repository(
+    name = "cpp-httplib",
+    build_file = "//third_party:cpp-httplib.BUILD",
+    path = "third_party/cpp-httplib",
+)
+
+new_local_repository(
+    name = "nlohmann",
+    build_file = "//third_party:nlohmann.BUILD",
+    path = "third_party/nlohmann",
 )
 
 new_local_repository(

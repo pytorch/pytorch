@@ -61,7 +61,7 @@ struct Slice {
                 return i;
             }
         }
-        return c10::nullopt;
+        return std::nullopt;
     }
     bool contains(const T& value) {
         return index(value).has_value();

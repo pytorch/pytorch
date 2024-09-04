@@ -1,4 +1,7 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["oncall: distributed"]
+
+# pyre-unsafe
 
 
 import os
@@ -21,7 +24,7 @@ CHECKPOINT_DIR = f"~/{os.environ['LOGNAME']}/checkpoint"
 
 
 class Model(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())

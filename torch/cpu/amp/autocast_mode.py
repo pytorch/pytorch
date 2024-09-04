@@ -1,7 +1,9 @@
+# mypy: allow-untyped-defs
 from typing import Any
 from typing_extensions import deprecated
 
 import torch
+
 
 __all__ = ["autocast"]
 

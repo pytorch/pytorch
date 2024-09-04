@@ -9,8 +9,8 @@
 #include <functional>
 #include <vector>
 
-#include <c10/util/Optional.h>
 #include <c10/util/OptionalArrayRef.h>
+#include <optional>
 
 namespace torch {
 namespace lazy {
@@ -114,7 +114,7 @@ std::optional<std::vector<T>> ToOptionalVector(
   if (arrayRef) {
     return arrayRef->vec();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 template <typename T>

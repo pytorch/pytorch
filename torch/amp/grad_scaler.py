@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import inspect
@@ -432,8 +433,11 @@ class GradScaler:
                         ]
                     ),
                 )
+                # Take the product of the scales, if the user has already set `optimizer.grad_scale`.
                 optimizer.grad_scale = (  # type: ignore[attr-defined]
-                    None if optimizer_state["stage"] == OptState.UNSCALED else scaler
+                    getattr(optimizer, "grad_scale", None)
+                    if optimizer_state["stage"] == OptState.UNSCALED
+                    else scaler * getattr(optimizer, "grad_scale", 1)
                 )
                 optimizer.found_inf = found_inf  # type: ignore[attr-defined]
             retval = optimizer.step(*args, **kwargs_)

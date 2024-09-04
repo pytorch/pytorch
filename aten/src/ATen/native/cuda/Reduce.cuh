@@ -313,7 +313,7 @@ struct ReduceJitOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -376,7 +376,7 @@ struct ReduceOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -807,6 +807,7 @@ struct ReduceOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+      __threadfence(); // complete the acquire pattern after atomic
       value = ident;
       if (config.should_block_x_reduce()) {
         index_t input_offset = threadIdx.x + threadIdx.y * blockDim.x;
@@ -1189,11 +1190,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
@@ -1298,11 +1299,11 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 

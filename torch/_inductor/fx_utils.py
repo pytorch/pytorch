@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
@@ -14,6 +15,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
+
 from .virtualized import V
 
 
@@ -70,7 +72,7 @@ class FakeTensorUpdater:
     fake tensors stop changing.
     """
 
-    def __init__(self, graph: torch.fx.Graph):
+    def __init__(self, graph: torch.fx.Graph) -> None:
         self.processed_hashes = set()
         self.graph = graph
 

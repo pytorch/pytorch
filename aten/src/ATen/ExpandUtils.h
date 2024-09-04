@@ -14,7 +14,6 @@
 #include <c10/util/irange.h>
 
 #include <functional>
-#include <sstream>
 #include <tuple>
 #include <utility>
 
@@ -462,7 +461,7 @@ inline Tensor _sum_to(
     reduce_dims.push_back(i);
   }
   for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (shape[i - leading_dims] == 1 &&
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(shape[i - leading_dims], 1)) &&
         TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(sizes[i], 1))) {
       reduce_dims.push_back(i);
     }
@@ -499,7 +498,7 @@ inline Tensor sum_to(
   return _sum_to(std::move(tensor), shape, always_return_non_view);
 }
 
-static inline bool is_expandable_to(
+inline bool is_expandable_to(
     SymIntArrayRef shape,
     c10::SymIntArrayRef desired) {
   size_t ndim = shape.size();
@@ -517,7 +516,7 @@ static inline bool is_expandable_to(
   return true;
 }
 
-static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
+inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
   auto sym_shape = c10::SymIntArrayRef(
       reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
   auto sym_desired = c10::SymIntArrayRef(

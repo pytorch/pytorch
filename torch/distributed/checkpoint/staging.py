@@ -6,8 +6,8 @@ from torch.distributed._state_dict_utils import (
     _create_cpu_state_dict,
     _offload_state_dict_to_cpu,
 )
-
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
+
 
 __all__ = ["AsyncStager", "BlockingAsyncStager"]
 
@@ -28,7 +28,7 @@ class AsyncStager(Protocol):
         case a copy of the entire state dict is created on CPU RAM and returned here, allowing users
         to continue training without risking changes to data which is being serialized.
 
-    2. dcp.save is called on the state_dict returned from stage in parallel. This call is respondsible
+    2. dcp.save is called on the state_dict returned from stage in parallel. This call is responsible
         for serializing the state_dict and writing it to storage.
 
     3. If AsyncStager.should_synchronize_after_execute is True, this method will be called immediately after
@@ -65,7 +65,6 @@ class AsyncStager(Protocol):
         In the case `stage` is async in some way, this method should be called to ensure staging
         is complete and it is safe to begin modifying the original `state_dict`
         """
-        pass
 
 
 class BlockingAsyncStager(AsyncStager):
@@ -116,4 +115,3 @@ class BlockingAsyncStager(AsyncStager):
         """
         No-op function, since staging is blocking.
         """
-        pass
