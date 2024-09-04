@@ -9,6 +9,7 @@ import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     compare_results,
+    CUSTOM_KEY,
     extract_results_from_loggers,
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
@@ -27,8 +28,13 @@ def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
     debug_handle_map: Dict[torch.fx.Node, int] = {}
 
     for node in model.graph.nodes:
-        if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-            debug_handle_map[str(node)] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
+        if (
+            CUSTOM_KEY in node.meta
+            and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
+        ):
+            debug_handle_map[str(node)] = node.meta[CUSTOM_KEY][
+                NUMERIC_DEBUG_HANDLE_KEY
+            ]
 
     return debug_handle_map
 
@@ -47,8 +53,8 @@ class TestNumericDebugger(TestCase):
         unique_ids = set()
         count = 0
         for n in m.graph.nodes:
-            if NUMERIC_DEBUG_HANDLE_KEY in n.meta:
-                unique_ids.add(n.meta[NUMERIC_DEBUG_HANDLE_KEY])
+            if CUSTOM_KEY in n.meta and NUMERIC_DEBUG_HANDLE_KEY in n.meta[CUSTOM_KEY]:
+                unique_ids.add(n.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY])
                 count += 1
         self.assertEqual(len(unique_ids), count)
 
@@ -69,9 +75,9 @@ class TestNumericDebugger(TestCase):
         m = prepare_pt2e(m, quantizer)
         debug_handle_map = _extract_debug_handles(m)
         res_counter = Counter(debug_handle_map.values())
-        repeated_debug_handle_ids = [2, 3, 6]
+        repeated_debug_handle_ids = [3, 4, 7]
         # 3 ids were repeated because we copy over the id from node to its output observer
-        # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim, torch.ops.aten.conv1d.default
+        # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim and torch.ops.aten.conv1d.default
         for dh_id in repeated_debug_handle_ids:
             self.assertEqual(res_counter[dh_id], 2)
 
@@ -81,7 +87,7 @@ class TestNumericDebugger(TestCase):
         res_counter = Counter(debug_handle_map.values())
         # same set of ids where repeated, because we copy over the id from observer/fake_quant to
         # dequantize node
-        repeated_debug_handle_ids = [2, 3, 6]
+        repeated_debug_handle_ids = [3, 4, 7]
         for dh_id in repeated_debug_handle_ids:
             self.assertEqual(res_counter[dh_id], 2)
 
@@ -122,6 +128,26 @@ class TestNumericDebugger(TestCase):
         debug_handle_map = _extract_debug_handles(m_export)
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
+
+    @unittest.skip(
+        "All nodes' meta are preserved but the first arg for the first node seems to be dropped"
+    )
+    def test_run_decompositions_preserve_handle(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = torch.export.export(m, example_inputs)
+        generate_numeric_debug_handle(m)
+
+        debug_handle_map_ref = _extract_debug_handles(m)
+
+        m_copy = copy.copy(m)
+        m_copy = m_copy.run_decompositions()
+        debug_handle_map = _extract_debug_handles(m_copy)
+
+        # checking the map still has the same ids, the node may change
+        self.assertEqual(
+            set(debug_handle_map.values()), set(debug_handle_map_ref.values())
+        )
 
     def test_prepare_for_propagation_comparison(self):
         m = TestHelperModules.Conv2dThenConv1d()

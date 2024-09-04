@@ -44,6 +44,18 @@ def _get_example_value(node: fx.Node) -> Optional[str]:
         return None
 
 
+def _get_example_value_key(node: fx.Node) -> Optional[str]:
+    """
+    actually just run this once at start of pass, based on first node, and constantly use that.
+    """
+    if "example_value" in node.meta:
+        return "example_value"
+    elif "val" in node.meta:
+        return "val"
+    else:
+        return None
+
+
 def _get_sym_val(node: fx.Node) -> Optional["sympy.Expr"]:
     val = _get_example_value(node)
     if isinstance(val, py_sym_types):
@@ -95,7 +107,7 @@ def insert_deferred_runtime_asserts(
 
     from torch._export.passes._node_metadata_hook import _set_node_metadata_hook
     from torch.fx.experimental.symbolic_shapes import (
-        _has_unsupported_sympy_function,
+        _has_uninterpretable_sympy_function,
         CallMethodKey,
         cast_symbool_to_symint_guardless,
         ConvertIntKey,
@@ -138,7 +150,7 @@ def insert_deferred_runtime_asserts(
             (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
             # this holds back from reifying anything in torch.utils._sympy.functions.py that's unsupported
-            and not _has_unsupported_sympy_function(val)
+            and not _has_uninterpretable_sympy_function(val)
             and any(
                 isinstance(arg, fx.Node)
                 and isinstance(_get_example_value(arg), (torch.Tensor, torch.Size))
@@ -147,8 +159,14 @@ def insert_deferred_runtime_asserts(
             )
         )
 
-    # Figure out if we're in Dynamo or AOTAutograd
-    val_key = "val" if export else "example_value"
+    # Figure out what key to use, val or example_value
+    val_key = "val"
+    for node in graph.nodes:
+        if "example_value" in node.meta:
+            val_key = "example_value"
+            break
+        elif "val" in node.meta:
+            break
 
     def _node_metadata_hook(
         node: torch.fx.Node,
@@ -215,7 +233,7 @@ def insert_deferred_runtime_asserts(
                     and _is_bound_expr_for_symbol(ra.expr)
                 )
                 # don't try to reify sympy functions we can't turn into FX nodes
-                or _has_unsupported_sympy_function(ra.expr)
+                or _has_uninterpretable_sympy_function(ra.expr)
             ):
                 continue
 
@@ -550,11 +568,12 @@ def insert_deferred_runtime_asserts(
                         # raises AOTAutograd errors on cast_symbool_to_symint_guardless
 
                         with _set_node_metadata_hook(
-                            gm, functools.partial(
+                            gm,
+                            functools.partial(
                                 _node_metadata_hook,
                                 stack_trace=node.meta.get("stack_trace"),
                                 nn_module_stack=node.meta.get("nn_module_stack"),
-                            )
+                            ),
                         ):
                             if (min_val := convert(vr.lower)) is not None:
                                 ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
