@@ -37,9 +37,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -50,14 +59,16 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cpu-build
+    needs:
+      - conda-py3_9-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -71,7 +82,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -101,6 +112,7 @@ jobs:
   conda-py3_9-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -112,15 +124,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda11_8-build
+    needs:
+      - conda-py3_9-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -135,7 +149,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -166,6 +180,7 @@ jobs:
   conda-py3_9-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -177,15 +192,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda12_1-build
+    needs:
+      - conda-py3_9-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -200,7 +217,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -231,6 +248,7 @@ jobs:
   conda-py3_9-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -242,15 +260,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda12_4-build
+    needs:
+      - conda-py3_9-cuda12_4-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -265,7 +285,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -296,6 +316,7 @@ jobs:
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -306,14 +327,16 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cpu-build
+    needs:
+      - conda-py3_10-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -327,7 +350,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -357,6 +380,7 @@ jobs:
   conda-py3_10-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -368,15 +392,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda11_8-build
+    needs:
+      - conda-py3_10-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -391,7 +417,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -422,6 +448,7 @@ jobs:
   conda-py3_10-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -433,15 +460,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda12_1-build
+    needs:
+      - conda-py3_10-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -456,7 +485,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -487,6 +516,7 @@ jobs:
   conda-py3_10-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -498,15 +528,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda12_4-build
+    needs:
+      - conda-py3_10-cuda12_4-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -521,7 +553,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -552,6 +584,7 @@ jobs:
   conda-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -562,14 +595,16 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cpu-build
+    needs:
+      - conda-py3_11-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -583,7 +618,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -613,6 +648,7 @@ jobs:
   conda-py3_11-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -624,15 +660,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda11_8-build
+    needs:
+      - conda-py3_11-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -647,7 +685,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -678,6 +716,7 @@ jobs:
   conda-py3_11-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -689,15 +728,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda12_1-build
+    needs:
+      - conda-py3_11-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -712,7 +753,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -743,6 +784,7 @@ jobs:
   conda-py3_11-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -754,15 +796,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda12_4-build
+    needs:
+      - conda-py3_11-cuda12_4-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -777,7 +821,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -808,6 +852,7 @@ jobs:
   conda-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -818,14 +863,16 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cpu-build
+    needs:
+      - conda-py3_12-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -839,7 +886,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -869,6 +916,7 @@ jobs:
   conda-py3_12-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -880,15 +928,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda11_8-build
+    needs:
+      - conda-py3_12-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -903,7 +953,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -934,6 +984,7 @@ jobs:
   conda-py3_12-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -945,15 +996,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda12_1-build
+    needs:
+      - conda-py3_12-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -968,7 +1021,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -999,6 +1052,7 @@ jobs:
   conda-py3_12-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1010,15 +1064,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda12_4-build
+    needs:
+      - conda-py3_12-cuda12_4-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -1033,7 +1089,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

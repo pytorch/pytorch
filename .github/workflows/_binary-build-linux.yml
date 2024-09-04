@@ -18,7 +18,7 @@ on:
         description: prefix for runner label
       runs_on:
         required: false
-        default: linux.12xlarge
+        default: linux.12xlarge.ephemeral
         type: string
         description: Hardware to run this "build" job on, linux.12xlarge or linux.arm64.2xlarge.
       timeout-minutes:
