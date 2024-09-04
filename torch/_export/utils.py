@@ -878,8 +878,7 @@ def _detect_fake_mode_from_gm(
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
-                fake_inps.append(fake_val)
-        
+                fake_inps.append(fake_val) 
         elif len(fake_inps) == 0 and (
             "example_value" in node.meta or "val" in node.meta
         ):
