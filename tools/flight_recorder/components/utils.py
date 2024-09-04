@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
+from typing import Any, Dict, List, Set, Tuple
 
 from tools.flight_recorder.components.types import (
     Group,
@@ -40,9 +40,10 @@ def match_one_event(
     event_a: Dict[Any, Any],
     event_b: Dict[Any, Any],
     memberships: Dict[str, Set[Any]],
+    pg_name: str,
 ) -> MatchState:
-    op_a = Op(event_a, memberships)
-    op_b = Op(event_b, memberships)
+    op_a = Op(event_a, memberships, pg_name)
+    op_b = Op(event_b, memberships, pg_name)
     return op_a.match(op_b)
 
 
@@ -51,6 +52,7 @@ def match_coalesced_groups(
     group_size: int,
     groups: Dict[str, Group],
     memberships: Dict[str, Set[Any]],
+    _pg_guids: Dict[Tuple[str, int], str],
 ) -> bool:
     """
     all_rank_events: {
@@ -76,13 +78,22 @@ def match_coalesced_groups(
         rank1 [recv:0 (1000B), recv:0 (100B)]   —> not okay
     """
     all_ops = {
-        rank: [Op(e, memberships) for i, e in all_rank_events[rank]]
+        rank: [
+            Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+            for i, e in all_rank_events[rank]
+        ]
         for rank in all_rank_events
     }
 
-    def visualize_ops(match: bool) -> None:
+    def visualize_ops(
+        match: bool,
+        _pg_guids: Dict[Tuple[str, int], str],
+    ) -> None:
         all_ops = {
-            rank: [Op(e, memberships) for i, e in all_rank_events[rank]]
+            rank: [
+                Op(e, memberships, _pg_guids[(e["process_group"][0], rank)])
+                for i, e in all_rank_events[rank]
+            ]
             for rank in all_rank_events
         }
 
@@ -94,8 +105,14 @@ def match_coalesced_groups(
             progress = False
             for r in all_ops:
                 if len(all_ops[r]) > i:
-                    _, event = all_rank_events[r][i]
-                    row.append(Op(event, memberships))
+                    rank, event = all_rank_events[r][i]
+                    row.append(
+                        Op(
+                            event,
+                            memberships,
+                            _pg_guids[(event["process_group"][0], rank)],
+                        )
+                    )
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
@@ -144,10 +161,10 @@ def match_coalesced_groups(
             my_ops.pop(0)
             peer_ops.pop(match_idx)
         else:
-            visualize_ops(False)
+            visualize_ops(False, _pg_guids)
             return False
 
-    visualize_ops(True)
+    visualize_ops(True, _pg_guids)
     return True
 
 
@@ -161,21 +178,27 @@ def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int
 
 
 def find_coalesced_group(
-    pg_name: str, entries: List[Dict[str, Any]]
+    pg_name: str,
+    entries: List[Dict[str, Any]],
+    _pg_guids: Dict[Tuple[str, int], str],
+    rank: int,
 ) -> List[Tuple[int, Dict[str, Any]]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
     build an return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
-    TODO: handle p2p_seq_id v/s collective_seq_id separately here.
     """
     found = []
     collective_seq_id = None
     for i, e in enumerate(entries):
-        if e["process_group"][0] != pg_name:
+        if _pg_guids[(e["process_group"][0], rank)] != pg_name:
             continue
         elif collective_seq_id is None:
-            collective_seq_id = e["collective_seq_id"]
+            collective_seq_id = (
+                e["p2p_seq_id"] if e["is_p2p"] else e["collective_seq_id"]
+            )
             found.append((i, e))
-        elif e["collective_seq_id"] == collective_seq_id:
+        elif not e["is_p2p"] and e["collective_seq_id"] == collective_seq_id:
+            found.append((i, e))
+        elif e["is_p2p"] and e["p2p_seq_id"] == collective_seq_id:
             found.append((i, e))
         else:
             break
@@ -190,6 +213,7 @@ def just_print_entries(
     all_entries: Dict[int, List[Dict[str, Any]]],
     _groups: Dict[str, Group],
     _memberships: Dict[str, Set[Any]],
+    _pg_guids: Dict[Tuple[str, int], str],
 ) -> None:
     rows = []
     ranks = sorted(all_entries.keys())
@@ -203,7 +227,8 @@ def just_print_entries(
                 row.append("")
             else:
                 entry = all_entries[rank].pop(0)
-                row.append(str(Op(entry, _memberships)))
+                pg_name = _pg_guids[(entry["process_group"][0], rank)]
+                row.append(str(Op(entry, _memberships, pg_name)))
                 progress = True
         if progress:
             rows.append(row)
