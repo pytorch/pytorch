@@ -19,6 +19,8 @@ import warnings
 import weakref
 from typing import (
     Any,
+    Callable,
+    Dict,
     FrozenSet,
     List,
     MutableMapping,
@@ -484,7 +486,9 @@ class VariableBuilder:
 
     @classmethod
     @functools.lru_cache(None)
-    def _id_dispatch(cls):
+    def _id_dispatch(
+        cls,
+    ) -> Dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
         from ..comptime import comptime
 
         entries = [
