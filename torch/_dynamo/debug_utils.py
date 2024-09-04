@@ -806,11 +806,11 @@ def profile_to_file(filename: str) -> Callable[[T], T]:
         sys.stderr.write(
             textwrap.dedent(
                 f"""\
-            Wrote profile to {filename}, view with:
+                Wrote profile to {filename}, view with:
 
-                snakeviz {filename}
+                    snakeviz {filename}
 
-        """
+                """
             )
         )
 
