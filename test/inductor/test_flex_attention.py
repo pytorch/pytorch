@@ -1376,6 +1376,34 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    def test_eager_backward_strides(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.qkv_proj = torch.nn.Linear(256, 256 * 3)
+                self.n_head = 256 // 64
+                self.d_attn = 256
+
+            def forward(self, x):
+                n_batch, n_ctx, _ = x.shape
+                q, k, v = self.qkv_proj(x).split(
+                    [self.d_attn, self.d_attn, self.d_attn], dim=2
+                )
+                q = q.reshape(n_batch, n_ctx, self.n_head, -1)
+                k = k.reshape(n_batch, n_ctx, self.n_head, -1)
+                v = v.reshape(n_batch, n_ctx, self.n_head, -1)
+                q = q.transpose(1, 2)
+                k = k.transpose(1, 2)
+                v = v.transpose(1, 2)
+                x = torch.nn.attention.flex_attention.flex_attention(q, k, v)
+                return x
+
+        model = Repro().cuda()
+        x = torch.randn((1, 512, 256), device="cuda", requires_grad=True)
+        out = torch.compile(model, backend="aot_eager")(x)
+        out.backward(torch.ones_like(out))
+
+    @supported_platform
     def test_differentiable_logsumexp_gradcheck(self):
         make_tensor = functools.partial(
             torch.randn,
