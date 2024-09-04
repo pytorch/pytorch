@@ -361,7 +361,9 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")  # noqa: B904
+                raise RuntimeError(  # noqa: B904
+                    "Could not generate fp64 outputs, workaround with torch._dynamo.config.same_two_models_use_fp64 = False"
+                )
             log.warning("Could not generate fp64 outputs")
 
     try:
