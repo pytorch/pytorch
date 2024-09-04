@@ -976,11 +976,15 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
 def forward(self, arg0_1: "f32[2][1]cpu"):
         select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1)
-        clone_default: "f32[][]cpu" = torch.ops.aten.clone.default(select);  select = None
-        clone_default_1: "f32[][]cpu" = torch.ops.aten.clone.default(select_1);  select_1 = None
-        foo_default = torch.ops.mylib.foo.default(clone_default, clone_default_1);  foo_default = None
-        select_scatter_default: "f32[2][1]cpu" = torch.ops.aten.select_scatter.default(arg0_1, clone_default, 0, 0);  clone_default = None
-        select_scatter_default_1: "f32[2][1]cpu" = torch.ops.aten.select_scatter.default(select_scatter_default, clone_default_1, 0, 1);  select_scatter_default = clone_default_1 = None
+        as_strided_default: "f32[1][1]cpu" = torch.ops.aten.as_strided.default(select, [1], [1], 0);  select = None
+        clone_default: "f32[1][1]cpu" = torch.ops.aten.clone.default(as_strided_default);  as_strided_default = None
+        as_strided_default_1: "f32[][]cpu" = torch.ops.aten.as_strided.default(clone_default, [], [], 0);  clone_default = None
+        as_strided_default_2: "f32[2][1]cpu" = torch.ops.aten.as_strided.default(select_1, [2], [1], 0);  select_1 = None
+        clone_default_1: "f32[2][1]cpu" = torch.ops.aten.clone.default(as_strided_default_2);  as_strided_default_2 = None
+        as_strided_default_3: "f32[][]cpu" = torch.ops.aten.as_strided.default(clone_default_1, [], [], 1);  clone_default_1 = None
+        foo_default = torch.ops.mylib.foo.default(as_strided_default_1, as_strided_default_3);  foo_default = None
+        select_scatter_default: "f32[2][1]cpu" = torch.ops.aten.select_scatter.default(arg0_1, as_strided_default_1, 0, 0);  as_strided_default_1 = None
+        select_scatter_default_1: "f32[2][1]cpu" = torch.ops.aten.select_scatter.default(select_scatter_default, as_strided_default_3, 0, 1);  select_scatter_default = as_strided_default_3 = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, select_scatter_default_1);  arg0_1 = select_scatter_default_1 = copy_ = None
         return ()""",  # noqa: B950
                     ignore_comments=True,
