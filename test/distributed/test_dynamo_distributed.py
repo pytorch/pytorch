@@ -616,21 +616,17 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_fsdp_setattr(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
+            from torch._dynamo.utils import counters
+
+            counters.clear()
             m, inputs, correct_outputs = get_mutating_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
-            prof = torch._dynamo.utils.CompileProfiler()
-            fsdp_m = torch.compile(fsdp_m, backend=prof, fullgraph=False)
+            fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
-            FileCheck().check("Torchdynamo Profiler Report").check(
-                "Graph Breaks"
-            ).check_not(
-                "setattr(FSDPManagedNNModuleVariable(MutatingModel), state, ...)"
-            ).check_not(
-                "setattr(FSDPManagedNNModuleVariable(FullyShardedDataParallel), _is_root, ...)"
-            ).run(
-                prof.report()
-            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            first_graph_break = list(counters["graph_break"].keys())[0]  # noqa: RUF015
+            self.assertTrue("setattr" not in first_graph_break)
 
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
