@@ -272,59 +272,63 @@ static const Tensor& tiled_add_sub_lerp(const Tensor& self,
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      mpsStream->endKernelCoalescing();
+  @autoreleasepool {
+    mpsStream->endKernelCoalescing();
 
-      uint64_t originalBatchSize = self.sizes().size() > 2 ? self.size(1) : 1;
-      uint64_t selfRows = self.size(-2);
-      uint64_t otherRows = other.size(-2);
-      uint64_t outputRows = output.size(-2);
-      uint64_t selfCols = self.size(-1);
-      uint64_t otherCols = other.size(-1);
-      uint64_t outputCols = output.size(-1);
-      uint64_t selfElemSize = self.element_size();
-      uint64_t otherElemSize = other.element_size();
-      uint64_t outputElemSize = output.element_size();
-      MPSDataType dtype = getMPSDataType(self);
+    uint64_t originalBatchSize = self.sizes().size() > 2 ? self.size(-3) : 1;
+    uint64_t selfRows = self.size(-2);
+    uint64_t otherRows = other.size(-2);
+    uint64_t outputRows = output.size(-2);
+    uint64_t selfCols = self.size(-1);
+    uint64_t otherCols = other.size(-1);
+    uint64_t outputCols = output.size(-1);
+    uint64_t selfElemSize = self.element_size();
+    uint64_t otherElemSize = other.element_size();
+    uint64_t outputElemSize = output.element_size();
+    MPSDataType dtype = getMPSDataType(self);
 
-      uint64_t elemInMatrix = outputRows * outputCols;
-      uint64_t largestSupportedBatchSize = floor(std::pow(2, 32) / elemInMatrix);
-      uint64_t batchSize = std::min(largestSupportedBatchSize, originalBatchSize);
-      uint64_t lastBatchSize = originalBatchSize % batchSize;
+    uint64_t elemInMatrix = outputRows * outputCols;
+    uint64_t largestSupportedBatchSize = floor(std::pow(2, 32) / elemInMatrix);
+    uint64_t batchSize = std::min(largestSupportedBatchSize, originalBatchSize);
+    uint64_t lastBatchSize = originalBatchSize % batchSize;
+    std::cout << "Largest supported: " << largestSupportedBatchSize << std::endl;
+    std::cout << "chosen supported: " << batchSize << std::endl;
+    std::cout << "last supported: " << lastBatchSize << std::endl;
 
-      MPSShape* selfShape = @[ @(batchSize), @(selfRows), @(selfCols) ];
-      MPSShape* otherShape = @[ @(batchSize), @(otherRows), @(otherCols) ];
-      MPSShape* outputShape = @[ @(batchSize), @(outputRows), @(outputCols) ];
-      auto selfDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:selfShape];
-      selfDesc_.preferPackedRows = true;
-      auto otherDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:otherShape];
-      otherDesc_.preferPackedRows = true;
-      auto outputDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:outputShape];
-      outputDesc_.preferPackedRows = true;
+    MPSShape* selfShape = @[ @(batchSize), @(selfRows), @(selfCols) ];
+    MPSShape* otherShape = @[ @1, @(otherRows), @(otherCols) ];
+    MPSShape* outputShape = @[ @(batchSize), @(outputRows), @(outputCols) ];
+    std::cout << batchSize << ", " << selfRows << ", " << selfCols << std::endl;
+    std::cout << 1 << ", " << otherRows << ", " << otherCols << std::endl;
+    std::cout << batchSize << ", " << outputRows << ", " << outputCols << std::endl;
+    auto selfDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:selfShape];
+    selfDesc_.preferPackedRows = true;
+    auto otherDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:otherShape];
+    otherDesc_.preferPackedRows = true;
+    auto outputDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:outputShape];
+    outputDesc_.preferPackedRows = true;
 
-      MPSNDArrayDescriptor *selfDescLastBatch_, *otherDescLastBatch_, *outputDescLastBatch_;
-      if (lastBatchSize != 0) {
-        selfDescLastBatch_ =
-            [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(selfRows), @(selfCols) ]];
-        selfDescLastBatch_.preferPackedRows = true;
-        otherDescLastBatch_ =
-            [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(otherRows), @(otherCols) ]];
-        otherDescLastBatch_.preferPackedRows = true;
-        outputDescLastBatch_ =
-            [MPSNDArrayDescriptor descriptorWithDataType:dtype
-                                                   shape:@[ @(lastBatchSize), @(outputRows), @(outputCols) ]];
-        outputDescLastBatch_.preferPackedRows = true;
-      }
+    MPSNDArrayDescriptor *selfDescLastBatch_, *otherDescLastBatch_, *outputDescLastBatch_;
+    if (lastBatchSize != 0) {
+      selfDescLastBatch_ =
+          [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(selfRows), @(selfCols) ]];
+      selfDescLastBatch_.preferPackedRows = true;
+      otherDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                   shape:@[ @1, @(otherRows), @(otherCols) ]];
+      otherDescLastBatch_.preferPackedRows = true;
+      outputDescLastBatch_ =
+          [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(outputRows), @(outputCols) ]];
+      outputDescLastBatch_.preferPackedRows = true;
+    }
 
-      uint64_t requiredIterations = ceil(float(originalBatchSize) / batchSize);
-      auto selfDesc = selfDesc_;
-      auto otherDesc = otherDesc_;
-      auto outputDesc = outputDesc_;
+    uint64_t requiredIterations = ceil(float(originalBatchSize) / batchSize);
+    auto selfDesc = selfDesc_;
+    auto otherDesc = otherDesc_;
+    auto outputDesc = outputDesc_;
 
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-
-      for (const auto i : c10::irange(requiredIterations)) {
+    id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+    for (const auto i : c10::irange(requiredIterations)) {
+      @autoreleasepool {
         if (i == requiredIterations - 1 && lastBatchSize != 0) {
           selfDesc = selfDescLastBatch_;
           otherDesc = otherDescLastBatch_;
@@ -332,26 +336,28 @@ static const Tensor& tiled_add_sub_lerp(const Tensor& self,
         }
 
         const uint64_t selfArrayOffset = i * batchSize * selfRows * selfCols;
-        const uint64_t otherArrayOffset = i * batchSize * otherRows * otherCols;
+        const uint64_t otherArrayOffset = 0; // i * batchSize * otherRows * otherCols;
         const uint64_t outputArrayOffset = i * batchSize * outputRows * outputCols;
 
         auto selfNDArray = [[[MPSNDArray alloc] initWithBuffer:selfBuffer
                                                         offset:(self.storage_offset() + selfArrayOffset) * selfElemSize
                                                     descriptor:selfDesc] autorelease];
+
         auto otherNDArray =
             [[[MPSNDArray alloc] initWithBuffer:otherBuffer
                                          offset:(other.storage_offset() + otherArrayOffset) * otherElemSize
-                                     descriptor:outputDesc] autorelease];
+                                     descriptor:otherDesc] autorelease];
         auto outputNDArray =
             [[[MPSNDArray alloc] initWithBuffer:outputBuffer
                                          offset:(output.storage_offset() + outputArrayOffset) * outputElemSize
                                      descriptor:outputDesc] autorelease];
-                                        
-        string key = op_name + getTensorsStringKey({self, other, output});
 
+        string key = op_name + getMPSShapeString([selfDesc getShape]) + getMPSShapeString([otherDesc getShape]) +
+            getMPSShapeString([outputDesc getShape]);
+        std::cout << key << std::endl;
         auto cachedGraph = LookUpOrCreateCachedGraph<BinaryOpCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-          MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), selfShape);
-          MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(other), otherShape);
+          MPSGraphTensor* selfTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(self));
+          MPSGraphTensor* otherTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(other));
 
           newCachedGraph->primaryTensor = selfTensor;
           newCachedGraph->secondaryTensor = otherTensor;
@@ -365,11 +371,12 @@ static const Tensor& tiled_add_sub_lerp(const Tensor& self,
         Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, outputNDArray);
 
         auto feeds = dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder);
-        runMPSGraph(mpsStream, cachedGraph->graph(), feeds, outputPlaceholder);
-
-     }
+        auto results = dictionaryFromPlaceholders(outputPlaceholder);
+        // runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+        mpsStream->executeMPSGraph(cachedGraph->graph(), feeds, results, SyncType::COMMIT);
+      }
     }
-  });
+  }
   return output;
 }
 
