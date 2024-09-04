@@ -31,6 +31,10 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
+# TODO: expose a single API
+__all__ = ["context_parallel"]
+
+
 class _CausalBehavior(Enum):
     SKIP = None
     NOT_IS_CAUSAL = False
@@ -134,10 +138,19 @@ class _SDPAMerger:
             self._lse = block_lse
             self._out = block_out
         else:
+            ROUND_ROBIN_CYCLE = 2
             assert self._lse is not None
             assert self._out is not None
-            lse = self._lse.chunk(2, dim=self._seq_dim)[1] if partial else self._lse
-            out = self._out.chunk(2, dim=self._seq_dim)[1] if partial else self._out
+            lse = (
+                self._lse.chunk(ROUND_ROBIN_CYCLE, dim=self._seq_dim)[1]
+                if partial
+                else self._lse
+            )
+            out = (
+                self._out.chunk(ROUND_ROBIN_CYCLE, dim=self._seq_dim)[1]
+                if partial
+                else self._out
+            )
 
             # The algorithm from
             # github.com/zhuzilin/ring-flash-attention/pull/34#issuecomment-2076126795
@@ -145,8 +158,22 @@ class _SDPAMerger:
             out = out - F.sigmoid(block_lse - lse) * (out - block_out)
             lse = lse - F.logsigmoid(lse - block_lse)
             if partial:
-                self._lse = _partial_update(self._lse, lse, 2, 2, 1, add=False)
-                self._out = _partial_update(self._out, out, 2, 2, 1, add=False)
+                self._lse = _partial_update(
+                    self._lse,
+                    lse,
+                    dim=self._seq_dim,
+                    n_chunks=ROUND_ROBIN_CYCLE,
+                    idx=1,
+                    add=False,
+                )
+                self._out = _partial_update(
+                    self._out,
+                    out,
+                    dim=self._seq_dim,
+                    n_chunks=ROUND_ROBIN_CYCLE,
+                    idx=1,
+                    add=False,
+                )
             else:
                 self._lse = lse
                 self._out = out
@@ -182,9 +209,10 @@ def _scaled_dot_product_ring_flash_attention(
     if return_debug_mask:
         raise NotImplementedError("return_debug_mask is not supported yet")
 
+    seq_dim = 2
     return _templated_ring_attention(
         mesh,
-        2,
+        seq_dim,
         aten._scaled_dot_product_flash_attention,
         query=query,
         key=key,
@@ -212,9 +240,10 @@ def _scaled_dot_product_ring_efficient_attention(
     if not compute_log_sumexp:
         raise NotImplementedError("compute_log_sumexp must be set")
 
+    seq_dim = 2
     return _templated_ring_attention(
         mesh,
-        2,
+        seq_dim,
         aten._scaled_dot_product_efficient_attention,
         query=query,
         key=key,
@@ -244,30 +273,31 @@ class _RingRotater(ABC):
         ...
 
     @abstractmethod
-    def rotate(self, buffer: torch.Tensor, curr_idx: int) -> torch.Tensor:
+    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
         ...
 
     @abstractmethod
-    def maybe_wait(self, tensor: torch.Tensor) -> torch.Tensor:
+    def next_buffer(self) -> torch.Tensor:
         ...
 
 
 class _AllToAllRotater(_RingRotater):
     """Use all_to_all to send the kv to the next rank"""
+
     def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
         self._pg = pg
         self._seq_dim = seq_dim
+        self._buffer = None
 
-    def rotate(self, buffer: torch.Tensor, curr_idx: int) -> torch.Tensor:
-        buffer = buffer.contiguous()
+    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
+        curr_buffer = curr_buffer.contiguous()
         size = dist.get_world_size(self._pg)
         dsts = list(range(1, size)) + [0]
-        return ft_c.permute_tensor(buffer, dsts, self._pg)
+        self._buffer = ft_c.permute_tensor(curr_buffer, dsts, self._pg)
 
-    def maybe_wait(self, tensor: torch.Tensor) -> torch.Tensor:
-        if isinstance(tensor, ft_c.AsyncCollectiveTensor):
-            return tensor.wait()
-        return tensor
+    def next_buffer(self) -> torch.Tensor:
+        assert self._buffer is not None
+        return _maybe_wait(self._buffer)
 
 
 class _AllGatherRotater(_RingRotater):
@@ -275,34 +305,29 @@ class _AllGatherRotater(_RingRotater):
     Allgather the kv and return the only the requried kv.
     Only one communication will be done.
     """
+
     def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
         self._pg = pg
         self._seq_dim = seq_dim
-        self._buffer: Optional[torch.Tensor] = None
+        self._aggregated_buffer: Optional[torch.Tensor] = None
         self._idx = 0
 
-    def rotate(self, buffer: torch.Tensor, curr_idx: int) -> torch.Tensor:
-        self._idx = curr_idx
-        if self._buffer is None:
-            return ft_c.all_gather_tensor(
-                buffer.contiguous(), gather_dim=0, group=self._pg
+    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
+        # We only need to perform the allgather once.
+        self._idx += 1
+        if self._aggregated_buffer is None:
+            self._aggregated_buffer = ft_c.all_gather_tensor(
+                curr_buffer.contiguous(), gather_dim=0, group=self._pg
             )
 
-        return self._buffer
-
-    def maybe_wait(self, tensor: torch.Tensor) -> torch.Tensor:
+    def next_buffer(self) -> torch.Tensor:
         size = dist.get_world_size(self._pg)
         rank = dist.get_rank(self._pg)
         idx = rank - self._idx
 
-        if self._buffer is None:
-            if isinstance(tensor, ft_c.AsyncCollectiveTensor):
-                tensor = tensor.wait()
-            self._buffer = tensor
-        else:
-            assert tensor is self._buffer
-
-        return self._buffer.chunk(dist.get_world_size(self._pg))[idx]
+        assert self._aggregated_buffer is not None
+        self._aggregated_buffer = _maybe_wait(self._aggregated_buffer)
+        return self._aggregated_buffer.chunk(dist.get_world_size(self._pg))[idx]
 
 
 def _create_rotater(
@@ -390,16 +415,16 @@ def _templated_ring_attention(
     rotater = _create_rotater(pg, 2)
 
     for i in range(size):
-        if next_kv is not None:
+        if i > 0:
             # Wait for the kv from the (cp_rank - 1) rank.
-            next_kv = rotater.maybe_wait(next_kv)
+            next_kv = rotater.next_buffer()
             key = next_kv[: key.numel()].reshape(key.shape)
             value = next_kv[key.numel() :].reshape(value.shape)
 
         if i < (size - 1):
             # Send the k, v to the next rank
             next_kv = torch.cat([key.flatten(), value.flatten()])
-            next_kv = rotater.rotate(next_kv, i + 1)
+            next_kv = rotater.exchange_buffers(next_kv)
 
         is_causal_behavior = _is_causal_behavior(
             rank=rank, world_size=size, i=i, is_causal=is_causal
@@ -412,9 +437,9 @@ def _templated_ring_attention(
             # We need to do SDPA with the full local q, k, v.
             q, k, v, partial = (query, key, value, False)
         elif i <= rank:
-            # Striped load balancing case, and i <= rank.
+            # Round-robin load balancing case, and i <= rank.
             # We need to do SPDA, with only the first half of the k, v.
-            # Note that q, k, v, each contains two stripes.
+            # Note that q, k, v, each contains two chunks.
             q, k, v, partial = (
                 query,
                 key.chunk(2, dim=2)[0],
@@ -422,12 +447,14 @@ def _templated_ring_attention(
                 False,
             )
         else:
-            # Striped load balancing case, and i > rank.
+            # Round-robin load balancing case, and i > rank.
             # We need to do SPDA with only the second half of the q, and update
             # only the the second part of  logsumexp. So partial is True.
-            # Note that q, k, v, each contains two stripes.
+            # Note that q, k, v, each contains two chunks.
             q, k, v, partial = query.chunk(2, dim=2)[1], key, value, True
 
+        # See https://github.com/pytorch/pytorch/blob/release/2.4/aten/src/ATen/native/native_functions.yaml#L14695
+        # for the SDPA kernel definitions.
         out, logsumexp, *rest = op(
             q,
             k,
@@ -517,6 +544,7 @@ def _sdpa_backward_handler(
 
 def _templated_ring_attention_backward(
     mesh: DeviceMesh,
+    seq_dim: int,
     op: _AttentionOp,
     grad_out: torch.Tensor,
     grad_out_name: str,
@@ -548,9 +576,9 @@ def _templated_ring_attention_backward(
     kv_rotater = _create_rotater(pg, 2)
     dkv_rotater = _create_rotater(pg, 2, method=_RotateMethod.ALL_TO_ALL)
     for i in range(size):
-        if next_kv is not None:
+        if i > 0:
             # Wait for the kv from the (cp_rank - 1) rank.
-            buffer = kv_rotater.maybe_wait(next_kv)
+            buffer = kv_rotater.next_buffer()
             pointer = 0
             key = buffer[pointer : pointer + key.numel()].reshape(key.shape)
             pointer += key.numel()
@@ -560,7 +588,7 @@ def _templated_ring_attention_backward(
         if i != size - 1:
             # Send the kv to the next rank.
             next_kv = torch.cat([key.flatten(), value.flatten()])
-            next_kv = kv_rotater.rotate(next_kv, i + 1)
+            kv_rotater.exchange_buffers(next_kv)
 
         is_causal_behavior = _is_causal_behavior(
             rank=rank, world_size=size, i=i, is_causal=is_causal
@@ -571,33 +599,35 @@ def _templated_ring_attention_backward(
                 # We need to do SDPA with the full local q, k, v.
                 q, k, v, out_, dout, lse = (query, key, value, out, grad_out, logsumexp)
             elif i <= rank:
-                # Striped load balancing case, and i <= rank.
+                # Round-robin load balancing case, and i <= rank.
                 # We need to do SPDA with only the first half of the k, v.
-                # Note that q, k, v, each contains two stripes.
+                # Note that q, k, v, each contains two chunks.
                 q, k, v, out_, dout, lse = (
                     query,
-                    key.chunk(2, dim=2)[0],
-                    value.chunk(2, dim=2)[0],
+                    key.chunk(2, dim=seq_dim)[0],
+                    value.chunk(2, dim=seq_dim)[0],
                     out,
                     grad_out,
                     logsumexp,
                 )
             else:
-                # Striped load balancing case, and i > rank.
+                # Round-robin load balancing case, and i > rank.
                 # We need to do SPDA with only the second half of the q
-                # Note that q, k, v, each contains two stripes.
+                # Note that q, k, v, each contains two chunks.
                 q, k, v, out_, dout, lse = (
-                    query.chunk(2, dim=2)[1],
+                    query.chunk(2, dim=seq_dim)[1],
                     key,
                     value,
-                    out.chunk(2, dim=2)[1],
-                    grad_out.chunk(2, dim=2)[1],
+                    out.chunk(2, dim=seq_dim)[1],
+                    grad_out.chunk(2, dim=seq_dim)[1],
                     # Need to make logsumexp contiguous, otherwise there will
                     # be numerical error.
-                    logsumexp.chunk(2, dim=2)[1].contiguous(),
+                    logsumexp.chunk(2, dim=seq_dim)[1].contiguous(),
                 )
 
             kwargs[grad_out_name] = dout
+            # See https://github.com/pytorch/pytorch/blob/release/2.4/aten/src/ATen/native/native_functions.yaml#L14695
+            # for the SDPA kernel definitions.
             grad_query_, grad_key_, grad_value_, *rest = op(
                 query=q,
                 key=k,
@@ -612,14 +642,14 @@ def _templated_ring_attention_backward(
             grad_key_ = torch.zeros_like(key, dtype=accum_dtype)
             grad_value_ = torch.zeros_like(value, dtype=accum_dtype)
 
+        ROUND_ROBIN_CYCLE = 2
         if i == 0:
             grad_key += grad_key_
             grad_value += grad_value_
         else:
             pointer = 0
-            assert next_grad_kv is not None
             # Wait for the kv gradient from (cp_rank - 1) rank.
-            next_grad_kv = dkv_rotater.maybe_wait(next_grad_kv)
+            next_grad_kv = dkv_rotater.next_buffer()
             grad_key = next_grad_kv[pointer : pointer + grad_key.numel()].reshape(
                 grad_key.shape
             )
@@ -629,26 +659,46 @@ def _templated_ring_attention_backward(
             )
 
             if i <= rank and _cp_options.enable_load_balance:
-                grad_key = _partial_update(grad_key, grad_key_, 2, 2, 0, add=True)
-                grad_value = _partial_update(grad_value, grad_value_, 2, 2, 0, add=True)
+                grad_key = _partial_update(
+                    grad_key,
+                    grad_key_,
+                    dim=seq_dim,
+                    n_chunks=ROUND_ROBIN_CYCLE,
+                    idx=0,
+                    add=True,
+                )
+                grad_value = _partial_update(
+                    grad_value,
+                    grad_value_,
+                    dim=seq_dim,
+                    n_chunks=ROUND_ROBIN_CYCLE,
+                    idx=0,
+                    add=True,
+                )
             else:
                 grad_key += grad_key_
                 grad_value += grad_value_
 
         next_grad_kv = torch.cat([grad_key.flatten(), grad_value.flatten()])
         # Send the grad key, and grad value to the next rank.
-        next_grad_kv = dkv_rotater.rotate(next_grad_kv, i + 1)
+        dkv_rotater.exchange_buffers(next_grad_kv)
 
         if i <= rank or not _cp_options.enable_load_balance:
             grad_query += grad_query_
         else:
-            grad_query = _partial_update(grad_query, grad_query_, 2, 2, 1, add=True)
+            grad_query = _partial_update(
+                grad_query,
+                grad_query_,
+                dim=seq_dim,
+                n_chunks=ROUND_ROBIN_CYCLE,
+                idx=1,
+                add=True,
+            )
 
-    assert next_grad_kv is not None
     assert grad_key_ is not None
     assert grad_value_ is not None
     grad_query = grad_query.to(query.dtype)
-    next_grad_kv = dkv_rotater.maybe_wait(next_grad_kv).to(key.dtype)
+    next_grad_kv = dkv_rotater.next_buffer().to(key.dtype)
     grad_key = next_grad_kv[: grad_key.numel()].reshape(grad_key.shape)
     grad_value = next_grad_kv[grad_value.numel() :].reshape(grad_value.shape)
     return (
@@ -678,8 +728,10 @@ def _scaled_dot_product_ring_flash_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> Tuple[torch.Tensor, ...]:
+    seq_dim = 2
     return _templated_ring_attention_backward(
         mesh,
+        seq_dim,
         aten._scaled_dot_product_flash_attention_backward.default,
         grad_out=grad_out,
         grad_out_name="grad_out",
@@ -717,8 +769,10 @@ def _scaled_dot_product_ring_efficient_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> Tuple[torch.Tensor, ...]:
+    seq_dim = 2
     return _templated_ring_attention_backward(
         mesh,
+        seq_dim,
         aten._scaled_dot_product_efficient_attention_backward.default,
         grad_out=grad_out,
         grad_out_name="grad_out_",
@@ -1024,17 +1078,23 @@ class _SequentialSharder(_LoadBalancer):
         return torch.cat(all_buffers, dim=seq_dim)
 
 
-class _StripeLoadBalancer(_LoadBalancer):
+class _RoundRobinLoadBalancer(_LoadBalancer):
     """
-    This load balancer chunk the buffer into cp_world_size * 2 shards, and
-    rank0 gets 0th and (cp_world_size * 2 - 1)th shards; aank1 will get 1st
-    and (cp_world_size * 2 - 2)th shards; ...
+    This load balancer chunk the buffer into cp_world_size * ROUND_ROBIN_CYCLE
+    shards, and uses a round robine approach to achieve load balancing.
+    Since ROUND_ROBIN_CYCLE begin 2 is enough for the causal masking, we currently
+    assume ROUND_ROBIN_CYCLE is always 2 to simplify the implementation.
     """
+
+    ROUND_ROBIN_CYCLE = 2
 
     @classmethod
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         cp_world_size = mesh.size()
         cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
@@ -1048,6 +1108,9 @@ class _StripeLoadBalancer(_LoadBalancer):
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
         cp_rank = mesh.get_local_rank()
@@ -1072,7 +1135,9 @@ def _context_parallel_buffers(
     """Shard the buffers along the sequence dimensions according to CP rules."""
     new_buffers = []
     sharder = (
-        _StripeLoadBalancer if _cp_options.enable_load_balance else _SequentialSharder
+        _RoundRobinLoadBalancer
+        if _cp_options.enable_load_balance
+        else _SequentialSharder
     )
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         new_buffers.append(sharder.shard(buffer, mesh, seq_dim))
@@ -1158,6 +1223,8 @@ def context_parallel_unshard(
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
     """
     sharder = (
-        _StripeLoadBalancer if _cp_options.enable_load_balance else _SequentialSharder
+        _RoundRobinLoadBalancer
+        if _cp_options.enable_load_balance
+        else _SequentialSharder
     )
     return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]

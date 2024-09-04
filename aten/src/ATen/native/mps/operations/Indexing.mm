@@ -304,7 +304,6 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) &&
       (self.numel() >= nonZeroMaxSize || self.is_complex())) {
-  https: // github.com/pytorch/pytorch/issues/122916
     TORCH_WARN_ONCE("MPS: nonzero op is not natively supported for the provided input on MacOS14",
                     "Falling back on CPU. This may have performance implications.",
                     "See github.com/pytorch/pytorch/issues/122916 for further info");
@@ -627,17 +626,20 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
+    // MPS TODO: MPS Gather is failing with MPS strided API. Fallback to old gather.
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_,
                                               self,
                                               /*mpsShape=*/nullptr,
                                               /*gatherTensorData=*/true,
-                                              /*dataType=*/inputType);
-    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
+                                              /*dataType=*/inputType,
+                                              /*useStridedAPI=*/false);
+    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index, nil, true, MPSDataTypeInvalid, false);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
                                                 output,
                                                 /*mpsShape=*/nullptr,
                                                 /*gatherTensorData=*/false,
-                                                /*dataType=*/outputType);
+                                                /*dataType=*/outputType,
+                                                /*useStridedAPI=*/false);
 
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
