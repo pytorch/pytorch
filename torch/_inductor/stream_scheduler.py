@@ -121,12 +121,14 @@ class SSGraph:
         self.max_stream_id = 0
         self.skip_cpu_nodes = True
         self.to_output_nodes = []
-        self.build_graph(snodes)
         # By default, we use the same mechanism with the original default stream assignment, which take the stream{device_index} as default stream id. 
-        self.DEFAULT_STREAM_ID = V.graph.scheduler.get_current_device_or_throw().index
+        self.DEFAULT_STREAM_ID = None
+        self.build_graph(snodes)
 
     def build_graph(self, snodes):
         for snode in snodes:
+            if self.DEFAULT_STREAM_ID is None and not isinstance(snode, NopKernelSchedulerNode) and (device := snode.get_device()):
+                self.DEFAULT_STREAM_ID = device.index
             new_ssnode = SSNode(snode)
             self.ssnodes.append(new_ssnode)
             self.op_to_ssnode[snode.get_name()] = new_ssnode
@@ -158,9 +160,38 @@ class SSGraph:
 
     def pattern_distributed(self):
         tmp_queue = self.to_output_nodes
+        from .ir import FallbackKernel
+        from .scheduler import ExternKernelSchedulerNode
+        
         for ssnode in self.ssnodes:
-            ssnode.stream_id = self.DEFAULT_STREAM_ID
-            self.stream_pool[self.DEFAULT_STREAM_ID] += 1
+            if ssnode.stream_id != UNASSIGNED_STREAM_ID:
+                continue
+            # copy-in
+            if isinstance(ssnode.original_node, ExternKernelSchedulerNode) and isinstance(ssnode.original_node.node, FallbackKernel) and "torch.ops.fsdp.all_gather_copy_in.default" in ssnode.original_node.node.python_kernel_name:
+                new_stream_id = self.stream_pool_pop()
+                ssnode.stream_id = new_stream_id
+                tmp_queue = list(ssnode.successors)
+                while tmp_queue:
+                    tmp_ssnode = tmp_queue.pop()
+                    if tmp_ssnode.stream_id != UNASSIGNED_STREAM_ID:
+                        continue
+                    # copy-out
+                    if isinstance(tmp_ssnode.original_node, ExternKernelSchedulerNode) and isinstance(tmp_ssnode.original_node.node, FallbackKernel) and "torch.ops.fsdp.split_with_sizes_copy.default" in tmp_ssnode.original_node.node.python_kernel_name:
+                        extern_kernel_node_count = 0
+                        for predecessor in tmp_ssnode.predecessors:
+                            predecessor.stream_id = new_stream_id
+                            if isinstance(predecessor.original_node, ExternKernelSchedulerNode):
+                                extern_kernel_node_count += 1
+                            elif isinstance(predecessor.original_node, NopKernelSchedulerNode):
+                                continue
+                            else:
+                                raise RuntimeError(f"Unexpected predecessor {predecessor} for copy_out node {tmp_ssnode}")
+                        assert extern_kernel_node_count == 1, f"Expected exactly one extern kernel node as predecessor for copy_out node {tmp_ssnode}, but got {extern_kernel_node_count}. Pattern match failed."
+                    else:
+                        tmp_queue += list(tmp_ssnode.successors)
+                    tmp_ssnode.stream_id = new_stream_id
+            else:
+                ssnode.stream_id = self.DEFAULT_STREAM_ID
 
     def stream_pool_pop(self, predecessor=None):
         if predecessor is not None:
@@ -188,6 +219,8 @@ class SSGraph:
                             break
 
     def stream_assign(self):
+        # To avoid assigning default stream when we want to pop a new stream from the pool.
+        self.stream_pool[self.DEFAULT_STREAM_ID] = len(self.ssnodes) + 2
         self.pattern_distributed()
         def check_all_nodes_assigned():
             for ssnode in self.ssnodes:

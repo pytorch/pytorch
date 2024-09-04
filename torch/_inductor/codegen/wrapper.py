@@ -407,10 +407,10 @@ class AllocateLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
-        DEFAULT_STREAM_ID = V.graph.stream_graph.DEFAULT_STREAM_ID
         line = self.wrapper.make_buffer_allocation(self.node)
         # if self has attribution named user_streams, it is used by multiple streams
         if hasattr(self, "user_streams"):
+            DEFAULT_STREAM_ID = V.graph.stream_graph.DEFAULT_STREAM_ID
             # the redundant stream_id have been removed when user_streams is set
             if len(self.user_streams) == 1:
                 if self.user_streams[0] != DEFAULT_STREAM_ID:
@@ -650,10 +650,13 @@ class WrapperCodeGen(CodeGen):
         self.header.writeline(
             V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         )
+        if config.multiple_streams:
+            self.header.writeline(V.graph.device_ops.generate_stream_creation(V.graph.stream_graph.stream_pool))
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
+        
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
@@ -728,7 +731,8 @@ class WrapperCodeGen(CodeGen):
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
         self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
-        self.writeline(f"{name} = get_raw_stream({device_idx})")
+        if not config.multiple_streams:
+            self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
     def get_codegened_graph(self):
@@ -790,14 +794,13 @@ class WrapperCodeGen(CodeGen):
         """
         Yueming: is it better to move the dependency detection to streamscheduler?
         """
-        ssnode = V.graph.stream_graph.op_to_ssnode[node_name]
+        ssnode = V.graph.stream_graph.buf_to_ssnode[node_name]
 
         def update_event_dependency(tmp_ssnode):
             dependent_buffers = set()
-            for name in tmp_ssnode.predecessors:
-                predecessor = tmp_ssnode.predecessors[name]
+            for predecessor in tmp_ssnode.predecessors:
                 if predecessor.is_nop_node:
-                    for prepredecessor in predecessor.predecessors.values():
+                    for prepredecessor in predecessor.predecessors:
                         if (
                             prepredecessor.stream_id != tmp_ssnode.stream_id
                             and not prepredecessor.is_nop_node
@@ -815,18 +818,18 @@ class WrapperCodeGen(CodeGen):
                 )
 
         update_event_dependency(ssnode)
-        for predecessor in ssnode.predecessors.values():
+        for predecessor in ssnode.predecessors:
             if predecessor.is_nop_node:
                 update_event_dependency(predecessor)
 
     def cuda_event_create(self, node_name, kernel_IndentedBuffer):
-        ssnode = V.graph.stream_graph.op_to_ssnode[node_name]
+        ssnode = V.graph.stream_graph.buf_to_ssnode[node_name]
         kernel_IndentedBuffer.writeline(
             f"event_{ssnode.get_name()} = torch.cuda.Event()"
         )
 
     def cuda_event_record(self, node_name, kernel_IndentedBuffer):
-        ssnode = V.graph.stream_graph.op_to_ssnode[node_name]
+        ssnode = V.graph.stream_graph.buf_to_ssnode[node_name]
         kernel_IndentedBuffer.writeline(
             f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)"
         )
@@ -840,12 +843,12 @@ class WrapperCodeGen(CodeGen):
         """
         kernel_IndentedBuffer = IndentedBuffer()
         self.cuda_event_dependency(node_name, kernel_IndentedBuffer)
-        ssnode = V.graph.stream_graph.op_to_ssnode[node_name]
+        ssnode = V.graph.stream_graph.buf_to_ssnode[node_name]
         if ssnode.cuda_event:
             self.cuda_event_create(node_name, kernel_IndentedBuffer)
         stream_id = ssnode.stream_id
         kernel_IndentedBuffer = kernel_IndentedBuffer
-        if stream_id != 0:
+        if stream_id != V.graph.stream_graph.DEFAULT_STREAM_ID:
             if stream_switch:
                 kernel_IndentedBuffer.writeline(
                     f"torch.cuda.set_stream(stream{stream_id}_raw)"
@@ -883,20 +886,21 @@ class WrapperCodeGen(CodeGen):
             ending = f".clone(){ending}"
 
         if no_return:
-            self.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}")
+            self.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}", node_name=output_name)
         else:
-            self.writeline(
+            call_strs = [
                 f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
-            )
+            ]
             if (
                 self.supports_intermediate_hooks
                 and config.generate_intermediate_hooks
                 and origin_node is not None
             ):
                 counters["inductor"]["intermediate_hooks"] += 1
-                self.writeline(
+                call_strs.append(
                     f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
                 )
+            self.writelines(call_strs, node_name=output_name)
 
     def generate_extern_kernel_out(
         self, kernel: str, out: str, out_view: Optional[str], args: List[str]
@@ -1998,7 +2002,7 @@ class WrapperCodeGen(CodeGen):
             new_allocateline.set_user_stream(ssnode.stream_id)
             user_streams = set()
             if ssnode.is_nop_node:
-                for predecessor in ssnode.predecessors.values():
+                for predecessor in ssnode.predecessors:
                     if predecessor.stream_id != ssnode.stream_id:
                         user_streams.add(predecessor.stream_id)
                 for user_stream in user_streams:
