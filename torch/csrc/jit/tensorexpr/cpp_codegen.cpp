@@ -79,52 +79,52 @@ void CppPrinter::printPrologue() {
 template <typename T>
 inline std::enable_if_t<!std::is_floating_point_v<T>, void> visit_mod(
     std::ostream& os,
-    const ExprPtr lhs,
-    const ExprPtr rhs) {
+    const ExprPtr& lhs,
+    const ExprPtr& rhs) {
   os << *lhs << " % " << *rhs;
 }
 
 template <typename T>
 inline std::enable_if_t<std::is_floating_point_v<T>, void> visit_mod(
     std::ostream& os,
-    const ExprPtr lhs,
-    const ExprPtr rhs) {
+    const ExprPtr& lhs,
+    const ExprPtr& rhs) {
   os << "std::fmod(" << *lhs << ", " << *rhs << ")";
 }
 
 template <typename T>
 inline std::
     enable_if_t<std::is_floating_point_v<T> || std::is_integral_v<T>, void>
-    visit_max(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+    visit_max(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
   os << "std::max(" << *lhs << ", " << *rhs << ")";
 }
 
 template <typename T>
 inline std::
     enable_if_t<!std::is_floating_point_v<T> && !std::is_integral_v<T>, void>
-    visit_max(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+    visit_max(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
   os << "(" << *lhs << " < " << *rhs << ") ? " << *rhs << " : " << *lhs;
 }
 
 template <typename T>
 inline std::
     enable_if_t<std::is_floating_point_v<T> || std::is_integral_v<T>, void>
-    visit_min(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+    visit_min(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
   os << "std::min(" << *lhs << ", " << *rhs << ")";
 }
 
 template <typename T>
 inline std::
     enable_if_t<!std::is_floating_point_v<T> && !std::is_integral_v<T>, void>
-    visit_min(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+    visit_min(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
   os << *lhs << " < " << *rhs << " ? " << *lhs << " : " << *rhs;
 }
 
 template <typename T>
 void visit_binary_op(
     std::ostream& os,
-    const ExprPtr lhs,
-    const ExprPtr rhs,
+    const ExprPtr& lhs,
+    const ExprPtr& rhs,
     IRNodeType op_type) {
   switch (op_type) {
     case IRNodeType::kMod:
@@ -242,7 +242,7 @@ void CppPrinter::visit(const IntrinsicsPtr& v) {
   }
 
   os() << "std::" << v->func_name() << "(";
-  for (int i = 0; i < v->nparams(); i++) {
+  for (size_t i = 0; i < v->nparams(); i++) {
     if (i > 0) {
       os() << ", ";
     }

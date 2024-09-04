@@ -6,7 +6,9 @@ namespace registerizer {
 
 // AccessInfo
 
-void AccessInfo::addStore(StorePtr store, const std::shared_ptr<Scope>& scope) {
+void AccessInfo::addStore(
+    const StorePtr& store,
+    const std::shared_ptr<Scope>& scope) {
   block_ =
       block_ ? Block::getSharedParent(block_, scope->block()) : scope->block();
 
@@ -25,9 +27,9 @@ void AccessInfo::addStore(StorePtr store, const std::shared_ptr<Scope>& scope) {
 }
 
 void AccessInfo::addLoad(
-    LoadPtr load,
+    const LoadPtr& load,
     const std::shared_ptr<Scope>& scope,
-    StmtPtr usage) {
+    const StmtPtr& usage) {
   block_ =
       block_ ? Block::getSharedParent(block_, scope->block()) : scope->block();
   first_usage_ = first_usage_ ? block_->getEnclosedRoot(first_usage_) : usage;
@@ -96,7 +98,7 @@ bool AccessInfo::overlaps(const std::shared_ptr<AccessInfo>& other) {
   return overlap;
 }
 
-bool AccessInfo::dependsOnVar(VarPtr v) {
+bool AccessInfo::dependsOnVar(const VarPtr& v) {
   VarFinder vf;
   for (const auto& i : indices_) {
     i->accept(&vf);
@@ -148,7 +150,7 @@ void Scope::closeAccess(const std::shared_ptr<AccessInfo>& info) {
   closedAccesses_.push_back(info);
 }
 
-AccessHashMap& Scope::getAccessMapByBuf(BufPtr b) {
+AccessHashMap& Scope::getAccessMapByBuf(const BufPtr& b) {
   auto it = openAccesses_.find(b);
   if (it == openAccesses_.end()) {
     // create and return
@@ -649,7 +651,7 @@ std::vector<std::shared_ptr<AccessInfo>> RegisterizerAnalysis::getCandidates() {
 
 // RegisterizerReplacer
 
-ExprPtr RegisterizerReplacer::mutate(LoadPtr v) {
+ExprPtr RegisterizerReplacer::mutate(const LoadPtr& v) {
   auto it = loadToAccess_.find(v);
   if (it == loadToAccess_.end()) {
     // This access cannot be registerized.
@@ -661,7 +663,7 @@ ExprPtr RegisterizerReplacer::mutate(LoadPtr v) {
   return info->replacement().var;
 }
 
-StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
+StmtPtr RegisterizerReplacer::mutate(const StorePtr& v) {
   if (eliminatedIntializers_.count(v) != 0) {
     // This store is the initializer for a scalar var that is already inserted.
     return nullptr;
@@ -683,7 +685,7 @@ StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
   return v;
 }
 
-StmtPtr RegisterizerReplacer::mutate(BlockPtr v) {
+StmtPtr RegisterizerReplacer::mutate(const BlockPtr& v) {
   auto& scope = parentToAccesses_[v];
 
   std::vector<StmtPtr> stmts;

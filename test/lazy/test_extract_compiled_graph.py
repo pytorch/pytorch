@@ -45,7 +45,7 @@ class ModuleReturnMulti(nn.Module):
 # The default fx tracer will convert torch.randn to a constant.. We may need
 # a custom tracer.
 # class ModuleEagerTensor(nn.Module):
-#     def __init__(self):
+#     def __init__(self) -> None:
 #         super().__init__()
 #
 #     def forward(self, a):
@@ -60,7 +60,7 @@ class ModuleReturnMulti(nn.Module):
 # Unfortunately, the default fx tracer convert the return value of the forward
 # method to a constant.. Comment out for now
 # class ModuleReturnEagerTensorOnDefaultDevice(nn.Module):
-#     def __init__(self):
+#     def __init__(self) -> None:
 #         super().__init__()
 #
 #     def forward(self):

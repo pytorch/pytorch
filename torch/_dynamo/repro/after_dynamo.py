@@ -12,7 +12,6 @@ from typing import Union
 
 import torch
 import torch.fx as fx
-
 from torch._dynamo.debug_utils import (
     AccuracyError,
     backend_accuracy_fails,
@@ -36,6 +35,7 @@ from .. import config
 from ..backends.registry import lookup_backend, register_debug_backend
 from ..debug_utils import clone_inputs_retaining_gradness
 
+
 log = logging.getLogger(__name__)
 
 
@@ -58,7 +58,7 @@ def _accuracy_fails(gm, example_inputs, compiler_fn):
 
 
 class WrapBackendDebug:
-    def __init__(self, unconfigured_compiler_fn, compiler_name: str):
+    def __init__(self, unconfigured_compiler_fn, compiler_name: str) -> None:
         functools.wraps(unconfigured_compiler_fn)(self)
         self._torchdynamo_orig_callable = unconfigured_compiler_fn  # type: ignore[attr-defined]
         self._compiler_name = compiler_name

@@ -19,6 +19,7 @@ from torch.onnx import _constants, _type_utils, errors, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils
 
+
 if typing.TYPE_CHECKING:
     from torch.types import Number
 
@@ -233,7 +234,7 @@ def parse_args(
     """
 
     def decorator(
-        fn: Callable[_Concatenate[_U, _P], _T]
+        fn: Callable[_Concatenate[_U, _P], _T],
     ) -> Callable[_Concatenate[_U, _P], _T]:
         fn._arg_descriptors = arg_descriptors  # type: ignore[attr-defined]
 

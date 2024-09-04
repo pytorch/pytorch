@@ -121,7 +121,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_large_node_error(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -178,7 +178,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
                 self.c = torch.rand(4)
@@ -210,7 +210,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_partition_device_mapping(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -249,7 +249,7 @@ class TestFXExperimental(JitTestCase):
                     layers.append(torch.nn.ReLU())
                 return layers
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 layers = self.create_mlp(4, 4, 4)
                 self.bottom_layers = torch.nn.Sequential(*layers)
@@ -303,7 +303,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_partition_latency(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -360,7 +360,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_cost_aware_partition(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -422,7 +422,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_aot_based_partition(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = torch.rand(4)
                 self.c = torch.rand(4)
@@ -481,7 +481,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_saturate_host(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -537,7 +537,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_conv_bn_fusion_not_running_state(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(32, 64, 3, stride=2)
                 self.bn = torch.nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False)
@@ -561,7 +561,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_conv_bn_fusion_mixed_dtype(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False, dtype=torch.bfloat16)
                 self.bn = torch.nn.BatchNorm2d(16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True)
@@ -612,7 +612,7 @@ class TestFXExperimental(JitTestCase):
 
     def test_meta_tracer(self):
         class MetaTracerTestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(num_embeddings=42, embedding_dim=16)
                 self.layernorm = torch.nn.LayerNorm(16)
@@ -735,7 +735,7 @@ terrible spacing
 
     def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(3, 4))
                 self.linear = torch.nn.Linear(4, 5)
@@ -855,7 +855,7 @@ terrible spacing
 
     def test_split_module_default_arg(self):
         class ModelToTrace(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = torch.nn.Linear(512, 512)
 
@@ -1169,7 +1169,7 @@ class {test_classname}(torch.nn.Module):
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -1199,7 +1199,7 @@ class {test_classname}(torch.nn.Module):
         d_hid = 4
 
         class ExampleCode(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -1244,7 +1244,7 @@ class {test_classname}(torch.nn.Module):
 
     def test_to_folder(self):
         class Test(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.W = torch.nn.Parameter(torch.randn(2))
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
@@ -1299,7 +1299,7 @@ class {test_classname}(torch.nn.Module):
         }
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 2)
                 self.bn = torch.nn.BatchNorm2d(3)
@@ -1493,7 +1493,7 @@ class {test_classname}(torch.nn.Module):
         import torch.nn as nn
 
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 layers = []
                 layers2 = []

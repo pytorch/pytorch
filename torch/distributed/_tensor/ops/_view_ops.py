@@ -57,8 +57,6 @@ DimMap = Tuple[DimSpec, ...]
 class Singleton(DimSpec):
     """Output dimension is a singleton."""
 
-    pass
-
 
 @dataclass
 class InputDim(DimSpec):
@@ -215,7 +213,7 @@ def normalize_sizes(sizes: Union[Shape, Tuple[Shape]]) -> Shape:
     if isinstance(sizes[0], int):
         return cast(Shape, sizes)
     elif len(sizes) == 1:
-        return cast(Shape, sizes[0])  # type: ignore[redundant-cast]
+        return sizes[0]
     else:
         raise RuntimeError("Size must be int... or tuple")
 

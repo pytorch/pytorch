@@ -40,6 +40,22 @@ from .utils import _from_fun, create_fw_bw_graph
 
 log = logging.getLogger(__name__)
 
+"""
+We're going to define a `cond_op` operation.
+In order to do this, we need implementations for each of the dispatch keys.
+"""
+
+
+class CondOp(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("cond")
+
+    def __call__(self, pred, true_fn, false_fn, operands):
+        return super().__call__(pred, true_fn, false_fn, operands)
+
+
+cond_op = CondOp()
+
 
 @exposed_in("torch")
 def cond(pred, true_fn, false_fn, operands):
@@ -147,20 +163,17 @@ def cond(pred, true_fn, false_fn, operands):
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    def _cond_op_wrapper(*args, **kwargs):
+        return cond_op(*args, **kwargs)
+
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
-                return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                return torch.compile(_cond_op_wrapper, backend="eager", fullgraph=True)(
                     pred, true_fn, false_fn, operands
                 )
-
-
-"""
-We're going to define a `cond_op` operation.
-In order to do this, we need implementations for each of the dispatch keys.
-"""
-cond_op = HigherOrderOperator("cond")
-cond_op.__module__ = "torch.ops.higher_order"
 
 
 def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
@@ -374,7 +387,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
     # we skip tracing the forward and backward graph.
     if pytree.tree_all_only(
         torch.Tensor,
-        lambda t: not t.requires_grad,
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
         (pred, operands),
     ):
         with torch._C._AutoDispatchBelowAutograd():
@@ -399,10 +412,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
 def inner(mode, pred, true_fn, false_fn, operands):
-    if mode.enable_tracing:
-        return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
-    else:
-        return cond_op(pred, true_fn, false_fn, operands)
+    return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
 
 
 @cond_op.py_impl(FakeTensorMode)

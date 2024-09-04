@@ -683,11 +683,9 @@ class TestFlopCounter(TestCase):
         "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
     )
     def test_nested_attention_fake_tensors(self):
-        # shape_env = ShapeEnv()
         x = torch.randn(123, 4, 16, device="cuda", dtype=torch.bfloat16)
         offsets = torch.tensor([0, 30, 60, 90, 123], device="cuda")
         max_seqlen = 40
-        # with FakeTensorMode(shape_env=shape_env) as fake_mode:
         with FakeTensorMode() as fake_mode:
             fake_x = fake_mode.from_tensor(x)
             fake_offsets = fake_mode.from_tensor(offsets)
@@ -754,7 +752,7 @@ class TestFlopCounter(TestCase):
                 return {"a": torch.mm(x, x)}
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = Foo()
                 self.b = Foo()

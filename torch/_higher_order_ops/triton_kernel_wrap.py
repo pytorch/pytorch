@@ -179,13 +179,18 @@ def generate_ttir(kernel, kwargs):
 
     src = ASTSource(kernel, signature, constants, specialization)
 
-    # Triton changes ASTSource.make_ir to take 3 arguments. Handle
+    # Triton changes ASTSource.make_ir to take 3/4 arguments. Handle
     # backward compatibility here.
-    if len(inspect.signature(src.make_ir).parameters) == 2:
+    make_ir_sig_params = len(inspect.signature(src.make_ir).parameters)
+    if make_ir_sig_params == 2:
         ttir_module = src.make_ir(options, context)
-    else:
+    elif make_ir_sig_params == 3:
         codegen_fns = backend.get_codegen_implementation()
         ttir_module = src.make_ir(options, codegen_fns, context)
+    else:
+        codegen_fns = backend.get_codegen_implementation()
+        module_map = backend.get_module_map()
+        ttir_module = src.make_ir(options, codegen_fns, module_map, context)
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
@@ -519,8 +524,16 @@ def identify_mutated_tensors(kernel, kwargs):
 
 # Used for wrapping a Triton Kernel
 class TritonKernelWrapperMutation(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation")
+
+    def __call__(self, kernel_idx, constant_args_idx, grid, kwargs):
+        return super().__call__(
+            kernel_idx=kernel_idx,
+            constant_args_idx=constant_args_idx,
+            grid=grid,
+            kwargs=kwargs,
+        )
 
 
 triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
@@ -528,8 +541,17 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 # Used for wrapping a Triton Kernel in a functional manner
 class TritonKernelWrapperFunctional(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional")
+
+    def __call__(self, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone):
+        return super().__call__(
+            kernel_idx=kernel_idx,
+            constant_args_idx=constant_args_idx,
+            grid=grid,
+            kwargs=kwargs,
+            tensors_to_clone=tensors_to_clone,
+        )
 
 
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
@@ -582,31 +604,24 @@ def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
         proxy_args,
         name=func_overload.__name__ + "_proxy",
     )
-    return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    return ret
 
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     mode, *, kernel_idx, constant_args_idx, grid, kwargs
 ):
-    if mode.enable_tracing:
-        trace_triton_kernel_wrapper(
-            mode,
-            triton_kernel_wrapper_mutation,
-            {
-                "kernel_idx": kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": grid,
-                "kwargs": kwargs,
-            },
-        )
-    else:
-        triton_kernel_wrapper_mutation(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            kwargs=kwargs,
-        )
+    trace_triton_kernel_wrapper(
+        mode,
+        triton_kernel_wrapper_mutation,
+        {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "kwargs": kwargs,
+        },
+    )
 
     return None
 
@@ -690,25 +705,17 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
 def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     mode, *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
 ):
-    if mode.enable_tracing:
-        return trace_triton_kernel_wrapper(
-            mode,
-            triton_kernel_wrapper_functional,
-            {
-                "kernel_idx": kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": grid,
-                "kwargs": kwargs,
-                "tensors_to_clone": tensors_to_clone,
-            },
-        )
-    else:
-        return triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx,
-            grid=grid,
-            kwargs=kwargs,
-            tensors_to_clone=tensors_to_clone,
-        )
+    return trace_triton_kernel_wrapper(
+        mode,
+        triton_kernel_wrapper_functional,
+        {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "kwargs": kwargs,
+            "tensors_to_clone": tensors_to_clone,
+        },
+    )
 
 
 @triton_kernel_wrapper_functional.py_functionalize_impl
@@ -813,26 +820,33 @@ class TritonHOPifier:
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
             if (
-                (
-                    "warmup" in defaults
-                    and defaults["warmup"].default
-                    != torch._dynamo.utils.get_first_attr(
-                        kernel, "num_warmups", "warmup"
+                not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
+                and (
+                    (
+                        "warmup" in defaults
+                        and defaults["warmup"].default
+                        != torch._dynamo.utils.get_first_attr(
+                            kernel, "num_warmups", "warmup"
+                        )
+                    )
+                    or (
+                        "rep" in defaults
+                        and defaults["rep"].default
+                        != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
+                    )
+                    or (
+                        "prune_configs_by" in defaults
+                        and defaults["prune_configs_by"].default
+                        != kernel.early_config_prune
+                    )
+                    # Set via reset_to_zero argument
+                    or len(kernel.reset_idx) != 0
+                    or len(kernel.restore_idx) != 0
+                    or (
+                        "use_cuda_graph" in defaults
+                        and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
                     )
                 )
-                or (
-                    "rep" in defaults
-                    and defaults["rep"].default
-                    != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
-                )
-                or (
-                    "prune_configs_by" in defaults
-                    and defaults["prune_configs_by"].default
-                    != kernel.early_config_prune
-                )
-                # Set via reset_to_zero argument
-                or len(kernel.reset_idx) != 0
-                or len(kernel.restore_idx) != 0
             ):
                 self.raise_unsupported(
                     "Only configs and keys are supported for triton.autotune"
@@ -1012,9 +1026,21 @@ class TraceableTritonKernelWrapper:
         return tracing_triton_hopifier_singleton.call_getitem(self, args)
 
     def run(self, *args, **kwargs):
-        return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
+        from torch._library.triton import is_capture_triton_enabled
+
+        if is_capture_triton_enabled():
+            return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
+        else:
+            assert self.kernel is not None
+            return self.kernel.run(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        return tracing_triton_hopifier_singleton.call_triton_kernel(
-            self, args, kwargs, None
-        )
+        from torch._library.triton import is_capture_triton_enabled
+
+        if is_capture_triton_enabled():
+            return tracing_triton_hopifier_singleton.call_triton_kernel(
+                self, args, kwargs, None
+            )
+        else:
+            assert self.kernel is not None
+            return self.kernel[self.grid](*args, **kwargs)
