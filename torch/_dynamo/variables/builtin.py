@@ -104,7 +104,7 @@ class BuiltinVariable(VariableTracker):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        return BuiltinVariable(value, source=source)
+        return cls(value, source=source)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -1916,15 +1916,6 @@ class BuiltinVariable(VariableTracker):
                     reverse=reverse,
                 )
             return variables.ListVariable(items)
-
-    def call_islice(self, tx: "InstructionTranslator", iterable, *args):
-        if iterable.has_unpack_var_sequence(tx) and all(
-            x.is_python_constant() for x in args
-        ):
-            const_args = [x.as_python_constant() for x in args]
-            items = iterable.unpack_var_sequence(tx)
-            items = list(itertools.islice(items, *const_args))
-            return variables.TupleVariable(items)
 
     # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(self, tx: "InstructionTranslator", a):
