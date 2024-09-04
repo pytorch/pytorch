@@ -166,20 +166,6 @@ def export_compat(
             verbose=verbose,
         )
 
-        if f is not None:
-            # Always save the initializers as external data to reduce the size of the ONNX file
-            onnx_program.save(
-                f,
-                include_initializers=export_params,
-                keep_initializers_as_inputs=keep_initializers_as_inputs,
-                external_data=external_data,
-            )
-            if (
-                opset_version is not None
-                and opset_version != onnx_program.model.opset_imports.get("")
-            ):
-                should_convert_version = True
-
     except Exception as e:
         if fallback:
             if verbose is not False:
