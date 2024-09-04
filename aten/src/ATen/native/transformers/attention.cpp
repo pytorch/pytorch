@@ -870,7 +870,6 @@ _scaled_dot_product_flash_attention_cpu(
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(2);
   int64_t num_head = query.size(1);
-  int64_t headSize = query.size(3);
 
   TORCH_CHECK(c10::isFloatingType(dtype),
     "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, FP16, but got ", dtype, " instead.");
@@ -888,7 +887,7 @@ _scaled_dot_product_flash_attention_cpu(
           (attn_mask.value().dim() == 2 || attn_mask.value().dim() == 4),
     "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}");
 
-  at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
+  at::Tensor output = at::empty_like(query, query.options()).transpose(1, 2);
   const auto accumulate_dtype = toOpMathType(dtype);
   at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
       query.options().dtype(accumulate_dtype));

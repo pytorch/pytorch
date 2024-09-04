@@ -157,6 +157,20 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
+    def test_pinned_memory_empty_cache(self):
+        for alloc_settings in (True, False):
+            torch.cuda.memory._set_allocator_settings(
+                f"pinned_use_cuda_host_register:{alloc_settings}"
+            )
+            try:
+                t = torch.ones(1024 * 1024, pin_memory=True)
+                self.assertTrue(t.is_pinned())
+                del t
+                torch._C._host_emptyCache()
+            except RuntimeError as e:
+                # Some GPUs don't support same address space on host and device side
+                pass
+
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
@@ -4097,6 +4111,62 @@ class TestCudaMallocAsync(TestCase):
 
         finally:
             torch.cuda.memory._record_memory_history(None)
+
+    def test_max_split_expandable(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        total_allowed = 120 * mb
+        fraction_allowed = total_allowed / all_memory
+        assert int(fraction_allowed * all_memory) == total_allowed
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,max_split_size_mb:40"
+        )
+        a = alloc(40)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:True,max_split_size_mb:40"
+        )
+        b = alloc(40)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,max_split_size_mb:40"
+        )
+        c = alloc(40)
+        with self.assertRaises(torch.OutOfMemoryError):
+            alloc(40)
+        del a, b, c
+        # force release_cached_blocks to run with some expandable segments in the free list
+        alloc(120)
+
+    def test_garbage_collect_expandable(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        total_allowed = 120 * mb
+        fraction_allowed = total_allowed / all_memory
+        assert int(fraction_allowed * all_memory) == total_allowed
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,garbage_collection_threshold:0.5"
+        )
+        a = alloc(40)
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:True,garbage_collection_threshold:0.5"
+        )
+        b = alloc(40)
+        del a, b
+        # causes GC to run. The expandable segment block will be split
+        # so GC would not attempt to free it anyway, but this at least makes sure
+        # expandable_segment blocks can be in the free list when this is called.
+        alloc(80)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
