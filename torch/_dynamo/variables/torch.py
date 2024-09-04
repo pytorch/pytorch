@@ -760,10 +760,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
             assert not args and not kwargs
-            if not tx.symbolic_torch_function_mode_stack:
+            if not tx.symbolic_torch_function_state.mode_stack:
                 raise unimplemented("Popping from an empty torch function mode stack")
             TorchFunctionModeStackVariable.register_mutation(tx)
-            return tx.pop_torch_function_mode_stack()
+            return tx.symbolic_torch_function_state.pop_torch_function_mode()
 
         @register(torch._C._push_on_torch_function_stack)
         def handle_push_torch_function(
@@ -771,7 +771,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             assert len(args) == 1 and not kwargs
             TorchFunctionModeStackVariable.register_mutation(tx)
-            tx.push_torch_function_mode_stack(args[0])
+            tx.symbolic_torch_function_state.push_torch_function_mode(args[0])
             return ConstantVariable.create(None)
 
         @register(torch._C._len_torch_function_stack)
@@ -779,7 +779,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
             assert not args and not kwargs
-            return ConstantVariable.create(len(tx.symbolic_torch_function_mode_stack))
+            return ConstantVariable.create(
+                len(tx.symbolic_torch_function_state.mode_stack)
+            )
 
         @register(torch.set_default_device)
         def handle_set_default_device(

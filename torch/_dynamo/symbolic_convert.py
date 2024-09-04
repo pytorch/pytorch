@@ -19,20 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Deque,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -72,7 +59,6 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
     Source,
-    TorchFunctionModeStackSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
@@ -119,11 +105,10 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
-
-
-if TYPE_CHECKING:
-    from .variables.torch_function import TorchFunctionModeVariable
-
+from .variables.torch_function import (
+    SymbolicTorchFunctionState,
+    TorchFunctionModeVariable,
+)
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -283,6 +268,10 @@ class BlockStackEntry:
             return ReenterWith(self.stack_index)
 
     def exit(self, tx):
+        if hasattr(self, "graph_break") and isinstance(
+            self.with_context, TorchFunctionModeVariable
+        ):
+            return
         assert self.with_context is not None
         return self.with_context.exit(tx)
 
@@ -651,7 +640,9 @@ def break_graph_if_unsupported(*, push):
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
-                assert isinstance(b.with_context, ContextWrappingVariable)
+                assert isinstance(
+                    b.with_context, (ContextWrappingVariable, TorchFunctionModeVariable)
+                )
                 b.with_context.reconstruct_type(cg)
                 cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
@@ -727,7 +718,7 @@ class InstructionTranslatorBase(
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
     symbolic_globals: Dict[str, VariableTracker]
-    symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"]
+    symbolic_torch_function_state: SymbolicTorchFunctionState
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
@@ -1122,6 +1113,8 @@ class InstructionTranslatorBase(
         return VariableBuilder(self, module_source)(fglobals_value)
 
     def LOAD_GLOBAL(self, inst):
+        if inst.argval == "_pop_mode":
+            breakpoint()
         if sys.version_info >= (3, 11) and sys.version_info < (3, 13) and inst.arg % 2:
             self.PUSH_NULL(inst)
         self._load_global(inst)
@@ -2304,7 +2297,9 @@ class InstructionTranslatorBase(
         ):
             unimplemented(f"{inst.opname} {ctx}")
 
-        if isinstance(ctx, GenericContextWrappingVariable):
+        if isinstance(ctx, GenericContextWrappingVariable) and not isinstance(
+            ctx, TorchFunctionModeVariable
+        ):
             self.generic_context_manager_depth += 1
 
         # Need this redundant check for mypy
@@ -2547,7 +2542,7 @@ class InstructionTranslatorBase(
         code_options: Dict[str, Any],
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
-        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
+        symbolic_torch_function_state: SymbolicTorchFunctionState,
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
@@ -2562,8 +2557,7 @@ class InstructionTranslatorBase(
         self.output = output
         self.symbolic_locals = symbolic_locals
         self.symbolic_globals = symbolic_globals
-        self.symbolic_torch_function_mode_stack = symbolic_torch_function_mode_stack
-        self._init_torch_function_state()
+        self.symbolic_torch_function_state = symbolic_torch_function_state
         self.stack = []
         # stack of variable names for tracking 3.13 closures
         self.name_stack: list[Any] = []
@@ -2628,55 +2622,6 @@ class InstructionTranslatorBase(
         )
         linecache.lazycache(f_code.co_filename, f_globals)
 
-    def _init_torch_function_state(self):
-        # This is annoyingly complicated because of how the torch function subclass + mode C API was designed
-        # There are two exposed C knobs here as contexts: torch._C.DisableTorchFunction and torch._C.DisableTorchFunctionSubclass
-        # These are their definitions:
-        # 1) torch._C._is_torch_function_enabled indicates that neither of the above knobs have been entered
-        # (if either are entered, this will be False)
-        # 2) torch._C._is_torch_function_mode_enabled indicates that either the torch mode stack is empty OR
-        # torch._C.DisableTorchFunction has been entered
-        # To disambiguate these and keep myself sane I added a C API to check whether all torch function
-        # concepts (modes and subclasses) are enabled.
-        # This only returns true iff we have not entered torch._C.DisableTorchFunction and allows us to separate
-        # the stack length from the enablement state of torch function modes.
-        # This is important because now if a mode is pushed while dynamo is tracing, we know whether
-        # or not torch function modes are enabled and whether we should trace it.
-        self.torch_function_subclass_enabled = torch._C._is_torch_function_enabled()
-
-        # This differs from the C API of the same name
-        # this will only be false iff we have entered torch._C.DisableTorchFunction
-        # and does not take into account the mode stack length, while the C API bundles these
-        # two concepts
-        self.torch_function_mode_enabled = (
-            not torch._C._is_torch_function_all_disabled()
-        )
-
-        self.cur_mode = None
-
-    @contextlib.contextmanager
-    def _pop_mode_for_inlining(self):
-        self.cur_mode = self.pop_torch_function_mode_stack()
-        try:
-            yield self.cur_mode
-        finally:
-            mode = self.cur_mode
-            self.cur_mode = None
-            self.push_torch_function_mode_stack(mode)
-
-    def in_torch_function_mode(self):
-        return len(self.symbolic_torch_function_mode_stack) > 0
-
-    def pop_torch_function_mode_stack(self):
-        return self.symbolic_torch_function_mode_stack.pop()
-
-    def push_torch_function_mode_stack(self, mode_var):
-        self.symbolic_torch_function_mode_stack.append(mode_var)
-
-    def call_torch_function_mode(self, fn, types, args, kwargs):
-        with self._pop_mode_for_inlining() as cur_mode:
-            return cur_mode.call_torch_function(self, fn, types, args, kwargs)
-
 
 class InstructionTranslator(InstructionTranslatorBase):
     mutated_closure_cell_contents: Set[str]
@@ -2736,7 +2681,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_locals={},  # set below
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals={},
-            symbolic_torch_function_mode_stack=collections.deque(),  # set below
+            symbolic_torch_function_state=None,  # type: ignore[arg-type] # set below
             f_code=f_code,
             export=export,
             inline_depth=0,
@@ -2771,7 +2716,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             }
 
-            self._init_torch_function_mode_stack(torch_function_mode_stack)
+            self.symbolic_torch_function_state = SymbolicTorchFunctionState(
+                torch_function_mode_stack
+            )
 
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
@@ -2785,22 +2732,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
-
-    def _init_torch_function_mode_stack(self, py_stack):
-        from .variables.torch_function import TorchFunctionModeStackVariable
-
-        TorchFunctionModeStackVariable.reset()
-
-        self.symbolic_torch_function_mode_stack: Deque[
-            TorchFunctionModeVariable
-        ] = collections.deque()
-
-        for i, val in enumerate(py_stack):
-            self.symbolic_torch_function_mode_stack.append(
-                variables.LazyVariableTracker.create(
-                    val, source=TorchFunctionModeStackSource(i)
-                )
-            )
 
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
@@ -3159,7 +3090,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 code,
                 sub_locals,
                 parent.symbolic_globals,
-                parent.symbolic_torch_function_mode_stack,
+                parent.symbolic_torch_function_state,
                 closure_cells,
                 func,
             )
@@ -3169,7 +3100,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 code,
                 sub_locals,
                 parent.symbolic_globals,
-                parent.symbolic_torch_function_mode_stack,
+                parent.symbolic_torch_function_state,
                 closure_cells,
                 func,
             )
@@ -3222,7 +3153,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         code: types.CodeType,
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
-        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
+        symbolic_torch_function_state: SymbolicTorchFunctionState,
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
     ) -> None:
@@ -3239,7 +3170,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
-            symbolic_torch_function_mode_stack=symbolic_torch_function_mode_stack,
+            symbolic_torch_function_state=symbolic_torch_function_state,
             instructions=instructions,
             code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,
