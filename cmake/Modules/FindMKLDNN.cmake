@@ -45,8 +45,6 @@ IF(NOT MKLDNN_FOUND)
     set(DNNL_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     if(LINUX)
       set(DNNL_CXX_FLAGS "${DNNL_CXX_FLAGS} -fpreview-breaking-changes")
-    else()
-
     endif()
     ExternalProject_Add(xpu_mkldnn_proj
       SOURCE_DIR ${MKLDNN_ROOT}
