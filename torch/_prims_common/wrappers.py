@@ -186,7 +186,7 @@ def _maybe_resize_out(
 
 
 def is_cpu_scalar(x: TensorLikeType) -> bool:
-    return x.shape == () and x.device.type == "cpu"
+    return x.dim == 0 and x.device.type == "cpu"
 
 
 def _safe_copy_out(

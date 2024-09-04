@@ -308,13 +308,16 @@ class MiscTests(torch._inductor.test_case.TestCase):
         )
 
     def test_scalar_device_movement(self):
+        if not torch._dynamo.config.assume_static_by_default:
+            self.skipTest("Doesn't work with symints")
+
         def add_fn(a, b, out):
             res = torch.add(a, b, out=out)
             return res
 
-        res = add_fn(2, 3, torch.tensor(0.))
+        res = add_fn(2, 3, torch.tensor(0.0))
         add_fn = torch.compile(add_fn, backend="eager", fullgraph=True)
-        res_compiled = add_fn(2, 3, torch.tensor(0.))
+        res_compiled = add_fn(2, 3, torch.tensor(0.0))
         self.assertEqual(res, res_compiled)
 
     @skipIfNNModuleInlined("fails internal CI")
