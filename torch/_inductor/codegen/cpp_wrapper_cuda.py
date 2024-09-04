@@ -302,7 +302,9 @@ class CppWrapperCuda(CppWrapperCpu):
                 and triton_meta["configs"]
             ):
                 equal_to_1 = triton_meta["configs"][0].equal_to_1
-                call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
+                call_args = [
+                    arg for i, arg in enumerate(call_args) if i not in equal_to_1
+                ]
                 arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
 
             call_args = self.generate_args_decl(call_args, arg_types)
@@ -321,7 +323,9 @@ class CppWrapperCuda(CppWrapperCpu):
 
             if grid_uses_symbolic_shapes:
                 self.writeline(f"if ({grid_name}.is_non_zero()) {{")
-            kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
+            kernel_var_name = (
+                f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
+            )
             self.writeline(
                 DeferredCudaKernelLine(
                     kernel_name,
@@ -342,14 +346,13 @@ class CppWrapperCuda(CppWrapperCpu):
             casted = []
             for arg_type, arg in zip(arg_types, call_args):
                 new_arg = arg
-                if arg_type.endswith('*') and arg != "nullptr":
+                if arg_type.endswith("*") and arg != "nullptr":
                     if config.abi_compatible:
                         new_arg = f"var_{next(self.arg_var_id)}"
                         self.writeline(
                             f"auto* {new_arg} = get_data_ptr_wrapper({arg});"
                         )
-                    
-                    # elif arg != "nullptr":
+                    else:
                         new_arg = f"{arg}.data_ptr()"
                 casted.append(f"({arg_type}){new_arg}")
             call_args_str = ", ".join(casted)

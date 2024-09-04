@@ -67,7 +67,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
-        self.initialized_kernels: [str, Kernel] = {}
+        self.initialized_kernels: Dict[str, Kernel] = {}
         self.expr_printer = cexpr
 
     def generate_kernel_call(
@@ -656,13 +656,15 @@ class CppWrapperCpu(WrapperCodeGen):
         # Tell compiler we need to link with the non-mangled symbols
         for kernel in self.initialized_kernels.values():
             signature = kernel.get_signature()
-            self.prefix.writeline(f"extern \"C\" {signature};")
+            self.prefix.writeline(f'extern "C" {signature};')
 
         self.prefix.writeline(
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        declare_kernel = set(self.src_to_kernel.values()) - set(self.initialized_kernels.keys())
+        declare_kernel = set(self.src_to_kernel.values()) - set(
+            self.initialized_kernels.keys()
+        )
         declare_kernel.update(
             entry[0] for entry in self.user_defined_kernel_cache.values()
         )
@@ -677,7 +679,7 @@ class CppWrapperCpu(WrapperCodeGen):
         for name, kernel in self.initialized_kernels.items():
             kernel_ptr = f"(*{name})"
             signature = kernel.get_signature().replace(name, kernel_ptr)
-            self.prefix.writeline(f"    {signature} = {name};")
+            self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
 

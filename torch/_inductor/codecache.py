@@ -1832,6 +1832,11 @@ class AotCodeCompiler:
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
+            other_obj_files = []
+            for entry in CUDACodeCache.cache.values():
+                if entry.output_path.endswith(".o"):
+                    other_obj_files.append(entry.output_path)
+            other_o = " ".join(other_obj_files)
 
             if config.aot_inductor.package:
                 output_name, output_dir = get_name_and_dir_from_output_file_path(
@@ -1845,7 +1850,7 @@ class AotCodeCompiler:
                 )
                 so_builder = CppBuilder(
                     name=output_name,
-                    sources=[output_o, consts_o],
+                    sources=[output_o, consts_o, other_o],
                     output_dir=output_dir,
                     BuildOption=so_build_options,
                 )
@@ -1879,7 +1884,7 @@ class AotCodeCompiler:
                 )
                 so_builder = CppBuilder(
                     name=output_name,
-                    sources=[output_o, consts_o],
+                    sources=[output_o, consts_o, other_o],
                     output_dir=output_dir,
                     BuildOption=so_build_options,
                 )

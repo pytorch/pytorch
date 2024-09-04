@@ -2,6 +2,8 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
     Buffer,
@@ -95,7 +97,7 @@ class CUDATemplateKernel(CUDAKernel):
             """
         )
         return res.getvalue()
-    
+
     def get_signature(self) -> str:
         return self.signature
 
@@ -144,7 +146,9 @@ class CUDATemplateKernel(CUDAKernel):
                 self.args.output_buffers[node.get_name()] = name
 
         arg_defs, *_ = self.args.cpp_argdefs()
-        signature = f"int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+        signature = (
+            f"int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+        )
         self.signature = signature
         return signature
 
@@ -166,6 +170,7 @@ class CUDATemplateKernel(CUDAKernel):
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
+            assert isinstance(wrapper, CppWrapperCpu)
             wrapper.initialized_kernels[name] = self
             # Kinda hacky because we always originally initialize name with "KERNEL_NAME"
             # So, we replace with the real kernel name passed as an arg to this function.
@@ -173,7 +178,7 @@ class CUDATemplateKernel(CUDAKernel):
 
         # NOTE:
         # We have to use python_argdefs even for cpp wrapper because python_argdefs
-        # gives us torch.dtype which is useful when calling 
+        # gives us torch.dtype which is useful when calling
         # generate_args_decl(call_args, arg_types) in generate_kernel_call()
 
         if V.graph.cpp_wrapper:
@@ -185,7 +190,11 @@ class CUDATemplateKernel(CUDAKernel):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
             else:
-                call_args[i] = call_args[i] if V.graph.cpp_wrapper else f"c_void_p({call_args[i]}.data_ptr())"
+                call_args[i] = (
+                    call_args[i]
+                    if V.graph.cpp_wrapper
+                    else f"c_void_p({call_args[i]}.data_ptr())"
+                )
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
@@ -198,8 +207,10 @@ class CUDATemplateKernel(CUDAKernel):
             wrapper.generate_workspace_allocation(
                 node.get_workspace_size(), V.graph.scheduler.current_device, False
             )
-            data_ptr = f"workspace.data_ptr()"
-            call_args.append(data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})")
+            data_ptr = "workspace.data_ptr()"
+            call_args.append(
+                data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
+            )
         else:
             call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
         if V.graph.cpp_wrapper:
