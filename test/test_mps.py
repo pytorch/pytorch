@@ -1929,6 +1929,21 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(output_cpu, output_mps, atol=tol, rtol=tol)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    @xfailIf(product_version < 15.0)
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_large_add(self, dtype):
+        a = torch.randn(11, 20064, 20064, dtype=dtype)
+        b = torch.randn(20064, 20064, dtype=dtype)
+        output_cpu = torch.add(a, b)
+        output_mps = torch.add(a.to('mps'), b.to('mps'))
+
+        # Using the low precision comparison for FP16
+        tol = 1e-2 if dtype == torch.float16 else None
+        self.assertEqual(output_cpu, output_mps, atol=tol, rtol=tol)
+        self.assertEqual(output_cpu.size(), output_mps.size())
+
+
+
 
     def test_addr(self):
         A = torch.ones(5, 10).to("mps")
