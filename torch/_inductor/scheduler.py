@@ -11,6 +11,7 @@ import operator
 import os
 import pprint
 import textwrap
+import traceback
 import typing
 from typing import (
     Any,
@@ -3372,6 +3373,26 @@ class Scheduler:
             return self._codegen()
 
     def _codegen(self) -> None:
+        if config.check_stack_no_cycles_TESTING_ONLY:
+            import torch._dynamo.convert_frame
+
+            stack = traceback.extract_stack()
+            seen = set()
+            for frame in reversed(stack):
+                # This is where maybe_cprofile is
+                if (
+                    frame.name == "_compile_inner"
+                    and frame.filename == torch._dynamo.convert_frame.__file__
+                ):
+                    break
+                key = (frame.filename, frame.lineno)
+                assert key not in seen, (
+                    f"Duplicate stack frame {frame.filename}:{frame.lineno}; "
+                    "did you add a decorator to one of the functions in this stack "
+                    "trace?  If so, try using a context manager instead."
+                )
+                seen.add(key)
+
         for node in self.nodes:
             try:
                 log.debug(
