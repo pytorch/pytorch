@@ -184,20 +184,20 @@ def capture_pre_autograd_graph(
                 range_constraints=range_constraints,
             )
 
-        error_message = \
-            """
-            Calling train() or eval() is not supported for exported models.
-            Alternatively, you may override these methods to do custom user behavior as follows:
+    error_message = \
+        """
+        Calling train() or eval() is not supported for exported models.
+        Alternatively, you may override these methods to do custom user behavior as follows:
 
-                def _my_train(self, mode: bool = True):
-                    ...
+            def _my_train(self, mode: bool = True):
+                ...
 
-                def _my_eval(self):
-                    ...
+            def _my_eval(self):
+                ...
 
-                model.train = types.MethodType(_my_train, model)
-                model.eval = types.MethodType(_my_eval, model)
-            """
+            model.train = types.MethodType(_my_train, model)
+            model.eval = types.MethodType(_my_eval, model)
+        """
 
     def _train(self, mode: bool = True):
         raise NotImplementedError(error_message)
