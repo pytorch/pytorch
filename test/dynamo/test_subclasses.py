@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 def traceable_subclass(c):
@@ -1426,6 +1427,62 @@ s1 > 3""",
             "Tensor subclass method __metadata_guard__ must be a classmethod",
             lambda: torch.compile(lambda x: x * x)(x),
         )
+
+    def test_subclass_constructor_proxying(self):
+        class SubclassTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a):
+                shape = a.shape
+                kwargs = {}
+                kwargs["strides"] = a.stride()
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = a.device
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+                return out
+
+            def __init__(self, a):
+                self.a = a
+
+            def __repr__(self):
+                a_repr = repr(self.a)
+                return f"SubclassTensor({a_repr})"
+
+            def __tensor_flatten__(self):
+                return ["a"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, _, __):
+                assert meta is None
+                a = inner_tensors["a"]
+                return SubclassTensor(a)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args_a = pytree.tree_map(
+                    lambda x: x.a if isinstance(x, SubclassTensor) else x, args
+                )
+                kwargs_a = pytree.tree_map(
+                    lambda x: x.a if isinstance(x, SubclassTensor) else x, kwargs
+                )
+                out_a = func(*args_a, **kwargs_a)
+                out = pytree.tree_map(
+                    lambda x: SubclassTensor(x) if isinstance(x, torch.Tensor) else x,
+                    out_a,
+                )
+                return return_and_correct_aliasing(func, args, kwargs, out)
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            out = SubclassTensor(x)
+            return out * out
+
+        x = torch.randn(3, 4)
+        f(x)
 
     def test_torch_function_subclass_survives_into_aot_autograd(self):
         # If you have a tensor subclass that relies on dispatch into the same op
