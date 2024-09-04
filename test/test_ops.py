@@ -1049,20 +1049,16 @@ class TestCommon(TestCase):
         [
             op
             for op in op_db
-            if (
-                op.supports_autograd_on_out
-                or op.supports_out
-                and (op.supports_autograd or op.is_factory_function)
-            )
+            if op.supports_out and (op.supports_autograd or op.is_factory_function)
         ],
         dtypes=OpDTypes.supported,
         allowed_dtypes=[torch.float, torch.cfloat],
     )
-    def test_out_and_grad(self, device, dtype, op):
+    def test_out_requires_grad_error(self, device, dtype, op):
         sample = first_sample(self, op.sample_inputs(device, dtype))
 
         # Call op to get prototype for out arguments
-        out = op(sample.input, *sample.args, **sample.kwargs)
+        expect = op(sample.input, *sample.args, **sample.kwargs)
         any_requires_grad = False
 
         def set_requires_grad(x):
@@ -1074,31 +1070,17 @@ class TestCommon(TestCase):
                 x.requires_grad_(True)
             return x
 
-        pytree.tree_map_(set_requires_grad, out)
+        out = pytree.tree_map_(set_requires_grad, expect)
         if not any_requires_grad:
             # Skip ops without any floating point outputs, e.g. isnan
             return
 
-        if not op.supports_autograd_on_out:
-            msg = (
-                "functions with out=... arguments don't support automatic "
-                "differentiation, but one of the arguments requires grad."
-            )
-            with self.assertRaises(RuntimeError, msg=msg):
-                op(sample.input, *sample.args, **sample.kwargs, out=out)
-
-        else:
-            result = op(sample.input, *sample.args, **sample.kwargs, out=out)
-            self.assertEqual(result, None)
-            self.assertIsInstance(out, tuple)
-            self.assertNotEqual(out, ())
-
-            [o.backward() for o in out]
-            self.assertTrue(all(o.grad is not None for o in out))
-
-            if op.name == "unbind_copy":  # Only such op right now
-                self.assertEqual({o.shape for o in out}, {out[0].shape})
-                self.assertTrue(all(torch.all(o.grad == 1.0) for o in out))
+        msg = (
+            "functions with out=... arguments don't support automatic "
+            "differentiation, but one of the arguments requires grad."
+        )
+        with self.assertRaises(RuntimeError, msg=msg):
+            op(sample.input, *sample.args, **sample.kwargs, out=out)
 
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
@@ -2494,9 +2476,16 @@ class TestFakeTensor(TestCase):
                         # if you see a shape exception here, you may need to add
                         # a `dynamic_output_shape` tag to an operator
 
-                        # prims/decomps must correctly model strides,
-                        # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                        prims.utils.compare_tensor_meta(fake_out, real_out, True)
+                        if op.op not in [
+                            torch.ops.aten._efficient_attention_forward,
+                            torch.ops.aten._flash_attention_forward,
+                        ]:
+                            # prims/decomps must correctly model strides,
+                            # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
+
+                            # note: the excluded ops have intentionally incorrect device;
+                            # see "Note [Seed and Offset]" (_meta_registrations.py)
+                            prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
                         if name not in aliasing_failures:
                             fake_aliasing = outputs_alias_inputs(
