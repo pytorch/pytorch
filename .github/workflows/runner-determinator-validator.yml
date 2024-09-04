@@ -1,0 +1,40 @@
+name: Validate Runner Determinator Script is in Sync
+
+on:
+  # Run on PRs when the runner-determinator script is updated to ensure it's copies are kept in sync
+  pull_request:
+    paths:
+      - .github/workflows/_runner-determinator.yml
+      - .github/workflows/runner-determinator-validator.yml
+      - .github/scripts/runner_determinator.py
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+jobs:
+  check-runner-determinator:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Run Hardcode runner-determinator script
+      id: hardcode-script
+      run: |
+        # Extract the script content from _runner-determinator.yml and skip the first 10 spaces of each line
+        script_content=$(awk '/cat <<EOF > runner_determinator.py/{flag=1;next}/EOF$/{flag=0}flag{print substr($0, 11)}' .github/workflows/_runner-determinator.yml)
+
+        # Write the extracted script content to runner_determinator.py
+        echo "$script_content" > runner_determinator_workflow.py
+
+    - name: Compare runner-determinator script embedded in workflow with checked in script
+      run: |
+        # Compare the extracted runner_determinator script with the existing one
+        # If this check fails, then make sure the contents of .github/scripts/runner_determinator.py is in sync with the
+        # version embedded into .github/workflows/_runner-determinator.yml
+        diff runner_determinator_workflow.py .github/scripts/runner_determinator.py
+      # Fail the job if the scripts are not identical
+      continue-on-error: false
