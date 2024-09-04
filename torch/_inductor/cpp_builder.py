@@ -832,16 +832,33 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
 
 @functools.lru_cache(None)
 def perload_icx_libomp_win(cpp_compiler: str) -> None:
-    try:
-        output = subprocess.check_output(
-            [cpp_compiler, "-print-file-name=libiomp5md.dll"], stderr=subprocess.DEVNULL
-        ).decode(*SUBPROCESS_DECODE_ARGS)
-        omp_path = output.rstrip()
-        if os.path.isfile(omp_path):
-            os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-            omp_module = cdll.LoadLibrary(omp_path)
-    except subprocess.SubprocessError:
-        pass
+    def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
+        try:
+            output = subprocess.check_output(
+                [cpp_compiler, f"-print-file-name={lib_name}"],
+                stderr=subprocess.DEVNULL,
+            ).decode(*SUBPROCESS_DECODE_ARGS)
+            omp_path = output.rstrip()
+            if os.path.isfile(omp_path):
+                os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+                omp_module = cdll.LoadLibrary(omp_path)
+                return True
+        except subprocess.SubprocessError:
+            pass
+        return False
+
+    """
+    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    We need preload them like openmp library.
+    """
+    preload_list = [
+        "libiomp5md.dll",  # openmp
+        "svml_dispmd.dll",  # svml library
+        "libmmd.dll",  # libm
+    ]
+
+    for lib_name in preload_list:
+        _load_icx_built_in_lib_by_name(cpp_compiler, lib_name)
 
 
 def _get_openmp_args(
@@ -942,6 +959,8 @@ def _get_openmp_args(
                 # TODO: fix issue, can't find omp.h
                 cflags.append("fopenmp")
                 libs.append("gomp")
+            elif _is_intel_compiler(cpp_compiler):
+                cflags.append("fiopenmp")
             else:
                 cflags.append("fopenmp")
                 libs.append("gomp")
