@@ -209,7 +209,9 @@ class UnflattenedModule(torch.nn.Module):
         for name in self.graph_signature.parameters:  # this loop adds used params
             param = state_dict[name]
             if id(param) not in id_to_param:
-                id_to_param[id(param)] = torch.nn.Parameter(param.clone())
+                id_to_param[id(param)] = torch.nn.Parameter(
+                    param.clone(), requires_grad=param.requires_grad
+                )
 
             _assign_attr(
                 id_to_param[id(param)],
@@ -405,6 +407,7 @@ class UnflattenedModule(torch.nn.Module):
         assert [fqn for fqn, _ in self.named_modules(remove_duplicate=False)] == list(
             fqn_order.keys()
         )
+        self.graph.lint()
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
@@ -594,9 +597,13 @@ def _compute_accessor(parent_fqn: str, child_fqn: str) -> str:
     parent_split = parent_fqn.split(".")
     child_split = child_fqn.split(".")
 
-    assert (
-        child_split[: len(parent_split)] == parent_split
-    ), f"Child module '{child_fqn}' is not a descendant of parent module '{parent_fqn}'"
+    # TODO: support skip connection by inlining the child module.
+    if child_split[: len(parent_split)] != parent_split:
+        raise RuntimeError(
+            f"Child module '{child_fqn}' is not a descendant of parent mldule '{parent_fqn}'."
+            "This is currently unsupported."
+            "Please try to make child module attach to parent module direclty."
+        )
     return ".".join(child_split[len(parent_split) :])
 
 
@@ -683,12 +690,12 @@ def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Mo
 class _ModuleFrame:
     def __init__(
         self,
-        flat_graph,
-        nodes,
+        flat_graph: torch.fx.Graph,
+        nodes: Tuple[torch.fx.Node, ...],
         seen_nodes,
         seen_modules,
         parent,
-        module_stack,
+        module_stack: List[str],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[torch.nn.Module] = None,
@@ -832,14 +839,8 @@ class _ModuleFrame:
         # To avoid this we copy these call_function nodes with sym_type results.
         # This should however only be done for sym_type nodes - call_function nodes on tensors
         # should not be deduplicated in the first place.
-        args = tuple(
-            self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
-            for _x in x.args
-        )
-        kwargs = {
-            k: self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
-            for k, _x in x.kwargs.items()
-        }
+        args = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.args)
+        kwargs = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.kwargs)
         node = self.graph.call_function(x.target, args, kwargs)
         node.meta = copy.copy(x.meta)
         self.node_map[x] = node
@@ -864,7 +865,10 @@ class _ModuleFrame:
                 with self.parent.graph.inserting_before(self.parent_call_module):
                     self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
             return self.node_to_placeholder[x]
-        elif x.op == "call_function":
+        elif x.op == "call_function" and (
+            x.target == torch.ops.aten.sym_size.int
+            or (hasattr(x.target, "__module__") and x.target.__module__ == "_operator")
+        ):
             # export deduplicates sym_size nodes, and may need to re-copy them
             # if module call signature needs to be preserved
             self.copy_sym_call_function(x)
@@ -873,7 +877,6 @@ class _ModuleFrame:
             raise RuntimeError(
                 f"Could not run remap_input() on op type: {x.op} for node {x}"
             )
-        return self.node_to_placeholder[x]
 
     def finalize_outputs(self):
         orig_outputs = []

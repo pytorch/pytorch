@@ -13,7 +13,6 @@ import itertools
 import logging
 import traceback
 from contextlib import nullcontext
-
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import torch
@@ -27,6 +26,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.multiprocessing.reductions import StorageWeakRef
+
 from .. import config
 from .autograd_cache import (
     AOTAutogradCache,
@@ -39,7 +39,6 @@ from .dispatch_and_compile_graph import (
     aot_dispatch_base_graph,
 )
 from .logging_utils import track_graph_compiling
-
 from .runtime_wrappers import (
     AOTDedupeWrapper,
     AOTDispatchAutograd,
@@ -48,6 +47,7 @@ from .runtime_wrappers import (
     AutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     DebugAssertWrapper,
+    EffectTokensWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
     make_runtime_safe,
@@ -57,8 +57,8 @@ from .runtime_wrappers import (
 )
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
-
 from .utils import _get_symint_hints, make_boxed_func, strict_zip, unlift_tokens
+
 
 zip = strict_zip
 
@@ -213,9 +213,15 @@ def aot_dispatch_base(
         runtime_metadata=fw_metadata,
     )
 
+    compiled_fw = EffectTokensWrapper().post_compile(
+        compiled_fw,
+        aot_config,
+        runtime_metadata=fw_metadata,
+    )
+
     # Why do we need to pass in num_fw_outs_saved_for_bw?
     # See Note: [Partitioner handling for Subclasses, Part 2]
-    compiled_fw_func = AOTDispatchSubclassWrapper(
+    compiled_fw = AOTDispatchSubclassWrapper(
         trace_joint=False,
         # TODO: once we use pre_compile this will be flat_fn at the top of this function
         fw_only=None,
@@ -227,15 +233,15 @@ def aot_dispatch_base(
         runtime_metadata=fw_metadata,
     )
 
-    if not hasattr(compiled_fw_func, "_boxed_call"):
-        compiled_fw_func = make_boxed_func(compiled_fw_func)
+    if not hasattr(compiled_fw, "_boxed_call"):
+        compiled_fw = make_boxed_func(compiled_fw)
 
     compiled_fn = RuntimeWrapper(
         indices_of_inps_to_detach=[],
         trace_joint=False,
         disable_amp=disable_amp,
     ).post_compile(
-        compiled_fw_func,
+        compiled_fw,
         aot_config,
         runtime_metadata=fw_metadata,
     )
@@ -378,10 +384,16 @@ def aot_dispatch_autograd(
             )
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
-            if num_tokens != 0 and config.unlift_effect_tokens:
-                unlift_tokens(fw_module, fw_metadata)
+            if config.unlift_effect_tokens and (
+                num_tokens > 0 or fw_metadata.num_backward_tokens > 0
+            ):
+                unlift_tokens(fw_module, fw_metadata, aot_config, bw_module)
+
                 num_inner_fwd_outputs -= num_tokens
-                joint_inputs = (joint_inputs[0][num_tokens:], joint_inputs[1])
+                joint_inputs = (
+                    joint_inputs[0][num_tokens:],
+                    joint_inputs[1],
+                )
 
             fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
@@ -478,16 +490,21 @@ def aot_dispatch_autograd(
         # (b) The grad_outputs that we AOT computed in our backward graph are the desugared tensor tensors,
         #     so we need to figure out which subclass fw inputs they map to.
         if maybe_subclass_meta is None:
+            num_backward_tokens: int = inner_meta.num_backward_tokens
             assert (
                 len(bw_outs)
-                == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
+                == len(fw_metadata.input_info)
+                + inner_meta.num_outputs_rng_offset
+                + num_backward_tokens
             )
-            bw_outs_no_rng = bw_outs
-            if inner_meta.num_outputs_rng_offset > 0:
-                bw_outs_no_rng = bw_outs[: -inner_meta.num_outputs_rng_offset]
-            assert len(bw_outs_no_rng) == len(fw_metadata.input_info)
+            bw_outs_no_rng_no_tokens = bw_outs
+            if (inner_meta.num_outputs_rng_offset + num_backward_tokens) > 0:
+                bw_outs_no_rng_no_tokens = bw_outs[
+                    : -(inner_meta.num_outputs_rng_offset + num_backward_tokens)
+                ]
+            assert len(bw_outs_no_rng_no_tokens) == len(fw_metadata.input_info)
 
-            for i, (bw_out) in enumerate(bw_outs_no_rng):
+            for i, (bw_out) in enumerate(bw_outs_no_rng_no_tokens):
                 # If our input experiences a metadata mutation inside the graph (e.g. set_()),
                 # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
                 metadata_mutation_in_graph = (
@@ -569,6 +586,12 @@ def aot_dispatch_autograd(
 
             if fakified_out_wrapper.needs_post_compile:
                 fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
+
+            compiled_fw_func = EffectTokensWrapper().post_compile(
+                compiled_fw_func,
+                aot_config,
+                runtime_metadata=fw_metadata,
+            )
 
             compiled_fw_func = AOTDispatchSubclassWrapper(
                 fw_only=None,

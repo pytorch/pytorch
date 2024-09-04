@@ -38,7 +38,7 @@ class _DynType:
     """
     _DynType defines a type which stands for the absence of type information.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         self.__name__ = '_DynType'
 
     def __eq__(self, other):
