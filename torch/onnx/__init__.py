@@ -472,6 +472,7 @@ def dynamo_export(
 
     from torch.onnx import _flags
     from torch.onnx._internal import exporter
+    from torch.utils import _pytree
 
     if isinstance(model, torch.export.ExportedProgram):
         return exporter.export_compat(
@@ -495,14 +496,30 @@ def dynamo_export(
 
         if export_options is not None and export_options.dynamic_shapes:
             # Make all shapes dynamic
-            dynamic_shapes = []
-            for arg_order, model_arg in enumerate(model_args):
-                arg_dynamic_shapes = {}
-                rank = len(model_arg.shape)
-                for idx in range(rank):
-                    dim = torch.export.Dim(f"arg{arg_order}_dim_{idx}")
-                    arg_dynamic_shapes[idx] = dim
-                dynamic_shapes.append(arg_dynamic_shapes)
+            def _to_dynamic_shapes_wrapper():
+                arg_order = 0
+
+                def _to_dynamic_shape(x):
+                    nonlocal arg_order
+                    if isinstance(x, torch.Tensor):
+                        rank = len(x.shape)
+                        dynamic_shape = {}
+                        for i in range(rank):
+                            dynamic_shape[i] = torch.export.Dim(
+                                f"arg_{arg_order}_dim_{i}"
+                            )
+                        arg_order += 1
+                        return dynamic_shape
+                    else:
+                        return None
+
+                return _to_dynamic_shape
+
+            # model_args could be nested
+            dynamic_shapes = _pytree.tree_map(
+                _to_dynamic_shapes_wrapper(),
+                model_args,
+            )
         else:
             dynamic_shapes = None
 

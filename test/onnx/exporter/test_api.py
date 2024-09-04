@@ -130,10 +130,27 @@ class TestExportAPIDynamo(common_utils.TestCase):
         os.environ["TORCH_ONNX_USE_EXPERIMENTAL_LOGIC"] = "1"
         assert os.environ.get("TORCH_ONNX_USE_EXPERIMENTAL_LOGIC") == "1"
 
+        class Nested(torch.nn.Module):
+            def forward(self, x):
+                (a0, a1), (b0, b1), (c0, c1, c2) = x
+                return a0 + a1 + b0 + b1 + c0 + c1 + c2
+
+        inputs = (
+            (1, 2),
+            (
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+            ),
+            (
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+            ),
+        )
+
         onnx_program = torch.onnx.dynamo_export(
-            SampleModelForDynamicShapes(),
-            torch.randn(2, 2, 3),
-            torch.randn(2, 2, 3),
+            Nested(),
+            inputs,
             export_options=torch.onnx.ExportOptions(dynamic_shapes=True),
         )
         assert onnx_program is not None
