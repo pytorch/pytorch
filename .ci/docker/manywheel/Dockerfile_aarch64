@@ -71,7 +71,8 @@ RUN yum install -y cmake3 && \
     ln -s /usr/bin/cmake3 /usr/bin/cmake
 
 #install ninja
-RUN yum install -y ninja-build
+RUN yum install -y ninja-build && \
+    ln -s /usr/bin/ninja-build /usr/bin/ninja
 
 FROM base as openssl
 # Install openssl (this must precede `build python` step)
