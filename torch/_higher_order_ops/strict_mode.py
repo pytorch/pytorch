@@ -28,7 +28,15 @@ def strict_mode(callable, operands):
             )
 
 
-strict_mode_op = HigherOrderOperator("strict_mode")
+class StrictMode(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("strict_mode")
+
+    def __call__(self, callable, operands):
+        return super().__call__(callable, operands)
+
+
+strict_mode_op = StrictMode()
 
 
 @strict_mode_op.py_impl(DispatchKey.CompositeExplicitAutograd)

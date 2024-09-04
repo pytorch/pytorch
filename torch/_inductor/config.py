@@ -411,6 +411,9 @@ aggressive_fusion = False
 debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
+loop_ordering_after_fusion = (
+    os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0") == "1"
+)
 
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
@@ -465,6 +468,8 @@ combo_kernels_autotune = 1
 # Enable masking for combining kernels of mixed sizes: 0 - disable, 1 - enable
 # for all except for foreach, 2 - enable for all
 combo_kernel_allow_mixed_sizes = 1
+# Enable dynamic shapes for foreach kernels
+combo_kernel_foreach_dynamic_shapes = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -590,6 +595,34 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# The width of comprehensive padding, in bytes.
+# CUDA max memory transaction size is 128 bytes for a warp.
+padding_alignment_bytes = 128
+
+# Threshold on the minimum stride that will be padded.
+#
+# Don't align a too small stride since that causes too much memory increase.
+# Pad too small stride may also cause perf loss. We may result in many tiny data blocks
+# with gaps in between. That causes less coalesced GPU memory access!
+#
+# Initially we pick 320 as the threshold since for alignement=16,
+# that results in at most 5% memory cost.
+#
+# But later on we raise the threshold to 1024 to avoid interfere with persistent reduction.
+# Let's say an inner reduction has a row size 513. Inductor will generate
+# persistent reduction code.
+# If we do padding, the strides are not contiguous any more. Inductor
+# uses a much smaller threshold for persistent reduction in this case and
+# generates potentially worse non-persistent reduction code.
+#
+# This change turns HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
+# (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
+padding_stride_threshold = 1024
+
+# Enable padding outputs, even if they would not be padded in eager mode.
+# By default, we use the same strides as eager mode.
+pad_outputs = False
+
 # Whether to treat output of the backward graph as user visible.
 # For user visible outputs, inductor will make sure the stride matches with eager.
 bw_outputs_user_visible = True
@@ -670,6 +703,12 @@ assume_aligned_inputs: bool = False
 # ignoring the unsupported args may lead to unexpected autotuning behavior: don't
 # set unless you know what you're doing.
 unsafe_ignore_unsupported_triton_autotune_args: bool = False
+
+# When True, we will check in scheduler.py _codegen that there are no "loops"
+# in the call stack; that is to say, the same frame multiple times.  This
+# ensures that a cProfile trace to this frame will be a straight line without
+# any cycles.
+check_stack_no_cycles_TESTING_ONLY: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -767,6 +806,9 @@ class cpp:
     # For example, if the total number of threads is 56, "7,4,2" means the work is
     # decomposed into 7x4x2 thread blocks along MxNxK of a GEMM.
     gemm_thread_factors = os.environ.get("TORCHINDUCTOR_CPP_GEMM_THREAD_FACTORS", None)
+
+    # Whether to enable masked vectorization for the tail_loop.
+    enable_loop_tail_vec = True
 
 
 # config specific to codegen/triton.py
@@ -899,6 +941,9 @@ class triton:
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
+    # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
+    codegen_upcast_to_fp32 = True
+
 
 class aot_inductor:
     # AOTInductor output path
@@ -915,14 +960,18 @@ class aot_inductor:
         os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
     )
 
-    # enable debug mode for aot inductor and it will print out more information including the intermediate tensor values, etc
-    # for debugging purpose
-    debug_intermediate_value_printer = (
-        os.environ.get("AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0") == "1"
+    # option for debug printing/saving for intermediate tensor values for aot inductor
+    # 0: disable debug dumping
+    # 1: enable saving intermediate tensor values
+    # 2: enable printing intermediate tensor values
+    debug_intermediate_value_printer = os.environ.get(
+        "AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0"
     )
 
-    # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
-    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
+    # filtered nodes to be printed for debug values. Specify this option when debug_intermediate_value_printer is set to 2
+    filtered_kernel_names = os.environ.get(
+        "AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", None
+    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""

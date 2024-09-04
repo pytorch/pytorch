@@ -38,6 +38,9 @@
 #   USE_CUSPARSELT=0
 #     disables the cuSPARSELt build
 #
+#   USE_CUDSS=0
+#     disables the cuDSS build
+#
 #   USE_CUFILE=0
 #     disables the cuFile build
 #
@@ -163,9 +166,6 @@
 #   NCCL_LIB_DIR
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
-#
-#   NVTOOLSEXT_PATH (Windows only)
-#     specify where nvtoolsext is installed
 #
 #   ACL_ROOT_DIR
 #     specify where Compute Library is installed
@@ -1103,6 +1103,12 @@ def configure_extension_build():
             "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
         ],
     }
+
+    if cmake_cache_vars["USE_DISTRIBUTED"]:
+        # Only enable fr_trace command if distributed is enabled
+        entry_points["console_scripts"].append(
+            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+        )
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
@@ -1501,7 +1507,7 @@ def main():
             f"Programming Language :: Python :: 3.{i}"
             for i in range(python_min_version[1], version_range_max)
         ],
-        license="BSD-3",
+        license="BSD-3-Clause",
         keywords="pytorch, machine learning",
     )
     if EMIT_BUILD_WARNING:

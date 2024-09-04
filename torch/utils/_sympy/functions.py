@@ -6,21 +6,67 @@ import sys
 
 import sympy
 from sympy import S
+from sympy.core import sympify
+from sympy.core.expr import Expr
+from sympy.core.function import Application
+from sympy.core.logic import _torf, fuzzy_and, fuzzy_or
 from sympy.core.numbers import equal_valued
+from sympy.core.operations import LatticeOp, ShortCircuit
+from sympy.core.sorting import ordered
+from sympy.core.traversal import walk
+from sympy.utilities.iterables import sift
 
 from .numbers import int_oo
 
 
+# Portions of this file are adapted from the Sympy codebase, which was
+# licensed as follows:
+#
+#   Copyright (c) 2006-2023 SymPy Development Team
+#
+#   All rights reserved.
+#
+#   Redistribution and use in source and binary forms, with or without
+#   modification, are permitted provided that the following conditions are met:
+#
+#     a. Redistributions of source code must retain the above copyright notice,
+#        this list of conditions and the following disclaimer.
+#     b. Redistributions in binary form must reproduce the above copyright
+#        notice, this list of conditions and the following disclaimer in the
+#        documentation and/or other materials provided with the distribution.
+#     c. Neither the name of SymPy nor the names of its contributors
+#        may be used to endorse or promote products derived from this software
+#        without specific prior written permission.
+#
+#   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+#   ARE DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR
+#   ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#   DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#   CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+#   LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+#   OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+#   DAMAGE.
+
 __all__ = [
     "FloorDiv",
     "ModularIndexing",
+    "Where",
+    "PythonMod",
+    "Mod",
     "CleanDiv",
+    "CeilToInt",
+    "FloorToInt",
     "CeilDiv",
     "IntTrueDiv",
     "FloatTrueDiv",
     "LShift",
     "RShift",
     "IsNonOverlappingAndDenseIndicator",
+    "TruncToFloat",
+    "TruncToInt",
     "RoundToInt",
     "RoundDecimal",
     "ToFloat",
@@ -439,6 +485,328 @@ class RShift(sympy.Function):
         if shift < 0:
             raise ValueError("negative shift count")
         return base // 2**shift
+
+
+class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
+    def __new__(cls, *args, **assumptions):
+        from sympy.core.parameters import global_parameters
+
+        evaluate = assumptions.pop("evaluate", global_parameters.evaluate)
+        args = (sympify(arg) for arg in args)
+
+        # first standard filter, for cls.zero and cls.identity
+        # also reshape Max(a, Max(b, c)) to Max(a, b, c)
+
+        if evaluate:
+            try:
+                args = frozenset(cls._new_args_filter(args))  # type: ignore[assignment]
+            except ShortCircuit:
+                return cls.zero  # type: ignore[attr-defined]
+            # remove redundant args that are easily identified
+            args = cls._collapse_arguments(args, **assumptions)
+            # find local zeros
+            args = cls._find_localzeros(args, **assumptions)
+        args = frozenset(args)
+
+        if not args:
+            return cls.identity  # type: ignore[attr-defined]
+
+        if len(args) == 1:
+            return list(args).pop()
+
+        # base creation
+        obj = Expr.__new__(cls, *ordered(args), **assumptions)
+        obj._argset = args
+        return obj
+
+    @classmethod
+    def _collapse_arguments(cls, args, **assumptions):
+        """Remove redundant args.
+
+        Examples
+        ========
+
+        >>> from sympy import Min, Max
+        >>> from sympy.abc import a, b, c, d, e
+
+        Any arg in parent that appears in any
+        parent-like function in any of the flat args
+        of parent can be removed from that sub-arg:
+
+        >>> Min(a, Max(b, Min(a, c, d)))
+        Min(a, Max(b, Min(c, d)))
+
+        If the arg of parent appears in an opposite-than parent
+        function in any of the flat args of parent that function
+        can be replaced with the arg:
+
+        >>> Min(a, Max(b, Min(c, d, Max(a, e))))
+        Min(a, Max(b, Min(a, c, d)))
+        """
+        if not args:
+            return args
+        args = list(ordered(args))
+        if cls is Min:
+            other = Max
+        else:
+            other = Min  # type: ignore[assignment]
+
+        # find global comparable max of Max and min of Min if a new
+        # value is being introduced in these args at position 0 of
+        # the ordered args
+        if args[0].is_number:
+            sifted = mins, maxs = [], []  # type: ignore[var-annotated]
+            for i in args:
+                for v in walk(i, Min, Max):
+                    if v.args[0].is_comparable:
+                        sifted[isinstance(v, Max)].append(v)
+            small = Min.identity
+            for i in mins:
+                v = i.args[0]
+                if v.is_number and (v < small) == True:  # noqa: E712
+                    small = v
+            big = Max.identity
+            for i in maxs:
+                v = i.args[0]
+                if v.is_number and (v > big) == True:  # noqa: E712
+                    big = v
+            # at the point when this function is called from __new__,
+            # there may be more than one numeric arg present since
+            # local zeros have not been handled yet, so look through
+            # more than the first arg
+            if cls is Min:
+                for arg in args:
+                    if not arg.is_number:
+                        break
+                    if (arg < small) == True:  # noqa: E712
+                        small = arg
+            elif cls == Max:
+                for arg in args:
+                    if not arg.is_number:
+                        break
+                    if (arg > big) == True:  # noqa: E712
+                        big = arg
+            T = None
+            if cls is Min:
+                if small != Min.identity:
+                    other = Max
+                    T = small
+            elif big != Max.identity:
+                other = Min  # type: ignore[assignment]
+                T = big
+            if T is not None:
+                # remove numerical redundancy
+                for i in range(len(args)):
+                    a = args[i]
+                    if isinstance(a, other):
+                        a0 = a.args[0]
+                        if (  # noqa: E712
+                            (a0 > T) if other == Max else (a0 < T)  # noqa: E712
+                        ) == True:  # noqa: E712
+                            args[i] = cls.identity  # type: ignore[attr-defined]
+
+        # remove redundant symbolic args
+        def do(ai, a):
+            if not isinstance(ai, (Min, Max)):
+                return ai
+            cond = a in ai.args
+            if not cond:
+                return ai.func(*[do(i, a) for i in ai.args], evaluate=False)
+            if isinstance(ai, cls):
+                return ai.func(*[do(i, a) for i in ai.args if i != a], evaluate=False)
+            return a
+
+        for i, a in enumerate(args):
+            args[i + 1 :] = [do(ai, a) for ai in args[i + 1 :]]
+
+        # factor out common elements as for
+        # Min(Max(x, y), Max(x, z)) -> Max(x, Min(y, z))
+        # and vice versa when swapping Min/Max -- do this only for the
+        # easy case where all functions contain something in common;
+        # trying to find some optimal subset of args to modify takes
+        # too long
+
+        def factor_minmax(args):
+            is_other = lambda arg: isinstance(arg, other)  # noqa: E731
+            other_args, remaining_args = sift(args, is_other, binary=True)
+            if not other_args:
+                return args
+
+            # Min(Max(x, y, z), Max(x, y, u, v)) -> {x,y}, ({z}, {u,v})
+            arg_sets = [set(arg.args) for arg in other_args]
+            common = set.intersection(*arg_sets)
+            if not common:
+                return args
+
+            new_other_args = list(common)
+            arg_sets_diff = [arg_set - common for arg_set in arg_sets]
+
+            # If any set is empty after removing common then all can be
+            # discarded e.g. Min(Max(a, b, c), Max(a, b)) -> Max(a, b)
+            if all(arg_sets_diff):
+                other_args_diff = [other(*s, evaluate=False) for s in arg_sets_diff]
+                new_other_args.append(cls(*other_args_diff, evaluate=False))
+
+            other_args_factored = other(*new_other_args, evaluate=False)
+            return remaining_args + [other_args_factored]
+
+        if len(args) > 1:
+            args = factor_minmax(args)
+
+        return args
+
+    @classmethod
+    def _new_args_filter(cls, arg_sequence):
+        """
+        Generator filtering args.
+
+        first standard filter, for cls.zero and cls.identity.
+        Also reshape ``Max(a, Max(b, c))`` to ``Max(a, b, c)``,
+        and check arguments for comparability
+        """
+        for arg in arg_sequence:
+            # pre-filter, checking comparability of arguments
+            if (
+                not isinstance(arg, Expr)
+                or arg.is_extended_real is False
+                or (arg.is_number and not arg.is_comparable)
+            ):
+                raise ValueError(f"The argument '{arg}' is not comparable.")
+
+            if arg == cls.zero:  # type: ignore[attr-defined]
+                raise ShortCircuit(arg)
+            elif arg == cls.identity:  # type: ignore[attr-defined]
+                continue
+            elif arg.func == cls:
+                yield from arg.args
+            else:
+                yield arg
+
+    @classmethod
+    def _find_localzeros(cls, values, **options):
+        """
+        Sequentially allocate values to localzeros.
+
+        When a value is identified as being more extreme than another member it
+        replaces that member; if this is never true, then the value is simply
+        appended to the localzeros.
+        """
+        localzeros = set()  # type: ignore[var-annotated]
+        for v in values:
+            is_newzero = True
+            localzeros_ = list(localzeros)
+            for z in localzeros_:
+                if id(v) == id(z):
+                    is_newzero = False
+                else:
+                    con = cls._is_connected(v, z)
+                    if con:
+                        is_newzero = False
+                        if con is True or con == cls:
+                            localzeros.remove(z)
+                            localzeros.update([v])
+            if is_newzero:
+                localzeros.update([v])
+        return localzeros
+
+    @classmethod
+    def _is_connected(cls, x, y):
+        """
+        Check if x and y are connected somehow.
+        """
+        if x == y:
+            return True
+        t, f = Max, Min
+        for op in "><":
+            for j in range(2):
+                try:
+                    if op == ">":
+                        v = x >= y
+                    else:
+                        v = x <= y
+                except TypeError:
+                    return False  # non-real arg
+                if not v.is_Relational:
+                    return t if v else f
+                t, f = f, t  # type: ignore[assignment]
+                x, y = y, x
+            x, y = y, x  # run next pass with reversed order relative to start
+
+        return False
+
+    _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
+    _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
+        i.is_antihermitian for i in s.args  # noqa: E731
+    )  # noqa: E731
+    _eval_is_commutative = lambda s: _torf(  # noqa: E731
+        i.is_commutative for i in s.args  # noqa: E731
+    )  # noqa: E731
+    _eval_is_complex = lambda s: _torf(i.is_complex for i in s.args)  # noqa: E731
+    _eval_is_composite = lambda s: _torf(i.is_composite for i in s.args)  # noqa: E731
+    _eval_is_even = lambda s: _torf(i.is_even for i in s.args)  # noqa: E731
+    _eval_is_finite = lambda s: _torf(i.is_finite for i in s.args)  # noqa: E731
+    _eval_is_hermitian = lambda s: _torf(i.is_hermitian for i in s.args)  # noqa: E731
+    _eval_is_imaginary = lambda s: _torf(i.is_imaginary for i in s.args)  # noqa: E731
+    _eval_is_infinite = lambda s: _torf(i.is_infinite for i in s.args)  # noqa: E731
+    _eval_is_integer = lambda s: _torf(i.is_integer for i in s.args)  # noqa: E731
+    _eval_is_irrational = lambda s: _torf(i.is_irrational for i in s.args)  # noqa: E731
+    _eval_is_negative = lambda s: _torf(i.is_negative for i in s.args)  # noqa: E731
+    _eval_is_noninteger = lambda s: _torf(i.is_noninteger for i in s.args)  # noqa: E731
+    _eval_is_nonnegative = lambda s: _torf(  # noqa: E731
+        i.is_nonnegative for i in s.args  # noqa: E731
+    )  # noqa: E731
+    _eval_is_nonpositive = lambda s: _torf(  # noqa: E731
+        i.is_nonpositive for i in s.args  # noqa: E731
+    )  # noqa: E731
+    _eval_is_nonzero = lambda s: _torf(i.is_nonzero for i in s.args)  # noqa: E731
+    _eval_is_odd = lambda s: _torf(i.is_odd for i in s.args)  # noqa: E731
+    _eval_is_polar = lambda s: _torf(i.is_polar for i in s.args)  # noqa: E731
+    _eval_is_positive = lambda s: _torf(i.is_positive for i in s.args)  # noqa: E731
+    _eval_is_prime = lambda s: _torf(i.is_prime for i in s.args)  # noqa: E731
+    _eval_is_rational = lambda s: _torf(i.is_rational for i in s.args)  # noqa: E731
+    _eval_is_real = lambda s: _torf(i.is_real for i in s.args)  # noqa: E731
+    _eval_is_extended_real = lambda s: _torf(  # noqa: E731
+        i.is_extended_real for i in s.args  # noqa: E731
+    )  # noqa: E731
+    _eval_is_transcendental = lambda s: _torf(  # noqa: E731
+        i.is_transcendental for i in s.args  # noqa: E731
+    )  # noqa: E731
+    _eval_is_zero = lambda s: _torf(i.is_zero for i in s.args)  # noqa: E731
+
+
+class Max(MinMaxBase, Application):  # type: ignore[misc]
+    r"""
+    Return, if possible, the maximum value of the list.
+    """
+    zero = S.Infinity
+    identity = S.NegativeInfinity
+
+    def _eval_is_positive(self):
+        return fuzzy_or(a.is_positive for a in self.args)  # type: ignore[attr-defined]
+
+    def _eval_is_nonnegative(self):
+        return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
+
+    def _eval_is_negative(self):
+        return fuzzy_and(a.is_negative for a in self.args)
+
+
+class Min(MinMaxBase, Application):  # type: ignore[misc]
+    """
+    Return, if possible, the minimum value of the list.
+    """
+
+    zero = S.NegativeInfinity
+    identity = S.Infinity
+
+    def _eval_is_positive(self):
+        return fuzzy_and(a.is_positive for a in self.args)  # type: ignore[attr-defined]
+
+    def _eval_is_nonnegative(self):
+        return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
+
+    def _eval_is_negative(self):
+        return fuzzy_or(a.is_negative for a in self.args)
 
 
 def safe_pow(base, exp):
