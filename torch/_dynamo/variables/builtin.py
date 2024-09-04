@@ -637,9 +637,6 @@ class BuiltinVariable(VariableTracker):
 
         return f"{self.__class__.__name__}({name})"
 
-    def python_type(self):
-        return type(self.fn)
-
     def as_python_constant(self):
         return self.fn
 
