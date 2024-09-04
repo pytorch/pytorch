@@ -19,7 +19,8 @@ class JobConfig:
         )
 
         self.parser.add_argument(
-            "-d", "--dir", help="Directory with flight recorder dumps"
+            "trace_dir",
+            help="Directory containing one trace file per rank, named with <prefix>_<rank>.",
         )
         self.parser.add_argument("-o", "--output", default=None)
         self.parser.add_argument(

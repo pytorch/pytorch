@@ -40,7 +40,7 @@ from tools.flight_recorder.components.types import types
 def main(args: Optional[Sequence[str]] = None) -> None:
     config = JobConfig()
     args = config.parse_args(args)
-    details = read_dir(args.prefix, args.dir)
+    details = read_dir(args.prefix, args.trace_dir)
     db = build_db(details, args)
     if args.output:
         with open(args.output, "wb") as f:
