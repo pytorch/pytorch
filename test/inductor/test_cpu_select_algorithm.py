@@ -669,6 +669,296 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("batch_size", (8,))
+    @parametrize("in_features", (3,))
+    @parametrize("in_features2", (192,))
+    @parametrize("image_size", (224,))
+    @parametrize("out_features", (64,))
+    @parametrize(
+        "bias",
+        (True,),
+    )
+    @dtypes(torch.float32)
+    def test_linear_with_in_out_buffer(
+        self,
+        batch_size,
+        in_features,
+        in_features2,
+        image_size,
+        out_features,
+        bias,
+        dtype,
+    ):
+        # Reproducer from the coat_lite_mini model in timm
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self._frozen_param398 = torch.randn(batch_size, out_features, 1, 1)
+                self.conv = torch.nn.Conv2d(
+                    in_features,
+                    out_features,
+                    kernel_size=4,
+                    padding=0,
+                    stride=4,
+                    dilation=1,
+                    groups=1,
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    out_features,
+                    out_features,
+                    kernel_size=3,
+                    padding=1,
+                    stride=1,
+                    dilation=1,
+                    groups=out_features,
+                )
+
+                self.conv3 = torch.nn.Conv2d(
+                    16,
+                    16,
+                    kernel_size=3,
+                    padding=1,
+                    stride=1,
+                    dilation=1,
+                    groups=16,
+                )
+
+                self.conv4 = torch.nn.Conv2d(
+                    24,
+                    24,
+                    kernel_size=5,
+                    padding=2,
+                    stride=1,
+                    dilation=1,
+                    groups=24,
+                )
+
+                self.conv5 = torch.nn.Conv2d(
+                    24,
+                    24,
+                    kernel_size=7,
+                    padding=3,
+                    stride=1,
+                    dilation=1,
+                    groups=24,
+                )
+
+                self.linear = torch.nn.Linear(out_features, in_features2, bias)
+
+                self.linear2 = torch.nn.Linear(out_features, out_features, bias)
+                self._frozen_param2 = torch.randn(out_features)
+                self._frozen_param3 = torch.randn(out_features)
+                self._frozen_param7 = torch.randn(out_features)
+                self._frozen_param8 = torch.randn(out_features)
+                self._frozen_param153 = torch.randn(batch_size, 1, out_features)
+
+            def forward(self, arg152_1):
+                _convolution_pointwise_default_35 = self.conv(arg152_1)
+                arg152_1 = None
+
+                view_168 = torch.ops.aten.reshape.default(
+                    _convolution_pointwise_default_35, [8, 64, 3136]
+                )
+                _convolution_pointwise_default_35 = None
+                permute_97 = torch.ops.aten.permute.default(view_168, [0, 2, 1])
+                view_168 = None
+                clone_65 = torch.ops.aten.clone.default(
+                    permute_97, memory_format=torch.contiguous_format
+                )
+                permute_97 = None
+                var_mean_21 = torch.ops.aten.var_mean.correction(
+                    clone_65, [2], correction=0, keepdim=True
+                )
+                getitem_90 = var_mean_21[0]
+                getitem_91 = var_mean_21[1]
+                var_mean_21 = None
+                add_82 = torch.ops.aten.add.Tensor(getitem_90, 1e-05)
+                getitem_90 = None
+                rsqrt_21 = torch.ops.aten.rsqrt.default(add_82)
+                add_82 = None
+                sub_29 = torch.ops.aten.sub.Tensor(clone_65, getitem_91)
+                clone_65 = getitem_91 = None
+                mul_82 = torch.ops.aten.mul.Tensor(sub_29, rsqrt_21)
+                sub_29 = rsqrt_21 = None
+                mul_83 = torch.ops.aten.mul.Tensor(mul_82, self._frozen_param2)
+                mul_82 = None
+                add_83 = torch.ops.aten.add.Tensor(mul_83, self._frozen_param3)
+                mul_83 = None
+                _frozen_param153 = self._frozen_param153
+                cat_20 = torch.ops.aten.cat.default([_frozen_param153, add_83], 1)
+                _frozen_param153 = add_83 = None
+                slice_111 = torch.ops.aten.slice.Tensor(cat_20, 1, 0, 1)
+                slice_113 = torch.ops.aten.slice.Tensor(
+                    cat_20, 1, 1, 9223372036854775807
+                )
+                cat_20 = None
+                permute_98 = torch.ops.aten.permute.default(slice_113, [0, 2, 1])
+                slice_113 = None
+                view_169 = torch.ops.aten.reshape.default(permute_98, [8, 64, 56, 56])
+                permute_98 = None
+                _convolution_pointwise_default_34 = self.conv2(view_169)
+
+                add_84 = torch.ops.aten.add.Tensor(
+                    _convolution_pointwise_default_34, view_169
+                )
+                _convolution_pointwise_default_34 = view_169 = None
+                view_170 = torch.ops.aten.reshape.default(add_84, [8, 64, 3136])
+                add_84 = None
+                permute_99 = torch.ops.aten.permute.default(view_170, [0, 2, 1])
+                view_170 = None
+                cat_21 = torch.ops.aten.cat.default([slice_111, permute_99], 1)
+                slice_111 = permute_99 = None
+                var_mean_22 = torch.ops.aten.var_mean.correction(
+                    cat_21, [2], correction=0, keepdim=True
+                )
+                getitem_92 = var_mean_22[0]
+                getitem_93 = var_mean_22[1]
+                var_mean_22 = None
+                add_85 = torch.ops.aten.add.Tensor(getitem_92, 1e-06)
+                getitem_92 = None
+                rsqrt_22 = torch.ops.aten.rsqrt.default(add_85)
+                add_85 = None
+                sub_30 = torch.ops.aten.sub.Tensor(cat_21, getitem_93)
+                getitem_93 = None
+                mul_84 = torch.ops.aten.mul.Tensor(sub_30, rsqrt_22)
+                sub_30 = rsqrt_22 = None
+                mul_85 = torch.ops.aten.mul.Tensor(mul_84, self._frozen_param7)
+                mul_84 = None
+                add_86 = torch.ops.aten.add.Tensor(mul_85, self._frozen_param8)
+                mul_85 = None
+                view_171 = torch.ops.aten.reshape.default(add_86, [25096, 64])
+                add_86 = None
+
+                _mkl_linear_32 = self.linear(view_171)
+                view_171 = None
+
+                view_172 = torch.ops.aten.reshape.default(
+                    _mkl_linear_32, [8, 3137, 192]
+                )
+                _mkl_linear_32 = None
+                view_173 = torch.ops.aten.reshape.default(view_172, [8, 3137, 3, 8, 8])
+                view_172 = None
+                permute_101 = torch.ops.aten.permute.default(view_173, [2, 0, 3, 1, 4])
+                view_173 = None
+                unbind_8 = torch.ops.aten.unbind.int(permute_101)
+                permute_101 = None
+                getitem_94 = unbind_8[0]
+                getitem_95 = unbind_8[1]
+                getitem_96 = unbind_8[2]
+                unbind_8 = None
+                clone_66 = torch.ops.aten.clone.default(
+                    getitem_95, memory_format=torch.contiguous_format
+                )
+                getitem_95 = None
+                amax_8 = torch.ops.aten.amax.default(clone_66, [2], True)
+                sub_31 = torch.ops.aten.sub.Tensor(clone_66, amax_8)
+                clone_66 = amax_8 = None
+                exp_8 = torch.ops.aten.exp.default(sub_31)
+                sub_31 = None
+                sum_9 = torch.ops.aten.sum.dim_IntList(exp_8, [2], True)
+                div_8 = torch.ops.aten.div.Tensor(exp_8, sum_9)
+                exp_8 = sum_9 = None
+                permute_102 = torch.ops.aten.permute.default(div_8, [0, 1, 3, 2])
+                div_8 = None
+                expand_37 = torch.ops.aten.expand.default(permute_102, [8, 8, 8, 3137])
+                permute_102 = None
+                view_174 = torch.ops.aten.reshape.default(expand_37, [64, 8, 3137])
+                expand_37 = None
+                expand_38 = torch.ops.aten.expand.default(getitem_96, [8, 8, 3137, 8])
+                clone_67 = torch.ops.aten.clone.default(
+                    expand_38, memory_format=torch.contiguous_format
+                )
+                expand_38 = None
+                view_175 = torch.ops.aten.reshape.default(clone_67, [64, 3137, 8])
+                clone_67 = None
+                bmm_16 = torch.ops.aten.bmm.default(view_174, view_175)
+                view_174 = view_175 = None
+                view_176 = torch.ops.aten.reshape.default(bmm_16, [8, 8, 8, 8])
+                bmm_16 = None
+                expand_39 = torch.ops.aten.expand.default(getitem_94, [8, 8, 3137, 8])
+                clone_68 = torch.ops.aten.clone.default(
+                    expand_39, memory_format=torch.contiguous_format
+                )
+                expand_39 = None
+                view_177 = torch.ops.aten.reshape.default(clone_68, [64, 3137, 8])
+                clone_68 = None
+                expand_40 = torch.ops.aten.expand.default(view_176, [8, 8, 8, 8])
+                view_176 = None
+                view_178 = torch.ops.aten.reshape.default(expand_40, [64, 8, 8])
+                expand_40 = None
+                bmm_17 = torch.ops.aten.bmm.default(view_177, view_178)
+                view_177 = view_178 = None
+                view_179 = torch.ops.aten.reshape.default(bmm_17, [8, 8, 3137, 8])
+                bmm_17 = None
+                slice_116 = torch.ops.aten.slice.Tensor(
+                    getitem_94, 2, 1, 9223372036854775807
+                )
+                getitem_94 = None
+                slice_120 = torch.ops.aten.slice.Tensor(
+                    getitem_96, 2, 1, 9223372036854775807
+                )
+                getitem_96 = None
+                permute_103 = torch.ops.aten.permute.default(slice_120, [0, 1, 3, 2])
+                slice_120 = None
+                view_180 = torch.ops.aten.reshape.default(permute_103, [8, 64, 56, 56])
+                permute_103 = None
+                split_with_sizes_8 = torch.ops.aten.split_with_sizes.default(
+                    view_180, [16, 24, 24], 1
+                )
+                view_180 = None
+                getitem_97 = split_with_sizes_8[0]
+                getitem_98 = split_with_sizes_8[1]
+                getitem_99 = split_with_sizes_8[2]
+                split_with_sizes_8 = None
+
+                _convolution_pointwise_default_33 = self.conv3(getitem_97)
+                _convolution_pointwise_default_32 = self.conv4(getitem_98)
+                _convolution_pointwise_default_31 = self.conv5(getitem_99)
+
+                cat_22 = torch.ops.aten.cat.default(
+                    [
+                        _convolution_pointwise_default_33,
+                        _convolution_pointwise_default_32,
+                        _convolution_pointwise_default_31,
+                    ],
+                    1,
+                )
+                _convolution_pointwise_default_33 = (
+                    _convolution_pointwise_default_32
+                ) = _convolution_pointwise_default_31 = None
+                view_181 = torch.ops.aten.reshape.default(cat_22, [8, 8, 8, 3136])
+                cat_22 = None
+                permute_104 = torch.ops.aten.permute.default(view_181, [0, 1, 3, 2])
+                view_181 = None
+
+                mul_86 = torch.ops.aten.mul.Tensor(slice_116, permute_104)
+                slice_116 = permute_104 = None
+                constant_pad_nd_8 = torch.ops.aten.constant_pad_nd.default(
+                    mul_86, [0, 0, 1, 0, 0, 0], 0.0
+                )
+                mul_86 = None
+                mul_87 = torch.ops.aten.mul.Tensor(view_179, 0.3535533905932738)
+                view_179 = None
+                add_87 = torch.ops.aten.add.Tensor(mul_87, constant_pad_nd_8)
+                mul_87 = constant_pad_nd_8 = None
+                return add_87
+
+        view_12 = torch.randn(batch_size, in_features, image_size, image_size)
+
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(
+                mod,
+                (view_12,),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
