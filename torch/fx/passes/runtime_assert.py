@@ -44,18 +44,6 @@ def _get_example_value(node: fx.Node) -> Optional[str]:
         return None
 
 
-def _get_example_value_key(node: fx.Node) -> Optional[str]:
-    """
-    actually just run this once at start of pass, based on first node, and constantly use that.
-    """
-    if "example_value" in node.meta:
-        return "example_value"
-    elif "val" in node.meta:
-        return "val"
-    else:
-        return None
-
-
 def _get_sym_val(node: fx.Node) -> Optional["sympy.Expr"]:
     val = _get_example_value(node)
     if isinstance(val, py_sym_types):
