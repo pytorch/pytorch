@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions
+    url: https://discuss.pytorch.org/
+    about: Ask questions and discuss with other PyTorch community members
