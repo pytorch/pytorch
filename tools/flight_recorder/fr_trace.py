@@ -24,18 +24,22 @@ Usage
 python fr_trace.py -d <dump dir containing trace files> [-o <output file>]
 
 - Omitting the optional output file will still yield analysis information to stdout
-- the output file is a pickle of the flat DB, which may change in format in the future.
+- The output file is a pickle of the flat DB, which may change in format in the future.
+- This script is versioned so that we can ensure our future changes to flight recorder are backwards compatible.
 """
 
-import argparse
 import pickle
+from typing import Optional, Sequence
 
+from tools.flight_recorder.components.builder import build_db
 from tools.flight_recorder.components.config_manager import JobConfig
 from tools.flight_recorder.components.loader import read_dir
-from tools.flight_recorder.components.processor import build_db, types
+from tools.flight_recorder.components.types import types
 
 
-def main(args: argparse.Namespace) -> None:
+def main(args: Optional[Sequence[str]] = None) -> None:
+    config = JobConfig()
+    args = config.parse_args(args)
     details = read_dir(args.prefix, args.dir)
     db = build_db(details, args)
     if args.output:
@@ -44,5 +48,4 @@ def main(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
-    config = JobConfig()
-    main(config.parse_args())
+    main()

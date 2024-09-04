@@ -46,11 +46,8 @@ if TYPE_CHECKING:
 
     import onnx
 
-    import onnxruntime  # type: ignore[import]
-    import onnxscript  # type: ignore[import]
-    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-        registration as torchlib_registry,
-    )
+    import onnxruntime
+    import onnxscript
 
     from torch._subclasses import fake_tensor
     from torch.onnx._internal.fx import diagnostics
@@ -107,12 +104,8 @@ class OnnxRegistry:
         # NOTE: _registry is the registry maps OpNameto a list of ONNXFunctions. It is important
         # not to directly modify this variable. Instead, access to it should be done through
         # the public methods: register_custom_op, get_ops, and is_registered_op.
-        self._registry: dict[
-            registration.OpName, list[registration.ONNXFunction]
-        ] = defaultdict(list)
-        # FIXME: Avoid importing onnxscript into torch
-        from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
-            registration,
+        self._registry: dict[registration.OpName, list[registration.ONNXFunction]] = (
+            defaultdict(list)
         )
 
         # opset_version is unused for now, since torchlib only supports opset18.
@@ -123,8 +116,7 @@ class OnnxRegistry:
             "different opset version, please register them with register_custom_op."
         )
 
-        # Initialize registry from torchlib
-        self._initiate_registry_from_torchlib(registration.default_registry)
+        self._initiate_registry_from_torchlib()
 
     @property
     def opset_version(self) -> int:
@@ -134,33 +126,25 @@ class OnnxRegistry:
 
         return self._opset_version
 
-    def _initiate_registry_from_torchlib(
-        self, torchlib_registry: torchlib_registry.Registry
-    ):
+    def _initiate_registry_from_torchlib(self) -> None:
         """Populates the registry with ATen functions from torchlib.
 
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
-        for aten_name, aten_overloads_func in torchlib_registry.items():
-            internal_name_instance = registration.OpName.from_qualified_name(aten_name)
-            for overload_func in aten_overloads_func.overloads:
-                symbolic_function = registration.ONNXFunction(
-                    onnx_function=overload_func,
-                    op_full_name=internal_name_instance.qualified_name(),
-                    is_custom=False,
-                    is_complex=False,
-                )
-                self._register(internal_name_instance, symbolic_function)
+        import onnxscript._framework_apis.torch_2_5 as onnxscript_apis
 
-            for complex_func in aten_overloads_func.complex:
-                symbolic_function = registration.ONNXFunction(
-                    onnx_function=complex_func,
-                    op_full_name=internal_name_instance.qualified_name(),
-                    is_custom=False,
-                    is_complex=True,
-                )
-                self._register(internal_name_instance, symbolic_function)
+        for meta in onnxscript_apis.get_torchlib_ops():
+            internal_name_instance = registration.OpName.from_qualified_name(
+                meta.qualified_name
+            )
+            symbolic_function = registration.ONNXFunction(
+                onnx_function=meta.function,  # type: ignore[arg-type]
+                op_full_name=internal_name_instance.qualified_name(),
+                is_custom=False,
+                is_complex=meta.is_complex,
+            )
+            self._register(internal_name_instance, symbolic_function)
 
     def _register(
         self,
@@ -263,7 +247,6 @@ class ExportOptions:
             When ``None``, the exporter determines the most compatible setting.
             When ``True``, all input shapes are considered dynamic.
             When ``False``, all input shapes are considered static.
-        op_level_debug: Whether to export the model with op-level debug information
         diagnostic_options: The diagnostic options for the exporter.
         fake_context: The fake context used for symbolic tracing.
         onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
@@ -276,9 +259,6 @@ class ExportOptions:
     - ``True``: all input shapes are considered dynamic.
     - ``False``: all input shapes are considered static.
     """
-
-    op_level_debug: bool | None = None
-    """When True export the model with op-level debug running ops through ONNX Runtime."""
 
     diagnostic_options: DiagnosticOptions
     """The diagnostic options for the exporter."""
@@ -293,13 +273,11 @@ class ExportOptions:
         self,
         *,
         dynamic_shapes: bool | None = None,
-        op_level_debug: bool | None = None,
         fake_context: ONNXFakeContext | None = None,
         onnx_registry: OnnxRegistry | None = None,
         diagnostic_options: DiagnosticOptions | None = None,
     ):
         self.dynamic_shapes = dynamic_shapes
-        self.op_level_debug = op_level_debug
         self.fake_context = fake_context
         self.onnx_registry = onnx_registry
         self.diagnostic_options = diagnostic_options or DiagnosticOptions()
@@ -313,7 +291,6 @@ class ResolvedExportOptions(ExportOptions):
 
     # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
     dynamic_shapes: bool
-    op_level_debug: bool
     diagnostic_options: DiagnosticOptions
     fake_context: ONNXFakeContext
     onnx_registry: OnnxRegistry
@@ -347,7 +324,6 @@ class ResolvedExportOptions(ExportOptions):
 
         if isinstance(options, ResolvedExportOptions):
             self.dynamic_shapes = options.dynamic_shapes
-            self.op_level_debug = options.op_level_debug
             self.diagnostic_options = options.diagnostic_options
             self.fake_context = options.fake_context
             # private
@@ -392,13 +368,14 @@ class ResolvedExportOptions(ExportOptions):
             )
 
             self.onnx_registry = resolve(options.onnx_registry, OnnxRegistry())
-            self.decomposition_table = decomposition_table.create_onnx_friendly_decomposition_table(  # type: ignore[assignment]
-                self.onnx_registry
+            self.decomposition_table = (
+                decomposition_table.create_onnx_friendly_decomposition_table(  # type: ignore[assignment]
+                    self.onnx_registry
+                )
             )
 
             from torch.onnx._internal.fx import onnxfunction_dispatcher
 
-            self.op_level_debug = resolve(options.op_level_debug, False)
             self.onnxfunction_dispatcher = (
                 onnxfunction_dispatcher.OnnxFunctionDispatcher(
                     self.onnx_registry,
@@ -766,6 +743,7 @@ class ONNXProgram:
             ...         self.conv2 = torch.nn.Conv2d(32, 64, 3, 1, bias=False)
             ...         self.fc1 = torch.nn.Linear(9216, 128, bias=False)
             ...         self.fc2 = torch.nn.Linear(128, 10, bias=False)
+            ...
             ...     def forward(self, x, b):
             ...         tensor_x = self.conv1(x)
             ...         tensor_x = torch.nn.functional.sigmoid(tensor_x)
@@ -778,11 +756,13 @@ class ONNXProgram:
             ...         tensor_x = self.fc2(tensor_x)
             ...         output = torch.nn.functional.log_softmax(tensor_x, dim=1)
             ...         (
-            ...         self.my_buffer2.add_(1.0) + self.my_buffer1
+            ...             self.my_buffer2.add_(1.0) + self.my_buffer1
             ...         )  # Mutate buffer through in-place addition
             ...         return output
             >>> inputs = (torch.rand((64, 1, 28, 28), dtype=torch.float32), torch.randn(3))
-            >>> exported_program = torch.export.export(CustomModule(), args=inputs).run_decompositions({})
+            >>> exported_program = torch.export.export(
+            ...     CustomModule(), args=inputs
+            ... ).run_decompositions({})
             >>> onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
             >>> pprint.pprint(onnx_program.model_signature)
             ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.PARAMETER: 2>,
@@ -1194,9 +1174,7 @@ class Exporter:
 
         with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
             self.options
-        ), torch._dynamo.config.patch(
-            dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
-        ):
+        ), torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )
@@ -1210,7 +1188,6 @@ class Exporter:
             onnxscript_graph = fx_interpreter.run(
                 fx_graph_module=graph_module,
                 onnxfunction_dispatcher=self.options.onnxfunction_dispatcher,
-                op_level_debug=self.options.op_level_debug,
             )
 
             # NOTE: Filter out the initializers with fake tensors when it's fake_mode exporting.
@@ -1401,17 +1378,19 @@ def dynamo_export(
             def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
+
             def forward(self, x, bias=None):
                 out = self.linear(x)
                 out = out + bias
                 return out
+
+
         model = MyModel()
-        kwargs = {"bias": 3.}
+        kwargs = {"bias": 3.0}
         args = (torch.randn(2, 2, 2),)
-        onnx_program = torch.onnx.dynamo_export(
-            model,
-            *args,
-            **kwargs).save("my_simple_model.onnx")
+        onnx_program = torch.onnx.dynamo_export(model, *args, **kwargs).save(
+            "my_simple_model.onnx"
+        )
 
     **Example 2 - Exporting with dynamic shapes**
     ::
@@ -1419,10 +1398,8 @@ def dynamo_export(
         # The previous model can be exported with dynamic shapes
         export_options = torch.onnx.ExportOptions(dynamic_shapes=True)
         onnx_program = torch.onnx.dynamo_export(
-            model,
-            *args,
-            **kwargs,
-            export_options=export_options)
+            model, *args, **kwargs, export_options=export_options
+        )
         onnx_program.save("my_dynamic_model.onnx")
 
 
