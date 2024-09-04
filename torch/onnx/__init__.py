@@ -496,7 +496,7 @@ def dynamo_export(
 
         if export_options is not None and export_options.dynamic_shapes:
             # Make all shapes dynamic
-            def _to_dynamic_shapes_wrapper():
+            def _to_dynamic_shapes_mapper():
                 arg_order = 0
 
                 def _to_dynamic_shape(x):
@@ -517,7 +517,7 @@ def dynamo_export(
 
             # model_args could be nested
             dynamic_shapes = _pytree.tree_map(
-                _to_dynamic_shapes_wrapper(),
+                _to_dynamic_shapes_mapper(),
                 model_args,
             )
         else:
