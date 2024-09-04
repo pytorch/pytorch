@@ -370,7 +370,7 @@ class TestAutocastMPS(TestCase):
                 if (
                     func is torch.ops.aten._to_copy.default
                     and args[0] is weight
-                    and kwargs["dtype"] is torch.float16
+                    and kwargs["dtype"] is torch.bfloat16
                 ):
                     nonlocal weight_dtype_cast_counter
                     weight_dtype_cast_counter += 1
