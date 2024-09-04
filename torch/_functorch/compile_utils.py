@@ -5,6 +5,7 @@ from typing import Callable
 
 import torch
 import torch.fx as fx
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten
 
@@ -51,12 +52,23 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
 
     compute_mutation_region_ids(fx_g)  # type: ignore[arg-type]
 
-    # Make a list of nodes that are directly returned from the output, which we'll skip
+    # Make a set of separate storages returned from the output, which will be preserved
     # when pruning.  This prevents us from deduplicating returned tensors which have
     # experienced identical operations, but are separate data structures in eager mode.
     output_node: fx.Node = list(fx_g.nodes)[-1]
     assert output_node.op == "output"
-    inputs_to_output_node = output_node.all_input_nodes
+    output_storages = {
+        StorageWeakRef(n.meta["val"].untyped_storage())
+        for n in output_node.all_input_nodes
+        if "val" in n.meta and isinstance(n.meta["val"], torch.Tensor)
+    }
+    nodes_that_alias_outputs = {
+        n
+        for n in fx_g.nodes
+        if "val" in n.meta
+        and isinstance(n.meta["val"], torch.Tensor)
+        and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
+    }
 
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
@@ -70,7 +82,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             # Also, aten.empty is almost always fusible into its consumer,
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
-            or n in inputs_to_output_node
+            or n in nodes_that_alias_outputs
         ):
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
