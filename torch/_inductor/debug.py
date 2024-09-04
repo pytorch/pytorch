@@ -110,7 +110,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
     FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
-    buf_to_fx_node = {}
+    op_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
 
@@ -164,20 +164,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         if isinstance(snode, FusedSchedulerNode):
             for x in snode.snodes:
-                # op node
-                buf_to_fx_node[x.get_name()] = fx_node
-                # buf node
-                if x.node and hasattr(x.node, "name") and x.node.name:
-                    buf_to_fx_node[x.node.name] = fx_node
-                else:
-                    raise RuntimeError("Can't obtain name for this node", x)
-        else:
-            if snode.node and hasattr(snode.node, "name"):
-                buf_to_fx_node[snode.node.name] = fx_node
-            else:
-                raise RuntimeError("Can't obtain name for this node", snode)
-        # op node
-        buf_to_fx_node[name] = fx_node
+                op_to_fx_node[x.get_name()] = fx_node
+        op_to_fx_node[name] = fx_node
 
         if first_node is None:
             first_node = fx_node
@@ -185,17 +173,17 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     # create edges between nodes
     for snode in snodes:
         name = snode.get_name()
-        deps = snode.read_writes.reads
-
-        fx_node = buf_to_fx_node[name]
+        deps = snode.unmet_dependencies
+        fx_node = op_to_fx_node[name]
         new_args = []
         for dep in deps:
-            if dep.name in buf_to_fx_node:
-                dep_node = buf_to_fx_node[dep.name]
+            dep_name = V.graph.scheduler.name_to_buf[dep.name].defining_op.get_name()
+            if dep_name in op_to_fx_node:
+                dep_node = op_to_fx_node[dep_name]
             else:
                 with graph.inserting_before(first_node):
-                    dep_node = graph.placeholder(dep.name)
-                    buf_to_fx_node[dep.name] = dep_node
+                    dep_node = graph.placeholder(dep_name)
+                    op_to_fx_node[dep_name] = dep_node
             new_args.append(dep_node)
 
         fx_node.args = tuple(new_args)
