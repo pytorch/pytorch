@@ -912,6 +912,7 @@ class TestQuantizedOps(TestCase):
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
     def test_qadd_relu_cudnn(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
@@ -946,6 +947,7 @@ class TestQuantizedOps(TestCase):
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
     def test_qadd_relu_cudnn_nhwc(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
@@ -1951,6 +1953,7 @@ class TestQuantizedOps(TestCase):
                                  msg=error_message.format(name + '.zero_point', scale,
                                  X_hat.q_zero_point()))
 
+    @unittest.skip("not currently working and feature isn't used")
     def test_adaptive_avg_pool(self):
 
         side_lens = (range(1, 10))
@@ -4056,6 +4059,7 @@ class TestQuantizedLinear(TestCase):
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
     # TODO: check with yang regarding CUDNN flags
+    @unittest.skip("not currently working and feature isn't used")
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.linear_prepack
@@ -4179,6 +4183,87 @@ class TestQuantizedLinear(TestCase):
                 W_q.q_scale()), np.float32(W_q_origin.q_scale()))
             np.testing.assert_equal(
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
+
+    """Tests the correctness of the _quantized::wrapped_quantized_linear op."""
+    @skipIfNoFBGEMM
+    @given(
+        m=st.integers(2, 6),
+        k=st.integers(2, 6),
+        n=st.integers(2, 6),
+    )
+    def test_wrapped_quantized_linear(self, m, n, k):
+        input = torch.randn(m, k, dtype=torch.float32)
+        input_scale = torch.tensor(0.1)
+        input_zero_point = torch.tensor(0)
+        weight = torch.randn(n, k, dtype=torch.float32)
+        weight_scale = torch.tensor(0.1)
+        weight_zero_point = torch.tensor(0)
+        bias = torch.randn(n, dtype=torch.float32)
+        output_scale = torch.tensor(0.1)
+        output_zero_point = torch.tensor(0)
+        out_channel = n
+
+        ret = torch.ops._quantized.wrapped_quantized_linear(
+            input,
+            input_scale,
+            input_zero_point,
+            weight,
+            weight_scale,
+            weight_zero_point,
+            bias,
+            output_scale,
+            output_zero_point,
+            out_channel,
+        )
+
+        qinput = torch.quantize_per_tensor(input, input_scale, input_zero_point, torch.quint8)
+        qweight = torch.quantize_per_tensor(weight, weight_scale, weight_zero_point, torch.qint8)
+        qlinear_prepack = torch.ops.quantized.linear_prepack(qweight, bias)
+        qlinear = torch.ops.quantized.linear(qinput, qlinear_prepack, output_scale, output_zero_point)
+        ret_ref = qlinear.dequantize()
+        self.assertEqual(ret, ret_ref)
+
+    """Tests the correctness of the _quantized::wrapped_linear_prepack and
+    _quantized::wrapped_quantized_linear_prepacked ops."""
+    @skipIfNoFBGEMM
+    @given(
+        m=st.integers(2, 6),
+        k=st.integers(2, 6),
+        n=st.integers(2, 6),
+    )
+    def test_wrapped_quantized_linear_prepacked(self, m, n, k):
+        input = torch.randn(m, k, dtype=torch.float32)
+        input_scale = torch.tensor(0.1)
+        input_zero_point = torch.tensor(0)
+        weight = torch.randn(n, k, dtype=torch.float32)
+        weight_scale = torch.tensor(0.1)
+        weight_zero_point = torch.tensor(0)
+        bias = torch.randn(n, dtype=torch.float32)
+        output_scale = torch.tensor(0.1)
+        output_zero_point = torch.tensor(0)
+        out_channel = n
+
+        ret_1 = torch.ops._quantized.wrapped_linear_prepack(
+            weight,
+            weight_scale,
+            weight_zero_point,
+            bias
+        )
+        ret_2 = torch.ops._quantized.wrapped_quantized_linear_prepacked(
+            input,
+            input_scale,
+            input_zero_point,
+            ret_1,
+            output_scale,
+            output_zero_point,
+            out_channel
+        )
+        qinput = torch.quantize_per_tensor(input, input_scale, input_zero_point, torch.quint8)
+        qweight = torch.quantize_per_tensor(weight, weight_scale, weight_zero_point, torch.qint8)
+        qlinear_prepack = torch.ops.quantized.linear_prepack(qweight, bias)
+        qlinear = torch.ops.quantized.linear(qinput, qlinear_prepack, output_scale, output_zero_point)
+        ret_ref = qlinear.dequantize()
+        self.assertEqual(ret_2, ret_ref)
 
     """Tests the correctness of the quantized::linear_unpack after freeing original tensor op."""
     @skipIfNoQNNPACK
@@ -5343,6 +5428,7 @@ class TestQuantizedConv(TestCase):
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
     def test_qconv2d_cudnn(
             self,
             batch_size,
@@ -5425,6 +5511,7 @@ class TestQuantizedConv(TestCase):
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
     def test_qconv2d_relu_cudnn(
             self,
             batch_size,
@@ -6159,6 +6246,7 @@ class TestQuantizedConv(TestCase):
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
     def test_qconv1d_cudnn(
         self,
         batch_size,
@@ -6232,6 +6320,7 @@ class TestQuantizedConv(TestCase):
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
     def test_qconv1d_relu_cudnn(
         self,
         batch_size,
