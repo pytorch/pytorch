@@ -910,7 +910,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
     def test_inference_mode1_v2(self):
         with torch.inference_mode():
             self.test_auto_functionalize_extra1()
-    
+
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_inference_mode2_v2(self):
         with torch.inference_mode():

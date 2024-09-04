@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import warnings
+import weakref
 from abc import ABC, abstractmethod
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 
@@ -163,13 +164,15 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
 
         if torch.is_inference_mode_enabled():
-            if out.isRootTensor():
+            if out.is_base_tensor():
                 out._inference_mode_base = None
+                # Here we  assume a functional tensor will not die before its storage do.
                 mode._storage_to_base[out.elem.storage()._cdata] = out
             else:
                 out._inference_mode_base = mode._storage_to_base[
                     out.elem.storage()._cdata
                 ]
+                assert out._inference_mode_base is not None
         return out
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -247,7 +250,7 @@ class FunctionalTensor(torch.Tensor):
         torch._sync(self)
         return torch._from_functional_tensor(self.elem)
 
-    def isRootTensor(self) -> bool:
+    def is_base_tensor(self) -> bool:
         return torch._is_functional_tensor_root(self.elem)
 
     def replace_(self, output) -> None:
@@ -332,7 +335,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
 
-        self._storage_to_base = {}
+        self._storage_to_base = weakref.WeakValueDictionary()
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):

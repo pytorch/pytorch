@@ -666,7 +666,7 @@ void initTorchFunctions(PyObject* module) {
       });
   py_module.def("_is_functional_tensor_root", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-    return at::functionalization::impl::isRootTensor(t);
+    return at::functionalization::impl::isBaseTensor(t);
   });
   py_module.def("_functionalize_is_multi_output_view", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));

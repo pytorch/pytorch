@@ -710,9 +710,9 @@ bool isFunctionalTensor(const at::Tensor& tensor) {
    return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
 }
 
-bool isRootTensor(const at::Tensor& tensor) {
+bool isBaseTensor(const at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(tensor));
-  return unsafeGetFunctionalWrapper(tensor)->isRootTensor();
+  return unsafeGetFunctionalWrapper(tensor)->isBaseTensor();
 }
 
 bool isFunctionalTensor(const std::optional<Tensor>& t) {

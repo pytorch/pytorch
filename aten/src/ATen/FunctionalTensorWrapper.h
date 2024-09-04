@@ -165,8 +165,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     was_storage_changed_ = true;
   }
 
-  // A tensor is a root tensor, if its not a view of another tensor.
-  bool isRootTensor() const {
+  // A tensor is a considered base, if its not a view of another tensor.
+  bool isBaseTensor() const {
     return view_metas_.empty();
   }
 
@@ -295,7 +295,7 @@ TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
   return functional_impl;
 }
 
-TORCH_API bool isRootTensor(const at::Tensor& tensor);
+TORCH_API bool isBaseTensor(const at::Tensor& tensor);
 
 TORCH_API bool isFunctionalTensor(const at::Tensor& tensor);
 TORCH_API bool isFunctionalTensor(const std::optional<Tensor>& t);
