@@ -57,16 +57,28 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     # experienced identical operations, but are separate data structures in eager mode.
     output_node: fx.Node = list(fx_g.nodes)[-1]
     assert output_node.op == "output"
+
+    def checkable_node(node: fx.Node) -> bool:
+        """We can evaluate only nodes that represent tensors with defined storage."""
+        if "val" not in node.meta or not isinstance(node.meta["val"], torch.Tensor):
+            return False
+
+        try:
+            node.meta["val"].untyped_storage()
+        except NotImplementedError:
+            return False
+
+        return True
+
     output_storages = {
         StorageWeakRef(n.meta["val"].untyped_storage())
         for n in output_node.all_input_nodes
-        if "val" in n.meta and isinstance(n.meta["val"], torch.Tensor)
+        if checkable_node(n)
     }
     nodes_that_alias_outputs = {
         n
         for n in fx_g.nodes
-        if "val" in n.meta
-        and isinstance(n.meta["val"], torch.Tensor)
+        if checkable_node(n)
         and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
     }
 
