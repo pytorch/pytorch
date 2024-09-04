@@ -552,9 +552,9 @@ class SymPyValueRangeAnalysis:
 
         def safe_mul(a, b):
             # Make unknown() * wrap(0.0) == wrap(0.0)
-            if a == 0.0 or a == 0:
+            if a == 0.0:
                 return a
-            elif b == 0.0 or b == 0:
+            elif b == 0.0:
                 return b
             else:
                 return a * b
@@ -590,7 +590,7 @@ class SymPyValueRangeAnalysis:
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if 0 in b:
-            return ValueRanges.unknown_int()
+            return ValueRanges.unknown()
         products = []
         for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper]):
             r = FloorDiv(x, y)
