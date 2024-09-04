@@ -68,6 +68,7 @@ from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
+    CacheLimitExceeded,
     format_error_msg,
     InternalTorchDynamoError,
     TorchRuntimeError,
@@ -850,7 +851,7 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            unimplemented(f"{limit_type} reached")
+            raise CacheLimitExceeded(f"{limit_type} reached")
 
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
@@ -1069,7 +1070,13 @@ class ConvertFrame:
             # need to make these exceptions not get wrapped
 
             # We intentionally don't want to suppress error here.
-            if isinstance(e, UncapturedHigherOrderOpError):
+            if isinstance(
+                e,
+                (
+                    UncapturedHigherOrderOpError,
+                    torch._C._dynamo.eval_frame.SkipCodeRecursiveException,
+                ),
+            ):
                 raise
 
             soft_fail = isinstance(e, Unsupported)
