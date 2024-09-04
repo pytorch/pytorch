@@ -652,6 +652,40 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_unbacked_to_cond(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return (x + 1).sum()
+
+                def false_fn(x):
+                    return (x + 3).sum()
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
+    def test_unbacked_to_cond_passthrough(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return x + 1
+
+                def false_fn(x):
+                    return x + 3
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
@@ -4362,12 +4396,9 @@ def forward(self, b_a_buffer, x):
         f = Module()
         if is_non_strict_test(self._testMethodName):
             error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-            error_msg = r"Could not guard on data-dependent expression"
         else:
             error = torch._dynamo.exc.UserError
-            error_msg = (
-                r"Tried to use data-dependent value in the subsequent computation"
-            )
+        error_msg = r"Could not guard on data-dependent expression"
         with self.assertRaisesRegex(error, error_msg):
             _ = export(f, (torch.tensor(6),))
 
@@ -5566,7 +5597,6 @@ graph():
             )
         )
 
-    # Guard validation upsets the guard
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:

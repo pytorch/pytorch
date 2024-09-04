@@ -11,6 +11,7 @@ import operator
 import os
 import pprint
 import textwrap
+import traceback
 import typing
 from typing import (
     Any,
@@ -3372,6 +3373,26 @@ class Scheduler:
             return self._codegen()
 
     def _codegen(self) -> None:
+        if config.check_stack_no_cycles_TESTING_ONLY:
+            import torch._dynamo.convert_frame
+
+            stack = traceback.extract_stack()
+            seen = set()
+            for frame in reversed(stack):
+                # This is where maybe_cprofile is
+                if (
+                    frame.name == "_compile_inner"
+                    and frame.filename == torch._dynamo.convert_frame.__file__
+                ):
+                    break
+                key = (frame.filename, frame.lineno)
+                assert key not in seen, (
+                    f"Duplicate stack frame {frame.filename}:{frame.lineno}; "
+                    "did you add a decorator to one of the functions in this stack "
+                    "trace?  If so, try using a context manager instead."
+                )
+                seen.add(key)
+
         for node in self.nodes:
             try:
                 log.debug(
@@ -3523,7 +3544,7 @@ class Scheduler:
                 raise
 
         # small kernels are very likely to have speedup but hard to benchmark. So we skip benchmarking.
-        small_kernel = ms2_clone / ms2 > 0.6 and ms2 - ms2_clone < 0.2
+        small_kernel = ms2 - ms2_clone < 0.3 or ms1 < 0.3
         if fusion_log.isEnabledFor(logging.DEBUG):
             if ms1 > ms2 or small_kernel:
                 fusion_log.debug(
@@ -3535,8 +3556,8 @@ class Scheduler:
                     "cannot fuse (benchmark): fusing causes %sx slowdown",
                     red_text(f"{ms1 / ms2:.3f}"),
                 )
-
-        return ms2 < ms1 or small_kernel
+        # ms1 returned by benchmark_fused_nodes discounted clone time
+        return ms2 - ms2_clone < ms1 or small_kernel
 
     def get_buffer_layout(self, buf_name: str) -> ir.Layout:
         buf = self.name_to_buf[buf_name]
