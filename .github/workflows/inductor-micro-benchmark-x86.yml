@@ -1,6 +1,8 @@
 name: inductor-micro-benchmark-x86
 
 on:
+  # DEBUG, TO BE REMOVE BEFORE COMMITING
+  pull_request:
   schedule:
     - cron: 0 7 * * *
   push:
