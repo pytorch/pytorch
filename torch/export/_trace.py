@@ -57,11 +57,8 @@ from torch._functorch._aot_autograd.traced_function_transforms import (
 from torch._functorch._aot_autograd.utils import create_tree_flattened_fn
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
-from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._utils_internal import log_export_usage
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -728,7 +725,6 @@ def _export_to_aten_ir(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
-    preserve_ops=(),
     decomp_table=None,
     _check_autograd_state=True,
     _is_torch_jit_trace=False,
@@ -754,10 +750,6 @@ def _export_to_aten_ir(
         finally:
             torch.compiler._is_compiling_flag = old_value
 
-    override_cia_ops = _override_composite_implicit_decomp(
-        preserve_ops, decomp_table if decomp_table else {}
-    )
-
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
@@ -767,7 +759,7 @@ def _export_to_aten_ir(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), override_cia_ops, grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -1349,15 +1341,12 @@ def _strict_export(
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
     preserve_module_call_signature: Tuple[str, ...],
     pre_dispatch: bool,
-    preserve_ops: Tuple[OpOverload, ...],
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
     _is_torch_jit_trace: bool,
 ) -> ExportArtifact:
-    lower_to_aten = functools.partial(
-        _export_to_aten_ir, pre_dispatch=pre_dispatch, preserve_ops=preserve_ops
-    )
+    lower_to_aten = functools.partial(_export_to_aten_ir, pre_dispatch=pre_dispatch)
     return _strict_export_lower_to_aten_ir(
         mod=mod,
         args=args,
@@ -1700,7 +1689,6 @@ def _non_strict_export(
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
     preserve_module_call_signature: Tuple[str, ...],
     pre_dispatch: bool,
-    preserve_ops: Tuple[OpOverload, ...],
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
@@ -1815,7 +1803,6 @@ def _non_strict_export(
                 else functools.partial(
                     _export_to_aten_ir,
                     pre_dispatch=pre_dispatch,
-                    preserve_ops=preserve_ops,
                     _is_torch_jit_trace=_is_torch_jit_trace,
                 )
             )
@@ -1880,7 +1867,6 @@ def _export_for_training(
         else functools.partial(
             _non_strict_export,
             dispatch_tracing_mode="make_fx",
-            preserve_ops=(),
         )
     )
     export_artifact = export_func(  # type: ignore[operator]
@@ -1950,7 +1936,6 @@ def _export(
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
-    preserve_ops: Tuple[OpOverload, ...] = (),
     _is_torch_jit_trace: bool = False,
 ) -> ExportedProgram:
     """
@@ -2007,12 +1992,6 @@ def _export(
 
     log_export_usage(event="export.enter", flags=_EXPORT_FLAGS)
 
-    if pre_dispatch and len(preserve_ops) > 0:
-        raise RuntimeError(
-            "We don't support preserving CompositeImplicitAutograd ops in "
-            "predispatch mode because they are preserved implicitly"
-        )
-
     (
         args,
         kwargs,
@@ -2031,7 +2010,6 @@ def _export(
         dynamic_shapes,
         preserve_module_call_signature,
         pre_dispatch,
-        preserve_ops,
         original_state_dict,
         original_in_spec,
         allow_complex_guards_as_runtime_asserts,
