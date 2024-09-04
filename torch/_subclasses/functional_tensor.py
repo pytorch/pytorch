@@ -166,7 +166,7 @@ class FunctionalTensor(torch.Tensor):
         if torch.is_inference_mode_enabled():
             if out.is_base_tensor():
                 out._inference_mode_base = None
-                # Here we  assume a functional tensor will not die before its storage do.
+                # We assume that the FunctionalTensor does not change its storage. otherwise this would be invalid. 
                 mode._storage_to_base[out.elem.storage()._cdata] = out
             else:
                 out._inference_mode_base = mode._storage_to_base[
