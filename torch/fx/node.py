@@ -263,11 +263,6 @@ class Node(_NodeBase):
         # transformations. This metadata is preserved across node copies
         assign(self, "meta", {})
 
-        table = getattr(graph, "_find_nodes_lookup_table", None)
-        if table:
-            table.insert(self)
-
-
     def __getstate__(self) -> Dict[str, Any]:
         state = self.__dict__.copy()
         state["_erased"] = self._erased
@@ -762,20 +757,21 @@ class Node(_NodeBase):
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name in _setattr_custom_handling:
-            m = self.graph.owning_module
-            if getattr(m, "_replace_hook", None):
-                assert isinstance(value, str)
-                for user in self.users:
-                    m._replace_hook(old=self, new=value, user=user)
+            if name == "name":
+                m = self.graph.owning_module
+                if getattr(m, "_replace_hook", None):
+                    assert isinstance(value, str)
+                    for user in self.users:
+                        m._replace_hook(old=self, new=value, user=user)
+            elif name in ("op", "target"):
+                table = getattr(self.graph, "_find_nodes_lookup_table", None)
+                if table and self in table:
+                    self.graph._find_nodes_lookup_table.remove(self)
+                    object.__setattr__(self, name, value)
+                    self.graph._find_nodes_lookup_table.insert(self)
+                    return
 
-            table = getattr(self.graph, "_find_nodes_lookup_table", None)
-            if table:
-                self.graph._find_nodes_lookup_table.remove(self)
-            object.__setattr__(self, name, value)
-            if table:
-                self.graph._find_nodes_lookup_table.insert(self)
-        else:
-            object.__setattr__(self, name, value)
+        object.__setattr__(self, name, value)
 
 _setattr_custom_handling = dict.fromkeys(["name", "op", "target"])
 
