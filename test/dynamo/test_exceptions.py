@@ -4,6 +4,7 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch.nn
 import torch.utils.checkpoint
 
 
@@ -316,6 +317,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, y)
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
+
+    def test_nn_reraise(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                raise ValueError("woof")
+                return x + 2
+
+        m = M()
+        m.register_forward_pre_hook(lambda m, go: None)
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        opt_call = torch.compile(lambda x: m(x), backend="eager")
+        self.assertRaises(ValueError, lambda: opt_call(torch.randn(3)))
+        metrics = torch._dynamo.utils.get_compilation_metrics()
+        self.assertEqual(metrics[0].fail_reason, "Observed exception")
 
     def test_key_error(self):
         def fn(x, d):
