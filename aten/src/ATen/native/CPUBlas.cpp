@@ -1116,7 +1116,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     if (dtype == ScalarType::Half) {
       static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
       return fp16_pack;
-    } 
+    }
     return false;
   }
 };
@@ -1143,54 +1143,6 @@ void brgemm(
 #endif
   TORCH_CHECK(false,
   "Half Brgemm is only supported on X64 when oneDNN ukernel is enabled and avx512_fp16 is supported");
-}
-
-void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const at::BFloat16* A,
-    const at::BFloat16* B,
-    float* C) {
-  TORCH_CHECK(false,
-  "BFloat16 Brgemm is currently not supported");
-}
-
-void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const float* A,
-    const float* B,
-    float* C) {
-  TORCH_CHECK(false,
-  "float Brgemm is currently not supported");
-}
-
-void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const double* A,
-    const double* B,
-    double* C) {
-  TORCH_CHECK(false,
-  "double Brgemm is currently not supported");
 }
 
 void brgemm_release() {
