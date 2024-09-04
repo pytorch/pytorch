@@ -2693,8 +2693,10 @@ class CppVecKernel(CppKernel):
                     if src_num_vectors == out_num_vectors == 1:
                         convert = f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value})"
                     else:
-                        convert = f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]},"
-                        f"{out_num_vectors},{DTYPE_TO_CPP[dtype]},{src_num_vectors}>({value})"
+                        convert = (
+                            f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]},"
+                            f"{out_num_vectors},{DTYPE_TO_CPP[dtype]},{src_num_vectors}>({value})"
+                        )
                 code.writeline(f"auto {converted_value} = {convert};")
                 value = converted_value
             code.splice(self._get_store_line(value, var, index, out_dtype))
