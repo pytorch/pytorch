@@ -22,6 +22,7 @@ import warnings
 import types
 import pickle
 import textwrap
+import shutil
 import subprocess
 import weakref
 import sys
@@ -10810,8 +10811,8 @@ def add_neg_dim_tests():
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
 class TestRPATH(TestCase):
-    @unittest.skipIf(not sys.platform.startswith('linux'), "linux-only test")
-    def test_rpath(self):
+    @unittest.skipIf(not shutil.which('objdump'), "Required tool 'objdump' not available")
+    def test_cuda_stubs_not_in_rpath(self):
         """
         Make sure RPATH (or RUNPATH) in nvrtc does not contain a cuda stubs directory
         issue gh-35418
