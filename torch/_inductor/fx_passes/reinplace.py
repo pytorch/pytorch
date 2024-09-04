@@ -11,7 +11,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
 )
-from torch._inductor import inductor_prims
+from torch._inductor import config, inductor_prims
 from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
@@ -591,7 +591,14 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             if isinstance(kernel, JITFunction):
                 kernel_name = kernel.fn.__name__
             elif isinstance(kernel, Autotuner):
-                kernel_name = kernel.base_fn.__name__
+                if config.is_fbcode():
+                    # Autotuner has different implementations for AMD and NV
+                    if torch.version.hip is None:
+                        kernel_name = kernel.base_fn.__name__
+                    else:
+                        kernel_name = kernel.fn.__name__
+                else:
+                    kernel_name = kernel.base_fn.__name__
             else:
                 raise AssertionError("Unknown triton kernel type")
 
