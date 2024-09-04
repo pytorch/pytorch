@@ -787,6 +787,12 @@ def aot_graph_input_parser(
 
 
 def profile_to_file(filename: str) -> Callable[[T], T]:
+    """
+    Decorator to cProfile a given function and save the result to disk on process exit.
+
+    Args:
+        filename: filename to save profile to
+    """
     prof = cProfile.Profile()
     filename = os.path.abspath(os.path.expanduser(filename))
 
