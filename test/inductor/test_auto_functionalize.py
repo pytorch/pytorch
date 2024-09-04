@@ -999,6 +999,33 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
     def test_dynamic3_v2(self):
         self.test_auto_functionalize_extra2(_dynamic=True)
 
+    # foo takes two views on the same input, function does not have return.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_graph_input_is_view(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x):
+                pass
+
+            @torch.compile(fullgraph=True, dynamic=False, backend="aot_eager")
+            def f(x):
+                a = x[0]
+                torch.ops.mylib.foo(a)
+                return
+
+            x = torch.tensor([[1, 2], [3, 4]])
+            # This would fail if auto_functionalized_v2 uses clone and not clone_preserve_strides
+            # to clone not-inplaced args.
+            f(x[1])
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
