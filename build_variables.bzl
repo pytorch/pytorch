@@ -473,6 +473,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/mkldnn_tensor.cpp",
     "torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
+    "torch/csrc/jit/serialization/pickle.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -689,7 +690,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
-    "torch/csrc/distributed/c10d/Utils.cu",
+    "torch/csrc/distributed/c10d/NanCheck.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
@@ -833,6 +834,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/extra_state.cpp",
     "torch/csrc/dynamo/framelocals_mapping.cpp",
     "torch/csrc/dynamo/guards.cpp",
+    "torch/csrc/dynamo/utils.cpp",
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/fx/node.cpp",
@@ -1453,6 +1455,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/native/cuda/Equal.cpp",
     "aten/src/ATen/native/cuda/GridSampler.cpp",
     "aten/src/ATen/native/cuda/IndexKernel.cpp",
+    "aten/src/ATen/native/cuda/MultiTensorApply.cpp",
     "aten/src/ATen/native/cuda/ReduceOps.cpp",
     "aten/src/ATen/native/cuda/ScanKernels.cpp",
     "aten/src/ATen/native/cuda/Sort.cpp",
