@@ -549,7 +549,8 @@ class VariableBuilder:
 
         # Note - There are some nested values where types mismatch!
         # We want to get those out and wrap those.
-        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
+        if is_function_or_wrapper(value):
+            value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
