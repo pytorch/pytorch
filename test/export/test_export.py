@@ -489,6 +489,38 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    def test_masked_select_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                mask = x.ge(0.5)
+                return torch.masked_select(x, mask)
+
+        example_args = (torch.randn(3, 4, 5),)
+        dim0_x_max, dim1_x_max = 100, 7
+        dynamic_shapes = {
+            "x": {
+                0: Dim("dim0_x", max=dim0_x_max),
+                1: Dim("dim1_x_max", max=dim1_x_max),
+            }
+        }
+        m = M()
+        exported_program: torch.export.ExportedProgram = export(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        # Test that the expected upper bound is among the range constraints.
+        expected_upper_bound = dim0_x_max * dim1_x_max * 5
+        vr_upper_bounds = [
+            vr.upper for vr in exported_program.range_constraints.values()
+        ]
+        self.assertTrue(expected_upper_bound in set(vr_upper_bounds))
+        # Test that none of the upper bounds are larger.
+        for vr_upper in vr_upper_bounds:
+            self.assertTrue(vr_upper <= expected_upper_bound)
+
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
