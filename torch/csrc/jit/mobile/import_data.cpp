@@ -61,8 +61,7 @@ c10::IValue IValueUnpickler::readArchive(
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t pickle_size;
+  size_t pickle_size = 0;
   std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
 
   size_t bytes_read = 0;

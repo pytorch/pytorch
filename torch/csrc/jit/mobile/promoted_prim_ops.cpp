@@ -113,10 +113,8 @@ void layout(Stack& stack) {
 }
 
 void toPrimDType(Stack& stack) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool non_blocking;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool copy;
+  bool non_blocking = false;
+  bool copy = false;
   pop(stack, non_blocking, copy);
   std::optional<at::ScalarType> scalarType =
       pop(stack).toOptional<at::ScalarType>();
@@ -141,10 +139,8 @@ void boolTensor(Stack& stack) {
 }
 
 void toList(Stack& stack) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int elem_ty_val;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int dim_val;
+  int elem_ty_val = 0;
+  int dim_val = 0;
   at::Tensor t;
 
   pop(stack, elem_ty_val);

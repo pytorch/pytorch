@@ -28,7 +28,7 @@ jobs:
     needs: get-label-type
     with:
       timeout: 120
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
@@ -45,7 +45,7 @@ jobs:
     needs: get-label-type
     with:
       timeout: 120
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
@@ -60,7 +60,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -95,7 +95,7 @@ jobs:
   pr-sanity-checks:
     name: pr-sanity-checks
     needs: get-label-type
-    runs-on: [self-hosted, "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.large"]
+    runs-on: [self-hosted, "${{ needs.get-label-type.outputs.label-type }}linux.large"]
     # Only run this on pull requests. This check is simple enough to be done without a Docker image
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
@@ -116,7 +116,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: -1
       submodules: true
@@ -153,7 +153,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -192,7 +192,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

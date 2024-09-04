@@ -14,6 +14,9 @@ except ImportError:
     from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 
+__all__ = ["local_map"]
+
+
 PlacementType = Optional[Sequence[Placement]]
 InputPlacements = Optional[Tuple[PlacementType, ...]]
 OutputPlacements = Union[PlacementType, Tuple[PlacementType, ...]]
@@ -191,13 +194,17 @@ def local_map(
             flat_out, out_spec = pytree.tree_flatten(out)
 
             flat_dist_out = []
-            for idx, out in enumerate(flat_out):
-                spec = (
-                    out_placements[idx]
-                    if isinstance(out_placements, tuple)
-                    else out_placements
-                )
-
+            out_placements_tuple = (
+                out_placements
+                if isinstance(out_placements, tuple)
+                else (out_placements,)
+            )
+            assert len(flat_out) == len(out_placements_tuple), (
+                "local_map requires one PlacementType be provided for each output value,"
+                f" received {len(out_placements_tuple)} out_placements but"
+                f" {len(flat_out)} is expected!"
+            )
+            for out, spec in zip(flat_out, out_placements_tuple):
                 if isinstance(out, torch.Tensor):
                     assert not isinstance(
                         out, DTensor
