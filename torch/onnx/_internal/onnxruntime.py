@@ -966,7 +966,6 @@ class OrtBackend:
             exported = fx_interpreter.run(
                 fx_graph_module=graph_module,
                 onnxfunction_dispatcher=self._resolved_onnx_exporter_options.onnxfunction_dispatcher,
-                op_level_debug=self._resolved_onnx_exporter_options.op_level_debug,
             )
             # Convert the exported result to ONNX ModelProto.
             onnx_model = exported.to_model_proto(
@@ -1211,8 +1210,6 @@ class OrtBackend:
             if a.export_options is not None and b.export_options is not None:
                 return (
                     a.export_options.dynamic_shapes == b.export_options.dynamic_shapes
-                    and a.export_options.op_level_debug
-                    == b.export_options.op_level_debug
                     and a.export_options.diagnostic_options
                     == b.export_options.diagnostic_options
                     and a.export_options.onnx_registry is b.export_options.onnx_registry
