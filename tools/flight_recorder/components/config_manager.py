@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+from typing import Optional, Sequence
 
 
 class JobConfig:
@@ -30,5 +31,7 @@ class JobConfig:
         self.parser.add_argument("-j", "--just_print_entries", action="store_true")
         self.parser.add_argument("-v", "--verbose", action="store_true")
 
-    def parse_args(self: "JobConfig") -> argparse.Namespace:
-        return self.parser.parse_args()
+    def parse_args(
+        self: "JobConfig", args: Optional[Sequence[str]]
+    ) -> argparse.Namespace:
+        return self.parser.parse_args(args)
