@@ -757,9 +757,21 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   //    void {pre,post}(std::vector<at::cuda::CUDAStream&>);
   template <typename Fn>
   c10::intrusive_ptr<Work> collective(
-      std::vector<at::Tensor>& inputs,
-      std::vector<at::Tensor>& outputs,
+      at::Tensor& inputs,
+      at::Tensor& outputs,
       Fn fn,
+      OpType opType,
+      const char* profilingTitle = nullptr,
+      bool avoidRecordStreams = false,
+      bool nanCheck = true);
+
+  template <typename Fn, typename PreProcess, typename PostProcess>
+  c10::intrusive_ptr<Work> collective(
+      at::Tensor& inputs,
+      at::Tensor& outputs,
+      Fn fn,
+      PreProcess pre,
+      PostProcess post,
       OpType opType,
       const char* profilingTitle = nullptr,
       bool avoidRecordStreams = false,
