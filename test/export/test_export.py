@@ -936,16 +936,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
     return (getitem, getitem_1, getitem_2)""",
         )
 
-    # TODO(yidi)
-    # Expected failure for test cases that calls run_decomposition().
-    # The top-level cond node has pre-existing metadata,
-    # which overrides the metadata for operators in subgraph due to interpreter.run(),
-    # where cond is a single node in the interpreter.run(). And we preserve metadata
-    # by copying current node's metadata for all nodes created during interpreting.
-    @testing.expectedFailurePreDispatchRunDecomp
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700910
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
