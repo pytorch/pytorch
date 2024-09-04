@@ -18,8 +18,7 @@ import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._decomp import get_decompositions
-from torch._decomp import core_aten_decompositions
+from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
@@ -1381,10 +1380,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             _ = torch.export.export(
                 Foo(),
                 (torch.randn(3, 3),),
-            ).run_decompositions(
-                {torch.ops.aten.native_batch_norm.default: None}
-            )
-    
+            ).run_decompositions({torch.ops.aten.native_batch_norm.default: None})
 
     def test_keep_composite_ops_linear_convd(self):
         class MyLinear(torch.nn.Module):
@@ -1415,9 +1411,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         decomp_table = {}
         for k in testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY:
             decomp_table[k] = None
-        ep_has_linear_convd = ep.run_decompositions(
-            decomp_table=decomp_table
-        )
+        ep_has_linear_convd = ep.run_decompositions(decomp_table=decomp_table)
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
             """\
@@ -1435,9 +1429,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         decomp_table[torch.ops.aten.conv2d.default] = None
         decomp_table[torch.ops.aten.conv1d.default] = None
 
-        ep_has_convd = ep.run_decompositions(
-            decomp_table=decomp_table
-        )
+        ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
@@ -1457,9 +1449,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         decomp_table = core_aten_decompositions()
         decomp_table[torch.ops.aten.conv2d.default] = None
 
-        ep_has_convd = ep_has_convd.run_decompositions(
-            decomp_table=decomp_table
-        )
+        ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
@@ -1502,7 +1492,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         ep = torch.export.export_for_training(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
-        
+
         decomp_table = {}
         for k in testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY:
             decomp_table[k] = None
@@ -1527,9 +1517,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
         decomp_table[torch.ops.aten.conv2d.default] = None
         decomp_table[torch.ops.aten.conv1d.default] = None
 
-        ep_has_convd = ep.run_decompositions(
-            decomp_table=decomp_table
-        )
+        ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
@@ -1550,9 +1538,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
         decomp_table = core_aten_decompositions()
         decomp_table[torch.ops.aten.conv2d.default] = None
 
-        ep_has_convd = ep_has_convd.run_decompositions(
-            decomp_table=decomp_table
-        )
+        ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
@@ -1613,12 +1599,10 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
         )
 
         decomp_table = core_aten_decompositions()
-        decomp_table[torch.ops.aten.conv2d.default] = None 
+        decomp_table[torch.ops.aten.conv2d.default] = None
         decomp_table[torch.ops.aten.conv1d.default] = None
 
-        ep_has_convd = ep.run_decompositions(
-            decomp_table=decomp_table
-        )
+        ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
@@ -1637,11 +1621,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
         )
 
         decomp_table = core_aten_decompositions()
-        decomp_table[torch.ops.aten.conv2d.default] = None 
+        decomp_table[torch.ops.aten.conv2d.default] = None
 
-        ep_has_convd = ep_has_convd.run_decompositions(
-            decomp_table=decomp_table
-        )
+        ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),

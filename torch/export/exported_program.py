@@ -858,7 +858,7 @@ class ExportedProgram:
         For now, we do not decompose joint graphs.
 
         If you want to disable a decomposition for certain operator, you can do following:
-        
+
         .. code-block:: python
 
             ep = torch.export.export(model, ...)
@@ -876,8 +876,10 @@ class ExportedProgram:
         """
         from torch._decomp import core_aten_decompositions
 
-        _decomp_table = core_aten_decompositions() if decomp_table is None else {k: v for k, v in decomp_table.items()}
-        
+        _decomp_table = (
+            core_aten_decompositions() if decomp_table is None else dict(decomp_table)
+        )
+
         _preserve_ops = []
         for op in list(_decomp_table.keys()):
             if _decomp_table[op] is None:
