@@ -584,6 +584,7 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 // M + (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + (M + 7) / 8 * 8 + 2 * N instructions
 template <>
 inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
+  TORCH_CHECK(M <= 16 && N <= 16, "transpose_mxn<float> expects M, N <= 16.");
   // load from src to registers
   __m512 input[16];
   int i;
