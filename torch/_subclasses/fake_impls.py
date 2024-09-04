@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import math
 import sys
 from typing import Callable, Union
 
@@ -463,20 +464,12 @@ def masked_select(fake_mode, func, self, mask):
     if not has_free_symbols(self.numel()):
         num_elements = int(self.numel())
     else:
-        if len(self.shape) != 0:
-            num_elements = 1
-            for size in self.shape:
-                if isinstance(size, int):
-                    num_elements *= size
-                elif isinstance(size, torch.SymInt):
-                    sym_node = size.node
-                    sym_range = bound_sympy(
-                        sym_node.expr, sym_node.shape_env.var_to_range
-                    )
-                    if isinstance(sym_range.upper, IntInfinity):
-                        num_elements = sys.maxsize - 1
-                        break
-                    num_elements *= int(sym_range.upper)
+        prod_node = math.prod(self.shape).node
+        prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
+        if isinstance(prod_range.upper, IntInfinity):
+            num_elements = sys.maxsize - 1
+        else:
+            num_elements = prod_range.upper
     if num_elements > 2:
         maxval = num_elements
 
