@@ -1408,9 +1408,8 @@ def safe_expand(r):
 @lru_cache(None)
 def _maybe_evaluate_static_worker(
     expr: sympy.Expr,
-    symbol_info: Tuple[Tuple[sympy.Symbol, ValueRanges, sympy.Integer, bool], ...],
+    symbol_info: Tuple[Tuple[sympy.Symbol, ValueRanges, sympy.Integer], ...],
     unbacked_only: bool,
-    size_oblivious: bool
 ):
     """
     This variant of ShapeEnv._maybe_evaluate_static has no dependence on
@@ -1423,33 +1422,20 @@ def _maybe_evaluate_static_worker(
     new_shape_env = {}
     new_range_env = {}
     for idx, sinfo in enumerate(symbol_info):
-        k, vr, val, is_size_like = sinfo
-        if isinstance(val, SingletonInt):
+        k, vr, hint = sinfo
+        if isinstance(hint, SingletonInt):
             # Skip var_ranges logic for SingletonInt which is only used
             # for jagged layout NestedTensors today
             continue
-        if size_oblivious and is_size_like:
-            lower = max(2, vr.lower)
-            # Clamping size-oblivious to some quantity below sys.maxsize
-            # helps us determine that f(u0) != sys.maxsize, which is a
-            # test that is looking for sys.maxsize as a sentinel, but you
-            # don't really want to worry about it for unbacked SymInts.
-            # This is similar to the flavor where size oblivious omits
-            # 0/1, it changes semantics but in a benign way.
-            upper = min(2 ** 48, vr.upper)
-            # This is a bit dodgy: what this means is that there was a
-            # size-like unbacked symbol whose upper bound < 2.  This
-            # causes... problems.
-            if lower <= upper:
-                vr = ValueRanges(lower, upper)
-        else:
-            lower = vr.lower
+
+        lower = vr.lower
+
         # Don't do anything if we don't have a nontrivial lower bound
         # Also don't do anything if we asked only to simplify unbacked
         # SymInt
         if (
             lower is -int_oo or
-            (unbacked_only and val is not None) or
+            (unbacked_only and hint is not None) or
             not vr.is_int
         ):
             new_range_env[k] = vr
@@ -4564,18 +4550,45 @@ class ShapeEnv:
         if not fs and (expr.is_number or expr.is_Boolean):
             return expr
 
+        def adjust_vr(k, vr):
+            # Check if the range can solve it statically quickly
+            if not (size_oblivious and k in self.size_like):
+                return vr
+
+            lower = max(2, vr.lower)
+            # Clamping size-oblivious to some quantity below sys.maxsize
+            # helps us determine that f(u0) != sys.maxsize, which is a
+            # test that is looking for sys.maxsize as a sentinel, but you
+            # don't really want to worry about it for unbacked SymInts.
+            # This is similar to the flavor where size oblivious omits
+            # 0/1, it changes semantics but in a benign way.
+            upper = min(2 ** 48, vr.upper)
+            # This is a bit dodgy: what this means is that there was a
+            # size-like unbacked symbol whose upper bound < 2.  This
+            # causes... problems.  When this happens, just ignore the
+            # preexisting upper bound
+            if lower > upper:
+                upper = max(lower, 2 ** 48)
+            return ValueRanges(lower, upper)
+
         if var_to_range is None:
-            var_ranges = self.var_to_range
+            if size_oblivious:  # micro-optimization
+                var_ranges = {k: adjust_vr(k, v) for k, v in self.var_to_range.items()}
+            else:
+                var_ranges = self.var_to_range
         else:
-            var_ranges = dict(var_to_range)
+            var_ranges = {k: adjust_vr(k, v) for k, v in var_to_range}
+
+        out = bound_sympy(expr, var_ranges)
+        if out.is_singleton():
+            return out.lower
 
         symbol_info = tuple(
-            (s, var_ranges.get(s), self.var_to_val.get(s), s in self.size_like)
+            (s, var_ranges.get(s), self.var_to_val.get(s))
             for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
         )
 
-        r = _maybe_evaluate_static_worker(expr, symbol_info, unbacked_only, size_oblivious)
-        return r
+        return _maybe_evaluate_static_worker(expr, symbol_info, unbacked_only)
 
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
