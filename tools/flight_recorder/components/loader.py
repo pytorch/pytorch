@@ -8,7 +8,7 @@ import gc
 import os
 import pickle
 import time
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Tuple, Union
 
 
 def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]]]:
@@ -35,13 +35,16 @@ def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]
     }
 
 
-def read_dir(prefix: str, folder: str) -> Dict[str, Dict[str, Any]]:
+def read_dir(prefix: str, folder: str) -> Tuple[Dict[str, Dict[str, Any]], str]:
     gc.disable()
     details = {}
     t0 = time.time()
+    version = ""
     for root, _, files in os.walk(folder):
         for f in files:
             details[f] = read_dump(prefix, os.path.join(root, f))
+            if not version:
+                version = str(details[f]["version"])
     tb = time.time()
     print(f"loaded {len(files)} files in {tb - t0}s")
-    return details
+    return details, version
