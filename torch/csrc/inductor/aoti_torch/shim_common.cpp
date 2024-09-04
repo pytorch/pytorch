@@ -1007,11 +1007,13 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   std::string cwd = fs::current_path().string();
   std::string tmp_folder = cwd + "/tmp/aoti_torch/";
   if (!fs::exists(tmp_folder)) {
-    std::cout << "Path does not exist, creating it..." << tmp_folder
-              << std::endl;
+    std::cout
+        << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
+        << tmp_folder << std::endl;
 
     if (!fs::create_directories(tmp_folder)) {
-      std::cout << "Error creating directory: " << tmp_folder << std::endl;
+      std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
+                << tmp_folder << std::endl;
       return;
     }
   }
@@ -1022,6 +1024,9 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
   fout.write(bytes.data(), bytes.size());
   fout.close();
+
+  std::cout << "aoti_torch_save_tensor_handle: Saved tensor to: "
+            << tensor_filepath_to_save << std::endl;
 #endif // !defined(C10_MOBILE)
 }
 

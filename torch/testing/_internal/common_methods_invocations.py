@@ -1573,7 +1573,7 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
         ((S, S), (0, 1), False),
     )
     # Test large inputs to check numerical stability
-    lows = (None, 1e3, 1e6) if dtype in (torch.float32, torch.float64) else (None,)
+    lows = (None, 1e3, 1e6) if dtype in (torch.float32, torch.float64, torch.complex64, torch.complex128) else (None,)
     for low in lows:
         high = low * 2 if low is not None else None
         for shape, dim, keepdim in inputs:
@@ -2849,28 +2849,29 @@ def error_inputs_multinomial(op_info, device, **kwargs):
 
     rep_arg = (False, True) if torch.device(device).type == 'cpu' else (False,)
 
-    for rep in rep_arg:
-        kwargs = {'num_samples': 2, 'replacement': rep}
+    if torch.device(device).type == 'cpu':
+        for rep in rep_arg:
+            kwargs = {'num_samples': 2, 'replacement': rep}
 
-        for shape in inputs:
-            # error case when input tensor contains `inf`, `nan` or negative element
-            yield ErrorInput(SampleInput(torch.tensor(shape), kwargs=kwargs),
-                             error_regex=err_msg1 if rep is False else err_msg2)
+            for shape in inputs:
+                # error case when input tensor contains `inf`, `nan` or negative element
+                yield ErrorInput(SampleInput(torch.tensor(shape), kwargs=kwargs),
+                                 error_regex=err_msg1 if rep is False else err_msg2)
 
-        # error case for the invalid multinomial distribution (sum of probabilities <= 0), 1-D input
-        x = torch.zeros(3, device=device)
-        yield ErrorInput(SampleInput(x, kwargs=kwargs),
-                         error_regex=err_msg2)
+            # error case for the invalid multinomial distribution (sum of probabilities <= 0), 1-D input
+            x = torch.zeros(3, device=device)
+            yield ErrorInput(SampleInput(x, kwargs=kwargs),
+                             error_regex=err_msg2)
 
-        # error case for the invalid multinomial distribution (sum of probabilities <= 0), 2-D input
-        x = torch.zeros(3, 3, device=device)
-        yield ErrorInput(SampleInput(x, kwargs=kwargs),
-                         error_regex=err_msg2)
+            # error case for the invalid multinomial distribution (sum of probabilities <= 0), 2-D input
+            x = torch.zeros(3, 3, device=device)
+            yield ErrorInput(SampleInput(x, kwargs=kwargs),
+                             error_regex=err_msg2)
 
-        # error case for the invalid multinomial distribution
-        x[1, :] = 1
-        yield ErrorInput(SampleInput(x, kwargs=kwargs),
-                         error_regex=err_msg2)
+            # error case for the invalid multinomial distribution
+            x[1, :] = 1
+            yield ErrorInput(SampleInput(x, kwargs=kwargs),
+                             error_regex=err_msg2)
 
 def error_inputs_gradient(op_info, device, **kwargs):
     for dtype in [torch.long, torch.float32, torch.complex64]:
@@ -9337,7 +9338,16 @@ class foreach_inputs_sample_func:
             if rightmost_supports_tensor:
                 self._rightmost_arg_types.append(ForeachRightmostArgType.Tensor)
 
-    def _sample_rightmost_arg(self, opinfo, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
+    def _sample_rightmost_arg(
+        self,
+        opinfo,
+        rightmost_arg_type,
+        device,
+        dtype,
+        num_tensors,
+        allow_higher_dtype_scalars,
+        **_foreach_inputs_kwargs,
+    ):
         if rightmost_arg_type == ForeachRightmostArgType.TensorList:
             return [sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)]
         if rightmost_arg_type == ForeachRightmostArgType.Tensor:
@@ -9357,21 +9367,25 @@ class foreach_inputs_sample_func:
 
         high = 2 if should_use_simpler_scalars else 9
         if rightmost_arg_type == ForeachRightmostArgType.ScalarList:
-            return [
-                [random.randint(0, high) + 1 for _ in range(num_tensors)],
-                [sample_float() for _ in range(num_tensors)],
-                [complex(sample_float(), sample_float()) for _ in range(num_tensors)],
-                [True for _ in range(num_tensors)],
-                [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 3)],
-                [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 4)],
-            ]
+            scalarlist_list = []
+            scalarlist_list.append([random.randint(0, high) + 1 for _ in range(num_tensors)])
+
+            if allow_higher_dtype_scalars or dtype.is_floating_point:
+                scalarlist_list.append([sample_float() for _ in range(num_tensors)])
+            if allow_higher_dtype_scalars or dtype.is_complex:
+                scalarlist_list.append([complex(sample_float(), sample_float()) for _ in range(num_tensors)])
+                scalarlist_list.append([1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 3)])
+                scalarlist_list.append([True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 4)])
+            return scalarlist_list
         if rightmost_arg_type == ForeachRightmostArgType.Scalar:
-            return (
-                random.randint(1, high + 1),
-                sample_float(),
-                True,
-                complex(sample_float(), sample_float()),
-            )
+            scalars = []
+            scalars.append(random.randint(1, high + 1))
+            if allow_higher_dtype_scalars or dtype.is_floating_point:
+                scalars.append(sample_float())
+            if allow_higher_dtype_scalars or dtype.is_complex:
+                scalars.append(complex(sample_float(), sample_float()))
+            scalars.append(True)
+            return scalars
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
@@ -9451,6 +9465,7 @@ class foreach_inputs_sample_func:
         assert "num_input_tensors" not in kwargs
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
+        allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
         for rightmost_arg_type in self._rightmost_arg_types:
             zero_size_foreach_inputs_kwargs = copy.deepcopy(_foreach_inputs_kwargs)
             zero_size_foreach_inputs_kwargs["zero_size"] = True
@@ -9462,8 +9477,14 @@ class foreach_inputs_sample_func:
                 ]
                 args.append(
                     self._sample_rightmost_arg(
-                        opinfo, ForeachRightmostArgType.TensorList, device, dtype, NUM_SIZE0_TENSORS,
-                        **zero_size_foreach_inputs_kwargs)[0])
+                        opinfo,
+                        ForeachRightmostArgType.TensorList,
+                        device,
+                        dtype,
+                        NUM_SIZE0_TENSORS,
+                        allow_higher_dtype_scalars=allow_higher_dtype_scalars,
+                        **zero_size_foreach_inputs_kwargs,
+                    )[0])
                 kwargs = self._sample_kwargs(
                     opinfo, args[-1], ForeachRightmostArgType.TensorList, dtype)
             else:
@@ -9482,6 +9503,7 @@ class foreach_inputs_sample_func:
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         _foreach_inputs_kwargs["zero_size"] = False
+        allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
 
         # add empty tensor interspersion to test fully fixing #100701
         for num_tensors, rightmost_arg_type, intersperse_empty_tensors in itertools.product(
@@ -9500,7 +9522,7 @@ class foreach_inputs_sample_func:
                     for _ in range(self.arity - 2)
                 ]
                 rightmost_arg_list = self._sample_rightmost_arg(
-                    opinfo, rightmost_arg_type, device, dtype, num_tensors,
+                    opinfo, rightmost_arg_type, device, dtype, num_tensors, allow_higher_dtype_scalars,
                     **_foreach_inputs_kwargs)
                 for rightmost_arg in rightmost_arg_list:
                     args.append(rightmost_arg)
@@ -9554,6 +9576,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
+        _allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
 
         for num_tensors, ord, out_dtype in product(
             num_input_tensors,
@@ -9582,24 +9605,6 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
                 if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
                     disable_fastpath = False
                 yield ForeachSampleInput([x], ord=ord, disable_fastpath=disable_fastpath)
-
-
-class foreach_lerp_sample_func(foreach_inputs_sample_func):
-    def _sample_rightmost_arg(self, opinfo, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
-        if rightmost_arg_type == ForeachRightmostArgType.TensorList:
-            return [sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)]
-        if rightmost_arg_type == ForeachRightmostArgType.ScalarList:
-            return [
-                [random.randint(0, 9) + 1 for _ in range(num_tensors)],
-                [1.0 - random.random() for _ in range(num_tensors)],
-                [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(num_tensors)],
-                [True for _ in range(num_tensors)],
-                [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 3)],
-                [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 4)],
-            ]
-        if rightmost_arg_type == ForeachRightmostArgType.Scalar:
-            return [random.random()]
-        raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
 
 class foreach_pointwise_sample_func(foreach_inputs_sample_func):
@@ -9636,6 +9641,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
+        allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
 
         for num_tensors, rightmost_arg_type in itertools.product(num_input_tensors, self._rightmost_arg_types):
             input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
@@ -9644,7 +9650,15 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 for _ in range(2 - int(rightmost_arg_type == ForeachRightmostArgType.TensorList))
             ]
             rightmost_arg_list = self._sample_rightmost_arg(
-                opinfo, rightmost_arg_type, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
+                opinfo,
+                rightmost_arg_type,
+                device,
+                dtype,
+                num_tensors,
+                zero_size=False,
+                allow_higher_dtype_scalars=allow_higher_dtype_scalars,
+                **_foreach_inputs_kwargs,
+            )
             for rightmost_arg in rightmost_arg_list:
                 kwargs = {}
                 if rightmost_arg_type == ForeachRightmostArgType.TensorList:
@@ -10786,14 +10800,15 @@ foreach_binary_op_db: List[OpInfo] = [
         decorators=(
             # These tests fail with aten._local_scalar_dense not being implemented.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types() + complex_types_and(torch.bool, torch.bfloat16, torch.float16, torch.float64)),
         ),
     ),
     ForeachFuncInfo(
@@ -10823,13 +10838,12 @@ foreach_binary_op_db: List[OpInfo] = [
         decorators=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace", dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=(torch.bool,)),
         ),
     ),
     ForeachFuncInfo(
@@ -10841,22 +10855,13 @@ foreach_binary_op_db: List[OpInfo] = [
         decorators=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
-            # fails with div_cpu is not implemented with ComplexHalf
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
-                         dtypes=(torch.float16,), device_type='cpu'),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                         dtypes=(torch.float16,), device_type='cpu'),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
-                         dtypes=(torch.float16,), device_type='cpu'),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                         dtypes=(torch.float16,), device_type='cpu'),
+                         dtypes=integral_types_and(torch.bool)),
         ),
     ),
     ForeachFuncInfo(
@@ -10866,14 +10871,22 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_inplace_autograd=True,
         supports_forward_ad=True,
         decorators=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         dtypes=complex_types_and(torch.bool)),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
@@ -10896,14 +10909,22 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_inplace_autograd=True,
         supports_forward_ad=True,
         decorators=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         dtypes=complex_types_and(torch.bool)),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
@@ -10927,14 +10948,22 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_inplace_autograd=False,
         supports_forward_ad=False,
         decorators=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         dtypes=complex_types_and(torch.bool)),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
@@ -10958,14 +10987,22 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_forward_ad=False,
         supports_inplace_autograd=False,
         decorators=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
+                         dtypes=complex_types_and(torch.bool)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         dtypes=complex_types_and(torch.bool)),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
@@ -10990,30 +11027,19 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_inplace_autograd=True,
         supports_forward_ad=True,
         decorators=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace", dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
                          dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace", dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
                          dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
                          dtypes=(torch.bool,)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                         dtypes=(torch.bool,)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
-                         dtypes=(torch.half,), device_type="cpu"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
-                         dtypes=(torch.half,), device_type="cpu"),
+                         dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                         dtypes=(torch.half,), device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                         dtypes=(torch.half,), device_type="cpu"),
+                         dtypes=(torch.bool,),),
             DecorateInfo(unittest.skip("flaky"), "TestForeach", "test_parity", device_type="cpu", dtypes=(torch.complex64,)),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -11044,23 +11070,19 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
         supports_inplace_autograd=True,
         supports_forward_ad=True,
         decorators=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
-            # Samples have complex types and inplace only works if the dtype is complex.
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=(torch.bool,)),
+            # # Samples have complex types and inplace only works if the dtype is complex.
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace", dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace", dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types() + complex_types_and(torch.bool)),
         ),
     ),
     ForeachFuncInfo(
@@ -11072,22 +11094,22 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
         decorators=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types() + complex_types_and(torch.bool)),
             # fails with div_cpu is not implemented with ComplexHalf
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=integral_types() + complex_types_and(torch.bool)),
         ),
     ),
 ]
@@ -11176,7 +11198,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
 foreach_other_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
-        sample_inputs_func=foreach_lerp_sample_func(3, True, False),
+        sample_inputs_func=foreach_inputs_sample_func(3, True, False),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -19571,7 +19593,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_zero_),
     OpInfo('logsumexp',
            aliases=('special.logsumexp',),
-           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,

@@ -1,9 +1,11 @@
+#ifdef USE_C10D_NCCL
+
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/torch.h>
 #include <algorithm>
+#include <torch/csrc/distributed/c10d/NanCheck.hpp>
 
 namespace c10d {
 
@@ -47,3 +49,5 @@ void checkForNan(const at::Tensor& tensor, at::cuda::CUDAStream& stream) {
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL
