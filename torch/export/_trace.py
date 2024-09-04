@@ -147,7 +147,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True
 
     saved_tables = {}
     patched_ops = set()
-    removed_decomps = {}
     for op_overload in ops_to_preserve:
         # Our strategy for deciding if we can preserve CIA is following:
         # 1. The op should be known statically that it is functional
@@ -214,10 +213,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True
                 functools.partial(_register_cia_to_meta, kernel=op_overload)
             )
 
-        if op_overload in decomp_table:
-            removed_decomps[op_overload] = decomp_table[op_overload]
-            del decomp_table[op_overload]
-
     try:
         yield
     finally:
@@ -225,9 +220,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
-
-        for op, decomp in removed_decomps.items():
-            decomp_table[op] = decomp
 
 
 @dataclasses.dataclass

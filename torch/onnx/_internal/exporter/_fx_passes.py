@@ -21,7 +21,9 @@ def decompose_with_registry(
     to_preserve = _decomp.get_preserve_ops()
     # We can only preserve implemented ops
     can_preserve = tuple(to_preserve.intersection(onnx_registered_ops))
-    return exported_program.run_decompositions(decomp_table, _preserve_ops=can_preserve)
+    for op in can_preserve:
+        decomp_table[op] = None
+    return exported_program.run_decompositions(decomp_table)
 
 
 def insert_type_promotion_nodes(

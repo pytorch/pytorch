@@ -848,7 +848,6 @@ class ExportedProgram:
     def run_decompositions(
         self,
         decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
-        _preserve_ops: Tuple[torch._ops.OpOverload, ...] = (),
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -857,16 +856,38 @@ class ExportedProgram:
         `Core ATen Operator Set <https://pytorch.org/docs/stable/torch.compiler_ir.html>`_.
 
         For now, we do not decompose joint graphs.
+
+        If you want to disable a decomposition for certain operator, you can do following:
+        
+        .. code-block:: python
+
+            ep = torch.export.export(model, ...)
+            ep = ep.run_decompositions(decomp_table={your_op: None})
+
+        If you want to get a core aten operator set except for certain operator, you can do following:
+
+        .. code-block:: python
+            ep = torch.export.export(model, ...)
+
+            from torch._decomp import core_aten_decompositions
+            decomp_table = core_aten_decompositions()
+            decomp_table[your_op] = None
+            ep = ep.run_decompositions(decomp_table={your_op: None})
         """
         from torch._decomp import core_aten_decompositions
 
-        if decomp_table is None:
-            decomp_table = core_aten_decompositions()
+        _decomp_table = core_aten_decompositions() if decomp_table is None else {k: v for k, v in decomp_table.items()}
+        
+        _preserve_ops = []
+        for op in list(_decomp_table.keys()):
+            if _decomp_table[op] is None:
+                _preserve_ops.append(op)
+                del _decomp_table[op]
 
         return _decompose_exported_program(
             self,
-            decomp_table=decomp_table,
-            _preserve_ops=_preserve_ops,  # type: ignore[arg-type]
+            decomp_table=_decomp_table,
+            _preserve_ops=tuple(_preserve_ops),  # type: ignore[arg-type]
             joint_loss_index=None,
         )
 
