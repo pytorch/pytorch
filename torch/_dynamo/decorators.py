@@ -3,7 +3,7 @@
 import functools
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Dict, Type, TYPE_CHECKING, TypeVar
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -17,6 +17,8 @@ from .utils import is_function
 
 
 if TYPE_CHECKING:
+    from types import FunctionType
+
     from torch._C._dynamo.eval_frame import (  # noqa: F401
         reset_code,
         set_eval_frame,
@@ -24,6 +26,8 @@ if TYPE_CHECKING:
         skip_code,
         unsupported,
     )
+
+    from .variables import VariableTracker
 else:
     for name in dir(torch._C._dynamo.eval_frame):
         if name.startswith("__"):
@@ -170,6 +174,8 @@ def substitute_in_graph(
     *,
     can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
+    # type that is embedded in the Python interpreter
+    is_embedded_type: bool = False,  # internal use only
 ) -> Callable[[_F], _F]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
@@ -219,10 +225,22 @@ def substitute_in_graph(
         >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
         2
     """
-    if not is_function(original_fn):
+    if not is_function(original_fn) and not (
+        is_embedded_type and inspect.isclass(original_fn)
+    ):
         raise TypeError(
             f"substitute_in_graph expects a function but got {type(original_fn)!r}"
         )
+    if is_embedded_type:
+        if not inspect.isclass(original_fn):
+            raise TypeError(
+                f"substitute_in_graph expects a class but got {type(original_fn)!r}"
+            )
+
+        from .variables.builder import ITERTOOLS_POLYFILLED_TYPE_IDS, ITERTOOLS_TYPE_IDS
+
+        if id(original_fn) in ITERTOOLS_TYPE_IDS:
+            ITERTOOLS_POLYFILLED_TYPE_IDS.add(id(original_fn))
 
     def wrapper(traceable_fn: _F) -> _F:
         if not is_function(traceable_fn):
@@ -291,13 +309,14 @@ def substitute_in_graph(
                 "already registered in VariableBuilder's id dispatch map"
             )
 
-        rule_map = get_torch_obj_rule_map()
+        rule_map: Dict[Any, Type[VariableTracker]] = get_torch_obj_rule_map()
         if original_fn in rule_map:
             raise ValueError(
                 f"Duplicate object {original_fn} with different rules: "
                 f"{PolyfilledFunctionVariable}, {rule_map[original_fn]}"
             )
 
+        polyfill_handlers: Dict[Callable[..., Any], FunctionType]
         polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
         if original_fn in polyfill_handlers:
             raise ValueError(
@@ -311,16 +330,16 @@ def substitute_in_graph(
         def wrapped(*args, **kwargs):
             return original_fn(*args, **kwargs)
 
-        def dispatch_fn(self, value):
+        def dispatch_fn(self, value: _F) -> PolyfilledFunctionVariable:
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
-                **self.install_guards(GuardBuilder.CLOSURE_MATCH),
+                **self.install_guards(GuardBuilder.FUNCTION_MATCH),
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
         rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
-        polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = traceable_fn
+        polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = wrapped  # type: ignore[assignment]
 
         wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
