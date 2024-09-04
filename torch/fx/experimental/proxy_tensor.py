@@ -596,8 +596,6 @@ def track_tensor_tree(
     constant: Optional[_NestedTensors],
     tracer: _ProxyTracer,
 ) -> T:
-    _set_unbacked_bindings(inner_res, proxy_res)
-
     def wrap_with_proxy(
         e: object, proxy: _NestedProxys, constant: Optional[_NestedTensors]
     ) -> None:
@@ -606,11 +604,13 @@ def track_tensor_tree(
             assert constant is None or isinstance(constant, Tensor)
             track_tensor(e, proxy, tracer=tracer, constant=constant)
             set_meta(proxy, e)
+            _set_unbacked_bindings(e, proxy)
         elif isinstance(e, py_sym_types):
             assert isinstance(proxy, Proxy)
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, thunkify(tracer, lambda: proxy))
+            _set_unbacked_bindings(e, proxy)
         elif isinstance(e, _AnyScriptObject):
             assert isinstance(proxy, Proxy)
             set_proxy_slot(e, tracer, proxy)
@@ -1566,6 +1566,9 @@ class _ModuleStackTracer(PythonKeyTracer):
                     )
                 return tracer.attr_proxy_map[attr_val]
 
+            def get_base(self) -> Module:
+                return tracer.proxy_modules[self]
+
             @property
             def _modules(self) -> Dict[str, AttrProxy]:
                 assert "_modules" in self.__dict__
@@ -2185,6 +2188,8 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     """A helper function for setting up unbacked_bindings on the destination FX graph."""
     from .symbolic_shapes import compute_unbacked_bindings
 
+    log.debug("_set_unbacked_bindings %s", out_proxy)
+
     # Can't use detect_fake_mode here,
     #
     # python test/distributed/_tensor/test_dtensor_compile.py -k
@@ -2195,5 +2200,5 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
-            assert isinstance(out_proxy, Proxy)
+            assert isinstance(out_proxy, Proxy), out_proxy
             out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
