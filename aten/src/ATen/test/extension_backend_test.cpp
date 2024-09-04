@@ -44,7 +44,7 @@ Tensor empty_strided_override(
   std::optional<c10::Device> device,
   std::optional<bool> pin_memory) {
 
-  return empty_override(fromIntArrayRefSlow(size), dtype, layout, device, pin_memory, c10::nullopt);
+  return empty_override(fromIntArrayRefSlow(size), dtype, layout, device, pin_memory, std::nullopt);
 }
 
 TORCH_LIBRARY_IMPL(aten, MAIA, m) {

@@ -82,7 +82,7 @@ def split_by_tags(
     Given the following module def:
 
     class SimpleModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.linear1 = torch.nn.Linear(...)
             self.linear2 = torch.nn.Linear(...)

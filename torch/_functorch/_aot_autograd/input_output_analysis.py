@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
+
 from .. import config
 from .collect_metadata_analysis import coerce_tangent
 from .schemas import (
@@ -29,6 +30,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -338,8 +340,6 @@ def _tensors_definitely_do_not_overlap(x, y):
             # without
             if offset_delta_mod + y.size(1) <= x.stride(0):
                 return True
-            else:
-                return False
     return False
 
 

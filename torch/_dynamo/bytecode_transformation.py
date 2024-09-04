@@ -68,13 +68,17 @@ class Instruction:
 
 
 def convert_instruction(i: dis.Instruction) -> Instruction:
+    if sys.version_info >= (3, 13):
+        starts_line = i.line_number
+    else:
+        starts_line = i.starts_line
     return Instruction(
         i.opcode,
         i.opname,
         i.arg,
         i.argval,
         i.offset,
-        i.starts_line,
+        starts_line,
         i.is_jump_target,
         getattr(i, "positions", None),
     )
@@ -694,9 +698,28 @@ def _get_instruction_front(instructions: List[Instruction], idx: int):
 
 def devirtualize_jumps(instructions):
     """Fill in args for virtualized jump target after instructions may have moved"""
-    indexof = get_indexof(instructions)
     jumps = set(dis.hasjabs).union(set(dis.hasjrel))
 
+    # check for negative jump args and fix them
+    for inst in instructions:
+        if inst.opcode in jumps:
+            if inst.opcode not in dis.hasjabs:
+                if inst.target.offset < inst.offset:
+                    if sys.version_info < (3, 11):
+                        raise RuntimeError("Got negative jump offset for Python < 3.11")
+                    # forward jumps become backward
+                    if "FORWARD" in inst.opname:
+                        flip_jump_direction(inst)
+                else:
+                    # backward jumps become forward
+                    if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
+                        flip_jump_direction(inst)
+
+    # jump instruction size may have changed due to flips
+    update_offsets(instructions)
+    indexof = get_indexof(instructions)
+
+    # compute jump instruction arg
     for inst in instructions:
         if inst.opcode in jumps:
             target = _get_instruction_front(instructions, indexof[inst.target])
@@ -711,18 +734,9 @@ def devirtualize_jumps(instructions):
                     raise RuntimeError("Python 3.11+ should not have absolute jumps")
             else:  # relative jump
                 # byte offset between target and next instruction
-                inst.arg = int(target.offset - inst.offset - instruction_size(inst))
-                if inst.arg < 0:
-                    if sys.version_info < (3, 11):
-                        raise RuntimeError("Got negative jump offset for Python < 3.11")
-                    inst.arg = -inst.arg
-                    # forward jumps become backward
-                    if "FORWARD" in inst.opname:
-                        flip_jump_direction(inst)
-                elif inst.arg > 0:
-                    # backward jumps become forward
-                    if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
-                        flip_jump_direction(inst)
+                inst.arg = abs(
+                    int(target.offset - inst.offset - instruction_size(inst))
+                )
                 if sys.version_info >= (3, 10):
                     # see bytecode size comment in the absolute jump case above
                     inst.arg //= 2
@@ -983,9 +997,40 @@ def remove_binary_store_slice(instructions: List[Instruction]) -> None:
     instructions[:] = new_insts
 
 
+FUSED_INSTS = {
+    "LOAD_FAST_LOAD_FAST": ("LOAD_FAST", "LOAD_FAST"),
+    "STORE_FAST_STORE_FAST": ("STORE_FAST", "STORE_FAST"),
+    "STORE_FAST_LOAD_FAST": ("STORE_FAST", "LOAD_FAST"),
+}
+
+
+def remove_fused_load_store(instructions: List[Instruction]) -> None:
+    new_insts = []
+    for inst in instructions:
+        new_insts.append(inst)
+        if inst.opname in FUSED_INSTS:
+            inst0, inst1 = FUSED_INSTS[inst.opname]
+            argval0, argval1 = inst.argval
+
+            # modify inst in-place to preserve jump target
+            inst.opcode = dis.opmap[inst0]
+            inst.opname = inst0
+            inst.argval = argval0
+
+            new_inst = create_instruction(inst1, argval=argval1)
+            # update inst.exn_tab_entry.end if necessary
+            if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
+                inst.exn_tab_entry.end = new_inst
+            # preserve exception table entries
+            new_inst.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+
+            new_insts.append(new_inst)
+    instructions[:] = new_insts
+
+
 def explicit_super(code: types.CodeType, instructions: List[Instruction]) -> None:
     """convert super() with no args into explicit arg form"""
-    cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
+    cell_and_free = (code.co_cellvars or ()) + (code.co_freevars or ())
     if not len(code.co_varnames):
         # A function with no argument cannot contain a valid "super()" call
         return
@@ -1186,7 +1231,14 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             )
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
-                instructions[i].arg = varnames[instructions[i].argval]
+                if (
+                    sys.version_info >= (3, 13)
+                    and instructions[i].argval not in varnames
+                ):
+                    # instructions like LOAD_FAST used for both local and free vars
+                    instructions[i].arg = freenames[instructions[i].argval]
+                else:
+                    instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
                 instructions[i].arg = get_name_index(instructions[i].argval)
@@ -1335,6 +1387,8 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
         remove_jump_if_none(instructions)
         if sys.version_info >= (3, 12):
             remove_binary_store_slice(instructions)
+        if sys.version_info >= (3, 13):
+            remove_fused_load_store(instructions)
         update_offsets(instructions)
         devirtualize_jumps(instructions)
     return instructions

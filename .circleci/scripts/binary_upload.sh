@@ -25,8 +25,13 @@ if [[ "${DRY_RUN}" = "disabled" ]]; then
   AWS_S3_CP="aws s3 cp"
 fi
 
-if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+if [[ "${USE_SPLIT_BUILD:-false}" == "true" ]]; then
   UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_pypi_pkg"
+fi
+
+# this is special build with all dependencies packaged
+if [[ ${BUILD_NAME} == *-full* ]]; then
+  UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_full"
 fi
 
 # Sleep 2 minutes between retries for conda upload

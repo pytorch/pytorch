@@ -222,6 +222,21 @@ struct TensorQueue : torch::CustomClassHolder {
   at::Tensor init_tensor_;
 };
 
+struct ConstantTensorContainer : torch::CustomClassHolder {
+  explicit ConstantTensorContainer(at::Tensor x) : x_(x) {}
+
+  at::Tensor get() {
+    return x_;
+  }
+
+  std::string tracing_mode() {
+    return "real";
+  }
+
+ private:
+  at::Tensor x_;
+};
+
 at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
   return torch::zeros({instance->vals.back(), 4});
 }
@@ -380,6 +395,22 @@ struct ReLUClass : public torch::CustomClassHolder {
   }
 };
 
+struct FlattenWithTensorOp : public torch::CustomClassHolder {
+  explicit FlattenWithTensorOp(at::Tensor t) : t_(t) {}
+
+  at::Tensor get() {
+    return t_;
+  }
+
+  std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {
+    return std::tuple(std::tuple("t", this->t_.sin()));
+  }
+
+ private:
+  at::Tensor t_;
+  ;
+};
+
 struct ContainsTensor : public torch::CustomClassHolder {
   explicit ContainsTensor(at::Tensor t) : t_(t) {}
 
@@ -446,6 +477,16 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           [](std::vector<int64_t> state) { // __setstate__
             return c10::make_intrusive<Foo>(state[0], state[1]);
           });
+
+  m.class_<FlattenWithTensorOp>("_FlattenWithTensorOp")
+      .def(torch::init<at::Tensor>())
+      .def("get", &FlattenWithTensorOp::get)
+      .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__);
+
+  m.class_<ConstantTensorContainer>("_ConstantTensorContainer")
+      .def(torch::init<at::Tensor>())
+      .def("get", &ConstantTensorContainer::get)
+      .def("tracing_mode", &ConstantTensorContainer::tracing_mode);
 
   m.def(
       "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
