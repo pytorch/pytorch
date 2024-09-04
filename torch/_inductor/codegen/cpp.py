@@ -1583,22 +1583,26 @@ class CppVecOverrides(CppOverrides):
         code.writeline(f"{mantissa_t} {mantissa};")
         code.writeline("[&]()")
         with code.indent():
-            code.writeline(f"__at_align__ std::array<{cdtype}, {size}> tmpbuf;")
-            code.writeline(f"{x}.store(tmpbuf.data(), {size});")
-            code.writeline(f"__at_align__ std::array<int32_t, {size}> tmpbuf_exponent;")
             code.writeline(
-                f"__at_align__ std::array<{cdtype}, {size}> tmpbuf_mantissa;"
+                f"__at_align__ std::array<{cdtype}, {V.kernel.tiling_factor}> tmpbuf;"
             )
-            code.writeline(f"for (int i = 0; i < {size}; i++)")
+            code.writeline(f"{x}.store(tmpbuf.data(), {cexpr_index(size)});")
+            code.writeline(
+                f"__at_align__ std::array<int32_t, {V.kernel.tiling_factor}> tmpbuf_exponent;"
+            )
+            code.writeline(
+                f"__at_align__ std::array<{cdtype}, {V.kernel.tiling_factor}> tmpbuf_mantissa;"
+            )
+            code.writeline(f"for (int i = 0; i < {cexpr_index(size)}; i++)")
             with code.indent():
                 code.writeline(
                     "tmpbuf_mantissa[i] = std::frexp(tmpbuf[i], &tmpbuf_exponent[i]);"
                 )
             code.writeline(
-                f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {size});"
+                f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {cexpr_index(size)});"
             )
             code.writeline(
-                f"{mantissa} = {mantissa_t}::loadu(tmpbuf_mantissa.data(), {size});"
+                f"{mantissa} = {mantissa_t}::loadu(tmpbuf_mantissa.data(), {cexpr_index(size)});"
             )
         code.writeline("();")
         V.kernel.compute.splice(code)
@@ -1632,15 +1636,19 @@ class CppVecOverrides(CppOverrides):
                         assert arg.is_vec
                         assert arg.dtype == vec_dtype
                         code.writeline(
-                            f"__at_align__ std::array<{cdtype}, {size}> tmpbuf{argidx};"
+                            f"__at_align__ std::array<{cdtype}, {kernel.tiling_factor}> tmpbuf{argidx};"
                         )
-                        code.writeline(f"{arg}.store(tmpbuf{argidx}.data(), {size});")
+                        code.writeline(
+                            f"{arg}.store(tmpbuf{argidx}.data(), {cexpr_index(size)});"
+                        )
                         scalar_args.append(f"tmpbuf{argidx}[i]")
                     else:
                         scalar_args.append(arg)
-                code.writeline(f"__at_align__ std::array<{octype}, {size}> tmpbuf_out;")
+                code.writeline(
+                    f"__at_align__ std::array<{octype}, {kernel.tiling_factor}> tmpbuf_out;"
+                )
                 res = scalar_func(*scalar_args)
-                code.writeline(f"for (int i = 0; i < {size}; i++)")
+                code.writeline(f"for (int i = 0; i < {cexpr_index(size)}; i++)")
                 with code.indent():
                     code.writeline(f"tmpbuf_out[i] = {res};")
                 if output_mask:
@@ -1648,7 +1656,7 @@ class CppVecOverrides(CppOverrides):
                     load_args = "tmpbuf_out.data()"
                     load_fn = f"at::vec::VecMask<{cdtype},{n_vec}>::from"
                 else:
-                    load_args = f"tmpbuf_out.data(), {size}"
+                    load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
                     if n_vec == 1:
                         load_fn = f"at::vec::Vectorized<{cdtype}>::loadu"
                     else:
