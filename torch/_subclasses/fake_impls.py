@@ -372,6 +372,7 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
+@register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
     if (r := arg.item_memo) is not None:
