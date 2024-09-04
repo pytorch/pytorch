@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, simple_floordiv_gcd
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 from torch.utils._sympy.reference import ReferenceAnalysis, PythonReferenceAnalysis
@@ -666,6 +666,24 @@ class TestSympySolve(TestCase):
         # i.e. the transformation is sound.
         r = solver.check()
         self.assertEqual(r, z3.unsat)
+
+    def test_simple_floordiv_gcd(self):
+        x, y, z = sympy.symbols("x y z")
+
+        # positive tests
+        self.assertEqual(simple_floordiv_gcd(x, x), x)
+        self.assertEqual(simple_floordiv_gcd(128 * x, 2304), 128)
+        self.assertEqual(simple_floordiv_gcd(128 * x + 128 * y, 2304), 128)
+        self.assertEqual(simple_floordiv_gcd(128 * x + 128 * y + 8192 * z, 9216), 128)
+        self.assertEqual(simple_floordiv_gcd(49152 * x, 96 * x), 96 * x)
+        self.assertEqual(simple_floordiv_gcd(96 * x, 96 * x), 96 * x)
+        self.assertEqual(simple_floordiv_gcd(x * y, x), x)
+        self.assertEqual(simple_floordiv_gcd(384 * x * y, x * y), x * y)
+        self.assertEqual(simple_floordiv_gcd(256 * x * y, 8 * x), 8 * x)
+
+        # negative tests
+        self.assertEqual(simple_floordiv_gcd(x * y + x + y + 1, x + 1), 1)
+
 
 class TestSingletonInt(TestCase):
     def test_basic(self):
