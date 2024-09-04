@@ -675,54 +675,56 @@ class CppPackedGemmTemplate(CppTemplate):
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
 
-                # By using the new packed weight for the GEMM template, we can prune the
-                # old weight if it has no other users. This saves memory but makes the FX graph
-                # non-retraceable. To support retracing, we can add a repack node to the
-                # FX graph. For example:
-                # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
-                wgt_tensor_users = 0
-                wgt_tensor = V.graph.constants[W_node.get_name()]
-                for node in reversed(V.graph.graph.nodes):
-                    # Case may happen when the wgt tensor is used by more than 1 get_attr node
-                    # https://github.com/pytorch/pytorch/issues/134998
-                    if node.op == "get_attr" and hasattr(
-                        V.graph.module, node.name
-                    ):  # wgt might already be deleted
-                        comp_tensor = getattr(V.graph.module, node.name)
-                        if (
-                            wgt_tensor.is_mkldnn == comp_tensor.is_mkldnn
-                            and wgt_tensor.dtype == comp_tensor.dtype
-                            and wgt_tensor.device == comp_tensor.device
-                            and (
-                                (
-                                    not wgt_tensor.is_mkldnn
-                                    and (
-                                        wgt_tensor.untyped_storage().data_ptr()
-                                        == comp_tensor.untyped_storage().data_ptr()
+                candidate_nodes = [node for node in input_nodes if node not in new_input_nodes]
+                for candidate_node in candidate_nodes:
+                    # By using the new packed weight for the GEMM template, we can prune the
+                    # old weight if it has no other users. This saves memory but makes the FX graph
+                    # non-retraceable. To support retracing, we can add a repack node to the
+                    # FX graph. For example:
+                    # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
+                    wgt_tensor_users = 0
+                    wgt_tensor = V.graph.constants[candidate_node.get_name()]
+                    for node in reversed(V.graph.graph.nodes):
+                        # Case may happen when the wgt tensor is used by more than 1 get_attr node
+                        # https://github.com/pytorch/pytorch/issues/134998
+                        if node.op == "get_attr" and hasattr(
+                            V.graph.module, node.name
+                        ):  # wgt might already be deleted
+                            comp_tensor = getattr(V.graph.module, node.name)
+                            if (
+                                wgt_tensor.is_mkldnn == comp_tensor.is_mkldnn
+                                and wgt_tensor.dtype == comp_tensor.dtype
+                                and wgt_tensor.device == comp_tensor.device
+                                and (
+                                    (
+                                        not wgt_tensor.is_mkldnn
+                                        and (
+                                            wgt_tensor.untyped_storage().data_ptr()
+                                            == comp_tensor.untyped_storage().data_ptr()
+                                        )
+                                    )
+                                    or (
+                                        wgt_tensor.is_mkldnn
+                                        and (
+                                            torch.ops.mkldnn.data_ptr(wgt_tensor)
+                                            == torch.ops.mkldnn.data_ptr(comp_tensor)
+                                        )
                                     )
                                 )
-                                or (
-                                    wgt_tensor.is_mkldnn
-                                    and (
-                                        torch.ops.mkldnn.data_ptr(wgt_tensor)
-                                        == torch.ops.mkldnn.data_ptr(comp_tensor)
-                                    )
-                                )
-                            )
-                        ):
-                            wgt_tensor_users += 1
+                            ):
+                                wgt_tensor_users += 1
 
-                for node in reversed(V.graph.graph.nodes):
-                    # The wgt tensor has been used by only 1 get_attr node
-                    # The get_attr node has only 1 user fx node
-                    if (
-                        node.name == W_node.get_name()
-                        and len(node.users) == 1
-                        and wgt_tensor_users == 1
-                    ):
-                        del V.graph.constants[node.name]
-                        delattr(V.graph.module, node.name)
-                        delattr(V.graph.graph.owning_module, node.name)
+                    for node in reversed(V.graph.graph.nodes):
+                        # The wgt tensor has been used by only 1 get_attr node
+                        # The get_attr node has only 1 user fx node
+                        if (
+                            node.name == candidate_node.get_name()
+                            and len(node.users) == 1
+                            and wgt_tensor_users == 1
+                        ):
+                            del V.graph.constants[node.name]
+                            delattr(V.graph.module, node.name)
+                            delattr(V.graph.graph.owning_module, node.name)
 
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
