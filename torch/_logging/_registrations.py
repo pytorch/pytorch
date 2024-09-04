@@ -42,6 +42,7 @@ register_log(
     [
         "torch._dynamo",
         "torch.export",
+        "torch.export.dynamic_shapes",
         *DYNAMIC,
         "torch._export.converter",
         "torch._export.non_strict_utils",
@@ -155,6 +156,11 @@ register_artifact("onnx_diagnostics", "", off_by_default=True)
 register_artifact(
     "fusion",
     "Detailed Inductor fusion decisions. More detailed than 'schedule'",
+    off_by_default=True,
+)
+register_artifact(
+    "loop_ordering",
+    "Logs related to loop ordering",
     off_by_default=True,
 )
 register_artifact(
