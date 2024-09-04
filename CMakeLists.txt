@@ -490,10 +490,6 @@ if(USE_SYSTEM_LIBS)
   endif()
 endif()
 
-# Used when building Caffe2 through setup.py
-option(BUILDING_WITH_TORCH_LIBS
-       "Tell cmake if Caffe2 is being built alongside torch libs" ON)
-
 # /Z7 override option When generating debug symbols, CMake default to use the
 # flag /Zi. However, it is not compatible with sccache. So we rewrite it off.
 # But some users don't use sccache; this override is for them.
@@ -886,6 +882,16 @@ cmake_dependent_option(
   "Enable memory-efficient attention for scaled dot product attention.\
   Will be disabled if not supported by the platform" ON
   "USE_CUDA OR USE_ROCM" OFF)
+
+#
+# Cannot be put into Dependencies.cmake due circular dependency:
+# USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
+#
+if(USE_ROCM)
+  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
+    include(cmake/External/aotriton.cmake)
+  endif()
+endif()
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")

@@ -807,10 +807,40 @@ def solve_min_cut(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
+    def can_fuse_into_auto_functionalized(a, b):
+        if b.target != torch.ops.higher_order.auto_functionalized:
+            return False
+        mutable_op = b.args[0]
+        mutable_arg_names = (
+            torch._higher_order_ops.auto_functionalize.get_mutable_arg_names(mutable_op)
+        )
+        for name in mutable_arg_names:
+            arg = b.kwargs[name]
+            if a is arg:
+                return True
+            if isinstance(arg, list):
+                if a in arg:
+                    return True
+        return False
+
+    def can_fuse_into_triton_kernel_wrapper_functional(a, b):
+        if b.target != torch.ops.higher_order.triton_kernel_wrapper_functional:
+            return False
+        mutable_arg_names = b.kwargs["tensors_to_clone"]
+        for name in mutable_arg_names:
+            arg = b.kwargs["kwargs"][name]
+            if a is arg:
+                return True
+        return False
+
     def is_fusible(a, b):
         # We can perform "memory fusion" into a cat, but cat cannot be a
         # producer to a fusion
         if get_aten_target(b) == aten.cat:
+            return True
+        if can_fuse_into_auto_functionalized(a, b):
+            return True
+        if can_fuse_into_triton_kernel_wrapper_functional(a, b):
             return True
         return op_types.is_fusible(a) and op_types.is_fusible(b)
 
@@ -1273,6 +1303,8 @@ def get_default_op_list() -> OpTypes:
         aten.full,
         aten.as_strided,
         aten.zeros,
+        aten.empty,
+        aten.empty_like,
         aten.argmax,
         aten.maximum,
         prims.iota,
