@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import abc
 import contextlib
 import ctypes
 import importlib
@@ -238,7 +239,7 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
 ]
 
 
-class HigherOrderOperator(OperatorBase):
+class HigherOrderOperator(OperatorBase, abc.ABC):
     # The HigherOrderOperator will appear as torch.ops.higher_order.{name}
     #
     # If you're creating a new HigherOrderOperator, please do not change the
@@ -246,6 +247,10 @@ class HigherOrderOperator(OperatorBase):
     # practice due to name collisions.
     def __init__(self, name):
         super().__init__()
+        if type(self) is HigherOrderOperator:
+            raise RuntimeError(
+                "Direct instantiation of HigherOrderOperator is not allowed. Please subclass it."
+            )
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
@@ -406,6 +411,7 @@ class HigherOrderOperator(OperatorBase):
         assert not isinstance(kernel, DispatchKey)
         return kernel(*args, **kwargs)
 
+    @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
@@ -428,9 +434,6 @@ class HigherOrderOperator(OperatorBase):
 
     def __str__(self):
         return f"{self.name()}"
-
-    # def __repr__(self):
-    #     return f"torch.ops._higher_order_ops.{self._name}"
 
     def name(self):
         return self._name

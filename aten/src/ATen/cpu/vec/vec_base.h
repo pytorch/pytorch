@@ -947,6 +947,17 @@ inline Vectorized<T> fmsub(const Vectorized<T>& a, const Vectorized<T>& b, const
   return a * b - c;
 }
 
+template <typename T>
+Vectorized<T> inline operator&&(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b) {
+  Vectorized<T> ret;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    ret[i] = a[i] && b[i];
+  }
+  return ret;
+}
+
 template <int64_t scale = 1, typename T = void>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<T>>
 inline gather(T const* base_addr, const Vectorized<int_same_size_t<T>>& vindex) {
