@@ -102,7 +102,7 @@ def associative_scan(
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
             This function must be pure, i.e., no lifted arguments are supported at the moment,
-            and satisfy the associative property.
+            satisfy the associative property and have no side-effects.
         input (torch.Tensor): The input tensor, or nested pytree of tensors.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
@@ -122,9 +122,14 @@ def associative_scan(
         cumsum = associative_scan(add, x, dim)
 
     """
-    assert callable(combine_fn), "combine_fn must be a callable, but got {combine_fn}"
-    assert isinstance(dim, int), "dim must be an int, but got {type(dim)}"
-    assert combine_mode in ["pointwise", "generic"]
+    if not callable(combine_fn):
+        raise RuntimeError("Combine_fn must be a callable, but got {combine_fn}")
+    if not isinstance(dim, int):
+        raise RuntimeError("Dim must be an int, but got " + str(type(dim)))
+    if combine_mode not in ["pointwise", "generic"]:
+        raise RuntimeError(
+            "Combine_mode must either 'pointwise' or 'generic', but got {combine_mode}"
+        )
 
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
@@ -139,10 +144,10 @@ def associative_scan(
             "For combine_mode='pointwise', all input tensors need to be on CUDA"
         )
 
-    assert len(leaves) >= 1, "expected at least 1 input leaf"
-    assert all(
-        isinstance(x, torch.Tensor) for x in leaves
-    ), "input leaves must be a Tensor"
+    if len(leaves) == 0:
+        raise RuntimeError("Expected at least 1 input leaf")
+    if any(not isinstance(x, torch.Tensor) for x in leaves):
+        raise RuntimeError("Input leaves must be a Tensor")
 
     if reverse:
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
@@ -159,13 +164,14 @@ def associative_scan(
         pytree.tree_unflatten(leaves, spec),
     )
     out_leaves, tree_out = pytree.tree_flatten(out)
-    assert len(leaves) == len(
-        out_leaves
-    ), "The pytree of the output of the operator needs to match the input pytree"
-    for x in out_leaves:
-        assert (
-            x.shape == shape
-        ), "The pytree of the output of the operator needs to match the input pytree"
+    if len(leaves) != len(out_leaves):
+        raise RuntimeError(
+            "The number of leaves of the pytree of the output of the operator needs to match the length of the pytree of the input"
+        )
+    if any(x.shape != shape for x in out_leaves):
+        raise RuntimeError(
+            "The pytree of the output of the operator needs to match the input pytree"
+        )
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)

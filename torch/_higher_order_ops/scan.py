@@ -9,10 +9,13 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
+    _has_potential_branch_input_alias,
+    _has_potential_branch_input_mutation,
     _set_compilation_env,
     autograd_not_implemented,
     reenter_make_fx,
     unique_graph_id,
+    UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -74,21 +77,26 @@ def scan(
         # Usage without the usage of ``init``
         cumsum = scan(add, x, dim)
         # This produces the output
-        cumsum = [x0, add(x0, x1), add(x1, x2)]
+        cumsum = torch.stack([x0, add(x0, x1), add(add(x0, x1), x2)], dim)
 
         # Usage with the usage of ``init``
         cumsum = scan(add, x, dim, init=i0)
         # This produces the output
-        cumsum = [i0, add(i0, x0), add(x0, x1)]
+        cumsum = torch.stack([i0, add(i0, x0), add(add(i0, x0), x1)], dim)
 
 
     """
-    assert callable(combine_fn), "combine_fn must be a callable, but got {combine_fn}"
-    assert isinstance(dim, int), "dim must be an int, but got {type(dim)}"
+    if not callable(combine_fn):
+        raise RuntimeError("Combine_fn must be a callable, but got {combine_fn}")
+    if not isinstance(dim, int):
+        raise RuntimeError("Dim must be an int, but got " + str(type(dim)))
 
     # TODO: Support closures/nn_modules in order to be able represent RNNs with scan
     # TODO: Support _inductor lowering
     # TODO: Support Autograd
+    # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
+    # TODO: Implement new "user interface" that allows the init and the output of scan to have
+    # different shapes. E.g. We compute cumsum, [a, a+b, a+b+c], but output [a, (a+b).sin(), (a+b+c).sin()]
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
@@ -109,19 +117,25 @@ def scan(
     if reverse:
         leaves_input = [torch.flip(elem, [dim]) for elem in leaves_input]
 
-    assert (
-        len(leaves_init) > 0 or len(leaves_input) > 0
-    ), "expected at least 1 init or input leaf"
+    if len(leaves_init) == 0 and len(leaves_input) == 0:
+        raise RuntimeError("Expected at least 1 init or input leaf")
+    if len(leaves_init) > 0:
+        if any(not isinstance(x, torch.Tensor) for x in leaves_init):
+            raise RuntimeError("Init leaves must be a Tensor")
+        if any(x.shape[dim] == 0 for x in leaves_init):
+            raise RuntimeError("Init leaves must have a scan dimension > 0")
+    if len(leaves_input) > 0:
+        if any(not isinstance(x, torch.Tensor) for x in leaves_input):
+            raise RuntimeError("Input leaves must be a Tensor")
+        if any(x.shape[dim] == 0 for x in leaves_input):
+            raise RuntimeError("Input leaves must have a scan dimension > 0")
+
     if len(leaves_init) > 0:
         shape = leaves_init[0].shape
         ndim = len(shape)
         dim = utils.canonicalize_dim(ndim, dim)
         num_el = shape[dim]
         output_spec = spec_init
-
-        assert all(
-            isinstance(x, torch.Tensor) for x in leaves_init
-        ), "If init leaves are provided, they must be a Tensor"
     else:
         shape = leaves_input[0].shape
         ndim = len(shape)
@@ -138,14 +152,6 @@ def scan(
             leaves_input = []
 
     if len(leaves_input) > 0:
-        assert all(
-            isinstance(x, torch.Tensor) for x in leaves_input
-        ), "If input leaves are provided, they must be a Tensor"
-
-        assert all(
-            x.shape[dim] > 0 for x in leaves_input
-        ), "If input leaves are provided, the scan dimension must be > 0"
-
         out = combine_fn(
             pytree.tree_unflatten(
                 [aten.slice(elem, dim, 0, 1, 1) for elem in leaves_input], output_spec
@@ -155,16 +161,18 @@ def scan(
             ),
         )
         out_leaves, tree_out = pytree.tree_flatten(out)
-        assert len(leaves_input) == len(
-            out_leaves
-        ), "The number of leaves of the pytree of the output of the operator needs to match the lenght of the pytree of the input"
-        for in_l, out_l in zip(leaves_init, out_leaves):
-            assert (
-                in_l.shape == out_l.shape
-            ), "The pytree of the output of the operator needs to match the pytree of the init"
+        if len(leaves_input) != len(out_leaves):
+            raise RuntimeError(
+                "The number of leaves of the pytree of the output of the operator\
+ needs to match the length of the pytree of the input"
+            )
+        if any(
+            in_l.shape != out_l.shape for in_l, out_l in zip(leaves_init, out_leaves)
+        ):
+            raise RuntimeError(
+                "The pytree of the output of the operator needs to match the pytree of the init"
+            )
 
-    # Add the init back to the result_flat as the first element
-    if len(leaves_input) > 0:
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
             combine_fn=combine_fn,
@@ -178,6 +186,7 @@ def scan(
             result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
 
         return pytree.tree_unflatten(result_flat, output_spec)
+
     else:
         return pytree.tree_unflatten(leaves_init, output_spec)
 
@@ -242,7 +251,9 @@ def generic_scan(operator, input, init, dim=0):
         return outs
 
     if len(input) == 0:
-        return []
+        raise ValueError(
+            "Input needs to be a list of tensors with a non-zero scan dimension"
+        )
 
     scans = _scan(input, init)
     return scans
@@ -301,7 +312,12 @@ def trace_scan(
     )
 
     with disable_proxy_modes_tracing():
-        out = [aten.clone(x) for x in input]
+        dim_len = input[0].shape[dim]
+        fake_out_shapes = [
+            tuple(-1 if i != dim else (dim_len + 1) for i, sh in enumerate(inp.size()))
+            for inp in input
+        ]
+        out = tuple(t.expand(*sh).clone() for t, sh in zip(init, fake_out_shapes))
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -324,9 +340,15 @@ def scan_proxy_mode(mode, combine_fn, input, init, dim):
 
 
 @scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, init, dim):
+def scan_fake_tensor_mode(mode, combine_fn, input, init, dim):
     with mode:
-        return combine_fn(*input, *input)
+        dim_len = input[0].shape[dim]
+        fake_out_shapes = [
+            tuple(-1 if i != dim else (dim_len + 1) for i, sh in enumerate(inp.size()))
+            for inp in input
+        ]
+        out = tuple(t.expand(*sh).clone() for t, sh in zip(init, fake_out_shapes))
+        return out
 
 
 @scan_op.py_functionalize_impl
@@ -335,5 +357,21 @@ def scan_functionalize(ctx, combine_fn, input, init, dim):
     unwrapped_init = ctx.unwrap_tensors(init)
     with ctx.redispatch_to_next() as m:
         functional_combine_fn = ctx.functionalize(combine_fn)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        sample_inputs = [
+            x for x in itertools.chain(unwrapped_init, unwrapped_init)
+        ]  # noqa: C416
+        if _has_potential_branch_input_mutation(
+            functional_combine_fn, sample_inputs, pre_dispatch=pre_dispatch
+        ):
+            raise UnsupportedAliasMutationException(
+                "Combine_fn might be modifying the input!"
+            )
+        if _has_potential_branch_input_alias(
+            functional_combine_fn, sample_inputs, pre_dispatch=pre_dispatch
+        ):
+            raise UnsupportedAliasMutationException(
+                "Combine_fn might be aliasing the input!"
+            )
         ret = scan_op(functional_combine_fn, unwrapped_input, unwrapped_init, dim)
     return ctx.wrap_tensors(ret)

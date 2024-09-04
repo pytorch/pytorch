@@ -23,6 +23,7 @@ from torch import distributed as dist
 from torch._C._functorch import _add_batch_dim, get_unwrapped, is_batchedtensor
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
+from torch._higher_order_ops.scan import scan
 from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
     extract_tensor_metadata,
@@ -922,6 +923,18 @@ class FakeTensorTest(TestCase):
 
         self.assertIsInstance(r, FakeTensor)
         self.assertEqual(r.size(), [3])
+
+    @parametrize("reverse", [False, True])
+    def test_scan(self, reverse):
+        def add(x, y):
+            return x + y
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            x = torch.randn((3, 5, 7), device="cpu")
+            r = scan(add, x, 1, reverse=reverse)
+
+        self.assertIsInstance(r, FakeTensor)
+        self.assertEqual(r.size(), x.size())
 
 
 instantiate_parametrized_tests(FakeTensorTest)

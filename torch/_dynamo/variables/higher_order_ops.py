@@ -1065,7 +1065,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             combine_fn,
             sub_args,
             sub_kwargs={},
-            description="scan_combine",
+            description="associativ_scan_combine_fn",
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
@@ -1097,7 +1097,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
-        combine_fn_name = add_subgraph(tx, "scan_combine", combine_gm)
+        combine_fn_name = add_subgraph(tx, "associatie_scan_combine_fn", combine_gm)
 
         p_args = (
             make_attr(tx, combine_fn_name),
@@ -1149,8 +1149,20 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         assert isinstance(init, torch._dynamo.variables.lists.BaseListVariable)
 
+        dim_fake = (
+            dim.as_proxy()
+            if type(dim.as_proxy()) == int
+            else get_fake_value(dim.as_proxy().node, tx)
+        )
+        dim_len = get_fake_value(input.items[0].as_proxy().node, tx).size()[dim_fake]
+        if dim_len == 0:
+            unimplemented(
+                "scan() operator doesn't support zero-sized tensors during tracing."
+            )
+
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
+        # TODO: Unify handling of sub_args across control flow ops, such as cond, while_loop, etc.
         sub_args = [
             inp.call_method(
                 tx,
@@ -1193,7 +1205,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             combine_fn,
             sub_args,
             sub_kwargs={},
-            description="scan_combine",
+            description="scan_combine_fn",
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
@@ -1240,11 +1252,11 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ):
                 unimplemented(
                     f"Expected metadata of the combine_fn result {combine_result_meta} to be the same as "
-                    + f"the metadata of init with {inp_meta}"
+                    + f"the metadata of init with {ini_meta}"
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
-        combine_fn_name = add_subgraph(tx, "scan_combine", combine_gm)
+        combine_fn_name = add_subgraph(tx, "scan_combine_fn", combine_gm)
 
         p_args = (
             make_attr(tx, combine_fn_name),
@@ -1254,9 +1266,28 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         with tx.fake_mode:
+            # For the fake mode, we need to duplicate the init tensor along the dim
+            # to have the same size as the input arguments
+            # We also do a clone with contiguous_format. This is to be consistent with
+            # eager semantic of map, which stacks the outputs. The result is contiguous
+            # as a result of the stack operation.
+            fake_out_shapes = [
+                tuple(
+                    -1 if i != dim_fake else (dim_len + 1)
+                    for i, sh in enumerate(
+                        get_fake_value(inp.as_proxy().node, tx).size()
+                    )
+                )
+                for inp in input.items
+            ]
             out_meta = tuple(
-                ini_proxy.node.meta["example_value"].clone() for ini_proxy in init_proxy
+                t.as_proxy()
+                .node.meta["example_value"]
+                .expand(*sh)
+                .clone(memory_format=torch.contiguous_format)
+                for t, sh in zip(init.items, fake_out_shapes)
             )
+
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
