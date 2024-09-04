@@ -1467,8 +1467,10 @@ class WrapperCodeGen(CodeGen):
         )
         return name, triton_meta
 
-    def generate_numel_expr(self, kernel_name: str, tree):
+    def generate_numel_expr(self, kernel_name: str, tree, suffix: Optional[str] = None):
         expr = f"{kernel_name}_{tree.prefix}numel"
+        if suffix is not None:
+            expr += f"_{suffix}"
         if (expr, V.graph) not in self.kernel_numel_expr:
             # declare expr once in each graph (scope)
             self.kernel_numel_expr.add((expr, V.graph))
@@ -1622,9 +1624,19 @@ class WrapperCodeGen(CodeGen):
             )
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
+        elif isinstance(arg, list):
+            return f"[{', '.join(self.generate_example_arg_value(a, type(a)) for a in arg)}]"
         else:
             breakpoint()
             raise NotImplementedError(f"Unsupported type {type(arg)}")
+
+    def _grid_dim_str(self, grid_per_dim):
+        if isinstance(grid_per_dim, list):
+            return (
+                "[" + ", ".join(self._grid_dim_str(item) for item in grid_per_dim) + "]"
+            )
+        else:
+            return pexpr(grid_per_dim)
 
     def generate_kernel_call(
         self,
@@ -1661,7 +1673,7 @@ class WrapperCodeGen(CodeGen):
                 if grid is None:
                     grid_str = grid_fn
                 else:
-                    grid_str = ", ".join(pexpr(item) for item in grid)
+                    grid_str = ", ".join(self._grid_dim_str(item) for item in grid)
                     if grid_extra_kwargs:
                         grid_str = f"{grid_str}, {grid_extra_kwargs}"
                     grid_str = f"{grid_fn}({grid_str})"
@@ -1715,6 +1727,8 @@ class WrapperCodeGen(CodeGen):
                         grid_str = ", ".join(
                             self.generate_example_arg_value(g, type(g)) for g in grid
                         )
+                        if grid_extra_kwargs:
+                            grid_str = f"{grid_str}, {grid_extra_kwargs}"
                         grid_str = f"{grid_fn}({grid_str})"
 
                     self.kernel_autotune_calls.writeline(
