@@ -72,13 +72,13 @@ def _from_dynamic_axes_to_dynamic_shapes(
     # for the exported program
     dynamic_shapes_to_exported_program = {}
     for input_name, axes in dynamic_axes.items():
-        # input_name can be either from inptu_names or from the model inputs
+        if input_name in output_names:
+            # User specified an output name as a dynamic axis, so we skip it
+            continue
+        # input_name can be either from input_names or from the model inputs
         if input_name not in input_names_to_model_inputs:
-            if input_name in output_names:
-                # User specified an output name as a dynamic axis, so we skip it
-                continue
             raise ValueError(
-                f"dynamix axis: {input_name} is not found in the input names: {input_names}"
+                f"dynamic axis: {input_name} is not found in the input names: {input_names}"
             )
         model_input_name = input_names_to_model_inputs[input_name]
         if isinstance(axes, dict):
