@@ -482,6 +482,77 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384, 385))
+    @parametrize("bias", (True, False))
+    @parametrize(
+        "unary",
+        ("relu",),
+    )
+    @parametrize(
+        "binary",
+        (
+            "add",
+            "sub",
+            "mul",
+            "div",
+        ),
+    )
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_with_unary_binary(
+        self, batch_size, in_features, out_features, bias, unary, binary, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias, unary, binary, other):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.unary = _get_epilogue(unary)
+                self.binary = _get_epilogue(binary, other)
+
+            def forward(self, x):
+                return self.binary(self.unary(self.linear(x)))
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        u = torch.randn(batch_size, out_features).to(dtype=dtype)
+        mod = M(bias=bias, unary=unary, binary=binary, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("batch_size", (1024,))
+    @parametrize("in_features", (1024,))
+    @parametrize("out_features", (1024, 1025))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.bfloat16)
+    def test_linear_amx(self, batch_size, in_features, out_features, bias, dtype):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        vec_amx = VecAMX()
+        self._check_amx_counter(vec_amx)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (8,))
     @parametrize("in_features", (128,))
     @parametrize("in_features_2", (196,))
@@ -569,76 +640,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
-
-    @inductor_config.patch({"freezing": True})
-    @patches
-    @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    @parametrize("batch_size", (384,))
-    @parametrize("in_features", (196,))
-    @parametrize("out_features", (384, 385))
-    @parametrize("bias", (True, False))
-    @parametrize(
-        "unary",
-        ("relu",),
-    )
-    @parametrize(
-        "binary",
-        (
-            "add",
-            "sub",
-            "mul",
-            "div",
-        ),
-    )
-    @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_linear_with_unary_binary(
-        self, batch_size, in_features, out_features, bias, unary, binary, dtype
-    ):
-        class M(torch.nn.Module):
-            def __init__(self, bias, unary, binary, other):
-                super().__init__()
-                self.linear = torch.nn.Linear(in_features, out_features, bias)
-                self.unary = _get_epilogue(unary)
-                self.binary = _get_epilogue(binary, other)
-
-            def forward(self, x):
-                return self.binary(self.unary(self.linear(x)))
-
-        counters.clear()
-        v = torch.randn(batch_size, in_features).to(dtype=dtype)
-        u = torch.randn(batch_size, out_features).to(dtype=dtype)
-        mod = M(bias=bias, unary=unary, binary=binary, other=u).to(dtype=dtype).eval()
-        with verify(dtype) as (atol, rtol):
-            self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
-
-    @inductor_config.patch({"freezing": True})
-    @patches
-    @torch.no_grad
-    @parametrize("batch_size", (1024,))
-    @parametrize("in_features", (1024,))
-    @parametrize("out_features", (1024, 1025))
-    @parametrize("bias", (True, False))
-    @dtypes(torch.bfloat16)
-    def test_linear_amx(self, batch_size, in_features, out_features, bias, dtype):
-        class M(torch.nn.Module):
-            def __init__(self, bias):
-                super().__init__()
-                self.linear = torch.nn.Linear(in_features, out_features, bias)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        counters.clear()
-        v = torch.randn(batch_size, in_features).to(dtype=dtype)
-        mod = M(bias=bias).to(dtype=dtype).eval()
-        with verify(dtype) as (atol, rtol):
-            self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-        vec_amx = VecAMX()
-        self._check_amx_counter(vec_amx)
 
     @inductor_config.patch({"freezing": True})
     @patches
