@@ -113,7 +113,7 @@ class FunctionalTensor(torch.Tensor):
     ]
 
     # Used by auto_functionalize to determine base of tensors during inference mode.
-    _inference_mode_base = None
+    _inference_mode_base: Optional[weakref.ref["FunctionalTensor"]] = None
 
     def __new__(cls, elem, mode):
         assert torch._is_functional_tensor(elem)
@@ -146,9 +146,9 @@ class FunctionalTensor(torch.Tensor):
             cls,
             elem.shape,  # sizes
             elem.stride() if not is_sparse_any(elem) else None,  # strides
-            elem.storage_offset()
-            if not is_sparse_any(elem)
-            else None,  # storage_offset
+            (
+                elem.storage_offset() if not is_sparse_any(elem) else None
+            ),  # storage_offset
             None,  # memory_format
             elem.dtype,  # dtype
             elem.layout,  # layout
@@ -166,13 +166,13 @@ class FunctionalTensor(torch.Tensor):
         if torch.is_inference_mode_enabled():
             if out.is_base_tensor():
                 out._inference_mode_base = None
-                # We assume that the FunctionalTensor does not change its storage after this point.
-                # Otherwise this would be invalid. 
-                mode._storage_to_base[out.elem.storage()._cdata] = out
+                # This assumes that the FunctionalTensor does not change its storage after this point.
+                # Otherwise this would be invalid.
+                mode._storage_to_base[out.elem.untyped_storage()] = weakref.ref(out)
             else:
                 out._inference_mode_base = mode._storage_to_base[
-                    out.elem.storage()._cdata
-                ]
+                    out.elem.untyped_storage()
+                ]()
                 assert out._inference_mode_base is not None
         return out
 
@@ -336,7 +336,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
 
-        self._storage_to_base = weakref.WeakValueDictionary()
+        self._storage_to_base: Dict[
+            torch.storage.UntypedStorage, Optional[weakref.ref[FunctionalTensor]]
+        ] = weakref.WeakKeyDictionary()
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
