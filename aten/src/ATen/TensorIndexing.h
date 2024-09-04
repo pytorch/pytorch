@@ -6,6 +6,7 @@
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/irange.h>
+#include <iostream> // Include for std::cout
 #include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -404,6 +405,13 @@ inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   return sizes.slice(first_non1_src);
 }
 
+inline bool isBatchedTensorCheck(const Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(
+             DispatchKey::FuncTorchBatched) ||
+      tensor.unsafeGetTensorImpl()->key_set().has(
+          DispatchKey::BatchedNestedTensor);
+}
+
 inline void copy_to(const Tensor& dst, const Tensor& src) {
   if (dst.sym_sizes().equals(src.sym_sizes())) {
     // A shortcut to avoid generating hard-coded constant sizes during tracing.
@@ -472,10 +480,20 @@ inline Tensor handleDimInMultiDimIndexing(
   } else if (index.is_tensor()) {
     Tensor result = prev_dim_result;
     const Tensor& tensor = index.tensor();
+
     auto scalar_type = tensor.scalar_type();
     if (tensor.dim() == 0 &&
         at::isIntegralType(scalar_type, /*includeBool=*/true)) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
+        if (isBatchedTensorCheck(tensor)) {
+          result = result.index_select(*dim_ptr, tensor);
+          auto ss = result.sizes();
+          std::cout << "tensor is batched" << *dim_ptr << real_dim << ss
+                    << std::endl;
+          result = result.squeeze(*dim_ptr);
+          return result;
+        }
+        std::cout << "tensor is not batched" << *dim_ptr << std::endl;
         result = impl::applySelect(
             result,
             *dim_ptr,

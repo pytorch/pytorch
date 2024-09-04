@@ -3483,6 +3483,27 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 output = vmap(fn, chunk_size=chunk_size, **kwargs)(*args)
                 self.assertEqual(output, expected_vmap)
 
+    def test_vmap_getitem(self):
+        # vanilla
+        def op(x): return torch.arange(4)[x]
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        test(op, (torch.arange(3),))
+
+        # indexed tensor has more than one dim
+        def op(x): return torch.arange(16).view(4, 4)[x]
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        test(op, (torch.arange(3),))
+
+        # second dim
+        def op(x): return torch.arange(16).view(4, 4)[:, x]
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        test(op, (torch.arange(3),))
+
+        # Nested vmap
+        op = vmap(lambda x: torch.arange(16).view(4, 4)[:, x])
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        test(op, (torch.arange(4).view(2, 2),))
+
     @parametrize("in_dim", [0, 1])
     @parametrize("out_dim", [0, 1])
     @parametrize("randomness", ["error", "same"])
