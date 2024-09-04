@@ -1116,7 +1116,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     if (dtype == ScalarType::Half) {
       static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
       return fp16_pack;
-    } 
+    }
     return false;
   }
 };
