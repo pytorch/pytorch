@@ -28,8 +28,6 @@ from torch._subclasses.fake_tensor import (
 )
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._stats import count_label
-from torch.utils._sympy.numbers import IntInfinity
-from torch.utils._sympy.value_ranges import bound_sympy
 
 
 pytree = torch.utils._pytree
@@ -457,6 +455,8 @@ def masked_select(fake_mode, func, self, mask):
         _constrain_range_for_size,
         has_free_symbols,
     )
+    from torch.utils._sympy.numbers import IntInfinity
+    from torch.utils._sympy.value_ranges import bound_sympy
 
     # If num elements is expressed symbolically, calculate
     # the concrete value based on upper bounds. Otherwise,
