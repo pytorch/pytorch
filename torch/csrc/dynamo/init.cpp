@@ -1,4 +1,5 @@
 #include <torch/csrc/dynamo/init.h>
+#include <torch/csrc/dynamo/utils.h>
 
 #include <pybind11/stl_bind.h>
 #include <torch/csrc/Exceptions.h>
@@ -41,6 +42,11 @@ void initDynamoBindings(PyObject* torch) {
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
   if (eval_frame == nullptr ||
       PyModule_AddObject(dynamo, "eval_frame", eval_frame) != 0) {
+    throw python_error();
+  }
+
+  PyObject* utils = torch_c_dynamo_utils_init();
+  if (utils == nullptr || PyModule_AddObject(dynamo, "utils", utils) != 0) {
     throw python_error();
   }
 
