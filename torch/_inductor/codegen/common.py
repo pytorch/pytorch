@@ -271,8 +271,8 @@ def get_device_op_overrides(device: str):
 @functools.lru_cache(None)
 def boolean_ops():
     return (
-        "is_inf",
-        "is_nan",
+        "isinf",
+        "isnan",
         "logical_not",
         "signbit",
         "le",

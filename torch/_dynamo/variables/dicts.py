@@ -356,11 +356,13 @@ class ConstDictVariable(VariableTracker):
         return [x.vt for x in self.items.keys()]
 
     def call_hasattr(self, tx, name):
-        # dict/OrderedDict do not allow setting arbitrary attributes. To check for hasattr, we can just check the
-        # __dict__ of the cls.
-        if name in self.user_cls.__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+        # dict not allow setting arbitrary attributes. To check for hasattr, we can just check the __dict__ of the dict.
+        # OrderedDict though requires side effects tracking because it supports arbitrary setattr.
+        if self.user_cls is dict:
+            if name in self.user_cls.__dict__:
+                return ConstantVariable.create(True)
+            return ConstantVariable.create(False)
+        unimplemented(f"hasattr on {self.user_cls} is not supported")
 
 
 class DefaultDictVariable(ConstDictVariable):
