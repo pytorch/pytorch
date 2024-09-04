@@ -10,10 +10,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,model_fail_to_load,0
-
-
-
 LearningToPaint,pass,0
 
 
@@ -30,7 +26,7 @@ basic_gnn_edgecnn,pass,0
 
 
 
-basic_gnn_gcn,pass,6
+basic_gnn_gcn,pass,0
 
 
 
@@ -46,7 +42,7 @@ dcgan,pass,0
 
 
 
-demucs,pass,3
+demucs,pass,0
 
 
 
@@ -54,67 +50,43 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,pass,42
+detectron2_fasterrcnn_r_101_c4,fail_to_run,0
 
 
 
-detectron2_fasterrcnn_r_101_dc5,pass,42
+detectron2_fasterrcnn_r_101_dc5,fail_to_run,0
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,46
+detectron2_fasterrcnn_r_101_fpn,fail_to_run,0
 
 
 
-detectron2_fasterrcnn_r_50_c4,pass,42
+detectron2_fasterrcnn_r_50_c4,fail_to_run,0
 
 
 
-detectron2_fasterrcnn_r_50_dc5,pass,42
+detectron2_fasterrcnn_r_50_dc5,fail_to_run,0
 
 
 
-detectron2_fasterrcnn_r_50_fpn,pass,46
+detectron2_fasterrcnn_r_50_fpn,fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,23
+dlrm,fail_to_run,0
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_accuracy,57
+doctr_det_predictor,fail_to_run,0
 
 
 
-detectron2_maskrcnn_r_101_fpn,fail_accuracy,63
+doctr_reco_predictor,fail_to_run,0
 
 
 
-detectron2_maskrcnn_r_50_c4,fail_accuracy,57
-
-
-
-detectron2_maskrcnn_r_50_fpn,pass,63
-
-
-
-dlrm,pass,0
-
-
-
-doctr_det_predictor,pass,5
-
-
-
-doctr_reco_predictor,pass,4
-
-
-
-drq,pass,0
-
-
-
-fastNLP_Bert,pass,4
+drq,fail_to_run,0
 
 
 
@@ -154,10 +126,6 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,5
-
-
-
 hf_T5_base,pass,0
 
 
@@ -174,7 +142,7 @@ lennard_jones,pass,0
 
 
 
-llama,pass,0
+llama,fail_to_run,0
 
 
 
@@ -186,23 +154,15 @@ maml_omniglot,pass,0
 
 
 
-mnasnet1_0,pass,0
-
-
-
 mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,pass,2
+mobilenet_v2_quantized_qat,fail_to_run,0
 
 
 
 mobilenet_v3_large,pass,0
-
-
-
-moco,model_fail_to_load,0
 
 
 
@@ -211,10 +171,6 @@ moondream,pass,0
 
 
 nvidia_deeprecommender,pass,0
-
-
-
-opacus_cifar10,pass,0
 
 
 
@@ -262,7 +218,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,pass,2
+resnet50_quantized_qat,fail_to_run,0
 
 
 
@@ -270,15 +226,7 @@ resnext50_32x4d,pass,0
 
 
 
-shufflenet_v2_x1_0,pass,0
-
-
-
-soft_actor_critic,pass,0
-
-
-
-speech_transformer,pass,10
+soft_actor_critic,fail_to_run,0
 
 
 
@@ -326,7 +274,7 @@ torch_multimodal_clip,pass,0
 
 
 
-tts_angular,pass,2
+tts_angular,pass,0
 
 
 
@@ -334,8 +282,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,27
+vision_maskrcnn,fail_to_run,0
 
 
 
-yolov3,pass,0
+yolov3,fail_to_run,0
