@@ -9,6 +9,7 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
+    _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
     reenter_make_fx,
@@ -357,6 +358,8 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim):
 def associative_scan_functionalize(ctx, combine_fn, input, dim):
     unwrapped_input = ctx.unwrap_tensors(input)
     with ctx.redispatch_to_next() as m:
-        functional_combine_fn = ctx.functionalize(combine_fn)
+        functional_combine_fn = ctx.functionalize(
+            _maybe_run_with_interpreter(combine_fn)
+        )
         ret = associative_scan_op(functional_combine_fn, unwrapped_input, dim)
     return ctx.wrap_tensors(ret)
