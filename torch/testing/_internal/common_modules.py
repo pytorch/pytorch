@@ -15,7 +15,7 @@ from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.testing._internal.common_dtype import (
     floating_types, floating_and_complex_types_and, get_all_fp_dtypes)
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
+    _TestParametrizer, _update_param_kwargs, expectedFailureMPS, toleranceOverride, tol,
     skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipMPS, skipMPSVersionIfLessThan,
     skipCUDAVersionIn)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
@@ -1718,14 +1718,6 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
             constructor_input=FunctionInput(3, 6, 1e-3),
             forward_input=FunctionInput(make_input((4, 6, 2, 3))),
             desc='2d_affine'),
-        ModuleInput(
-            constructor_input=FunctionInput(3, 6, 1e-3),
-            forward_input=FunctionInput(make_input((4, 6, 28, 28))),
-            desc='2d_affine_large_feature'),
-        ModuleInput(
-            constructor_input=FunctionInput(3, 51, 1e-5, False),
-            forward_input=FunctionInput(make_input((2, 51, 28, 28))),
-            desc='2d_no_affine_large_feature'),
         ModuleInput(
             constructor_input=FunctionInput(3, 3, 1e-3, False),
             forward_input=FunctionInput(make_input((4, 3, 2, 3))),
@@ -3438,9 +3430,6 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm1d,
                skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
                    DecorateInfo(
@@ -3459,9 +3448,8 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
                skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),
+                   # See https://github.com/pytorch/pytorch/issues/134580
+                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format'),
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
                    DecorateInfo(

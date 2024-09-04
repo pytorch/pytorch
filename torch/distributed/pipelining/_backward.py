@@ -135,7 +135,7 @@ def get_param_groups(
 
     # The assert will only be true if the input tensor requires gradients,
     # otherwise the autograd graph will miss the first layer of inputs
-    # assert union_params == set(params)
+    assert union_params == set(params)
     return unique_param_groups
 
 
@@ -148,6 +148,11 @@ def stage_backward_input(
     """
     compute the gradients for only the stage inputs with respect to the stage outputs
     """
+    # TODO: sets require gradients for input
+    for inp in input_values:
+        if not inp.requires_grad:
+            inp.requires_grad_(True)
+
     stage_output_grad_fns: List[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs))
     )

@@ -1414,6 +1414,15 @@ Tensor& mean_out(const Tensor& self, DimnameList dim,
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
+Tensor& mean_dtype_out(const Tensor &self, std::optional<ScalarType> dtype, Tensor& result) {
+  TORCH_CHECK(
+    canCast(self.scalar_type(), result.scalar_type()),
+      "mean.dtype_out(): input types can't be cast to the desired output type ",
+      result.scalar_type());
+  // at::mean_out should make sure dtype and result.scalar_type() are the same
+  return at::mean_out(result, self, IntArrayRef{}, false, dtype);
+}
+
 // TODO(@heitorschueroff) implement custom kernels for nanmean
 Tensor& nanmean_out(
     const Tensor& self,

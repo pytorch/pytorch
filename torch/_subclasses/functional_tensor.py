@@ -278,6 +278,10 @@ class FunctionalTensor(torch.Tensor):
     int = _conversion_method_template(dtype=torch.int32)
     long = _conversion_method_template(dtype=torch.int64)
 
+    # TODO(sparse-team): fixes #133174 but can we do without the relay?
+    def to_dense(self):
+        return self.elem.to_dense()
+
     @property
     def layout(self):
         return self.elem.layout
@@ -298,6 +302,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         # Map of effect type (ex. _EffectType.ORDERED) to a token. The tokens help keep
         # track of the ordering between side effectful operations.
         self._tokens: Dict[Any, torch.Tensor] = {}
+
+        # Filled after forward tracing.
+        self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
 
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to

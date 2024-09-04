@@ -340,8 +340,7 @@ struct CodeImpl {
       int reg = registerFor(input);
       bool moved = input->uses().size() == ++use_count_[input];
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      OpCode op;
+      OpCode op{};
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
       } else if (moved) {

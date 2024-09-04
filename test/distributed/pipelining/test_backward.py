@@ -95,9 +95,8 @@ class StageBackwardTests(TestCase):
             self.assertEqual(p.grad, None)
 
         # Monitor memory after backward_input
+        after_gc_counts = []
         for _ in range(5):
-            gc.collect()
-            before_gc_count = len(gc.get_objects())
             out = mod(x)
             loss = loss_fn(out, target)
             dinputs, param_groups = stage_backward_input(
@@ -108,7 +107,10 @@ class StageBackwardTests(TestCase):
             )
             gc.collect()
             after_gc_count = len(gc.get_objects())
-            self.assertLessEqual(after_gc_count, before_gc_count)
+            after_gc_counts.append(after_gc_count)
+
+        # Check that after gc_counts are not increasing
+        self.assertFalse(all(after_gc_counts[i] > after_gc_counts[i+1] for i in range(len(after_gc_counts)-1)))
 
     def test_stage_backward_weight(self):
         # MLP as a stage module

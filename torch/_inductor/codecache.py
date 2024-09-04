@@ -53,7 +53,7 @@ from typing_extensions import TypeAlias
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.utils import ChromiumEventLogger, counters, dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed, get_chromium_event_logger
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -429,6 +429,7 @@ def write(
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
+    encode_utf_8: bool = hash_type == "code"
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path
@@ -442,7 +443,10 @@ def write_text(text: str) -> str:
 
 
 def write_atomic(
-    path: str, content: Union[str, bytes], make_dirs: bool = False
+    path: str,
+    content: Union[str, bytes],
+    make_dirs: bool = False,
+    encode_utf_8: bool = False,
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
@@ -454,7 +458,7 @@ def write_atomic(
         path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     write_mode = "w" if isinstance(content, str) else "wb"
-    with tmp_path.open(write_mode) as f:
+    with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
         f.write(content)
     tmp_path.rename(path)
 
@@ -1358,7 +1362,8 @@ class FxGraphCache:
                 )
         assert compiled_graph is not None
         cache_info["cache_state"] = cache_state
-        ChromiumEventLogger.log_instant_event(
+        chromium_log = get_chromium_event_logger()
+        chromium_log.log_instant_event(
             f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
         torch._logging.trace_structured(
@@ -1899,10 +1904,15 @@ class AotCodeCompiler:
                     run_command_and_check(link_cmd)
 
                 if use_mmap_weights:
+                    import resource
+
+                    page_size_ = resource.getpagesize()
+                    page_size = max(16384, page_size_)
+
                     with open(output_so, "a+b") as f_so:
                         so_size = f_so.tell()
                         # Page align the weights
-                        f_so.write(b" " * (16384 - so_size % 16384))
+                        f_so.write(b" " * (page_size - so_size % page_size))
                         f_so.write(serialized_weights)
                         f_so.write(struct.pack("q", magic_number))
 
@@ -2227,7 +2237,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
-        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
+        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == -1 && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
