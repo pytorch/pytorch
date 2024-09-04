@@ -261,7 +261,8 @@ struct AddGenericMetadata : public MetadataBase {
 
     // Add metadata for kwinputs if exist
     for (const auto& [key, val] : op_event.kwinputs_) {
-      addMetadata(key, ivalueToStr(val));
+      bool isString = val.isString();
+      addMetadata(key, ivalueToStr(val, isString));
     }
     // Add extra metadata if any
     for (const auto& [key, val] : op_event.extra_meta_) {
