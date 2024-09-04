@@ -542,9 +542,20 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::CachingHostAllocator_emptyCache();
+  }
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::emptyCache();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::emptyCache();
+  }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -1837,6 +1848,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaHostAllocator,
      METH_NOARGS,
      nullptr},
+    {"_host_emptyCache", THCPModule_hostEmptyCache, METH_NOARGS, nullptr},
     {"_cuda_cudaCachingAllocator_raw_alloc",
      THCPModule_cudaCachingAllocator_raw_alloc,
      METH_VARARGS,
