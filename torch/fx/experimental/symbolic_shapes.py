@@ -57,6 +57,7 @@ from torch.fx.experimental.recording import (
 )
 from torch.fx.experimental.sym_node import SymNode, SymTypes
 from torch._logging import trace_structured, structured
+import torch._logging.scribe as scribe
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
@@ -1418,6 +1419,52 @@ def _maybe_evaluate_static_worker(
     that occurs when we reallocate the symbols
     """
 
+    def log_and_return(res):
+        def jsonify(x):
+            if x.is_integer:
+                if x in [int_oo, -int_oo]:
+                    return str(x)
+                return int(x)
+            elif x.is_real:
+                return float(x)
+            else:
+                return bool(x)
+
+        try:
+            env = {}
+            for s, vr, hint in symbol_info:
+                e = {}
+                if not s.is_integer and s.is_real:
+                    e['real'] = True
+                else:
+                    assert s.is_integer
+                if vr is not None:
+                    e['vr'] = [jsonify(vr.lower), jsonify(vr.upper)]
+                if hint is not None:
+                    e['hint'] = jsonify(hint)
+                env[str(s)] = e
+            entry = {
+                'expr': str(expr),
+                'env': env,
+                'res': jsonify(res),
+            }
+            if unbacked_only:
+                entry['unbacked_only'] = True
+        except Exception:
+            log.exception("log_and_return failed")
+        else:
+            signpost_event(
+                "dynamic",
+                "maybe_evaluate_static_worker",
+                entry,
+            )
+            scribe.open_source_signpost(
+                subsystem="dynamic",
+                name="maybe_evaluate_static_worker",
+                parameters=lambda: json.dumps(entry),
+            )
+        return res
+
     # Simplify making use of value range lower bound
     new_shape_env = {}
     new_range_env = {}
@@ -1478,12 +1525,12 @@ def _maybe_evaluate_static_worker(
     # analysis give lose bounds
     new_expr = canonicalize_bool_expr(safe_expand(new_expr))
     if new_expr.is_number:
-        return new_expr
+        return log_and_return(new_expr)
 
     # Check if the range can solve it statically
     out = bound_sympy(new_expr, new_range_env)
     if out.is_singleton():
-        return out.lower
+        return log_and_return(out.lower)
 
     return new_expr if unbacked_only else None
 
