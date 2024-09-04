@@ -157,6 +157,20 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
+    def test_pinned_memory_empty_cache(self):
+        for alloc_settings in (True, False):
+            torch.cuda.memory._set_allocator_settings(
+                f"pinned_use_cuda_host_register:{alloc_settings}"
+            )
+            try:
+                t = torch.ones(1024 * 1024, pin_memory=True)
+                self.assertTrue(t.is_pinned())
+                del t
+                torch._C._host_emptyCache()
+            except RuntimeError as e:
+                # Some GPUs don't support same address space on host and device side
+                pass
+
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
