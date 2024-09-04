@@ -40,6 +40,8 @@
 #include <ATen/ops/xlogy_native.h>
 #endif
 
+#include <cmath>
+
 namespace at::native {
 namespace mps {
 
@@ -253,6 +255,109 @@ static void div_mode_template(const Tensor& self,
                  div_mode_op_block);
 }
 
+static const Tensor& tiled_add_sub_lerp(const Tensor& self,
+                                        const Tensor& other,
+                                        const Scalar& alpha,
+                                        const Tensor& output,
+                                        std::string op_name) {
+  std::cout << self.sizes() << std::endl;
+  std::cout << other.sizes() << std::endl;
+  std::cout << output.sizes() << std::endl;
+
+  id<MTLBuffer> selfBuffer = getMTLBufferStorage(self);
+  id<MTLBuffer> otherBuffer = getMTLBufferStorage(other);
+  id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+
+      uint64_t originalBatchSize = self.sizes().size() > 2 ? self.size(1) : 1;
+      uint64_t selfRows = self.size(-2);
+      uint64_t otherRows = other.size(-2);
+      uint64_t outputRows = output.size(-2);
+      uint64_t selfCols = self.size(-1);
+      uint64_t otherCols = other.size(-1);
+      uint64_t outputCols = output.size(-1);
+      uint64_t selfElemSize = self.element_size();
+      uint64_t otherElemSize = other.element_size();
+      uint64_t outputElemSize = output.element_size();
+      MPSDataType dtype = getMPSDataType(self);
+
+      uint64_t elemInMatrix = outputRows * outputCols;
+      uint64_t largestSupportedBatchSize = floor(std::pow(2, 32) / elemInMatrix);
+      uint64_t batchSize = std::min(largestSupportedBatchSize, originalBatchSize);
+      uint64_t lastBatchSize = originalBatchSize % batchSize;
+
+      MPSShape* selfShape = @[ @(batchSize), @(selfRows), @(selfCols) ];
+      MPSShape* otherShape = @[ @(batchSize), @(otherRows), @(otherCols) ];
+      MPSShape* outputShape = @[ @(batchSize), @(outputRows), @(outputCols) ];
+      auto selfDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:selfShape];
+      selfDesc_.preferPackedRows = true;
+      auto otherDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:otherShape];
+      otherDesc_.preferPackedRows = true;
+      auto outputDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:outputShape];
+      outputDesc_.preferPackedRows = true;
+
+      MPSNDArrayDescriptor *selfDescLastBatch_, *otherDescLastBatch_, *outputDescLastBatch_;
+      if (lastBatchSize != 0) {
+        selfDescLastBatch_ =
+            [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(selfRows), @(selfCols) ]];
+        selfDescLastBatch_.preferPackedRows = true;
+        otherDescLastBatch_ =
+            [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(otherRows), @(otherCols) ]];
+        otherDescLastBatch_.preferPackedRows = true;
+        outputDescLastBatch_ =
+            [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                   shape:@[ @(lastBatchSize), @(outputRows), @(outputCols) ]];
+        outputDescLastBatch_.preferPackedRows = true;
+      }
+
+      uint64_t requiredIterations = ceil(float(originalBatchSize) / batchSize);
+      auto selfDesc = selfDesc_;
+      auto otherDesc = otherDesc_;
+      auto outputDesc = outputDesc_;
+
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      auto kernel = [[MPSNDArrayAddition alloc] initWithDevice:device];
+
+      for (const auto i : c10::irange(requiredIterations)) {
+        if (i == requiredIterations - 1 && lastBatchSize != 0) {
+          selfDesc = selfDescLastBatch_;
+          otherDesc = otherDescLastBatch_;
+          outputDesc = outputDescLastBatch_;
+        }
+
+        const uint64_t selfArrayOffset = i * batchSize * selfRows * selfCols;
+        const uint64_t otherArrayOffset = i * batchSize * otherRows * otherCols;
+        const uint64_t outputArrayOffset = i * batchSize * outputRows * outputCols;
+
+        auto selfNDArray = [[[MPSNDArray alloc] initWithBuffer:selfBuffer
+                                                        offset:(self.storage_offset() + selfArrayOffset) * selfElemSize
+                                                    descriptor:selfDesc] autorelease];
+        auto otherNDArray =
+            [[[MPSNDArray alloc] initWithBuffer:otherBuffer
+                                         offset:(other.storage_offset() + otherArrayOffset) * otherElemSize
+                                     descriptor:outputDesc] autorelease];
+        auto outputNDArray =
+            [[[MPSNDArray alloc] initWithBuffer:outputBuffer
+                                         offset:(output.storage_offset() + outputArrayOffset) * outputElemSize
+                                     descriptor:outputDesc] autorelease];
+
+        [kernel encodeToCommandEncoder:computeEncoder
+                         commandBuffer:commandBuffer
+                          sourceArrays:@[ selfNDArray, otherNDArray ]
+                      destinationArray:outputNDArray];
+      }
+    }
+  });
+  return output;
+}
+
 static void add_sub_lerp_template(const Tensor& self,
                                   const Tensor& other,
                                   const Scalar& alpha,
@@ -414,16 +519,18 @@ TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tens
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  if ((isComplexType(self.scalar_type()) || isComplexType(other.scalar_type())) && !alpha.isComplex() &&
-      !mps::supportsComplex()) {
-    // Complex add with non-complex alpha is just add over views
-    return mps::add_sub_lerp_template(mps::legacy_complex_as_view(self),
-                                      mps::legacy_complex_as_view(other),
-                                      alpha,
-                                      mps::legacy_complex_as_view(output),
-                                      "add");
-  }
-  mps::add_sub_lerp_template(self, other, alpha, output, "add");
+  //  if ((isComplexType(self.scalar_type()) || isComplexType(other.scalar_type())) && !alpha.isComplex() &&
+  //      !mps::supportsComplex()) {
+  //    // Complex add with non-complex alpha is just add over views
+  //    return mps::add_sub_lerp_template(mps::legacy_complex_as_view(self),
+  //                                      mps::legacy_complex_as_view(other),
+  //                                      alpha,
+  //                                      mps::legacy_complex_as_view(output),
+  //                                      "add");
+  //  }
+  //
+  //  mps::add_sub_lerp_template(self, other, alpha, output, "add");
+  mps::tiled_add_sub_lerp(self, other, alpha, output, "add");
 }
 
 TORCH_IMPL_FUNC(sub_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
