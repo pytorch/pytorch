@@ -2686,10 +2686,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   work->outputs_ =
       std::make_shared<std::vector<at::Tensor>>(std::move(outputs));
 
-  if (avoidRecordStreams && inputs.size() == 1) {
+  if (avoidRecordStreams) {
     work->stashed_for_allocator_safety_ =
         std::make_shared<std::vector<at::Tensor>>();
-    work->stashed_for_allocator_safety_->push_back(inputs[0]);
+    for (const auto& input : inputs) {
+      work->stashed_for_allocator_safety_->push_back(input);
+    }
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard(device);
