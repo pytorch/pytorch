@@ -1,7 +1,7 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import logging
 import operator
+import sys
 from typing import Any, Dict, Optional, Set, TYPE_CHECKING
 
 
@@ -93,7 +93,7 @@ def insert_deferred_runtime_asserts(
     import sympy
 
     from torch.fx.experimental.symbolic_shapes import (
-        _has_unsupported_sympy_function,
+        _has_uninterpretable_sympy_function,
         CallMethodKey,
         cast_symbool_to_symint_guardless,
         ConvertIntKey,
@@ -104,6 +104,7 @@ def insert_deferred_runtime_asserts(
     )
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import PythonReferenceAnalysis
+    from torch.utils._sympy.value_ranges import ValueRanges
 
     # TODO: Request simplification on runtime asserts before emitting them
     ras_by_symbol = shape_env.deferred_runtime_asserts.copy()
@@ -135,7 +136,7 @@ def insert_deferred_runtime_asserts(
             (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
             # this holds back from reifying anything in torch.utils._sympy.functions.py that's unsupported
-            and not _has_unsupported_sympy_function(val)
+            and not _has_uninterpretable_sympy_function(val)
             and any(
                 isinstance(arg, fx.Node)
                 and isinstance(_get_example_value(arg), (torch.Tensor, torch.Size))
@@ -194,7 +195,7 @@ def insert_deferred_runtime_asserts(
                     and _is_bound_expr_for_symbol(ra.expr)
                 )
                 # don't try to reify sympy functions we can't turn into FX nodes
-                or _has_unsupported_sympy_function(ra.expr)
+                or _has_uninterpretable_sympy_function(ra.expr)
             ):
                 continue
 
@@ -494,6 +495,10 @@ def insert_deferred_runtime_asserts(
                         )
 
                 vr = shape_env.var_to_range[i0]
+                if vr.is_int and vr.upper == sys.maxsize - 1:
+                    # treat upper bound == sys.maxsize - 1 for int symbols as +oo
+                    # to avoid redundant runtime assert
+                    vr = ValueRanges(vr.lower, int_oo)
                 if not shape_env._default_unspecified_value_range().issubset(vr):
                     # The runtime range is constrained, so add a runtime
                     # assert and also explicitly refine the range

@@ -242,12 +242,31 @@ class _KinetoProfile:
     def toggle_collection_dynamic(
         self, enable: bool, activities: Iterable[ProfilerActivity]
     ):
-        """Toggle collection of activities on/off
+        """Toggle collection of activities on/off at any point of collection. Currently supports toggling Torch Ops
+        (CPU) and CUDA activity supported in Kineto
 
         Args:
-            activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-                ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
-                ``torch.profiler.ProfilerActivity.XPU``.
+            activities (iterable): list of activity groups to use in profiling, supported values:
+                ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``
+        Examples:
+
+        .. code-block:: python
+
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            ) as p:
+                code_to_profile_0()
+                // turn off collection of all CUDA activity
+                p.toggle_collection_dynamic(False, [torch.profiler.ProfilerActivity.CUDA])
+                code_to_profile_1()
+                // turn on collection of all CUDA activity
+                p.toggle_collection_dynamic(True, [torch.profiler.ProfilerActivity.CUDA])
+                code_to_profile_2()
+            print(p.key_averages().table(
+                sort_by="self_cuda_time_total", row_limit=-1))
         """
         if not self.profiler:
             return
