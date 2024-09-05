@@ -915,7 +915,7 @@ def _compile(
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
         except Exception as e:
-            fail_type = str(type(e))
+            fail_type = type(e).__qualname__
             fail_reason = str(e)
             # NB: e's msg is mutated here to add user stack, but we DON'T want
             # that stack in the Scuba logged fail_reason
