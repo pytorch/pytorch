@@ -3394,6 +3394,71 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_frozenset_construction(self):
+        def fn(x):
+            s = frozenset({x})
+            t = frozenset(s)
+            return len(t)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_frozenset_reconstruction(self):
+        d = {}
+        f = frozenset()
+        d[f] = torch.randn(4)
+
+        def fn(x):
+            k = frozenset()
+            torch._dynamo.graph_break()
+            return d[k] * x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_frozenset_illegal_call_method(self):
+        def fn_add():
+            s = frozenset((1, 2, 3))
+            s.add({2})
+            return len(s)
+
+        def fn_pop():
+            s = frozenset((1, 2, 3))
+            s.pop()
+            return len(s)
+
+        def fn_update():
+            s = frozenset((1, 2, 3))
+            s.update({4, 5, 6})
+            return len(s)
+
+        def fn_remove():
+            s = frozenset((1, 2, 3))
+            s.remove(2)
+            return len(s)
+
+        def fn_discard():
+            s = frozenset((1, 2, 3))
+            s.discard(2)
+            return len(s)
+
+        def fn_clear():
+            s = frozenset((1, 2, 3))
+            s.clear()
+            return len(s)
+
+        for fn in [fn_add, fn_pop, fn_update, fn_remove, fn_discard, fn_clear]:
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
+                opt_fn()
+
     def test_is_tensor_tensor(self):
         def fn(x, y):
             if x is y:
