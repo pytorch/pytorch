@@ -15,9 +15,7 @@ test_classes = {}
 
 def mocked_training_ir_to_run_decomp_export_strict(*args, **kwargs):
     ep = torch.export.export_for_training(*args, **kwargs)
-    decomp_table = {}
-    for k in testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY:
-        decomp_table[k] = None
+    decomp_table = testing._testing_decomp_table()
     return ep.run_decompositions(decomp_table)
 
 
@@ -27,9 +25,7 @@ def mocked_training_ir_to_run_decomp_export_non_strict(*args, **kwargs):
     else:
         ep = torch.export.export_for_training(*args, **kwargs, strict=False)
 
-    decomp_table = {}
-    for k in testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY:
-        decomp_table[k] = None
+    decomp_table = testing._testing_decomp_table()
     return ep.run_decompositions(decomp_table)
 
 

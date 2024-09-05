@@ -136,10 +136,10 @@ def make_fake_inputs(
 
     combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
-    transformed_dynamic_shapes = _transform_shapes_for_default_dynamic(
+    _dynamic_shapes = _transform_shapes_for_default_dynamic(
         combined_args, dynamic_shapes
     )
-    constraints = _process_dynamic_shapes(combined_args, transformed_dynamic_shapes)
+    constraints = _process_dynamic_shapes(combined_args, _dynamic_shapes)
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
@@ -216,14 +216,7 @@ def make_fake_inputs(
             phantom_symbols=list(phantom_symbols.values()),
             warn_only=False,
         )
-        return (
-            fake_mode,
-            fake_args,
-            fake_kwargs,
-            equalities_inputs,
-            original_signature,
-            transformed_dynamic_shapes,
-        )
+        return fake_mode, fake_args, fake_kwargs, equalities_inputs, original_signature
 
 
 def _flatten_dynamic_shapes(

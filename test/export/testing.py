@@ -195,6 +195,17 @@ _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
 ]
 
 
+def _testing_decomp_table():
+    """
+    This decomp table is intended for testing only. It basically tries its' best to 
+    replicate functional pre-dispatch IR. 
+    """
+    decomp_table = {}
+    for op in _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY:
+        decomp_table[op] = None
+    return decomp_table
+
+
 def make_test_cls_with_mocked_export(
     cls, cls_prefix, fn_suffix, mocked_export_fn, xfail_prop=None
 ):

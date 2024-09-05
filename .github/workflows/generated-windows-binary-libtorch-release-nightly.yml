@@ -221,7 +221,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-release
@@ -480,7 +480,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_8-shared-with-deps-release
@@ -740,7 +740,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda12_1-shared-with-deps-release
@@ -1000,7 +1000,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda12_4-shared-with-deps-release

@@ -42,7 +42,6 @@ register_log(
     [
         "torch._dynamo",
         "torch.export",
-        "torch.export.dynamic_shapes",
         *DYNAMIC,
         "torch._export.converter",
         "torch._export.non_strict_utils",

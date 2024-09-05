@@ -293,19 +293,15 @@ std::string strListToStr(const std::vector<std::string>& types) {
     return "[" + rc + "]";
   }
 }
-std::string ivalueToStr(const c10::IValue& val, bool isString) {
+std::string ivalueToStr(const c10::IValue& val) {
   std::stringstream ss;
   if (val.isNone()) {
     return "\"None\"";
   } else {
     ss.str("");
-    if (isString) {
-      ss << "\"";
-    }
+    ss << "\"";
     ss << val;
-    if (isString) {
-      ss << "\"";
-    }
+    ss << "\"";
     std::string mystr = ss.str();
 
     // A double quote can cause issues with the chrome tracing so force

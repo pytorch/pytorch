@@ -3,6 +3,8 @@ self-hosted-runner:
     # GitHub hosted x86 Linux runners
     - linux.20_04.4x
     - linux.20_04.16x
+    # Repo-specific LF hosted ARC runners
+    - linux.large.arc
     # Organization-wide AWS Linux Runners
     - linux.large
     - linux.2xlarge

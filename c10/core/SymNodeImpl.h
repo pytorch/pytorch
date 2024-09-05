@@ -239,4 +239,5 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
 };
 
 } // namespace c10
-C10_DIAGNOSTIC_POP()
+
+C10_CLANG_DIAGNOSTIC_POP()

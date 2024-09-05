@@ -2429,9 +2429,6 @@ def _automatic_dynamic(
 
     # Prep for automatic dynamic
     def update_frame_state(size, stride):
-        # Intentionally shadow e from parent scope so it is not accidentally
-        # called
-        e = None
         frame_state_entry = None
         if name not in tx.output.frame_state:
             # If there is no entry for this source, add the tensor to frame state with its current static size.
@@ -2442,13 +2439,13 @@ def _automatic_dynamic(
         else:
             frame_state_entry = tx.output.frame_state[name]
             if frame_state_entry.size is not None:
-                if len(size) != len(frame_state_entry.size):
+                if e.ndim != len(frame_state_entry.size):
                     # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
                     # E.g. {"x": [2, 3, 4]} -> {"x": None}
                     log.debug(
                         "automatic dynamic %s dim %s != %s",
                         name,
-                        len(size),
+                        e.ndim,
                         frame_state_entry.size,
                     )
                     frame_state_entry.size = None
@@ -2465,7 +2462,7 @@ def _automatic_dynamic(
                                 "automatic dynamic %s size(%s) %s != %s",
                                 name,
                                 i,
-                                size[i],
+                                e.size(i),
                                 dim,
                             )
                             frame_state_entry.size[i] = None
@@ -2495,7 +2492,7 @@ def _automatic_dynamic(
                                     "automatic dynamic %s stride(%s) %s != %s",
                                     name,
                                     i,
-                                    stride[i],
+                                    e.stride(i),
                                     dim,
                                 )
                                 frame_state_entry.stride[i] = None

@@ -4,11 +4,11 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 
-CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
-    : backend(backend) {
+CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend) {
   this->check_fn = guarded_code.attr("check_fn");
   this->code = guarded_code.attr("code");
   this->compile_id = guarded_code.attr("compile_id");
+  this->backend = backend;
   // TODO - clean this up when enable_cpp_guard_manager is True by default
   if (py::hasattr(this->check_fn, "root")) {
     this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
@@ -16,7 +16,6 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   }
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 CacheEntry::~CacheEntry() {
   // prevent check_fn from use-after-free when invalidating
   this->check_fn.attr("cache_entry") = py::none();
@@ -48,6 +47,9 @@ PyObject* get_backend(PyObject* callback) {
   py::handle handle = py::handle(callback);
   while (py::hasattr(handle, "_torchdynamo_orig_callable")) {
     handle = handle.attr("_torchdynamo_orig_callable");
+  }
+  if (py::hasattr(handle, "compiler_fn")) {
+    handle = handle.attr("compiler_fn");
   }
   return handle.ptr();
 }

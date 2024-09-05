@@ -1661,7 +1661,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         args = e["args"]
                         self.assertTrue("stream" in args)
                         self.assertTrue("grid" in args)
-                        self.assertTrue(args["stream"] == 0)
+                        self.assertTrue(args["stream"] == "0")
                         self.assertTrue(args["grid"] == "lambda x : x + 1")
                         self.assertTrue(args["debug"] == "None")
 

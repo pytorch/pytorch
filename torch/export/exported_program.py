@@ -230,10 +230,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, safe=True):
     saved_tables = {}
     patched_ops = set()
     for op_overload in ops_to_preserve:
-        if safe:
-            # If we didn't error, it means we can go ahead
-            _assert_valid_to_preserve(op_overload)
-
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
 

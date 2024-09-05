@@ -91,10 +91,7 @@ def verify_onnx_program(
         )
         abs_diff = abs_diff.flatten()
         rel_diff = rel_diff.flatten()
-        bins = torch.tensor(
-            [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10, 1000000],
-            dtype=abs_diff.dtype,
-        )
+        bins = torch.tensor([0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10])
         abs_diff_hist = torch.histogram(abs_diff, bins=bins)
         rel_diff_hist = torch.histogram(rel_diff, bins=bins)
         results.append(

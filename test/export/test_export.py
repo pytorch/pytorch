@@ -686,27 +686,6 @@ graph():
         M()(torch.randn(7))
         torch.export.export(M(), (torch.randn(7),))
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_cond_contains_unbacked_no_escape(self):
-        class M(torch.nn.Module):
-            def forward(self, a, b1, b2, c):
-                def true_fn(x):
-                    return x * b1.item()
-
-                def false_fn(x):
-                    return x * b2.item()
-
-                r = torch.cond(a, true_fn, false_fn, (c,))
-                return r * 2
-
-        args = (
-            torch.tensor(True),
-            torch.tensor([4]),
-            torch.tensor([4]),
-            torch.randn(10, requires_grad=True),
-        )
-        torch.export.export(M(), args)
-
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
@@ -1408,10 +1387,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ep = torch.export.export(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
-        decomp_table = {}
-        for k in testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY:
-            decomp_table[k] = None
-        ep_has_linear_convd = ep.run_decompositions(decomp_table=decomp_table)
+        ep_has_linear_convd = ep.run_decompositions(decomp_table=testing._testing_decomp_table())
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
             """\
@@ -1493,11 +1469,8 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
 
-        decomp_table = {}
-        for k in testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY:
-            decomp_table[k] = None
         ep_has_linear_convd = ep.run_decompositions(
-            decomp_table=decomp_table,
+            decomp_table=testing._testing_decomp_table(),
         )
 
         self.assertExpectedInline(
@@ -1556,6 +1529,51 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
+    def test_error_when_passing_mutating_primitive_op(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() 
+        
+        ep = export(Foo(), (torch.ones(3, 3),))
+        with self.assertRaisesRegex(
+            RuntimeError, 
+            "aten.index_put_.default is a mutating/aliasing op, we can't preserve it as is"
+        ):
+            ep.run_decompositions({torch.ops.aten.index_put_.default: None})
+
+    def test_if_post_autograd_op_preserved(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() + x.sum()
+        
+        ep = export(Foo(), (torch.ones(3, 3),))
+        decomp_table = core_aten_decompositions()
+        decomp_table[torch.ops.aten.sum.default] = None 
+        
+        # Even though we are decomposing to core aten which should make
+        # sum into sum.dim_IntList, we explicitly marked it to not do that.
+        ep_preserve_sum = ep.run_decompositions(decomp_table)
+        self.assertExpectedInline(
+            str(ep_preserve_sum.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    sin = torch.ops.aten.sin.default(x)
+    sum_1 = torch.ops.aten.sum.default(x);  x = None
+    add = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_no_preserve_sum = ep.run_decompositions(core_aten_decompositions())
+        self.assertExpectedInline(
+            str(ep_no_preserve_sum.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    sin = torch.ops.aten.sin.default(x)
+    sum_1 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
+    add = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
+    return (add,)""",
+        )
+        
     def test_set_grad_empty(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -2034,7 +2052,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             + re.escape(
                 "specified at `dynamic_shapes[0]['k']['k'][0]` "
                 "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                " where each dimension is an int, a Dim, Dim.AUTO, or Dim.STATIC)"
+                " where each dimension is None, an int, a Dim, Dim.AUTO, or Dim.STATIC)"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
