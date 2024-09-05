@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 from .graph_module import GraphModule
 from .graph import Graph
 from .node import Node

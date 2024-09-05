@@ -68,17 +68,16 @@ jobs:
     needs: get-label-type
     with:!{{ upload.binary_env_as_input(config) }}
       {%- if "aarch64" in build_environment %}
-      runner_prefix: amz2023.
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       {%- else %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       {%- endif %}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
@@ -103,7 +102,6 @@ jobs:
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
       {%- if "aarch64" in build_environment %}
-      runner_prefix: amz2023.
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
@@ -112,10 +110,10 @@ jobs:
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
       {%- else %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
       {%- endif %}
     secrets:

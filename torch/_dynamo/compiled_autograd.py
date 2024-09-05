@@ -182,7 +182,7 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
-    def proxy_call_hook(self, hook, *args):
+    def proxy_call_hook(self, hook, *args, **kwargs):
         return self.fx_tracer.create_proxy(
             "call_function",
             call_hook,
@@ -190,7 +190,7 @@ class AutogradCompilerInstance:
                 hook,
                 *[self.to_proxy(x) for x in args],
             ),
-            {},
+            kwargs,
         )
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):
@@ -199,6 +199,7 @@ class AutogradCompilerInstance:
         proxy = self.proxy_call_hook(
             hook,
             inputs[i],
+            hook_type="tensor_pre_hook",
         )
         with disable_proxy_modes_tracing():
             inputs[i] = maybe_clone(inputs[i])
@@ -211,6 +212,7 @@ class AutogradCompilerInstance:
         proxies = self.proxy_call_hook(
             hook,
             inputs,
+            hook_type="pre_hook",
         )
         with disable_proxy_modes_tracing():
             inputs = [maybe_clone(x) for x in inputs]
@@ -224,6 +226,7 @@ class AutogradCompilerInstance:
             hook,
             outputs,
             inputs,
+            hook_type="post_hook",
         )
         with disable_proxy_modes_tracing():
             outputs = [maybe_clone(x) for x in outputs]
@@ -237,6 +240,7 @@ class AutogradCompilerInstance:
         proxies = self.proxy_call_hook(
             hook,
             input,
+            hook_type="post_acc_grad_hook",
         )
         with disable_proxy_modes_tracing():
             input = [maybe_clone(input)]
