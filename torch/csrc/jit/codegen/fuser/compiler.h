@@ -11,9 +11,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Performs device-independent "upfront" compilation of the given fusion_group,
 // if it has not been registered already.
@@ -55,6 +53,4 @@ struct TORCH_API RegisterFusionBackend {
   }
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser
