@@ -1737,7 +1737,7 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
 
-            def get_nbytes_of_tensor(tensor, all_cuda):
+            def get_nbytes_of_tensor(tensor: torch.Tensor, all_cuda: bool) -> int:
                 n_bytes = (
                     torch.ops.mkldnn._nbytes(tensor)
                     if tensor.is_mkldnn
