@@ -33,6 +33,8 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
+_legal_ops = dict.fromkeys(['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root'])
+
 _side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
     torch._C._set_grad_enabled,
     torch.amp._enter_autocast,
@@ -164,6 +166,8 @@ class Node(_NodeBase):
     - ``output`` contains the output of the traced function in its ``args[0]`` attribute. This corresponds to the "return" statement
       in the Graph printout.
     """
+    _args: Tuple['Argument', ...]
+    _kwargs: Dict[str, 'Argument']
 
     @compatibility(is_backward_compatible=True)
     def __init__(self, graph: 'Graph', name: str, op: str, target: 'Target',
@@ -198,7 +202,7 @@ class Node(_NodeBase):
         super().__init__()
         self.graph = graph
         self.name = name  # unique name of value being created
-        assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
+        assert op in _legal_ops
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
         if op == 'call_function':
             if not callable(target):
@@ -215,7 +219,7 @@ class Node(_NodeBase):
         # The public API for this is `all_input_nodes`, this private attribute
         # should not be accessed directly.
         self._input_nodes : Dict[Node, None] = {}
-        self.__update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore[arg-type]
+        self.__update_args_kwargs(args, kwargs)
 
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo ``x + x``
@@ -364,7 +368,7 @@ class Node(_NodeBase):
         """
         # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.args = new_args`
-        self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore[arg-type]
+        self.__update_args_kwargs(a, self._kwargs)
 
     @property
     def kwargs(self) -> Dict[str, Argument]:
@@ -387,7 +391,7 @@ class Node(_NodeBase):
         """
         # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.kwargs = new_kwargs`
-        self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore[arg-type]
+        self.__update_args_kwargs(self._args, k)
 
     @property
     def all_input_nodes(self) -> List['Node']:
@@ -453,9 +457,7 @@ class Node(_NodeBase):
             key (str): The key in ``self.kwargs`` of the element to update
             arg (Argument): The new argument value to write into ``kwargs``
         """
-        kwargs = dict(self.kwargs)
-        kwargs[key] = arg
-        self.kwargs = kwargs
+        self.kwargs = {**self.kwargs, key: arg}
 
     @property
     def stack_trace(self) -> Optional[str]:
@@ -479,18 +481,23 @@ class Node(_NodeBase):
         """
         This API is internal. Do *not* call it directly.
         """
-        self._args = new_args
-        self._kwargs = new_kwargs
+        def update_users_and_input_nodes(n: Any) -> Any:
+            if isinstance(n, Node):
+                self._input_nodes.setdefault(n)
+                n.users.setdefault(self)
+            return n
 
+        # Clear prior users and input_nodes
         for old_use in self._input_nodes.keys():
             old_use.users.pop(self)
-
         self._input_nodes = {}
-        map_arg(self._args, self._input_nodes.setdefault)
-        map_arg(self._kwargs, self._input_nodes.setdefault)
 
-        for new_use in self._input_nodes.keys():
-            new_use.users.setdefault(self)
+        # We do three things in a single pass of the args
+        # - Normalize list->immutable_list, dict->immutable_dict, etc
+        # - Populate self._input_nodes
+        # - Populate arg.users[self] for each arg
+        self._args = map_aggregate(new_args, update_users_and_input_nodes)  # type: ignore[assignment]
+        self._kwargs = map_aggregate(new_kwargs, update_users_and_input_nodes)  # type: ignore[assignment]
 
     def __repr__(self) -> str:
         if self._repr_fn:
