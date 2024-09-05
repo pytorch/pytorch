@@ -1,4 +1,5 @@
-from typing import Callable, List, TypeAlias, Union
+from typing import Callable, List, Union
+from typing_extensions import TypeAlias
 
 
 try:
