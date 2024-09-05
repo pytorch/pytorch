@@ -60,6 +60,52 @@ def hook2(grads):
 def hook3(gI, gO):
     return (torch.sin(gI[0]) + gO[0],)
 
+torch.library.define(
+    "testlib::foo",
+    "(Tensor(a!) x, Tensor(b!) z) -> (Tensor, Tensor, Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
+torch.library.define(
+    "testlib::foo_mutated",
+    "(Tensor(a!) x) -> (Tensor, Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
+torch.library.define(
+    "testlib::foo_functional",
+    "(Tensor x) -> (Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
+torch.library.define(
+    "testlib::foo_unbacked",
+    "(Scalar x) -> (Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
+
+
+
+@torch.library.impl("testlib::foo", "cpu")
+@torch._dynamo.disable
+def foo_impl(x, z):
+    x.add_(5)
+    z.add_(5)
+    return x, z, x + z
+
+
+@torch.library.impl_abstract("testlib::foo")
+def foo_abstract(x, z):
+    return x, z, x + z
+
+
+@torch.library.impl("testlib::foo_mutated", "CompositeImplicitAutograd")
+def foo_mutated(x):
+    a, b, c = torch.ops.testlib.foo(x, x.cos())
+    return a, a.cos()
+
+
+@torch.library.impl("testlib::foo_functional", "CompositeImplicitAutograd")
+def foo_functional(x):
+    a, b, c = torch.ops.testlib.foo(x.cos(), x.cos())
+    return a.cos()
 
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
@@ -1432,35 +1478,53 @@ main()
             )
 
     def test_trace_auto_functionalized(self):
-        def fsdp_split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, out=out):
-            return torch.ops.fsdp.split_with_sizes_copy(
-                all_gather_output, all_gather_input_split_sizes, dim=1, out=out
-            )
+        # def g(all_gather_output, all_gather_input_split_sizes, out, unsharded_params):
+        #     torch.ops.fsdp.split_with_sizes_copy(
+        #         all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+        #     )
+        #     for o, up in zip(out, unsharded_params):
+        #         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(up):
+        #             torch.ops.fsdp.set_(up, o)
+        #     z = unsharded_params[0]
+        #     for up in unsharded_params:
+        #         z = torch.matmul(z, up)
+        #         z = z * z
+        #     return z
 
-        def g(all_gather_output, all_gather_input_split_sizes, out=out):
-            torch.utils.checkpoint.checkpoint(
-                fsdp_split_with_sizes_copy, all_gather_output, all_gather_input_split_sizes, out, use_reentrant=False
-            )
-            z = 1.
-            for o in out:
-                z = torch.mul(z, o.sum())
-            return z
+        # def g_cp(all_gather_output, all_gather_input_split_sizes, out, unsharded_params):
+        #     return torch.utils.checkpoint.checkpoint(g, all_gather_output, all_gather_input_split_sizes, out, unsharded_params, use_reentrant=False)
+
+        # def f():
+        #     all_gather_output = torch.randn(8, 16)
+        #     all_gather_input_split_sizes = [8, 8]
+        #     dim = 1
+        #     out = [
+        #         torch.empty(8, 8),
+        #         torch.empty(8, 8),
+        #     ]
+        #     unsharded_params = [
+        #         torch.empty(8, 8, requires_grad=True),
+        #         torch.empty(8, 8, requires_grad=True),
+        #     ]
+        #     output = torch.compile(g, fullgraph=True)(
+        #         all_gather_output, all_gather_input_split_sizes, out, unsharded_params
+        #     )
+        #     output.sum().backward()
+        #     return output, *[x.grad for x in unsharded_params]
+
+        def g(x):
+            x = torch.matmul(x, x)
+            o1, o2 = torch.ops.testlib.foo_mutated(x)
+            return torch.matmul(o1, o2)
+
+        def g_cp(x):
+            return torch.utils.checkpoint.checkpoint(g, x, use_reentrant=False)
 
         def f():
-            all_gather_output = torch.randn(2, 272, requires_grad=True)
-            all_gather_input_split_sizes = [128, 8, 128, 8]
-            dim = 1
-            out = [
-                torch.empty(2, 128, requires_grad=True),
-                torch.empty(2, 8, requires_grad=True),
-                torch.empty(2, 128, requires_grad=True),
-                torch.empty(2, 8, requires_grad=True),
-            ]
-            out = torch.compile(g, fullgraph=True)(
-                all_gather_output, all_gather_input_split_sizes, out
-            )
-            out.sum().backward()
-            return out, *[x.grad for x in [all_gather_output] + out]
+            inps = (torch.randn(4, 4, requires_grad=True),)
+            output = torch.compile(g_cp, fullgraph=True)(*inps)
+            output.sum().backward()
+            return output, inps[0].grad
 
         """
         Walkthrough of what happens with `auto_functionalized`:
@@ -1481,7 +1545,7 @@ main()
 
         def make_compiler_fn_with_op_check():
             def _compiler_fn(gm):
-                # Checks that `auto_functionalized` op exists in Compiled Autograd's Dynamo graph.
+                # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
                 self.assertTrue(
                     any(
                         node.target is torch.ops.higher_order.auto_functionalized
