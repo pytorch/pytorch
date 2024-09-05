@@ -62,6 +62,8 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._utils_internal import log_cache_bypass
 
+from .utils import _align
+
 
 T = TypeVar("T")
 
@@ -1729,9 +1731,9 @@ class AotCodeCompiler:
 
             output_o = os.path.splitext(input_path)[0] + ".o"
             consts_size = sum(
-                torch.ops.mkldnn._nbytes(tensor)
+                _align(torch.ops.mkldnn._nbytes(tensor))
                 if tensor.is_mkldnn
-                else tensor.untyped_storage().nbytes()
+                else _align(tensor.untyped_storage().nbytes())
                 for (name, tensor) in graph.constants.items()
                 if name not in graph.folded_constants
             )
