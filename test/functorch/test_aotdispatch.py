@@ -6023,6 +6023,12 @@ class TestAOTModuleSimplified(AOTTestCase):
         self.assertEqual(ref_out, out)
 
     def test_channels_last_grads_no_force_contiguous_dense(self):
+        # https://github.com/pytorch/pytorch/issues/134644
+        # AOTD tries to predict tangents for tracing ahead of time.
+        # The first strategy was to coerce traced_tangents and runtime_tangents to be contiguous().
+        # But for models working in channels_last memory format this will add additional contiguous() calls.
+        # The fix is predicting tangents memory format to be similar to outputs memory format.
+        # And coerce runtime tangents to that traced memory format.
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -6057,6 +6063,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         inps = dense_inps()
         outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
         s = outs[0].sum()
+        # Using torch.profiler to verify that no contiguous() calls happenend
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
         ) as prof:
