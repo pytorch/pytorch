@@ -2631,8 +2631,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
 
 template <typename Fn, typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
-    at::Tensor& input,
-    at::Tensor& output,
+    std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& outputs,
     Fn fn,
     PreProcess pre,
     PostProcess post,
@@ -2652,7 +2652,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   seqCollective_++;
   op_id_++;
 
-  auto device = getDevice(input);
+  auto device = getDevice(inputs[0]);
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
 
@@ -2677,28 +2677,25 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // First let NCCL streams wait for input tensors allocation streams
   syncStream(device, ncclEvents_[key], ncclStream);
 
-  std::vector<at::Tensor> inputs{input};
-  std::vector<at::Tensor> outputs{output};
-
   bool enqueue =
       !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
   auto work =
       initWork(device, rank_, opType, profilingTitle, inputs, outputs, enqueue);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
-  work->outputs_ =
-      std::make_shared<std::vector<at::Tensor>>(std::move(outputs));
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   if (avoidRecordStreams) {
     work->stashed_for_allocator_safety_ =
-        std::make_shared<std::vector<at::Tensor>>();
-    work->stashed_for_allocator_safety_->push_back(input);
+        std::make_shared<std::vector<at::Tensor>>(inputs);
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   if (nanCheck) {
-    checkForNan(input, ncclStream);
+    for (const auto& input : inputs) {
+      checkForNan(input, ncclStream);
+    }
   }
 
   // Start event should only be recorded before the ncclGroupStart()
@@ -2719,25 +2716,35 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   //
   // See [Sync Streams].
   if (!avoidRecordStreams) {
-    if (!input.is_sparse()) {
-      c10::cuda::CUDACachingAllocator::recordStream(
-          input.storage().data_ptr(), ncclStream);
-    } else {
-      // for sparse input case record streams on both index and value
-      // tensors
-      c10::cuda::CUDACachingAllocator::recordStream(
-          input.values().storage().data_ptr(), ncclStream);
-      c10::cuda::CUDACachingAllocator::recordStream(
-          input.indices().storage().data_ptr(), ncclStream);
+    for (const auto& input : inputs) {
+      if (!input.is_sparse()) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            input.storage().data_ptr(), ncclStream);
+      } else {
+        // for sparse input case record streams on both index and value
+        // tensors
+        c10::cuda::CUDACachingAllocator::recordStream(
+            input.values().storage().data_ptr(), ncclStream);
+        c10::cuda::CUDACachingAllocator::recordStream(
+            input.indices().storage().data_ptr(), ncclStream);
+      }
     }
   }
+
+// Not all collectives have the same signature, e.g, all-reduce take in a Tensor
+// as the input and output while all-to-all take in a vector of Tensors as input
+// and output. Because we define the signature of the fn to take only single
+// tensor as input and output, we need to do a hack to get the first element in
+// the vector and pass it to fn.
+// TODO: we should clean up this in future (by either entirely removing lambda's
+// or removing input and output from lambda's signature).
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(
-      fn(input, output, comm, ncclStream),
+      fn(inputs[0], outputs[0], comm, ncclStream),
       ncclComm->getNcclCommFailureReason());
 #else
   C10D_NCCL_CHECK_TIMEOUT(
-      fn(input, output, comm, ncclStream),
+      fn(inputs[0], outputs[0], comm, ncclStream),
       comm,
       ncclComm->getNcclCommFailureReason());
 #endif
@@ -2779,8 +2786,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   assignTimeoutToWork(work, options_);
   // Record size info for debug. We only record the size on the first device as
   // multi-device per process is deprecated
-  work->numelIn_ = input.numel();
-  work->numelOut_ = output.numel();
+  work->numelIn_ = 0;
+  work->numelOut_ = 0;
+  for (const auto& input : inputs) {
+    work->numelIn_ += input.numel();
+  }
+  for (const auto& output : outputs) {
+    work->numelOut_ += output.numel();
+  }
 
   // Notify graphs before we check the capture status preemptively
   at::cuda::CUDAGraph::inc_pending_event_queries();
@@ -3222,6 +3235,31 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 }
 
+template <typename Fn, typename PreProcess, typename PostProcess>
+c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
+    at::Tensor& input,
+    at::Tensor& output,
+    Fn fn,
+    PreProcess pre,
+    PostProcess post,
+    OpType opType,
+    const char* profilingTitle,
+    bool avoidRecordStreams,
+    bool nanCheck) {
+  auto inputs = std::vector<at::Tensor>{input};
+  auto outputs = std::vector<at::Tensor>{output};
+  return collective(
+      inputs,
+      outputs,
+      fn,
+      pre,
+      post,
+      opType,
+      profilingTitle,
+      avoidRecordStreams,
+      nanCheck);
+}
+
 template <typename Fn>
 c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     at::Tensor& input,
@@ -3231,9 +3269,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     const char* profilingTitle,
     bool avoidRecordStreams,
     bool nanCheck) {
+  auto inputs = std::vector<at::Tensor>{input};
+  auto outputs = std::vector<at::Tensor>{output};
   return collective(
-      input,
-      output,
+      inputs,
+      outputs,
       fn,
       [](at::cuda::CUDAStream&,
          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
@@ -3532,10 +3572,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
         ValueError,
         "Tensor input and output of _broadcast_oop must have the same number of elements ");
   }
-
   const auto root = opts.rootRank + opts.rootTensor;
   bool nanCheck = (root == rank_);
-
   return collective(
       inputTensor,
       outputTensor,
@@ -3632,7 +3670,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
         ValueError,
         "Tensor input and output of _reduce_oop must have the same number of elements ");
   }
-
   return collective(
       inputTensor,
       outputTensor,
@@ -4225,8 +4262,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       this->getSize()); // worldSize
 
   return collective(
-      inputTensors[0],
-      outputTensors[0],
+      inputTensors,
+      outputTensors,
       [&](at::Tensor& /* unused */,
           at::Tensor& /* unused */,
           ncclComm_t comm,
@@ -4419,9 +4456,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
 
   // avoidRecordStreams_ note: collective() will stash inputTensors and
   // outputs, which == outputTensors[0] on the root rank where it matters.
+
+  auto inputs = std::vector<at::Tensor>{inputTensor};
   return collective(
-      inputTensor,
-      outputs[0], // just to fit the collective interface
+      inputs,
+      outputs, // just to fit the collective interface
       [&](at::Tensor& /* unused */,
           at::Tensor& /* unused */,
           ncclComm_t comm,
@@ -4438,6 +4477,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
         torch::cuda::nccl::gather(inputTensor, outputs, comm, stream, root);
         return ncclSuccess;
       },
+      [](at::cuda::CUDAStream&,
+         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [](at::cuda::CUDAStream&,
+         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
       OpType::GATHER,
       "nccl:gather");
 }
@@ -4511,9 +4554,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   const auto root = opts.rootRank;
   bool nanCheck = (rank_ == root);
 
+  auto outputs = std::vector<at::Tensor>{outputTensor};
   return collective(
-      outputTensor,
-      inputs[0], // just to fit the collective interface
+      outputs,
+      inputs, // just to fit the collective interface
       [&](at::Tensor& /* unused */,
           at::Tensor& /* unused */,
           ncclComm_t comm,
@@ -4529,6 +4573,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
         torch::cuda::nccl::scatter(inputs, outputTensor, comm, stream, root);
         return ncclSuccess;
       },
+      [](at::cuda::CUDAStream&,
+         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [](at::cuda::CUDAStream&,
+         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
       OpType::SCATTER,
       "nccl:scatter",
       avoidRecordStreams,
