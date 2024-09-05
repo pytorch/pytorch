@@ -1448,9 +1448,13 @@ def _maybe_evaluate_static_worker(
                 'expr': str(expr),
                 'env': env,
                 'res': jsonify(res),
+                'pytest_current_test': os.getenv('PYTEST_CURRENT_TEST'),
             }
             if unbacked_only:
                 entry['unbacked_only'] = True
+            from torch._dynamo.utils import get_chromium_event_logger
+            chromium_log = get_chromium_event_logger()
+            entry['simple_stack'] = chromium_log.get_stack()
         except Exception:
             log.exception("log_and_return failed")
         else:
