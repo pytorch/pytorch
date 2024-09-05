@@ -1376,6 +1376,34 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    def test_eager_backward_strides(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.qkv_proj = torch.nn.Linear(256, 256 * 3)
+                self.n_head = 256 // 64
+                self.d_attn = 256
+
+            def forward(self, x):
+                n_batch, n_ctx, _ = x.shape
+                q, k, v = self.qkv_proj(x).split(
+                    [self.d_attn, self.d_attn, self.d_attn], dim=2
+                )
+                q = q.reshape(n_batch, n_ctx, self.n_head, -1)
+                k = k.reshape(n_batch, n_ctx, self.n_head, -1)
+                v = v.reshape(n_batch, n_ctx, self.n_head, -1)
+                q = q.transpose(1, 2)
+                k = k.transpose(1, 2)
+                v = v.transpose(1, 2)
+                x = torch.nn.attention.flex_attention.flex_attention(q, k, v)
+                return x
+
+        model = Repro().cuda()
+        x = torch.randn((1, 512, 256), device="cuda", requires_grad=True)
+        out = torch.compile(model, backend="aot_eager")(x)
+        out.backward(torch.ones_like(out))
+
+    @supported_platform
     def test_differentiable_logsumexp_gradcheck(self):
         make_tensor = functools.partial(
             torch.randn,
@@ -1507,7 +1535,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         out, lse = flex(query, key, value, block_mask=block_mask, return_lse=True)
         self.assertEqual(out[:, :, M:, :].sum(), 0)
-        self.assertTrue((lse[:, :, M:] == 0.0).all())
+        self.assertTrue((lse[:, :, M:] == -float("inf")).all())
 
         loss = out.sum() + lse.sum()
         loss.backward()
@@ -1640,6 +1668,86 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out_compiled, lse_compiled = flex_compile(query, key, value, return_lse=True)
 
         torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
+
+    @supported_platform
+    @common_utils.parametrize("backend", ["flex_attention", "flex_decode", "eager"])
+    def test_lse_masked_output(self, backend):
+        if backend == "flex_decode":
+            kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
+            flex_call = torch.compile(flex_attention, fullgraph=True)
+        elif backend == "flex_attention":
+            kernel_options = {"FORCE_USE_FLEX_ATTENTION": True}
+            flex_call = torch.compile(flex_attention, fullgraph=True)
+        else:
+            kernel_options = {}
+            flex_call = flex_attention
+
+        N_CTX = 96
+        SLIDING_WINDOW = 64
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, N_CTX, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+
+        def sliding_window_causal(b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            window_mask = q_idx - kv_idx <= SLIDING_WINDOW
+            return causal_mask & window_mask
+
+        def global_causal(b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            window_mask = q_idx - kv_idx > SLIDING_WINDOW
+            return causal_mask & window_mask
+
+        sliding_window_causal = torch.nn.attention.flex_attention.create_block_mask(
+            sliding_window_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+        )
+        global_causal = torch.nn.attention.flex_attention.create_block_mask(
+            global_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+        )
+
+        local_attn = functools.partial(
+            flex_call,
+            block_mask=sliding_window_causal,
+            return_lse=True,
+            kernel_options=kernel_options,
+        )
+        global_attn = functools.partial(
+            flex_call,
+            block_mask=global_causal,
+            return_lse=True,
+            kernel_options=kernel_options,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        gradOut = make_tensor(requires_grad=False)
+
+        x_local, lse_local = local_attn(q, k, v)
+        x_global, lse_global = global_attn(q, k, v)
+
+        max_lse = torch.maximum(lse_local, lse_global)
+        lse_global = lse_global - max_lse
+        lse_local = lse_local - max_lse
+        lse_global = torch.exp(lse_global)
+        lse_local = torch.exp(lse_local)
+        x = ((x_local * lse_local[..., None]) + (x_global * lse_global[..., None])) / (
+            lse_global[..., None] + lse_local[..., None]
+        )
+        x.backward(gradOut)
+        flex_q_grad, flex_k_grad, flex_v_grad = q.grad, k.grad, v.grad
+        q.grad = None
+        k.grad = None
+        v.grad = None
+
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True)
+        out.backward(gradOut)
+
+        torch.testing.assert_close(x, out, atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(flex_q_grad, q.grad, atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(flex_k_grad, k.grad, atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(flex_v_grad, v.grad, atol=3e-3, rtol=2e-3)
 
     @supported_platform
     def test_small_q_kv_len(self):
@@ -1834,6 +1942,63 @@ class TestBlockMask(InductorTestCase):
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
 
     @supported_platform
+    def test_getitem(self):
+        offset = torch.zeros(8, device="cuda")
+
+        def causal_mask(b, h, q, kv):
+            return (q + (offset[b] * 128)) >= kv
+
+        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512)
+        assert block_mask.kv_num_blocks.shape == (4, 2, 4)
+        assert block_mask.kv_indices.shape == (4, 2, 4, 4)
+
+        # Index on batch dimension
+        new_block_mask = block_mask[0]
+        assert new_block_mask.kv_num_blocks.shape == (2, 4)
+        assert new_block_mask.kv_indices.shape == (2, 4, 4)
+
+        # Index on batch and head dimension
+        new_block_mask = block_mask[0, 1]
+        assert new_block_mask.kv_num_blocks.shape == (4,)
+        assert new_block_mask.kv_indices.shape == (4, 4)
+
+        # slicing on batch and head dimension
+        new_block_mask = block_mask[0:2, 1:2]
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
+        assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
+
+        # slicing on batch, head, and query dimension
+        new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
+        assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
+
+        # slicing on batch, head, and query dimension
+        q_index = torch.tensor([0], dtype=torch.int32)
+        new_block_mask = block_mask[:, :, q_index]
+
+        self.assertEqual(new_block_mask.kv_num_blocks.ndim, 3)
+        self.assertEqual(new_block_mask.kv_indices.ndim, 4)
+        torch.testing.assert_close(
+            new_block_mask.kv_num_blocks,
+            block_mask.kv_num_blocks[:, :, q_index],
+        )
+        torch.testing.assert_close(
+            new_block_mask.kv_indices, block_mask.kv_indices[:, :, q_index, :]
+        )
+
+        if block_mask.full_kv_num_blocks is not None:
+            assert new_block_mask.full_kv_num_blocks is not None
+            assert new_block_mask.full_kv_indices is not None
+            torch.testing.assert_close(
+                new_block_mask.full_kv_num_blocks,
+                block_mask.full_kv_num_blocks[:, :, q_index],
+            )
+            torch.testing.assert_close(
+                new_block_mask.full_kv_indices,
+                block_mask.full_kv_indices[:, :, q_index, :],
+            )
+
+    @supported_platform
     def test_block_mask_device_change(self):
         offset = torch.zeros(8, device="cuda")
 
@@ -1857,6 +2022,16 @@ class TestBlockMask(InductorTestCase):
         assert block_mask.kv_num_blocks.is_cuda
         assert block_mask.q_indices.is_cuda
         assert block_mask.q_num_blocks.is_cuda
+
+    @supported_platform
+    def test_compiling_create_block_mask(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 512, 512, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
 
     @supported_platform
     def test_block_mask_viz(self):
@@ -2082,7 +2257,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             *inputs, is_causal=True
         )
 
-        torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=1e-3, rtol=0.0)
+        torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)

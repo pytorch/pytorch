@@ -312,18 +312,12 @@ def _get_param_buffer_mapping(
     of a traced module to what the original module contains.
     """
 
-    param_lookup: Dict[int, List[str]] = {}
-    buffer_lookup: Dict[int, List[str]] = {}
+    param_lookup: Dict[int, str] = {}
+    buffer_lookup: Dict[int, str] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup.setdefault(id(param), []).append(name)
+        param_lookup[id(param)] = name
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
-        buffer_lookup.setdefault(id(buffer), []).append(name)
-
-    # reverse lists so FQN assignment is FIFO wrt model structure
-    for name, fqns in param_lookup.items():
-        param_lookup[name] = fqns[::-1]
-    for name, fqns in buffer_lookup.items():
-        buffer_lookup[name] = fqns[::-1]
+        buffer_lookup[id(buffer)] = name
 
     param_buffer_table: Dict[str, str] = {}
     for dynamo_name, dynamo_param in traced_module.named_parameters(
@@ -331,14 +325,14 @@ def _get_param_buffer_mapping(
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_param) in param_lookup:
-            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)]
 
     for dynamo_name, dynamo_buffer in traced_module.named_buffers(
         remove_duplicate=False
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_buffer) in buffer_lookup:
-            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)]
 
     return param_buffer_table
 
@@ -543,7 +537,7 @@ def _export_to_torch_ir(
     kwargs = kwargs or {}
     combined_args = _combine_args(f, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
-    _dynamic_shapes = _transform_shapes_for_default_dynamic(
+    transformed_dynamic_shapes = _transform_shapes_for_default_dynamic(
         combined_args, dynamic_shapes
     )
 
@@ -555,7 +549,7 @@ def _export_to_torch_ir(
             ), _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
-                    dynamic_shapes=_dynamic_shapes,  # type: ignore[arg-type]
+                    dynamic_shapes=transformed_dynamic_shapes,  # type: ignore[arg-type]
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
                     # currently the following 2 flags are tied together for export purposes,
@@ -1682,6 +1676,7 @@ def _non_strict_export(
         fake_kwargs,
         equalities_inputs,
         original_signature,
+        transformed_dynamic_shapes,
     ) = make_fake_inputs(
         mod,
         args,
@@ -1697,7 +1692,7 @@ def _non_strict_export(
         return produce_guards_and_solve_constraints(
             fake_mode=fake_mode,
             gm=gm,
-            dynamic_shapes=dynamic_shapes,
+            dynamic_shapes=transformed_dynamic_shapes,
             equalities_inputs=equalities_inputs,
             original_signature=original_signature,
             _is_torch_jit_trace=_is_torch_jit_trace,
