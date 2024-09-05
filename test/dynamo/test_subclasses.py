@@ -1430,8 +1430,8 @@ s1 > 3""",
 
     def test_subclass_constructor_proxying(self):
         import dataclasses
-        from typing import Any
         from collections import namedtuple
+        from typing import Any
 
         @dataclasses.dataclass(frozen=True)
         class SubclassTensorArgs:
@@ -1439,11 +1439,14 @@ s1 > 3""",
             device: torch.device
             inner_meta: Any
 
-        SubclassTensorArgs2 = namedtuple("SubclassTensorArgs2", [
-            "original_shape",
-            "device",
-            "inner_meta", 
-        ])
+        SubclassTensorArgs2 = namedtuple(
+            "SubclassTensorArgs2",
+            [
+                "original_shape",
+                "device",
+                "inner_meta",
+            ],
+        )
 
         class SubclassTensor(torch.Tensor):
             @staticmethod
@@ -1487,14 +1490,20 @@ s1 > 3""",
                 )
                 out_a = func(*args_a, **kwargs_a)
                 out = pytree.tree_map(
-                    lambda x: SubclassTensor(x, SubclassTensorArgs2(x.shape, x.device, None)) if isinstance(x, torch.Tensor) else x,
+                    lambda x: SubclassTensor(
+                        x, SubclassTensorArgs2(x.shape, x.device, None)
+                    )
+                    if isinstance(x, torch.Tensor)
+                    else x,
                     out_a,
                 )
                 return return_and_correct_aliasing(func, args, kwargs, out)
 
         @torch.compile(fullgraph=True)
         def f1(x):
-            meta = SubclassTensorArgs(x.shape, x.device, SubclassTensorArgs(x.shape, x.device, None))
+            meta = SubclassTensorArgs(
+                x.shape, x.device, SubclassTensorArgs(x.shape, x.device, None)
+            )
             out = SubclassTensor(x, meta)
             return out * out
 
@@ -1503,7 +1512,9 @@ s1 > 3""",
 
         @torch.compile(fullgraph=True)
         def f1(x):
-            meta = SubclassTensorArgs2(x.shape, x.device, SubclassTensorArgs2(x.shape, x.device, None))
+            meta = SubclassTensorArgs2(
+                x.shape, x.device, SubclassTensorArgs2(x.shape, x.device, None)
+            )
             out = SubclassTensor(x, meta)
             return out * out
 
