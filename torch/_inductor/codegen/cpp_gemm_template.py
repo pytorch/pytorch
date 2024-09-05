@@ -121,14 +121,14 @@ extern "C" {{export_declaration}}
         const int64_t k_block_end = Kr_blocks;
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
+{%- if use_local_acc %}
+    {%- set acc_buf_name = "local_acc_buf" %}
+        {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+{%- endif %}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
             const int64_t m_start = mc * Mr;
             const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
             const int64_t m_size = m_end - m_start;
-{%- if use_local_acc %}
-    {%- set acc_buf_name = "local_acc_buf" %}
-            {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "Nc_blocks*Nr"], acc_buf_dtype) }}
-{%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
                 const int64_t n_start = nc * Nr;
                 const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
@@ -146,7 +146,7 @@ extern "C" {{export_declaration}}
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
 {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
-{%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
 {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                         if (kc == k_block_start) {
@@ -164,7 +164,7 @@ extern "C" {{export_declaration}}
 {%- endif %}
                 {
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
+{%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
@@ -378,7 +378,7 @@ class CppPackedGemmTemplate(CppTemplate):
             # The ratios below are empirically determined to decide
             # the effective sizes of L1 and L2.
             # TODO: tune the factor here
-            L1_limit_factor = 1
+            L1_limit_factor = 0.8
             L2_limit_factor = 0.5
 
             L1_cache_size = (
