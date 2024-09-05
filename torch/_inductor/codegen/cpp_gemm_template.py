@@ -674,11 +674,70 @@ class CppPackedGemmTemplate(CppTemplate):
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
+                W_packed = new_input_nodes[1]
+                W_packed_constant = V.graph.add_tensor_constant(W_packed)
+                new_input_nodes[1] = W_packed_constant
 
-                candidate_nodes = [
-                    node for node in input_nodes if node not in new_input_nodes
-                ]
-                for candidate_node in candidate_nodes:
+                def share_storage(base_tensor: torch.Tensor, comp_tensor: torch.Tensor):
+                    return (
+                        base_tensor.is_mkldnn == comp_tensor.is_mkldnn
+                        and base_tensor.dtype == comp_tensor.dtype
+                        and base_tensor.device == comp_tensor.device
+                        and (
+                            (
+                                not base_tensor.is_mkldnn
+                                and (
+                                    base_tensor.untyped_storage().data_ptr()
+                                    == comp_tensor.untyped_storage().data_ptr()
+                                )
+                            )
+                            or (
+                                base_tensor.is_mkldnn
+                                and (
+                                    torch.ops.mkldnn.data_ptr(base_tensor)
+                                    == torch.ops.mkldnn.data_ptr(comp_tensor)
+                                )
+                            )
+                        )
+                    )
+
+                def get_candidates(input_nodes, new_input_nodes):
+                    # Only ConstantBuffer like weight and bias might be changed
+                    candidate_nodes = [
+                        node
+                        for node in input_nodes
+                        if (
+                            node not in new_input_nodes
+                            and isinstance(node, (ir.TensorBox, ir.StorageBox))
+                            and node.get_name() in V.graph.constants
+                        )
+                    ]
+
+                    def node_share_storage(
+                        candidate_node: ir.IRNode, new_input_nodes: List[ir.IRNode]
+                    ):
+                        for new_node in new_input_nodes:
+                            if (
+                                isinstance(new_node, (ir.TensorBox, ir.StorageBox))
+                                and new_node.get_name() in V.graph.constants
+                            ):
+                                candidate_tensor = V.graph.constants[
+                                    candidate_node.get_name()
+                                ]
+                                comp_tensor = V.graph.constants[new_node.get_name()]
+                                if share_storage(candidate_tensor, comp_tensor):
+                                    return True
+                        return False
+
+                    # Even the Inductor IR Node changed, may still share the storage
+                    # For example: bias in bfloat16 case which only do the expand
+                    return [
+                        candidate_node
+                        for candidate_node in candidate_nodes
+                        if not node_share_storage(candidate_node, new_input_nodes)
+                    ]
+
+                for candidate_node in get_candidates(input_nodes, new_input_nodes):
                     # By using the new packed weight for the GEMM template, we can prune the
                     # old weight if it has no other users. This saves memory but makes the FX graph
                     # non-retraceable. To support retracing, we can add a repack node to the
@@ -693,27 +752,7 @@ class CppPackedGemmTemplate(CppTemplate):
                             V.graph.module, node.name
                         ):  # wgt might already be deleted
                             comp_tensor = getattr(V.graph.module, node.name)
-                            if (
-                                candidate_tensor.is_mkldnn == comp_tensor.is_mkldnn
-                                and candidate_tensor.dtype == comp_tensor.dtype
-                                and candidate_tensor.device == comp_tensor.device
-                                and (
-                                    (
-                                        not candidate_tensor.is_mkldnn
-                                        and (
-                                            candidate_tensor.untyped_storage().data_ptr()
-                                            == comp_tensor.untyped_storage().data_ptr()
-                                        )
-                                    )
-                                    or (
-                                        candidate_tensor.is_mkldnn
-                                        and (
-                                            torch.ops.mkldnn.data_ptr(candidate_tensor)
-                                            == torch.ops.mkldnn.data_ptr(comp_tensor)
-                                        )
-                                    )
-                                )
-                            ):
+                            if share_storage(candidate_tensor, comp_tensor):
                                 W_tensor_users += 1
 
                     for node in reversed(V.graph.graph.nodes):
@@ -728,8 +767,6 @@ class CppPackedGemmTemplate(CppTemplate):
                             delattr(V.graph.module, node.name)
                             delattr(V.graph.graph.owning_module, node.name)
 
-                W_packed = new_input_nodes[1]
-                W_packed_constant = V.graph.add_tensor_constant(W_packed)
                 template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(
                     W_packed_constant
                 )

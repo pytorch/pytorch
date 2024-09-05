@@ -175,7 +175,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("in_features", (1000,))
     @parametrize("out_features", (1024,))
     @parametrize("bias", (True,))
-    @dtypes(torch.float,)
+    @dtypes(
+        torch.float,
+    )
     def test_linear_wgt_multi_users(self, in_features, out_features, bias, dtype):
         class M(torch.nn.Module):
             def __init__(self, bias):
