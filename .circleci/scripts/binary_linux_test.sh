@@ -120,7 +120,7 @@ fi
 /builder/check_binary.sh
 
 if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
-  # Exclude s390, xpu and libtorch builds from smoke testing
+  # Exclude s390, xpu, rocm and libtorch builds from smoke testing
   python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
 fi
 
