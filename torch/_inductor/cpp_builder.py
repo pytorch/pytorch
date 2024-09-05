@@ -217,7 +217,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
                     )
 
                 # version check
-                icx_ver = re.search(r"release (\d+[.]\d+)", output_msg)
+                icx_ver = re.search(r"(\d+[.]\d+[.]\d+[.]\d+)", output_msg)
                 print("icx_ver: ", icx_ver)
         return is_intel_compiler
     except FileNotFoundError as exc:
