@@ -2,9 +2,10 @@
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
+from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 
 import torch
+import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
@@ -342,6 +343,23 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        if self.export:
+            # We need to make sure that we don't decompose to() as usual in export mode,
+            # because it can get optimized away. Instead we always replace it with _to_copy().
+            if func == torch.ops.aten.to.dtype_layout:
+                kwargs.pop("copy", None)
+                return self.__torch_dispatch__(
+                    torch.ops.aten._to_copy.default, types, args, kwargs
+                )
+            if func == torch.ops.aten.to.dtype:
+                schema = tuple(arg.name for arg in func._schema.arguments)
+                for arg, name in zip(args[1:], schema[1:]):
+                    kwargs[name] = arg
+                kwargs.pop("copy", None)
+                return self.__torch_dispatch__(
+                    torch.ops.aten._to_copy.default, types, args[:1], kwargs
+                )
+
         unrecognized_types = [
             t
             for t in types
@@ -417,6 +435,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         from torch._higher_order_ops.auto_functionalize import (
             can_auto_functionalize,
             do_auto_functionalize,
+            do_auto_functionalize_v2,
         )
 
         if can_auto_functionalize(
@@ -427,7 +446,10 @@ class FunctionalTensorMode(TorchDispatchMode):
             # it doesn't matter what mode we use here because
             # the implementation of do_auto_functionalize doesn't
             # interact with FunctionalTensorMode at all
-            return do_auto_functionalize(func, args, kwargs)
+            if self.export or not inductor_config.enable_auto_functionalized_v2:
+                return do_auto_functionalize(func, args, kwargs)
+            else:
+                return do_auto_functionalize_v2(func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
@@ -594,7 +616,7 @@ class BaseFunctionalizeAPI(ABC):
     @abstractmethod
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+    ) -> Any:
         pass
 
     @abstractmethod
@@ -637,8 +659,8 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
             )
 
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]
+    ) -> Any:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
@@ -731,9 +753,11 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
     def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(
             inner_f,
-            remove="mutations_and_views"
-            if self.interpreter.functionalize_add_back_views()
-            else "mutations",
+            remove=(
+                "mutations_and_views"
+                if self.interpreter.functionalize_add_back_views()
+                else "mutations"
+            ),
         )
 
     def redispatch_to_next(self) -> ContextManager:
