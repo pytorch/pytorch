@@ -44,11 +44,12 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
+    requiresPy310,
     same,
     skipIfNotPy311,
     unsupported,
 )
-from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
+from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -1999,6 +2000,17 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(opt_fn(cfg, x, x), 2 * x + 5))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_data_access_in_inference_mode(self):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.data
+            return y
+
+        with torch.inference_mode():
+            x = torch.randn(3)
+            y = f(x)
+        self.assertEqual(y, x)
 
     def test_dataclass_fields(self):
         @dataclasses.dataclass
@@ -7875,49 +7887,6 @@ utils_device.CURRENT_DEVICE == None""".split(
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
-    @expectedFailureDynamic
-    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
-    def test_compile_profiler(self):
-        class Model(torch.nn.Module):
-            def forward(self, input):
-                return input + input
-
-        model = Model()
-        prof = CompileProfiler()
-        compiled = torch.compile(model, backend=prof)
-        base_checker = (
-            lambda: FileCheck()
-            .check("Torchdynamo Profiler Report")
-            .check("Graph Breaks")
-            .check("No graph breaks detected.")
-            .check("Recompilation")
-        )
-        input = torch.rand((2, 3, 4))
-        _ = compiled(input)
-        base_checker().check("No recompilation detected.").run(prof.report())
-
-        new_shape_input = torch.rand((3, 3, 4))
-        _ = compiled(new_shape_input)
-
-        # Not an exhaustive test of dynamic shapes behavior, but some sanity
-        if torch._dynamo.config.assume_static_by_default:
-            base_checker().check("Recompile Reasons").check("'forward'").check(
-                "cache_size_limit to 1"
-            ).run(prof.report())
-        else:
-            base_checker().check("No recompilation detected.").run(prof.report())
-
-        new_shape_input = torch.rand((4, 3, 4))
-        _ = compiled(new_shape_input)
-
-        base_checker().check("Recompile Reasons").check("'forward'").check(
-            "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
-        ).check(
-            "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-        ).run(
-            prof.report()
-        )
-
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
 
@@ -9753,6 +9722,113 @@ def ___make_guard_fn():
             "L__self___foo_bar_test_buf": "foo_bar.test_buf",
         }
         self.assertEqual(expected_fqn, gm.meta["dynamo_flat_name_to_original_fqn"])
+
+    def test_proxy_frozen_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + dc.y
+
+        def fn(x, y):
+            dc = TestDataClass(x, y)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
+    def test_reconstruct_frozen_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        def fn(x, y):
+            dc = TestDataClass(x, y)
+            torch._dynamo.graph_break()
+            return dc.x + dc.y
+
+        fn_opt = torch.compile()(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+    def test_frozen_dataclass_default_value(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int = dataclasses.field(default=5)
+            a: int = 6
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.z + dc.a
+
+        def fn(x, y):
+            dc = TestDataClass(x, y)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_default_factory(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int = dataclasses.field(default_factory=list)
+            a: int = dataclasses.field(default_factory=lambda: [5])
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.a[0]
+
+        def fn(x, y):
+            dc = TestDataClass(x, y)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
+    @requiresPy310
+    def test_frozen_dataclass_kw_only(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int = dataclasses.field(kw_only=True)
+            a: int = dataclasses.field(kw_only=True)
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.a + dc.z
+
+        def fn(x, y):
+            dc = TestDataClass(x, y, z=5, a=2)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
