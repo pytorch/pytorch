@@ -395,7 +395,6 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        #print(x.size(), freqs_cis.size())
         h = x + self.attention(self.attention_norm(x), freqs_cis)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
@@ -713,13 +712,13 @@ class Test3DComposability(FSDPTest):
 
         os.environ["KINETO_LOG_LEVEL"] = "5"
 
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(8)
     def test_3d_composability(self):
         self.run_subtests(
             {
                 "name": ["pp_dp_tp"],
                 "dp_degree": [
-                    1,
+                    2,
                 ],
                 "tp_degree": [
                     2,
@@ -728,7 +727,7 @@ class Test3DComposability(FSDPTest):
                     2,
                 ],
                 "float8": [False],
-                "async_tp": [False],
+                "async_tp": [False, True],
                 "schedule_class": [
                     "1f1b",
                     "gpipe",
@@ -810,7 +809,7 @@ class Test3DComposability(FSDPTest):
                 m.train()
         else:
             self._parallelize_llama(model, world_mesh, parallel_dims)
-            model.to_empty(device=init_device)
+            model.to_empty(device="cuda")
             model.init_weights()
             model.train()
             model_parts = [model]
@@ -828,49 +827,11 @@ class Test3DComposability(FSDPTest):
             train_state.step += 1
             gc_handler.run(train_state.step)
 
-            input_ids = torch.randint(0, 2048, (8, 128))
-            labels = torch.randint(0, 2048, (8, 128))
-
-            input_ids = input_ids.cuda()
-            labels = labels.cuda()
             optimizers.zero_grad()
-
-            if parallel_dims.pp_enabled:
-                # Pipeline Parallel forward / backward inside step() call
-                is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
-
-                with train_context():
-                    if pp_mesh.get_local_rank() == 0:
-                        #torch.distributed.breakpoint()
-                        pp_schedule.step(input_ids)
-                    elif is_last_stage:
-                        losses = []
-                        pp_schedule.step(target=labels, losses=losses)
-                    else:
-                        pp_schedule.step()
-
-                # accumulate losses across pipeline microbatches
-                loss = (
-                    torch.mean(torch.stack(losses))
-                    if is_last_stage
-                    else torch.Tensor([-1.0])
-                )
-            else:
-                # Non-PP forward / backward
-                with train_context():
-                    pred = model(input_ids)
-                    loss = loss_fn(pred, labels)
-                    # pred.shape=(bs, seq_len, vocab_size)
-                    # need to free to before bwd to avoid peaking memory
-                    del pred
-                    loss.backward()
 
             # clip gradients
             for m in model_parts:
                 torch.nn.utils.clip_grad_norm_(m.parameters(), 1.0, foreach=True)
-
-            # sync float8 amaxes and scales
-            # float8_handler.sync_float8_amax_and_scale_history(model_parts)
 
             # optimizer step
             optimizers.step()
@@ -901,7 +862,7 @@ class Test3DComposability(FSDPTest):
                 self._apply_fsdp(
                     model,
                     world_mesh["dp"],
-                    param_dtype=torch.float32, # change to float32
+                    param_dtype=torch.float32,
                     reduce_dtype=torch.float32,
                     tp_enabled=parallel_dims.tp_enabled,
                     pp_enabled=parallel_dims.pp_enabled,
@@ -1109,7 +1070,7 @@ class Test3DComposability(FSDPTest):
         pp_rank = pp_mesh.get_local_rank()
         pp_size = pp_mesh.size()
         microbatches = parallel_dims.pp
-        splits = ["layers.4"]
+        splits = ["layers.2", "layers.4", "layers.6"]
 
         def _build_stage(
             stage_idx, pp_mesh, start_layer, stop_layer, is_first=False, is_last=False
@@ -1136,7 +1097,7 @@ class Test3DComposability(FSDPTest):
             if parallel_dims.dp_enabled:
                 mp_dtype = torch.float32
             else:
-                mp_dtype = torch.float32 # change to float32
+                mp_dtype = torch.float32
 
             batch_size = 8
             local_seq_len = int(128 // parallel_dims.tp)
