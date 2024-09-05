@@ -33,6 +33,7 @@ from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
+    justknobs_check,
     maybe_upload_prof_stats_to_manifold,
     signpost_event,
 )
@@ -852,7 +853,13 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            raise CacheLimitExceeded(f"{limit_type} reached")
+            if justknobs_check(
+                "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
+            ):
+                raise CacheLimitExceeded(f"{limit_type} reached")
+            else:
+                # do not recursively skip frames
+                unimplemented(f"{limit_type} reached")
 
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
