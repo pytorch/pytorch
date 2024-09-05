@@ -148,7 +148,6 @@ def _override_decomp_aten_to_variants():
     # We will later replace them with aten._to_copy when functionalizing.
     with _override_composite_implicit_decomp(
         (torch.ops.aten.to.dtype_layout, torch.ops.aten.to.dtype),
-        {},
         safe=False,
     ):
         yield
@@ -158,7 +157,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
     ep,
     *,
     decomp_table: Dict[torch._ops.OperatorBase, Callable],
-    _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
     from torch._functorch.aot_autograd import aot_export_module
@@ -173,6 +171,30 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace,
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
+    # At this point, we have a decomp_table that can contain None entries
+    # for ops user want to preserve in the aten IR.
+    # We need to separate the op into two categories:
+    # 1. CIA op: These are the ops that we want to override
+    #    CompositeImplicitAutograd decomp for. For them, we need to use _override_composite_implicit_decomp
+    #    context manager to plumb it through AOTDispatcher
+    # 2. Non-CIA op: These ops are only relevant after AOTDIspatcher runs, so just
+    #    checking if they are statically functional is enough.
+
+    preserve_cia_ops = []
+    for op in list(decomp_table.keys()):
+        if decomp_table[op] is None:
+            assert isinstance(op, torch._ops.OpOverload)
+            _assert_valid_to_preserve(op)
+            if (
+                torch._C._dispatch_has_kernel_for_dispatch_key(
+                    op.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+                )
+                or torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels
+            ):
+                preserve_cia_ops.append(op)
+            del decomp_table[op]
 
     # TODO Merge this path with inference IR decomp, but it will require some additional work
     # so I will leave it for now. T200307782
@@ -231,7 +253,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 {},
                 fake_params_buffers,
                 constant_attrs,
-                preserve_ops=_preserve_ops,
                 decomp_table=decomp_table,
                 _check_autograd_state=False,
             )
@@ -267,8 +288,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
-        _preserve_ops,
-        decomp_table,
+        preserve_cia_ops
     ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
@@ -474,13 +494,11 @@ def _decompose_exported_program(
     ep,
     *,
     decomp_table: Dict[torch._ops.OperatorBase, Callable],
-    _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
     gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         decomp_table=decomp_table,
-        _preserve_ops=_preserve_ops,
         joint_loss_index=joint_loss_index,
     )
 
@@ -880,16 +898,9 @@ class ExportedProgram:
             core_aten_decompositions() if decomp_table is None else dict(decomp_table)
         )
 
-        _preserve_ops = []
-        for op in list(_decomp_table.keys()):
-            if _decomp_table[op] is None:
-                _preserve_ops.append(op)
-                del _decomp_table[op]
-
         return _decompose_exported_program(
             self,
             decomp_table=_decomp_table,
-            _preserve_ops=tuple(_preserve_ops),  # type: ignore[arg-type]
             joint_loss_index=None,
         )
 

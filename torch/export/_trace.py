@@ -96,6 +96,19 @@ from .graph_signature import _convert_to_export_graph_signature, ExportGraphSign
 log = logging.getLogger(__name__)
 
 
+def _register_cia_to_meta(*args, **kwargs):
+    kernel = kwargs["kernel"]
+    del kwargs["kernel"]
+
+    assert torch._C._dispatch_has_kernel_for_dispatch_key(
+        kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+    )
+
+    return kernel._op_dk(
+        torch._C.DispatchKey.CompositeImplicitAutograd, *args, **kwargs
+    )
+
+
 # This list is compiled from DispatchKey.cpp.
 # The idea is that we use these keys to override
 # CIA decomp in export
@@ -115,21 +128,45 @@ _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE = [
 ]
 
 
-def _register_cia_to_meta(*args, **kwargs):
-    kernel = kwargs["kernel"]
-    del kwargs["kernel"]
+# Our strategy for deciding if we can preserve a op is following:
+# 1. The op should be known statically that it is functional
+# 2. If it is maybe aliasing, we decompose because we must know if an op
+#    is mutating or aliasing.
+# TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
+# decomp part. (https://github.com/pytorch/pytorch/issues/129431)
+def _assert_valid_to_preserve(op_overload):
+    if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+        raise RuntimeError(
+            f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
+        )
+    if op_overload in FunctionalTensor.metadata_fns:
+        raise RuntimeError(
+            f"{op_overload} is a metadata query function, "
+            "it will be preserved implicitly in our tracing system. "
+            "Please file an issue on github if you see otherwise"
+        )
 
-    assert torch._C._dispatch_has_kernel_for_dispatch_key(
-        kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+    alias_info = len(
+        [i for i in op_overload._schema.arguments if i.alias_info is not None]
     )
 
-    return kernel._op_dk(
-        torch._C.DispatchKey.CompositeImplicitAutograd, *args, **kwargs
-    )
+    is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
+
+    if is_mutating_or_aliasing:
+        raise RuntimeError(
+            f"{op_overload} is a mutating/aliasing op, we can't preserve it as is"
+        )
+
+    if not torch._C._dispatch_has_kernel(op_overload.name()):
+        raise RuntimeError(
+            f"{op_overload} is a TorchScript op, we can't preserve it as is"
+        )
+
+    return True
 
 
 @contextmanager
-def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True):
+def _override_composite_implicit_decomp(ops_to_preserve, safe=True):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -147,50 +184,10 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True
 
     saved_tables = {}
     patched_ops = set()
-<<<<<<< HEAD
-=======
-    removed_decomps = {}
->>>>>>> 3fd689c629f (Support preserving ops in one shot export)
     for op_overload in ops_to_preserve:
-        # Our strategy for deciding if we can preserve CIA is following:
-        # 1. The op should be known statically that it is functional
-        # 2. If it is maybe aliasing, we decompose because we must know if an op
-        #    is mutating or aliasing.
-        # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
-        # decomp part. (https://github.com/pytorch/pytorch/issues/129431)
-        def assert_valid_to_preserve(op_overload):
-            if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
-                raise RuntimeError(
-                    f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
-                )
-            if op_overload in FunctionalTensor.metadata_fns:
-                raise RuntimeError(
-                    f"{op_overload} is a metadata query function, "
-                    "it will be preserved implicitly in our tracing system. "
-                    "Please file an issue on github if you see otherwise"
-                )
-
-            alias_info = len(
-                [i for i in op_overload._schema.arguments if i.alias_info is not None]
-            )
-
-            is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
-
-            if is_mutating_or_aliasing:
-                raise RuntimeError(
-                    f"{op_overload} is a mutating/aliasing op, we can't preserve it as is"
-                )
-
-            if not torch._C._dispatch_has_kernel(op_overload.name()):
-                raise RuntimeError(
-                    f"{op_overload} is a TorchScript op, we can't preserve it as is"
-                )
-
-            return True
-
         if safe:
             # If we didn't error, it means we can go ahead
-            assert_valid_to_preserve(op_overload)
+            _assert_valid_to_preserve(op_overload)
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -732,7 +729,6 @@ def _export_to_aten_ir(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
-    preserve_ops=(),
     decomp_table=None,
     _check_autograd_state=True,
     _is_torch_jit_trace=False,
@@ -1353,14 +1349,13 @@ def _strict_export(
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
     preserve_module_call_signature: Tuple[str, ...],
     pre_dispatch: bool,
-    preserve_ops: Tuple[OpOverload, ...],
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
     _is_torch_jit_trace: bool,
 ) -> ExportArtifact:
     lower_to_aten = functools.partial(
-        _export_to_aten_ir, pre_dispatch=pre_dispatch, preserve_ops=preserve_ops
+        _export_to_aten_ir, pre_dispatch=pre_dispatch
     )
     return _strict_export_lower_to_aten_ir(
         mod=mod,
@@ -1704,7 +1699,6 @@ def _non_strict_export(
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
     preserve_module_call_signature: Tuple[str, ...],
     pre_dispatch: bool,
-    preserve_ops: Tuple[OpOverload, ...],
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
@@ -1819,7 +1813,6 @@ def _non_strict_export(
                 else functools.partial(
                     _export_to_aten_ir,
                     pre_dispatch=pre_dispatch,
-                    preserve_ops=preserve_ops,
                     _is_torch_jit_trace=_is_torch_jit_trace,
                 )
             )
@@ -1884,7 +1877,6 @@ def _export_for_training(
         else functools.partial(
             _non_strict_export,
             dispatch_tracing_mode="make_fx",
-            preserve_ops=(),
         )
     )
     export_artifact = export_func(  # type: ignore[operator]
@@ -1954,7 +1946,6 @@ def _export(
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
-    preserve_ops: Tuple[OpOverload, ...] = (),
     _is_torch_jit_trace: bool = False,
 ) -> ExportedProgram:
     """
