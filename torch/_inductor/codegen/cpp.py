@@ -4702,6 +4702,8 @@ class LoopLevel:
         if self.steps.is_number:
             steps_str = f"{self.var}+={cexpr_index(self.steps)}"
         else:
+            # If the step size is 0, change it to 1 because a step size of 0
+            # will cause floating point exception (core dump) during parallelization.
             steps_str = (
                 f"{self.var}+=({cexpr_index(self.steps)} == 0 ? "
                 f"1 : {cexpr_index(self.steps)})"
