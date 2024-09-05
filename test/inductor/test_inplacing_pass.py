@@ -3,7 +3,7 @@
 from typing import List
 
 import torch
-import torch._inductor.config as inductor_config
+import torch._functorch.config as functorch_config
 from functorch import make_fx
 from torch import Tensor
 from torch._dynamo.utils import counters
@@ -306,7 +306,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     def test_multi_output_intermediate(self):
         for requires_grad in [False, True]:
             for enable_v2 in [False, True]:
-                with inductor_config.patch(
+                with functorch_config.patch(
                     {"enable_auto_functionalized_v2": enable_v2}
                 ):
                     counters.clear()
@@ -355,7 +355,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(num_reinplacing_failures(), 0)
 
     def test_lists_functionalize_v2(self):
-        with inductor_config.patch({"enable_auto_functionalized_v2": True}):
+        with functorch_config.patch({"enable_auto_functionalized_v2": True}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
             def mutate_op(y: List[Tensor]) -> None:
@@ -381,7 +381,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
 
     def test_lists_old_functionalize(self):
-        with inductor_config.patch({"enable_auto_functionalized_v2": False}):
+        with functorch_config.patch({"enable_auto_functionalized_v2": False}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
             def mutate_op(y: List[Tensor]) -> None:
