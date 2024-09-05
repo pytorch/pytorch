@@ -6035,6 +6035,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                 return r, r.transpose(0, 1), z.view(-1), z.transpose(0, 1)
 
         m = M()
+        m.to(memory_format=torch.channels_last)
         m.train()
 
         def dense_inps():
@@ -6042,7 +6043,9 @@ class TestAOTModuleSimplified(AOTTestCase):
                 torch.randn(2, 3, 5, 5, requires_grad=True).to(
                     memory_format=torch.channels_last
                 ),
-                torch.randn(3, 2, requires_grad=True).clone(),
+                torch.randn(3, 2, 1, 1, requires_grad=True).to(
+                    memory_format=torch.channels_last
+                ),
             )
             [inp.retain_grad() for inp in ret]
             return ret
@@ -6053,34 +6056,32 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         inps = dense_inps()
         outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
-        outs[0].sum().backward()
+        s = outs[0].sum()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+        ) as prof:
+            s.backward()
 
-        def dense_inps_contiguous():
-            ret = (
-                torch.randn(2, 3, 5, 5, requires_grad=True),
-                torch.randn(3, 2, requires_grad=True).clone(),
-            )
-            [inp.retain_grad() for inp in ret]
-            return ret
-
-        inps_cont = dense_inps_contiguous()
-        outs_cont = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps_cont)
-        outs_cont[0].sum().backward()
+        contiguous_events = [
+            event for event in prof.events() if event.name == "aten::contiguous"
+        ]
+        self.assertTrue(len(contiguous_events) == 0)
 
     def test_channels_last_grads_no_force_contiguous_subclass(self):
-        class SCM(torch.nn.Module):
+        class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x, y):
-                return self.conv(x), y + 1
+                r = self.conv(x)
+                return r, y + 1
 
-        scm = SCM()
-        scm.to(memory_format=torch.channels_last)
-        scm.train()
+        m = M()
+        m.to(memory_format=torch.channels_last)
+        m.train()
 
-        def sc_inps():
+        def inps_fn():
             t0 = torch.randn(2, 3, 5, 5, requires_grad=True).to(
                 memory_format=torch.channels_last
             )
@@ -6096,9 +6097,25 @@ class TestAOTModuleSimplified(AOTTestCase):
             [inp.retain_grad() for inp in ret]
             return ret
 
-        sc_inps = sc_inps()
-        sc_outs = torch.compile(scm, backend="aot_eager", fullgraph=True)(*sc_inps)
-        sc_outs[0].sum().backward()
+        ref_inps = inps_fn()
+        ref_outs = m(*ref_inps)
+        ref_outs[0].sum().backward()
+
+        mc = M()
+        mc.to(memory_format=torch.channels_last)
+        mc.train()
+        inps = inps_fn()
+        outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
+        s = outs[0].sum()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+        ) as prof:
+            s.backward()
+
+        contiguous_events = [
+            event for event in prof.events() if event.name == "aten::contiguous"
+        ]
+        self.assertTrue(len(contiguous_events) == 0)
 
 
 # entries in here don't work and need to be fixed.

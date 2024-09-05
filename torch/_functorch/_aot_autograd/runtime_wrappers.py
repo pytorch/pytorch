@@ -1447,7 +1447,13 @@ class AOTDispatchAutograd:
             return x
         for i, attr in enumerate(x.__tensor_flatten__()[0]):  # type: ignore[attr-defined]
             elem = getattr(x, attr)
-            setattr(x, attr, elem.to(memory_format[i]))
+            setattr(
+                x,
+                attr,
+                AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                    elem, memory_format[i]
+                ),
+            )
         return x
 
     # See Note [Tangents must be contiguous, Part 2]

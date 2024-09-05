@@ -55,7 +55,6 @@ log = logging.getLogger(__name__)
 static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
 
 
-# TODO: XXX Update comment
 # Note [Tangents must be contiguous]
 # We force tangents to be contiguous today.
 # The idea is that we are technically making a guess about the strides of our tangents,
@@ -675,7 +674,7 @@ from a multi-output view call"
             suggest_memory_format = torch._prims_common.suggest_memory_format
             if is_traceable_wrapper_subclass(t):
                 return [
-                    suggest_memory_format(getattr(t, attr))
+                    recursive_suggest_memory_format(getattr(t, attr))
                     for attr in t.__tensor_flatten__()[0]
                 ]
 
