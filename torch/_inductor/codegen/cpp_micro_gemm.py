@@ -469,7 +469,7 @@ inline void {{kernel_name}}_kernel(
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
-        [(4, 64, 32), (4, 64, 64), (4, 64, 128), (4, 64, 256)],
+        [(4, 64, 32), (4, 64, 64)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int32,
         output_dtype=torch.float,
@@ -489,15 +489,13 @@ inline void {{kernel_name}}(
 {%- endif %}
     const {{input_t}}* {{restrict_keyword}} A,
     const {{input2_t}}* {{restrict_keyword}} B,
-    const {{input_t}}* {{restrict_keyword}} S,
     {{output_t}}* {{restrict_keyword}} C,
     int64_t M,
     int64_t N,
     int64_t K,
     int64_t lda,
     int64_t ldb,
-    int64_t ldc,
-    int64_t actual_N
+    int64_t ldc
 )
 """
 
@@ -513,13 +511,15 @@ inline void {{kernel_name}}(
                 {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
                     A + m * lda,
                     reinterpret_cast<const uint8_t*>(B) + n,
-                    S,
+                    ZPS,
                     C + m * ldc + n,
                     K,
                     lda,
                     ldb,
                     ldc,
-                    actual_N
+                    actual_N,
+                    k_start,
+                    q_group_size
                 );
             } else {
                 switch (block_m) {
@@ -528,13 +528,15 @@ inline void {{kernel_name}}(
                     {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
                         A + m * lda,
                         reinterpret_cast<const uint8_t*>(B) + n,
-                        S,
+                        ZPS,
                         C + m * ldc + n,
                         K,
                         lda,
                         ldb,
                         ldc,
-                        actual_N
+                        actual_N,
+                        k_start,
+                        q_group_size
                     );
                     break;
                 {%- endfor %}
@@ -549,11 +551,16 @@ inline void {{kernel_name}}(
 
     TEMPLATE_KERNEL = r"""
 
-inline bool is_block_start(int index, int BLOCK_SIZE) {
-  return !(index & (BLOCK_SIZE -1));
+inline bool is_block_start(int index, int k_start, int group_size) {
+  if C10_UNLIKELY(index == 0) {
+      return true;
+  } else if ((k_start + index) % group_size == 0) {
+      return true;
+  }
+  return false;
 }
 
-inline __m128i conver_int4_to_int8(const uint8_t* data) {
+inline __m128i convert_int4_to_int8(const uint8_t* data) {
   __m128i tmp = _mm_loadu_si64((const __m128i*)data);
   __m128i bytes = _mm_cvtepu8_epi16(tmp);
   const __m128i lowMask = _mm_set1_epi8(0xF);
@@ -568,13 +575,15 @@ template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 inline void {{kernel_name}}_kernel(
     const {{input_t}}* {{restrict_keyword}} A,
     const uint8_t* {{restrict_keyword}} B,
-    const {{input_t}}* {{restrict_keyword}} ScaleAndZeros,
+    const {{input_t}}* {{restrict_keyword}} ZPS,
     {{output_t}}* {{restrict_keyword}} C,
     int64_t K,
     int64_t lda,
     int64_t ldb,
     int64_t ldc,
-    int64_t actual_N) {
+    int64_t actual_N,
+    int64_t k_start,
+    int64_t q_group_size) {
   constexpr int BLOCK_K = {{block_k}};
   constexpr int ROWS = BLOCK_M;
   constexpr int COLS = BLOCK_N / 16;
@@ -613,9 +622,9 @@ inline void {{kernel_name}}_kernel(
   // load scale and zero point
   auto load_scale_and_zeros = [&](int i, int _kb) {
     // load 2x bfloat16 vector
-    __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * actual_N * 2 + 32 * i));
+    __m512i t = _mm512_loadu_si512((__m512i*)(ZPS + _kb * actual_N * 2 + 32 * i));
     if (_kb + PREFETCH_SIZE_KB < KB) {
-      _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * actual_N * 2 + 32 * i, _MM_HINT_T0);
+      _mm_prefetch(ZPS + (_kb + PREFETCH_SIZE_KB) * actual_N * 2 + 32 * i, _MM_HINT_T0);
     }
 
     // convert to 2x f32 vector
@@ -679,7 +688,7 @@ inline void {{kernel_name}}_kernel(
           vb[3] = _mm512_fmadd_ps(vb[3], scale[3], zero[3]);
         }
       } else {
-        __m128i b8 = conver_int4_to_int8(B + k * ldb + col * 8);
+        __m128i b8 = convert_int4_to_int8(B + k * ldb + col * 8);
         __m512i b32 = _mm512_cvtepu8_epi32(b8);
         vb[col] = _mm512_permutexvar_ps(b32, lut);
         vb[col] = _mm512_fmadd_ps(vb[col], scale[col], zero[col]);
@@ -691,7 +700,7 @@ inline void {{kernel_name}}_kernel(
   };
 
   for (int k = 0, kb = 0; k < K; ++k) {
-    if (is_block_start(k, BLOCK_K)) {
+    if (is_block_start(k, k_start, q_group_size)) {
       c10::ForcedUnroll<COLS>{}(load_scale_and_zeros, kb++);
     }
     c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
@@ -712,10 +721,12 @@ inline void {{kernel_name}}_kernel(
         kernel: CppTemplateKernel,
         X: ir.Buffer,
         W: ir.Buffer,
-        S: ir.Buffer,
         Y: ir.Buffer,
         accum: bool,
+        ZPS: ir.Buffer,
         actual_N: int,
+        k_start: int,
+        q_group_size: int,
     ) -> str:
         """
         Generate the code for calling the templated kernel that computes
@@ -723,7 +734,7 @@ inline void {{kernel_name}}_kernel(
         """
         X_ptr = f"&({kernel.index(X, [0, 0])})"
         W_ptr = f"&({kernel.index(W, [0, 0])})"
-        S_ptr = f"&({kernel.index(S, [0, 0])})"
+        ZPS_ptr = f"&({kernel.index(ZPS, [0, 0])})"
         Y_ptr = f"&({kernel.index(Y, [0, 0])})"
         M = kernel.size(Y, 0)
         N = kernel.size(Y, 1)
@@ -739,7 +750,6 @@ inline void {{kernel_name}}_kernel(
                 res.writeline(extra_args)
             res.writeline(f"{X_ptr},")
             res.writeline(f"{W_ptr},")
-            res.writeline(f"{S_ptr},")
             res.writeline(f"{Y_ptr},")
             res.writeline(f"{M},")
             res.writeline(f"{N},")
@@ -747,10 +757,18 @@ inline void {{kernel_name}}_kernel(
             res.writeline(f"{lda},")
             res.writeline(f"{ldb},")
             res.writeline(f"{ldc},")
-            res.writeline(f"{actual_N}")
+            res.writeline(f"{ZPS_ptr},")
+            res.writeline(f"{actual_N},")
+            res.writeline(f"{k_start},")
+            res.writeline(f"{q_group_size}")
         res.writeline(");")
         return res.getvalue()
 
+    def get_kernel_extra_args_declare(self) -> str:
+        return "const {{input_t}}* {{restrict_keyword}} ZPS,\n\tint64_t actual_N,\n\tint64_t k_start,\n\tint64_t q_group_size,"
+
+    def get_kernel_extra_args(self) -> str:
+        return "ZPS,\n\tactual_N,\n\tk_start,\n\tq_group_size,"
 
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads, q_group_size=None):
@@ -1075,6 +1093,7 @@ def create_micro_gemm(
                 config.input_dtype == input_dtype
                 and config.compute_dtype == compute_dtype
                 and config.input2_dtype == input2_dtype
+                and config.output_dtype == output_dtype
                 # The output_dtype here is the output dtype of the micro-kernel.
                 # In some cases, the actual output dtype of the op for which the micro-kernel
                 # is being created would be same as that of the activation, but the micro-kernels

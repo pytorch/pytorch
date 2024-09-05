@@ -153,7 +153,7 @@ extern "C" {{export_declaration}}
                         {%- if w_scale_zp is not none %}
                         int64_t zp_end = k_end / q_group_size;
                         int64_t zp_start = k_start / q_group_size;
-                            {%- set tile_S_2d = kernel.slice_nd(w_scale_zp, [("zp_start", "zp_end"), ("nci * 2 * Nr", "(nci + 1) * 2 * Nr")]) %}
+                            {%- set tile_ZPS_2d = kernel.slice_nd(w_scale_zp, [("zp_start", "zp_end"), ("nci * 2 * Nr", "(nci + 1) * 2 * Nr")]) %}
                             {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
                             {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n // 8]) %}
                         {%- else %}
@@ -162,15 +162,43 @@ extern "C" {{export_declaration}}
                         {%- endif %}
                         {%- if w_scale_zp is not none %}
                         if (kc == k_block_start) {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc_slice, accum=False, actual_N=N)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(kernel,
+                                                       tile_X,
+                                                       tile_W,
+                                                       tile_ZPS_2d,
+                                                       acc_slice,
+                                                       accum=False,
+                                                       actual_N=N,
+                                                       k_start="k_start",
+                                                       q_group_size=q_group_size)|indent(28, false)
+                            }}
                         } else {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc_slice, accum=True, actual_N=N)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(kernel,
+                                                       tile_X,
+                                                       tile_W,
+                                                       tile_ZPS_2d,
+                                                       acc_slice,
+                                                       accum=True,
+                                                       actual_N=N,
+                                                       k_start="k_start",
+                                                       q_group_size=q_group_size)|indent(28, false)
+                            }}
                         }
                         {%- else %}
                         if (kc == k_block_start) {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=False)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(kernel,
+                                                       tile_X,
+                                                       tile_W,
+                                                       acc_slice,
+                                                       accum=False)|indent(28, false)
+                            }}
                         } else {
-                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=True)|indent(28, false) }}
+                            {{ micro_gemm.codegen_call(kernel,
+                                                       tile_X,
+                                                       tile_W,
+                                                       acc_slice,
+                                                       accum=True)|indent(28, false)
+                            }}
                         }
                     {%- endif %}
                     }
@@ -269,11 +297,6 @@ class CppPackedGemmTemplate(CppTemplate):
         self.padded_n = get_padded_n(n, self.register_blocking.block_n)
         self.is_dynamic_M = has_free_symbols((m,))
         self.is_int4_woq_gemm = is_int4_woq_gemm
-        self.qBlockSize = (
-            (input_nodes[1].get_numel() * 16) / input_nodes[2].get_numel()
-            if self.is_int4_woq_gemm
-            else 0
-        )
 
     @cache_on_self
     def thread_blocking(self) -> GemmBlocking:
@@ -614,9 +637,10 @@ class CppPackedGemmTemplate(CppTemplate):
         if not is_int4_woq_gemm:
             assert micro_gemm is not None
         else:
+            # If int4 WoQ GEMM can't be supported, we return False
             if not micro_gemm:
                 return False
-        _, block_n, block_k = micro_gemm.register_blocking
+        _, block_n, _ = micro_gemm.register_blocking
         if not is_int4_woq_gemm:
             padded_n = get_padded_n(n, block_n)
 
@@ -627,6 +651,9 @@ class CppPackedGemmTemplate(CppTemplate):
             blocked_w: Union[ir.IRNode, torch.Tensor] = W
             if isinstance(W, ir.IRNode):
                 if is_int4_woq_gemm:
+                    # We always set block_n as 64 for int4 WoQ GEMM
+                    # The data is packed as [N/64, K, 32] in uint8_t,
+                    # and hence [N/64, K, 8] when cast as int32
                     new_size = [n // block_n, k, block_n // 8]
                 else:
                     new_size = [padded_n // block_n, k, block_n]
@@ -641,7 +668,9 @@ class CppPackedGemmTemplate(CppTemplate):
                     ),
                 )
                 if is_int4_woq_gemm:
-                    new_zp_size = [k // block_k, 2 * n]
+                    # group size = no. of (actual) weight elements // no. of scales or zero points elements
+                    q_group_size = (W.get_numel() * 16) // zp_scales.get_numel()
+                    new_zp_size = [k // q_group_size, 2 * n]
                     blocked_zp_scales = ir.Buffer(
                         zp_scales.get_name(),  # Borrow the registered buffer name
                         ir.FixedLayout(
@@ -654,9 +683,10 @@ class CppPackedGemmTemplate(CppTemplate):
                     )
             else:
                 if is_int4_woq_gemm:
+                    q_group_size = (W.numel() * 16) // zp_scales.numel()
                     blocked_w = W.reshape(n // block_n, k, block_n // 8).contiguous()
                     blocked_zp_scales = zp_scales.reshape(
-                        k // block_k, n * 2
+                        k // q_group_size, n * 2
                     ).contiguous()
                 else:
                     blocked_w = (

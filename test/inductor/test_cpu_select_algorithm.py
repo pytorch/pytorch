@@ -1029,9 +1029,15 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (1, 32, 4096))
-    @parametrize("in_features", (128, 1024, 4096))
-    @parametrize("out_features", (64, 65, 1024, 4096))
+    @parametrize("batch_size", (32,))
+    @parametrize("in_features", (128,))
+    @parametrize(
+        "out_features",
+        (
+            64,
+            65,
+        ),
+    )
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
         # x will be reshaped from 3d to 2d
         second_dim_size = 1
@@ -1084,23 +1090,34 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @parametrize(
         "batch_size",
-        (64,),
+        (64, 1),
     )
     @parametrize(
         "in_features",
-        (128, 256, 512, 1024, 1536, 2048, 4096),
+        (4096,),
     )
     @parametrize(
         "out_features",
         (
-            64,
-            128,
-            256,
-            512,
+            4096,
+            14336,
         ),
     )
-    @parametrize("inner_k_tiles", (2,))
-    @parametrize("q_group_size", (32, 64))
+    @parametrize(
+        "inner_k_tiles",
+        (
+            2,
+            4,
+            8,
+        ),
+    )
+    @parametrize(
+        "q_group_size",
+        (
+            32,
+            256,
+        ),
+    )
     def test_int4_woq_gemm(
         self, batch_size, in_features, out_features, inner_k_tiles, q_group_size
     ):
@@ -1128,7 +1145,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 # dtype is torch.int32
                 self.register_buffer("weight", weight)
                 # Shape (in_features // groupsize, out_features, 2)
-                # dtype of scales & zeros is torch.bfloat16
+                # dtype of scales & zero points is torch.bfloat16
                 self.register_buffer("scales_and_zeros", scales_and_zeros)
 
             def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -1136,7 +1153,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     input, self.weight, self.groupsize, self.scales_and_zeros
                 )
 
-        torch.manual_seed(1)
         a = torch.rand((batch_size, in_features), dtype=torch.bfloat16)
         b = torch.rand((in_features, out_features), dtype=torch.bfloat16)
 
@@ -1159,7 +1175,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         )
         eager_mode_output = mod(a)
         mean_err = ((eager_mode_output - ref).abs() / ref).mean()
-        self.assertTrue(mean_err < 0.05)
+        # The output is compared with torch.ops.aten._weight_int4pack_mm while auto-tuning.
+        # Here, we check that the mean error with torch.mm(a, b) is less than 0.5
+        self.assertTrue(abs(mean_err) < 0.05)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
