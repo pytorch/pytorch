@@ -18,8 +18,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import _inductor as inductor
-from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo import compiled_autograd, config
+from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
@@ -27,8 +27,10 @@ from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
+
 def make_compiler_fn(fullgraph=True, dynamic=True, backend="inductor"):
     assert backend in ["inductor", "aot_eager"]
+
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
 
@@ -60,6 +62,7 @@ def hook2(grads):
 
 def hook3(gI, gO):
     return (torch.sin(gI[0]) + gO[0],)
+
 
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
@@ -1443,7 +1446,6 @@ main()
             tags=torch.Tag.pt2_compliant_tag,
         )
 
-
         @torch.library.impl("testlib::foo", "cpu")
         def foo(x):
             x.add_(5)
@@ -1453,11 +1455,9 @@ main()
         def foo_meta(x):
             return x
 
-
         @torch.library.impl("testlib::foo_mutated", "CompositeImplicitAutograd")
         def foo_mutated(x):
             return torch.ops.testlib.foo(x)
-
 
         def _get_custom_policy(must_recompute_list=None):
             def _custom_policy(ctx, func, *args, **kwargs):
@@ -1484,7 +1484,9 @@ main()
             return torch.matmul(x, x)
 
         def g_cp(x):
-            return torch.utils.checkpoint.checkpoint(g, x, use_reentrant=False, context_fn=context_fn)
+            return torch.utils.checkpoint.checkpoint(
+                g, x, use_reentrant=False, context_fn=context_fn
+            )
 
         def f():
             inps = (torch.randn(4, 4, requires_grad=True),)
@@ -1501,7 +1503,7 @@ main()
         ===== Backward graph 0 =====
         def forward(self, primals_1: "f32[4, 4][4, 1]cpu", tangents_1: "f32[4, 4][4, 1]cpu"):
             ...
-            auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm);  mm = None
+            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
             ...
             return (add_1,)
         ```
@@ -1510,7 +1512,7 @@ main()
         ===== Compiled autograd graph =====
         def forward(self, inputs, sizes, scalars, hooks):
             ...
-            aot0_auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm);  aot0_mm = None
+            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
             ...
             return []
         ```
@@ -1519,7 +1521,7 @@ main()
         ===== __compiled_fn_3 =====
         def forward(self, L_inputs_ : list):
             ...
-            auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm);  aot0_mm = None
+            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
             ...
             return (new_grad,)
         ```
@@ -1528,7 +1530,7 @@ main()
         ===== Forward graph 1 =====
         def forward(self, arg0_1: "f32[][]cpu", arg1_1: "f32[4, 4][4, 1]cpu"):
             ...
-            auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm);  mm = None
+            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
             ...
             return (clone_1,)
         ```
