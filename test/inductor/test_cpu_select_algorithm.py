@@ -57,8 +57,7 @@ def patches(fn):
 
     for patcher in [
         dynamo_config.patch(verbose=True),
-        # Fails due to https://github.com/pytorch/pytorch/issues/131929
-        dynamo_config.patch(inline_inbuilt_nn_modules=False),
+        dynamo_config.patch(inline_inbuilt_nn_modules=True),
         inductor_config.patch(
             debug=True,
             max_autotune=True,
@@ -223,6 +222,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, epilogue, dtype
     ):
@@ -253,6 +253,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             and epilogue != "mul"
             and epilogue != "div"
             or (dtype == torch.half and epilogue == "add" and not bias)
+            or (
+                dtype == torch.float32
+                and epilogue == "add"
+                and not bias
+                and dynamo_config.dynamic_shapes
+                and not dynamo_config.assume_static_by_default
+            )
         ):
             # Several scenarios where epilogue fusion is not counted in:
             # 1. For bfloat16, the epilogue fusion is part of the template,
@@ -261,6 +268,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    div fusion which is not supported for oneDNN linear.
             # 2. For float16, since oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
+            # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
+            #    and linear w/o bias plus epilogue add is treated as addmm.
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
@@ -477,6 +486,98 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (8,))
+    @parametrize("in_features", (128,))
+    @parametrize("in_features_2", (196,))
+    @parametrize("out_features", (256,))
+    @parametrize(
+        "bias",
+        (True,),
+    )
+    @dtypes(torch.float32)
+    def test_linear_with_multiple_reindexers(
+        self,
+        batch_size,
+        in_features,
+        in_features_2,
+        out_features,
+        bias,
+        dtype,
+    ):
+        flatten_BS = int(batch_size * in_features_2)
+
+        # Reproducer from the levit_128 model in timm
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    64,
+                    128,
+                    kernel_size=3,
+                    padding=1,
+                    stride=2,
+                    dilation=1,
+                    groups=1,
+                )
+                self.linear = torch.nn.Linear(in_features, out_features, bias=False)
+                self._frozen_param221 = torch.randn(out_features)
+                self._frozen_param389 = torch.randn(out_features)
+                self._frozen_param20 = torch.randn(out_features)
+                self._frozen_param21 = torch.randn(out_features)
+
+            def forward(self, view_368):
+                _mkl_linear_57 = self.linear(view_368)
+                view_369 = torch.ops.aten.reshape.default(
+                    _mkl_linear_57, [batch_size, in_features_2, out_features]
+                )
+                _mkl_linear_57 = None
+
+                view_370 = torch.ops.aten.reshape.default(
+                    view_369, [flatten_BS, out_features]
+                )
+                view_369 = None
+                sub_85 = torch.ops.aten.sub.Tensor(view_370, self._frozen_param221)
+                view_370 = _frozen_param221 = None
+                mul_261 = torch.ops.aten.mul.Tensor(sub_85, self._frozen_param389)
+                sub_85 = _frozen_param389 = None
+                mul_262 = torch.ops.aten.mul.Tensor(mul_261, self._frozen_param20)
+                mul_261 = _frozen_param20 = None
+                add_219 = torch.ops.aten.add.Tensor(mul_262, self._frozen_param21)
+                mul_262 = _frozen_param21 = None
+                view_371 = torch.ops.aten.reshape.default(
+                    add_219, [batch_size, in_features_2, out_features]
+                )
+                add_219 = None
+
+                add_220 = torch.ops.aten.add.Tensor(view_371, 3)
+                clamp_min_35 = torch.ops.aten.clamp_min.default(add_220, 0)
+                add_220 = None
+                clamp_max_35 = torch.ops.aten.clamp_max.default(clamp_min_35, 6)
+                clamp_min_35 = None
+                mul_263 = torch.ops.aten.mul.Tensor(view_371, clamp_max_35)
+                view_371 = clamp_max_35 = None
+                div_51 = torch.ops.aten.div.Tensor(mul_263, 6)
+                mul_263 = None
+
+                return div_51
+
+        view_368 = torch.randn(flatten_BS, in_features)
+
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(
+                mod,
+                (view_368,),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
     @inductor_config.patch({"freezing": True})
     @patches

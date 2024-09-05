@@ -216,7 +216,8 @@ class Tensor(torch._C.TensorBase):
         # Ignore all state when using FakeTensor with skip_data(materialize_fake_tensors) because FakeTensor has
         # some state that cannot be pickled
         if (
-            type(self) is torch._subclasses.fake_tensor.FakeTensor
+            hasattr(torch, "_subclasses")
+            and type(self) is torch._subclasses.fake_tensor.FakeTensor
             and materialize_fake_tensors
         ) or (type(self) is Tensor and not state):
             # Fast path for regular tensor without Python state.
