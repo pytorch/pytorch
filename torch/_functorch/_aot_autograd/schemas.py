@@ -313,6 +313,8 @@ class ViewAndMutationMeta:
     # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: Optional[List[Any]] = None
 
+    traced_tangent_memory_formats: Optional[List[Any]] = None
+
     num_symints_saved_for_bw: Optional[int] = None
 
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue

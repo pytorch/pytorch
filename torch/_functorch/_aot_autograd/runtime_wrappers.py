@@ -1438,21 +1438,20 @@ class AutogradLazyBackwardCompileInfo:
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
     @staticmethod
-    def _force_contiguous(x):
+    def coerce_runtime_tangent_tracing_memory_format(x, memory_format):
         if not isinstance(x, torch.Tensor):
             return x
-        x = x.contiguous()
+        x = x.to(memory_format=memory_format)
         if not is_traceable_wrapper_subclass(x):
             return x
-        for attr in x.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
+        for i, attr in enumerate(x.__tensor_flatten__()[0]):  # type: ignore[attr-defined]
             elem = getattr(x, attr)
-            if not elem.is_contiguous():
-                setattr(x, attr, elem.contiguous())
+            setattr(x, attr, elem.to(memory_format[i]))
         return x
 
     # See Note [Tangents must be contiguous, Part 2]
     @staticmethod
-    def coerce_runtime_tangent(x, metadata):
+    def coerce_runtime_subclass_tangent(x, metadata):
         if not isinstance(x, torch.Tensor):
             return x
         if not is_traceable_wrapper_subclass(x):
@@ -1854,7 +1853,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
                         (
-                            AOTDispatchAutograd.coerce_runtime_tangent(
+                            AOTDispatchAutograd.coerce_runtime_subclass_tangent(
                                 t,
                                 CompiledFunction.metadata.traced_tangent_metas[
                                     i - tangents_start_idx
@@ -1873,11 +1872,14 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     tangents_end_idx = tangents_start_idx + len_tangents
 
-                # Make the tangents contiguous. Note that we must do this after subclass desugaring
-                # because inputs to inductor have to be contiguous
                 all_args = [
                     (
-                        AOTDispatchAutograd._force_contiguous(t)
+                        AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                            t,
+                            CompiledFunction.metadata.traced_tangent_memory_formats[
+                                i - tangents_start_idx
+                            ],
+                        )
                         if (tangents_start_idx <= i < tangents_end_idx)
                         else t
                     )

@@ -55,6 +55,7 @@ log = logging.getLogger(__name__)
 static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
 
 
+# TODO: XXX Update comment
 # Note [Tangents must be contiguous]
 # We force tangents to be contiguous today.
 # The idea is that we are technically making a guess about the strides of our tangents,
@@ -63,10 +64,14 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 # on all tangents at runtime.
 # In the future, you could imagine lifting this restriction, since these contiguous()
 # calls can have noticeable perf overhead depending on the model.
-def coerce_tangent(x):
+def coerce_tangent(x, memory_format):
     if not isinstance(x, Tensor):
         return x
-    out = x.detach().contiguous()
+
+    if not is_traceable_wrapper_subclass(x):
+        assert isinstance(memory_format, torch.memory_format)
+        out = x.detach().to(memory_format=memory_format)
+
     # Note [Tangents must be contiguous, Part 2]
     # In the same way that "what strides do we assigns to our tangents" is a question
     # that we can not answer (and therefore have to guess) as we trace the backward ahead-of-time,
@@ -94,11 +99,11 @@ def coerce_tangent(x):
     # but has noncontiguous inner tensors.
     # Force these to be conntiguous too
     if is_traceable_wrapper_subclass(out):
-        for attr in out.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
+        assert isinstance(memory_format, list)
+        for i, attr in enumerate(out.__tensor_flatten__()[0]):  # type: ignore[attr-defined]
             elem = getattr(out, attr)
-            if not elem.is_contiguous():
-                elem_contig = elem.contiguous()
-                setattr(out, attr, elem_contig)
+            setattr(out, attr, coerce_tangent(elem, memory_format[i]))
+
     return out
 
 
@@ -665,11 +670,27 @@ from a multi-output view call"
         traced_tangents = pytree.tree_map(
             view_avoid_dupes_with_primals, traced_tangents
         )
-        # See Note [Tangents must be contiguous]
-        traced_tangents = pytree.tree_map(
-            coerce_tangent,
-            traced_tangents,
-        )
+
+        def subcompat_suggest_memory_format(t):
+            suggest_memory_format = torch._prims_common.suggest_memory_format
+            if is_traceable_wrapper_subclass(t):
+                return [
+                    suggest_memory_format(getattr(t, attr))
+                    for attr in out.__tensor_flatten__()[0]
+                ]
+
+            assert isinstance(t, Tensor)
+            return suggest_memory_format(t)
+
+        traced_tangent_memory_formats = [
+            subcompat_suggest_memory_format(tt) for tt in traced_tangents
+        ]
+
+        traced_tangents = [
+            coerce_tangent(tt, mf)
+            for tt, mf in zip(traced_tangents, traced_tangent_memory_formats)
+        ]
+
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
         nonlocal static_input_indices
@@ -732,6 +753,7 @@ from a multi-output view call"
             num_intermediate_bases=len(intermediate_bases),
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
+            traced_tangent_memory_formats=traced_tangent_memory_formats,
             subclass_inp_meta=create_subclass_meta(flat_args),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(traced_tangents),

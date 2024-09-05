@@ -6022,6 +6022,47 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
+    def test_channels_last_grads_no_force_contiguous(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x, y):
+                z = y + 3
+                y.mul_(2)
+                r = self.conv(x)
+                return r, r.transpose(0, 1), z.view(-1), z.transpose(0, 1)
+
+        m = M()
+        m.to(memory_format=torch.channels_last)
+        m.train()
+        w = m.conv.weight
+
+        ref_inps = (
+            torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
+            ),
+            torch.randn(3, 2, requires_grad=True).clone(),
+        )
+
+        [ref_inp.retain_grad() for ref_inp in ref_inps]
+
+        ref_outs = m(*ref_inps)
+        ref_outs[0].sum().backward()
+
+        inps = (
+            torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
+            ),
+            torch.randn(3, 2, requires_grad=True).clone(),
+        )
+        [inp.retain_grad() for inp in inps]
+
+        outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
+
+        outs[0].sum().backward()
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
