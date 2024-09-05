@@ -1586,22 +1586,26 @@ class CppVecOverrides(CppOverrides):
         code.writeline(f"{mantissa_t} {mantissa};")
         code.writeline("[&]()")
         with code.indent():
-            code.writeline(f"__at_align__ std::array<{cdtype}, {size}> tmpbuf;")
-            code.writeline(f"{x}.store(tmpbuf.data(), {size});")
-            code.writeline(f"__at_align__ std::array<int32_t, {size}> tmpbuf_exponent;")
             code.writeline(
-                f"__at_align__ std::array<{cdtype}, {size}> tmpbuf_mantissa;"
+                f"__at_align__ std::array<{cdtype}, {V.kernel.tiling_factor}> tmpbuf;"
             )
-            code.writeline(f"for (int i = 0; i < {size}; i++)")
+            code.writeline(f"{x}.store(tmpbuf.data(), {cexpr_index(size)});")
+            code.writeline(
+                f"__at_align__ std::array<int32_t, {V.kernel.tiling_factor}> tmpbuf_exponent;"
+            )
+            code.writeline(
+                f"__at_align__ std::array<{cdtype}, {V.kernel.tiling_factor}> tmpbuf_mantissa;"
+            )
+            code.writeline(f"for (int i = 0; i < {cexpr_index(size)}; i++)")
             with code.indent():
                 code.writeline(
                     "tmpbuf_mantissa[i] = std::frexp(tmpbuf[i], &tmpbuf_exponent[i]);"
                 )
             code.writeline(
-                f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {size});"
+                f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {cexpr_index(size)});"
             )
             code.writeline(
-                f"{mantissa} = {mantissa_t}::loadu(tmpbuf_mantissa.data(), {size});"
+                f"{mantissa} = {mantissa_t}::loadu(tmpbuf_mantissa.data(), {cexpr_index(size)});"
             )
         code.writeline("();")
         V.kernel.compute.splice(code)
@@ -1635,15 +1639,19 @@ class CppVecOverrides(CppOverrides):
                         assert arg.is_vec
                         assert arg.dtype == vec_dtype
                         code.writeline(
-                            f"__at_align__ std::array<{cdtype}, {size}> tmpbuf{argidx};"
+                            f"__at_align__ std::array<{cdtype}, {kernel.tiling_factor}> tmpbuf{argidx};"
                         )
-                        code.writeline(f"{arg}.store(tmpbuf{argidx}.data(), {size});")
+                        code.writeline(
+                            f"{arg}.store(tmpbuf{argidx}.data(), {cexpr_index(size)});"
+                        )
                         scalar_args.append(f"tmpbuf{argidx}[i]")
                     else:
                         scalar_args.append(arg)
-                code.writeline(f"__at_align__ std::array<{octype}, {size}> tmpbuf_out;")
+                code.writeline(
+                    f"__at_align__ std::array<{octype}, {kernel.tiling_factor}> tmpbuf_out;"
+                )
                 res = scalar_func(*scalar_args)
-                code.writeline(f"for (int i = 0; i < {size}; i++)")
+                code.writeline(f"for (int i = 0; i < {cexpr_index(size)}; i++)")
                 with code.indent():
                     code.writeline(f"tmpbuf_out[i] = {res};")
                 if output_mask:
@@ -1651,7 +1659,7 @@ class CppVecOverrides(CppOverrides):
                     load_args = "tmpbuf_out.data()"
                     load_fn = f"at::vec::VecMask<{cdtype},{n_vec}>::from"
                 else:
-                    load_args = f"tmpbuf_out.data(), {size}"
+                    load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
                     if n_vec == 1:
                         load_fn = f"at::vec::Vectorized<{cdtype}>::loadu"
                     else:
@@ -2279,7 +2287,7 @@ class CppVecKernel(CppKernel):
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
-                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.num_elems})"
+                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {cexpr_index(self.num_elems)})"
             )
         return line
 
@@ -2320,6 +2328,12 @@ class CppVecKernel(CppKernel):
             else:
                 return self.num_elems
 
+        def get_tiling_size(dtype: torch.dtype) -> int:
+            if dtype.itemsize < 4:
+                return self.tiling_factor * (4 // dtype.itemsize)
+            else:
+                return self.tiling_factor
+
         def vec_to_array(vec_var: CppCSEVariable) -> CppCSEVariable:
             assert vec_var.is_vec
             code = BracesBuffer()
@@ -2330,10 +2344,11 @@ class CppVecKernel(CppKernel):
                 if vec_dtype == torch.bool:
                     vec_dtype = torch.float
                 result_size = get_result_size(vec_dtype)
+                tiling_size = get_tiling_size(vec_dtype)
                 code.writeline(
-                    f"__at_align__ std::array<{DTYPE_TO_CPP[vec_dtype]}, {result_size}> tmpbuf;"
+                    f"__at_align__ std::array<{DTYPE_TO_CPP[vec_dtype]}, {tiling_size}> tmpbuf;"
                 )
-                line = f"{vec_var}.store(tmpbuf.data(), {result_size});"
+                line = f"{vec_var}.store(tmpbuf.data(), {cexpr_index(result_size)});"
                 code.writeline(line)
                 code.writeline("return tmpbuf;")
             code.writeline("()")
@@ -2345,12 +2360,15 @@ class CppVecKernel(CppKernel):
         code.writeline("[&]")
         with code.indent():
             result_size = get_result_size(dtype)
+            tiling_size = get_tiling_size(dtype)
             result_declare = (
-                f"__at_align__ std::array<{DTYPE_TO_CPP[dtype]}, {result_size}> tmpbuf;"
+                f"__at_align__ std::array<{DTYPE_TO_CPP[dtype]}, {tiling_size}> tmpbuf;"
             )
             code.writeline(result_declare)
             if store_value:
-                code.writeline(f"{store_value}.store(tmpbuf.data(), {result_size});")
+                code.writeline(
+                    f"{store_value}.store(tmpbuf.data(), {cexpr_index(result_size)});"
+                )
             itervar_inner = sympy_index_symbol(
                 f"{self.itervars[self.tiling_idx]}_inner"
             )
@@ -2376,12 +2394,12 @@ class CppVecKernel(CppKernel):
                 else:
                     load_mask = f"{self._load_mask} != 0"
             if cpp_builder.is_gcc():
-                code.writeline(f"#pragma GCC unroll {self.num_elems}")
+                code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
-                code.writeline(f"#pragma unroll {self.num_elems}")
+                code.writeline(f"#pragma unroll {self.tiling_factor}")
             code.writeline(
                 f"for (long {itervar_inner} = 0; "
-                + f"{itervar_inner} < {self.num_elems}; "
+                + f"{itervar_inner} < {cexpr_index(self.num_elems)}; "
                 + f"{itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
@@ -2463,7 +2481,9 @@ class CppVecKernel(CppKernel):
             if dtype == torch.float and self.tail_size is None:
                 code.writeline(f"{value}.store({var_expr});")
             else:
-                code.writeline(f"{value}.store({var_expr}, {self.num_elems});")
+                code.writeline(
+                    f"{value}.store({var_expr}, {cexpr_index(self.num_elems)});"
+                )
         else:
             self._load_or_store_non_contiguous(
                 var, index, dtype, buffer=code, store_value=value, accu_store=accu_store
@@ -2801,7 +2821,7 @@ class CppVecKernel(CppKernel):
         is_bool = src_dtype == torch.bool
         if reduction_type == "max":
             if self.tail_size:
-                return f"max_masked_reduce({var}, {next_value}, {self.tail_size})"
+                return f"max_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
             else:
                 return (
                     f"{var} | {next_value}"
@@ -2810,7 +2830,7 @@ class CppVecKernel(CppKernel):
                 )
         elif reduction_type == "min":
             if self.tail_size:
-                return f"min_masked_reduce({var}, {next_value}, {self.tail_size})"
+                return f"min_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
             else:
                 return (
                     f"{var} & {next_value}"
@@ -2819,29 +2839,29 @@ class CppVecKernel(CppKernel):
                 )
         elif reduction_type == "sum":
             if self.tail_size:
-                return f"sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+                return f"sum_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
             else:
                 conjunction = "|" if is_bool else "+"
                 return f"{var} {conjunction} {next_value}"
         elif reduction_type == "prod":
             if self.tail_size:
-                return f"prod_masked_reduce({var}, {next_value}, {self.tail_size})"
+                return f"prod_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
             else:
                 return f"{var} * {next_value}"
         elif reduction_type == "xor_sum":
             if self.tail_size:
-                return f"xor_sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+                return f"xor_sum_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
             else:
                 return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
             if use_weight_recps:
                 if self.tail_size:
-                    return f"welford_combine({var}, {next_value}, {self.tail_size}, &{self.weight_recps_val})"
+                    return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)}, &{self.weight_recps_val})"
                 else:
                     return f"welford_combine({var}, {next_value}, &{self.weight_recps_val})"
             else:
                 if self.tail_size:
-                    return f"welford_combine({var}, {next_value}, {self.tail_size})"
+                    return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)})"
                 else:
                     return f"welford_combine({var}, {next_value})"
         elif reduction_type == "welford_combine":
@@ -2852,7 +2872,7 @@ class CppVecKernel(CppKernel):
                 # When combining intermediate accumulators we have a Welford<T> struct
                 mean, m2, weight = reduction_project(reduction_type, next_value)
             if self.tail_size:
-                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {self.tail_size})"
+                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {cexpr_index(self.tail_size)})"
             else:
                 return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         elif reduction_type in ("argmin", "argmax"):
@@ -2869,7 +2889,7 @@ class CppVecKernel(CppKernel):
             if self.tail_size:
                 return (
                     f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
-                    f"({var}, {next_value}{arg_extra}, {self.tail_size})"
+                    f"({var}, {next_value}{arg_extra}, {cexpr_index(self.tail_size)})"
                 )
             else:
                 return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
@@ -2907,6 +2927,11 @@ class CppVecKernel(CppKernel):
                 mask = f"{self._get_mask_type(var.dtype)}({mask})"
             # We need not check when the mask is False
             cond = f"({cond}) | ~({mask})"
+        if self.tail_size:
+            cond = (
+                f"{self._get_mask_type(var.dtype)}::set({self._get_mask_type(var.dtype)}::from(1)"
+                f", ({cond}), {cexpr_index(self.tail_size)})"
+            )
         cond = f"({cond}).all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
@@ -3010,20 +3035,29 @@ class CppTile2DKernel(CppVecKernel):
         src = f"{var} + {cexpr_index(index)}"
         dst = "__place_holder__"
         ld_src = f"{cexpr_index(stride_at_vec_range(index, self.itervars[self.tiling_idx], self.tiling_factor))}"
-        ld_dst = f"{self.num_elems}"
+        ld_dst = f"{cexpr_index(self.num_elems)}"
         if is_store:
             src, dst = dst, src
             ld_src, ld_dst = ld_dst, ld_src
 
         need_define = True
         if self.inner_is_tiling_idx ^ is_store:
+            M, N = self.inner_num_elems, self.outer_num_elems
+        else:
+            M, N = (
+                self.outer_num_elems,
+                self.inner_num_elems,
+            )
+        if (isinstance(M, sympy.Expr) and not M.is_number) or (
+            isinstance(N, sympy.Expr) and not N.is_number
+        ):
             load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.inner_num_elems},{self.outer_num_elems}>"
-                f"({src}, {ld_src}, {dst}, {ld_dst});"
+                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]}>"
+                f"({src}, {ld_src}, {dst}, {ld_dst}, {cexpr_index(M)}, {cexpr_index(N)});"
             )
         else:
             load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.outer_num_elems},{self.inner_num_elems}>"
+                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{cexpr_index(M)},{cexpr_index(N)}>"
                 f"({src}, {ld_src}, {dst}, {ld_dst});"
             )
         if is_store:
@@ -3035,7 +3069,10 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{self.outer_num_elems}*{self.inner_num_elems}];"
+            define_line = (
+                f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}"
+                f"[{cexpr_index(self.outer_num_elems * self.inner_num_elems)}];"
+            )
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -3085,7 +3122,7 @@ class CppTile2DKernel(CppVecKernel):
                 torch.uint8,
                 torch.int8,
             ]:
-                line = f"{value}.store({storebuf}, {self.num_elems});"
+                line = f"{value}.store({storebuf}, {cexpr_index(self.num_elems)});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
@@ -3097,11 +3134,11 @@ class CppTile2DKernel(CppVecKernel):
         inner = self.inner_itervar()
         if self.inner_is_tiling_idx:
             code.writeline(
-                f"for (long {inner} = 0; {inner} < {self.outer_num_elems}; {inner}++)"
+                f"for (long {inner} = 0; {inner} < {cexpr_index(self.outer_num_elems)}; {inner}++)"
             )
         else:
             code.writeline(
-                f"for (long {inner} = 0; {inner} < {self.inner_num_elems}; {inner}++)"
+                f"for (long {inner} = 0; {inner} < {cexpr_index(self.inner_num_elems)}; {inner}++)"
             )
 
     def set_ranges(self, group, reduction_group):
@@ -3643,9 +3680,6 @@ class CppKernelProxy(CppKernel):
             if any(dtype not in MASKED_VECTORIZABLE_DTYPES for dtype in all_dtypes):
                 # can be removed after masked vectorizable dtype are same with vectorizable dtype
                 could_masked_vec = False
-            if has_free_symbols(self.ranges):
-                # can be removed after masked vec support dynamic ranges
-                could_masked_vec = False
 
             if len(tiling_indices) == 1:
                 vec_kernel = codegen_kernel(
@@ -3657,11 +3691,7 @@ class CppKernelProxy(CppKernel):
                 )
                 main_loop.set_kernel(vec_kernel)
                 main_loop.simd_vec = True
-                if (
-                    config.cpp.enable_loop_tail_vec
-                    and could_masked_vec
-                    and (tail_loop.size - tail_loop.offset) >= 4
-                ):
+                if config.cpp.enable_loop_tail_vec and could_masked_vec:
                     tail_loop.steps = tail_loop.size - tail_loop.offset
                     masked_vec_kernel = codegen_kernel(
                         CppVecKernel,
@@ -4779,7 +4809,15 @@ class LoopLevel:
             line1 = ""
         offset_str = f"{INDEX_TYPE} {self.var}={offset_expr}"
         size_str = f"{self.var}<{size_expr}"
-        steps_str = f"{self.var}+={cexpr_index(self.steps)}"
+        if self.steps.is_number:
+            steps_str = f"{self.var}+={cexpr_index(self.steps)}"
+        else:
+            # If the step size is 0, change it to 1 because a step size of 0
+            # will cause floating point exception (core dump) during parallelization.
+            steps_str = (
+                f"{self.var}+=({cexpr_index(self.steps)} == 0 ? "
+                f"1 : {cexpr_index(self.steps)})"
+            )
         line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:
             return [line2]
