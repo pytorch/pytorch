@@ -280,7 +280,9 @@ def parse_settings_from_text(settings_text: str) -> Settings:
         if settings_text:
             # Escape the backtick as well so that we can have the settings in a code block on the GH issue
             # for easy reading
-            settings_text = settings_text.strip("\r\n\t` ")
+            # Note: We add two backticks because otherwise cat step in _runner-determinator.yml will think it's an open
+            #       quote and fail to cat out the script to a python file
+            settings_text = settings_text.strip("\r\n\t`` ")
             settings = load_yaml(settings_text)
 
             # For now we just load experiments. We can expand this if/when we add more settings
