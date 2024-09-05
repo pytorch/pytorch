@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Callable, List
+from typing import Callable, List, Tuple
 
 import torch
 import torch._prims_common as utils
@@ -44,12 +44,14 @@ def wrap_combine_fn_flat(
 
 
 def scan(
-    combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
+    combine_fn: Callable[
+        [pytree.PyTree, pytree.PyTree], Tuple[pytree.PyTree, pytree.PyTree]
+    ],
     init: pytree.PyTree,
     input: pytree.PyTree,
     dim: int,
     reverse: bool = False,
-) -> torch.Tensor:
+) -> Tuple[pytree.PyTree, pytree.PyTree]:
     r"""
     Performs an inclusive scan with a combine function.
 
@@ -75,6 +77,9 @@ def scan(
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
 
+    Returns:
+        final_carry (torch.Tensor): The final carry of the scan operation
+        out (torch.Tensor): The output matrix for which each scan iteration produced a slice along dim
 
     Example::
 
@@ -355,7 +360,7 @@ scan_op.py_impl(DispatchKey.Autograd)(
 
 @scan_op.py_impl(ProxyTorchDispatchMode)
 def scan_proxy_mode(mode, combine_fn, init, input, dim, reverse):
-    return trace_scan(mode, scan_op, combine_fn, init, input, dim, reverse)
+    return trace_scan(mode, scan_op, combine_fn, init, input, dim)
 
 
 @scan_op.py_impl(FakeTensorMode)

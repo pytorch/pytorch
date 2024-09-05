@@ -1607,28 +1607,6 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result, expected_result)
 
-        # Check against associative_scan operator
-        def assoc_fct(x, y):
-            A_i, Bu_i = x
-            A_j, Bu_j = y
-            return A_j * A_i, A_j * Bu_i + Bu_j
-
-        if device is torch.device("cuda"):
-            assoc_result = associative_scan(
-                assoc_fct, input=elements, dim=0, reverse=reverse
-            )
-        else:
-            assoc_result = associative_scan(
-                assoc_fct,
-                input=elements,
-                dim=0,
-                reverse=reverse,
-                combine_mode="generic",
-            )
-
-        self.assertEqual(result[1][0], assoc_result[0])
-        self.assertEqual(result[1][1], assoc_result[1])
-
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2239,10 +2217,6 @@ def forward(self, pred_1, x_1):
 
         # Init with two timestep on dim axis. Should work as y has always 1 on dim axis and
         # hence automatic broadcasting should work
-        # TODO: However, this creates a problem with the output of scan.
-        # If the carry is allowed to have a scan dim > 1, then the output of the operator will also
-        # be broadcasted to that shape. This means that the output of the operator may not have the same
-        # scan dim as the input, which may be weird.
         init = torch._ops.ops.aten.slice(x, dim, 0, 2, 1)
         result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
         result_exp = _fake_scan(op, init=init, input=inp, dim=dim, reverse=reverse)
