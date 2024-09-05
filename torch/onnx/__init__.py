@@ -149,7 +149,7 @@ def export(
     | torch.export.ExportedProgram
     | torch.jit.ScriptModule
     | torch.jit.ScriptFunction,
-    args: tuple[Any, ...],
+    args: tuple[Any, ...] = (),
     f: str | os.PathLike | None = None,
     *,
     kwargs: dict[str, Any] | None = None,

@@ -12,6 +12,7 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
@@ -88,6 +89,10 @@ def fuse_chunk_reshape_unsqueeze_concat_pass(graph):
     return None
 
 
+def fuse_chunk_reshape_concat_pass(graph):
+    return None
+
+
 def remove_noop_pass(graph):
     return None
 
@@ -153,10 +158,20 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 "[Pre grad(predispatch IR)]Apply remove_noop pass",
             )
             pass_execution_and_save(
+                fuse_chunk_reshape_concat_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_concat_pass",
+            )
+            pass_execution_and_save(
                 group_batch_fusion_passes,
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply group_batch_fusion",
+            )
+            # update node.meta after group batch fusion
+            FakeTensorProp(module=gm, mode=detect_fake_mode(example_inputs)).propagate(
+                *example_inputs
             )
             pass_execution_and_save(
                 normalize_node_kwargs_pass,

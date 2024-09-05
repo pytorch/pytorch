@@ -3,12 +3,25 @@
 
 import copy
 import itertools
+from pprint import pformat
+from typing import NamedTuple
 
 import torch
-from torch.distributed._tensor import DeviceMesh, distribute_module, distribute_tensor
+from torch.distributed._tensor import (
+    DeviceMesh,
+    distribute_module,
+    distribute_tensor,
+    DTensor,
+)
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.ops.utils import is_tensor_partial, normalize_dim
 from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+    SequenceParallel,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -21,11 +34,30 @@ funcol = torch.ops.c10d_functional
 
 
 class DistMathOpsTest(DTensorTestBase):
+    def _check_module(self, m1, m2, check_grad=False):
+        named_parameters = dict(m1.named_parameters())
+        for name, param_m2 in m2.named_parameters():
+            self.assertTrue(name in named_parameters)
+            param_m1 = named_parameters[name]
+            if check_grad:
+                param_m2 = param_m2.grad
+                param_m1 = param_m1.grad
+            if isinstance(param_m2, DTensor):
+                replicate = [Replicate()]
+                param_m2 = param_m2.redistribute(
+                    device_mesh=param_m2.device_mesh, placements=replicate
+                ).to_local()
+            self.assertEqual(param_m2, param_m1)
+
     def linear_op_reductions(self, op_str):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         tensor = torch.randn(12, 8, 8)
+        # TODO: check `all` correctness and test `all` on a bool tensor
+        if op_str in ("any"):
+            # test out a bool tensor for any
+            tensor = tensor < 0
         dtensor = distribute_tensor(tensor, device_mesh, shard_spec)
 
         op = getattr(tensor, op_str)
@@ -51,7 +83,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     def test_linear_op_reductions(self):
-        for op_str in ("all", "sum", "prod", "max", "min"):
+        for op_str in ("all", "sum", "prod", "max", "min", "any"):
             self.linear_op_reductions(op_str)
 
     @with_comms
@@ -394,6 +426,149 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
 
     @with_comms
+    def test_layer_norm_bwd_req_grad(self):
+        device_mesh = self.build_device_mesh()
+        batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
+
+        # build our subtest configurations and filter out invalid ones
+        class SubTest(NamedTuple):
+            multidim_norm: bool
+            elementwise_affine: bool
+            emb_req_grad: bool
+            ln_req_grad: bool
+            out_req_grad: bool
+
+        subtest_fails = {}
+        valid_filter = lambda cfg: not (  # noqa: E731
+            cfg.ln_req_grad and not cfg.elementwise_affine
+        ) and any(cfg[2:])
+        subtest_cfgs = list(
+            filter(
+                valid_filter,
+                [SubTest(*cfg) for cfg in itertools.product(*(((False, True),) * 5))],
+            )
+        )
+
+        for subtest_cfg in subtest_cfgs:
+            try:
+                (
+                    multidim_norm,
+                    elementwise_affine,
+                    emb_req_grad,
+                    ln_req_grad,
+                    out_req_grad,
+                ) = subtest_cfg
+                normalized_shape = (
+                    (seq_len, embedding_dim) if multidim_norm else (embedding_dim,)
+                )
+
+                # configure our local and parallelized models for this subtest
+                class LnTpBlock(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.preln_embeddings = torch.nn.Embedding(
+                            vocab_size, embedding_dim
+                        )
+                        self.layer_norm = torch.nn.LayerNorm(
+                            normalized_shape, elementwise_affine=elementwise_affine
+                        )
+                        self.postln_linear = torch.nn.Linear(
+                            embedding_dim, embedding_dim
+                        )
+
+                    def forward(self, tokens):
+                        h = self.preln_embeddings(tokens)
+                        h = self.layer_norm(h)
+                        output = self.postln_linear(h)
+                        return output
+
+                parallel_plan = {
+                    "preln_embeddings": RowwiseParallel(
+                        input_layouts=Replicate(), output_layouts=Shard(1)
+                    ),
+                    "layer_norm": SequenceParallel(),
+                    "postln_linear": ColwiseParallel(
+                        input_layouts=Shard(1),
+                        output_layouts=Replicate(),
+                    ),
+                }
+
+                model = LnTpBlock()
+                model_local = copy.deepcopy(model).to(device=self.device_type)
+                model_dist = parallelize_module(model, device_mesh, parallel_plan)
+                req_grad_map = {
+                    "preln_embeddings": emb_req_grad,
+                    "postln_linear": out_req_grad,
+                    "layer_norm": ln_req_grad,
+                }
+
+                # apply the relevant `requires_grad` mask for this subtest to both models
+                for target_model in [model_local, model_dist]:
+                    for n, p in target_model.named_parameters():
+                        if not req_grad_map.get(n.rpartition(".")[0], False):
+                            p.requires_grad_(False)
+                            assert not p.requires_grad
+                        else:
+                            assert p.requires_grad
+
+                # forward step for both local and distributed models
+                x = torch.randint(vocab_size, (batch, seq_len), device=self.device_type)
+                x_local = x.detach().clone()
+                output_local = model_local(x_local)
+
+                with CommDebugMode() as comm_mode:
+                    output_dist = model_dist(x)
+
+                self.assertEqual(output_local, output_dist)
+
+                # all requires_grad patterns should have the same forward comm counts
+                expected_fwd_comm = {
+                    funcol.reduce_scatter_tensor: 1,
+                    funcol.all_gather_into_tensor: 2,
+                }
+                self.assertDictEqual(
+                    comm_mode.comm_module_counts["Global"]["forward"], expected_fwd_comm
+                )
+
+                # backward step
+                output_local.sum().backward()
+
+                with CommDebugMode() as comm_mode:
+                    output_dist.sum().backward()
+
+                # ensure gradients (and parameters) remain equal between local and distributed models
+                self._check_module(model_local, model_dist, check_grad=True)
+
+                # different requires_grad patterns will have different bwd comm counts
+                if out_req_grad and not any((emb_req_grad, ln_req_grad)):
+                    expected_bwd_comm = {}
+                elif ln_req_grad and not any((emb_req_grad, multidim_norm)):
+                    expected_bwd_comm = {funcol.reduce_scatter_tensor: 1}
+                elif multidim_norm:
+                    expected_bwd_comm = {funcol.all_reduce: 1}
+                    expected_bwd_comm[funcol.all_gather_into_tensor] = (
+                        2 if emb_req_grad else 1
+                    )
+                else:
+                    expected_bwd_comm = {
+                        funcol.reduce_scatter_tensor: 1,
+                        funcol.all_gather_into_tensor: 1,
+                    }
+
+                self.assertDictEqual(
+                    comm_mode.comm_module_counts["Global"]["backward"],
+                    expected_bwd_comm,
+                )
+                self.assertEqual(output_local, output_dist)
+
+            except Exception as e:
+                subtest_fails[subtest_cfg] = e
+        # if any subtest fails, provide the failed subtests and report the overall failure
+        assert (
+            not subtest_fails
+        ), f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
+
+    @with_comms
     def test_topk(self):
         device_mesh = self.build_device_mesh()
         placement_combs = [Shard(0), Shard(1), Shard(2), Replicate()]
@@ -454,6 +629,24 @@ class DistMathOpsTest(DTensorTestBase):
 
         for o, so in zip(out, sharded_out):
             self.assertEqual(so.full_tensor(), o)
+
+    @with_comms
+    def test_linalg_eigh(self):
+        A = torch.randn(2, 2, dtype=torch.float64)
+        mesh = self.build_device_mesh()
+        dtensor_A = distribute_tensor(A, device_mesh=mesh, placements=[Replicate()])
+        dtensor_A = dtensor_A + dtensor_A.mT
+        dtensor_L, dtensor_Q = torch.linalg.eigh(dtensor_A)
+
+        # TODO: we need to convert A, L, Q to local because we don't have a
+        # sharding strategy registered for aten.dist.default yet.
+        local_A, local_L, local_Q = (
+            dtensor_A.to_local(),
+            dtensor_L.to_local(),
+            dtensor_Q.to_local(),
+        )
+        distance = torch.dist(local_Q @ torch.diag(local_L) @ local_Q.mT, local_A)
+        self.assertEqual(distance.item(), 0.0)
 
 
 if __name__ == "__main__":
