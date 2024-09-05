@@ -1865,13 +1865,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def _get_bn_train_eval_ops(self):
         if capture_pre_autograd_graph_using_training_ir():
-            return (
-                torch.ops.aten.batch_norm.default,
-                torch.ops.aten.batch_norm.default,
-            )
-        # TODO: This branch is going through a deprecated branch and should be deleted soon,
-        # after capture_pre_autograd_graph fully migrate to training IR
-        # T199018392
+            return (torch.ops.aten.batch_norm.default, torch.ops.aten.batch_norm.default)
         if TEST_WITH_ROCM:
             return (
                 torch.ops.aten.miopen_batch_norm.default,
@@ -1883,8 +1877,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 torch.ops.aten.cudnn_batch_norm.default,
             )
         else:
-            if capture_pre_autograd_graph_using_training_ir():
-                return (torch.ops.aten.batch_norm.default, torch.ops.aten.batch_norm.default)
             return (
                 torch.ops.aten._native_batch_norm_legit.default,
                 torch.ops.aten._native_batch_norm_legit_no_training.default,
