@@ -1434,22 +1434,24 @@ double getDefaultTolerance() {
     return 1.e-9;
 }
 
-template<typename T>
-at::vec::VecMask<T, 1> create_vec_mask(uint64_t bitmask) {
-  constexpr auto N = at::vec::Vectorized<T>::size();
-  std::array<int, N> mask;
-  for (int i = 0; i < N; i++) {
-    mask[i] = (bitmask >> i) & 1;
+template<typename T, int N = 1>
+at::vec::VecMask<T, N> create_vec_mask(uint64_t bitmask) {
+  constexpr auto size = at::vec::Vectorized<T>::size();
+  std::array<int, N * size> mask;
+  for (int n = 0; n < N; n++) {
+      for (int i = 0; i < size; i++) {
+        mask[n * size + i] = (bitmask >> i) & 1;
+      }
   }
-  return at::vec::VecMask<T, 1>::from(mask.data());
+  return at::vec::VecMask<T, N>::from(mask.data());
 }
 
-template<typename T>
-at::vec::VecMask<T, 1> generate_vec_mask(int seed) {
-  constexpr auto N = at::vec::Vectorized<T>::size();
-  ValueGen<uint64_t> generator(0, (1ULL << N) - 1, seed);
+template<typename T, int N = 1>
+at::vec::VecMask<T, N> generate_vec_mask(int seed) {
+  constexpr auto size = at::vec::Vectorized<T>::size();
+  ValueGen<uint64_t> generator(0, (1ULL << size) - 1, seed);
   auto bitmask = generator.get();
-  return create_vec_mask<T>(bitmask);
+  return create_vec_mask<T, N>(bitmask);
 }
 
 template<typename T>

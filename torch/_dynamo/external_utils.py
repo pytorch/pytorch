@@ -2,8 +2,8 @@
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
+import warnings
 from typing import List
-from typing_extensions import deprecated
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,10 +15,6 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 
-@deprecated(
-    "`torch._dynamo.external_utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
-    category=FutureWarning,
-)
 def is_compiling() -> bool:
     """
     Indicates whether we are tracing/compiling with torch.compile() or torch.export().
@@ -46,13 +42,15 @@ def wrap_inline(fn):
     return inner
 
 
-def call_hook(hook, *args):
+def call_hook(hook, *args, **kwargs):
     """
     Used by compiled autograd to handle hook returning None
     """
     result = hook(*args)
     if result is None:
         return args[0]
+    elif kwargs["hook_type"] == "post_acc_grad_hook":
+        raise RuntimeError("Tensor post accumulate grad hooks should return None.")
     return result
 
 
@@ -84,6 +82,13 @@ class FakeBackwardCFunction:
         self.saved_tensors = saved_tensors
 
     def __getattr__(self, name):
+        if name == "saved_variables":
+            warnings.warn(
+                "'saved_variables' is deprecated; use 'saved_tensors'",
+                DeprecationWarning,
+            )
+            return self.saved_tensors
+
         # route any attribute that isn't defined on this obj
         return getattr(self.real, name)
 

@@ -45,7 +45,6 @@ def _parameterized_class_attrs_and_values():
     input_values.extend(
         itertools.product(
             (True, False),
-            (True, False),
             (
                 pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
                 pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
@@ -53,7 +52,7 @@ def _parameterized_class_attrs_and_values():
         )
     )
     return {
-        "attrs": ["op_level_debug", "dynamic_shapes", "model_type"],
+        "attrs": ["dynamic_shapes", "model_type"],
         "input_values": input_values,
     }
 
@@ -75,7 +74,6 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
     class_name_func=_parameterize_class_name,
 )
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
-    op_level_debug: bool
     dynamic_shapes: bool
     model_type: pytorch_test_common.TorchModelType
 
@@ -200,7 +198,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             tensor_x,
             8.0,
             export_options=torch.onnx.ExportOptions(
-                op_level_debug=self.op_level_debug,
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
@@ -481,6 +478,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
+    @unittest.skip(
+        "Fixme: arange in torchlib does not support dynamic start and end yet."
+    )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -539,7 +539,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
-        error_message="at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED"
+        error_message="at::functionalization::impl::isFunctionalTensor(t) INTERNAL ASSERT FAILED"
     )
     def test_expand_as_fill_separate_tensor(self):
         class Model(torch.nn.Module):
@@ -779,7 +779,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
                 options = torch.onnx.ExportOptions(
                     dynamic_shapes=self.dynamic_shapes,
-                    op_level_debug=self.op_level_debug,
                 )
                 export_options = _exporter_legacy.ResolvedExportOptions(options)
                 export_options.fx_tracer = (
@@ -913,7 +912,6 @@ def _parameterized_class_attrs_and_values_with_fake_options():
             (True, False),
             (True, False),
             (True, False),
-            (True, False),
             (
                 pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
                 pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
@@ -922,7 +920,6 @@ def _parameterized_class_attrs_and_values_with_fake_options():
     )
     return {
         "attrs": [
-            "op_level_debug",
             "dynamic_shapes",
             "load_checkpoint_during_init",
             "export_within_fake_mode",
@@ -942,7 +939,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     TODO: Should we merge this with  `TestFxToOnnxWithOnnxRuntime`? Considerably increases export time
     """
 
-    op_level_debug: bool
     dynamic_shapes: bool
     load_checkpoint_during_init: bool
     export_within_fake_mode: bool
@@ -1015,7 +1011,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Export the model with fake inputs and parameters
                 export_options = torch.onnx.ExportOptions(
                     dynamic_shapes=self.dynamic_shapes,
-                    op_level_debug=self.op_level_debug,
                     fake_context=fake_context,
                 )
 
@@ -1051,7 +1046,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             if diagnostics.is_onnx_diagnostics_log_artifact_enabled():
                 onnx_program.save_diagnostics(
                     f"test_report_{self._testMethodName}"
-                    f"_op_level_debug_{self.op_level_debug}"
                     f"_dynamic_axes_{self.dynamic_shapes}"
                     f"_load_checkpoint_{self.load_checkpoint_during_init}"
                     f"_export_within_fake_mode_{self.export_within_fake_mode}"

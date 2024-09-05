@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # Nodes represent a definition of a value in our graph of operators.
 from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict, Set
 from ._compatibility import compatibility
@@ -47,9 +46,6 @@ _side_effectful_functions: Set[Callable] = {
     torch._assert_async,
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
-    _ops.aten.copy_.default,
-    _ops.aten.set_.source_Tensor,
-    _ops.aten.index_put_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
@@ -650,9 +646,11 @@ class Node(_NodeBase):
         if self.op in {"placeholder", "output"}:
             return True
 
-        # Check if an impure function.
+        # Check if an impure function based on schema.
         if self.op == "call_function":
-            return self.target in _side_effectful_functions
+            schema = getattr(self.target, "_schema", None)
+            schema_mutable = schema is not None and schema.is_mutable
+            return schema_mutable or self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":
@@ -769,7 +767,7 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
     if isinstance(a, tuple):
         t = tuple(map_aggregate(elem, fn) for elem in a)
         # Support NamedTuple (if it has `_fields`) by repacking into original type.
-        return t if not hasattr(a, '_fields') else type(a)(*t)
+        return t if not hasattr(a, '_fields') else type(a)(*t)  # type: ignore[arg-type]
     elif isinstance(a, list):
         return immutable_list(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, dict):
