@@ -883,7 +883,7 @@ class PagedCache(torch.nn.Module):
                 b, num_pages_to_allocate[b].item(), last_allocated_page_idx[b].item()
             )
 
-    def batch_deallocate(self,  batch: Tensor):
+    def batch_deallocate(self, batch: Tensor):
         # batch is a 1D tensor with 1 element
         self.page_table_ref_cnt[batch] -= 1
         zero_ref_pages = self.page_table_ref_cnt[batch] < 1
@@ -914,7 +914,7 @@ class PagedCache(torch.nn.Module):
         logical_block_offset = input_pos % self.page_size  # [B, H, S]
 
         physical_block_idx = torch.empty((B, H, S)).scatter_(
-            self.page_table, 2, logical_block_idx
+            2, logical_block_idx, self.page_table
         )
 
         # update
@@ -923,60 +923,28 @@ class PagedCache(torch.nn.Module):
         )  # [BxHxS]
         self.cache[addr] = val.view(B * H * S, D)
 
-
-# TODO
-class PagedKVCache(torch.nn.Module):
-    # We assume a 1:1 mapping between sparse kv block and page block.
-    def __init__(
-        self,
-        max_batch_size: int,
-        max_seq_len: int,
-        n_heads: int,
-        head_dim: int,
-        n_pages: int,
-        page_size: int,
-        dtype=torch.bfloat16,
-    ):
-        super().__init__()
-        cache_shape = (n_pages, page_size, head_dim)
-        self.register_buffer("physical_k_cache", torch.zeros(cache_shape, dtype=dtype))
-        self.register_buffer("physical_v_cache", torch.zeros(cache_shape, dtype=dtype))
-        self.page_size = page_size
-
-        # Page Table: [b, h, logical_block_idx] -> (physical_page_idx, n_filled, ref_count)
-        max_seq_pages = (max_seq_len + page_size - 1) // page_size
-        page_table_shape = (max_batch_size, n_heads, max_seq_pages, 3)
-        self.register_buffer(
-            "kv_page_table", -torch.ones(page_table_shape, dtype=torch.int)
-        )
-
-
     def convert_logical_block_mask(self, block_mask: BlockMask):
         assert block_mask.BLOCK_SIZE[1] == self.page_size
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
-        new_kv_num_blocks = block_mask.kv_num_blocks.clone()
-        new_kv_indices = torch.empty_like(block_mask.kv_indices)
-        for b in range(B):
-            for h in range(H):
-                for r in range(ROWS):
-                    for c in range(MAX_BLOCKS_IN_COL):
-                        new_kv_indices[b][h][r][c] = self.kv_page_table[b][h][
-                            block_mask.kv_indices[b, h, r, c]
-                        ]
 
-        new_full_kv_num_blocks = None
-        new_full_kv_indices = None
+        new_kv_num_blocks = block_mask.kv_num_blocks.clone()
+        new_kv_indices = torch.gather(
+            self.page_table, 2, block_mask.kv_indices.view(B, H, -1)
+        )
+
+        new_full_kv_num_blocks = (
+            None
+            if block_mask.full_kv_num_blocks is None
+            else block_mask.full_kv_num_blocks.clone()
+        )
+
+        new_full_kv_indices, new_full_kv_num_blocks = None, None
         if block_mask.full_kv_num_blocks is not None:
             assert block_mask.full_kv_indices is not None
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
-            new_full_kv_indices = torch.empty_like(block_mask.full_kv_indices)
-            for b in range(B):
-                for h in range(H):
-                    for r in range(ROWS):
-                        for c in range(MAX_BLOCKS_IN_COL):
-                            new_full_kv_indices[b][h][r][c] = self.kv_page_table[b][h][
-                                block_mask.full_kv_indices[b, h, r, c]
-                            ]
+            new_full_kv_indices = torch.gather(
+                self.page_table, 2, block_mask.full_kv_indices.view(B, H, -1)
+            )
 
         return BlockMask.from_kv_blocks(
             new_kv_num_blocks,
@@ -986,10 +954,6 @@ class PagedKVCache(torch.nn.Module):
             block_mask.BLOCK_SIZE,
             block_mask.mask_mod,
         )
-
-    def get_paged_score_mod(self):
-        # TODO
-        return
 
 
 def _apply_kernel_options(
