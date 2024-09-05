@@ -351,7 +351,7 @@ def get_runner_prefix(
             for requestor in workflow_requestors
             if is_user_opted_in(requestor, user_optins, experiment_name)
         ]
-        log.info(user_optins)
+
         if opted_in_users:
             log.info(
                 f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
