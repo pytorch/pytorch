@@ -237,7 +237,7 @@ def reduction_project(reduction_type, acc):
 
 
 def transform_kernel_codes_under_inner_loop(
-    code: IndentedBuffer, var: str, new_var: str, loop_start, loop_end
+    code: IndentedBuffer, idx: str, new_idx: str, loop_start, loop_end
 ):
     r"""
     f(idx) is transformed to f(new_idx) under the inner loop
@@ -245,11 +245,19 @@ def transform_kernel_codes_under_inner_loop(
     for (new_idx = loop_start; new_idx < loop_end; new_idx++) {
         f(new_idx)
     }
+    Please be careful while using this function, the variable defined
+    in f(idx) while not be used outside the for loop
+    for example
+    auto tmp0 = in_ptr[x0]; ->
+    for (new_x0 = start; new_x0 < end; new_x0++){
+        auto tmp0 = in_ptr[x0]
+    }
+    the tmp0 are invalid outside the loop
     """
     transformed_code = BracesBuffer()
     with contextlib.ExitStack() as stack:
         transformed_code.writeline(
-            f"for (long {new_var} = {cexpr_index(loop_start)}; {new_var} < {cexpr_index(loop_end)}; {new_var}++)"
+            f"for (long {new_idx} = {cexpr_index(loop_start)}; {new_idx} < {cexpr_index(loop_end)}; {new_idx}++)"
         )
         stack.enter_context(transformed_code.indent())
         for _, line in enumerate(code._lines):
@@ -258,7 +266,7 @@ def transform_kernel_codes_under_inner_loop(
                 deferred_name = line.name
                 line = line.line
             assert isinstance(line, str)
-            new_line = re.sub(r"\b" + f"{var}" + r"\b", f"{new_var}", line)
+            new_line = re.sub(r"\b" + f"{idx}" + r"\b", f"{new_idx}", line)
             if deferred_name:
                 new_line = DeferredLine(deferred_name, new_line)  # type: ignore[assignment]
             transformed_code.writeline(new_line)
@@ -3899,10 +3907,10 @@ class CppKernelProxy(CppKernel):
                     stack.enter_context(code.indent())
                     body = kernel.gen_body()
                     if kernel.inner_itervars:
-                        for var in kernel.inner_itervars:
-                            start, end = kernel.active_ranges[var]
+                        for idx in kernel.inner_itervars:
+                            start, end = kernel.active_ranges[idx]
                             body = transform_kernel_codes_under_inner_loop(
-                                body, var, f"{var}_tail", start, end
+                                body, idx, f"{idx}_tail", start, end
                             )
                     code.splice(body)
 
