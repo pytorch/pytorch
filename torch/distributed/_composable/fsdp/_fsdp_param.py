@@ -720,7 +720,7 @@ class FSDPParam:
         if self.offload_to_cpu and not local_tensor.is_cpu:
             local_tensor = local_tensor.cpu()
         if self.pin_memory and not local_tensor.is_pinned():
-            local_tensor = local_tensor.cpu().pin_memory()
+            local_tensor = local_tensor.pin_memory()
         self._sharded_param_data = local_tensor.view(-1)
         if not isinstance(new_param, DTensor):
             raise ValueError(
