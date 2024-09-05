@@ -228,6 +228,8 @@ xfail_not_implemented = {
     "aten::var_mean.correction_names",
     "aten::var_mean.names_dim",
     "aten::where",
+    "aten::wrapped_linear_prepack",
+    "aten::wrapped_quantized_linear_prepacked",
 }
 
 

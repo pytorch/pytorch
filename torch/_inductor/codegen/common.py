@@ -271,8 +271,8 @@ def get_device_op_overrides(device: str):
 @functools.lru_cache(None)
 def boolean_ops():
     return (
-        "is_inf",
-        "is_nan",
+        "isinf",
+        "isnan",
         "logical_not",
         "signbit",
         "le",
@@ -1335,9 +1335,9 @@ class KernelArgs:
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
-        arg_defs = []
-        call_args = []
-        arg_types = []
+        arg_defs: List[str] = []
+        call_args: List[str] = []
+        arg_types: List[torch.dtype] = []
         precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):

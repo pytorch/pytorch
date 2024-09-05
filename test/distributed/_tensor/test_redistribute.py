@@ -510,6 +510,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
             ([Shard(0), Shard(1), Shard(2)], [Shard(2), Shard(1), Shard(0)]),
             ([Shard(1), Shard(0), Shard(0)], [Replicate(), Shard(0), Shard(0)]),
             ([Shard(1), Replicate(), Shard(0)], [Replicate(), Shard(0), Shard(0)]),
+            ([Shard(0), Shard(0), Shard(1)], [Shard(0), Shard(1), Shard(2)]),
         ]
         comm_counts_3d = [
             3,  # 2: S0 - R, 1: S1 -> R, 0: S0 -> S1
@@ -517,6 +518,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
             2,  # 2: S2 -> R, 0: S1 -> S2
             1,  # 0: S1 -> R
             2,  # 2: S0 -> R, 1: R -> S0, 2: R -> S0, 0: S1 -> R
+            2,  # 2: S1 -> S2, 1: S0 -> S1
         ]
 
         comm_mode = CommDebugMode()

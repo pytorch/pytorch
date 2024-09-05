@@ -122,6 +122,9 @@ Memory management
      change_current_allocator
      MemPool
      MemPoolContext
+
+.. autoclass:: torch.cuda.use_mem_pool
+
 .. FIXME The following doesn't seem to exist. Is it supposed to?
    https://github.com/pytorch/pytorch/issues/27785
    .. autofunction:: reset_max_memory_reserved
@@ -183,6 +186,7 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
 .. for tracking purposes
 .. py:module:: torch.cuda.comm
 .. py:module:: torch.cuda.error
+.. py:module:: torch.cuda.gds
 .. py:module:: torch.cuda.graphs
 .. py:module:: torch.cuda.jiterator
 .. py:module:: torch.cuda.memory

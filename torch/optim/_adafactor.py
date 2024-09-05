@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import cast, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
@@ -11,6 +11,7 @@ from .optimizer import (
     _maximize_doc,
     Optimizer,
     ParamsT,
+    TensorListList,
 )
 
 
@@ -27,6 +28,7 @@ class Adafactor(Optimizer):
         d: float = 1.0,
         weight_decay: float = 0.0,
         *,
+        foreach: Optional[bool] = None,
         maximize: bool = False,
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
@@ -49,6 +51,7 @@ class Adafactor(Optimizer):
             eps=eps,
             d=d,
             weight_decay=weight_decay,
+            foreach=foreach,
             maximize=maximize,
         )
         super().__init__(params, defaults)
@@ -56,6 +59,7 @@ class Adafactor(Optimizer):
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
+            group.setdefault("foreach", None)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
                 if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
@@ -159,6 +163,7 @@ class Adafactor(Optimizer):
                 weight_decay=group["weight_decay"],
                 eps1=eps1,
                 eps2=eps2,
+                foreach=group["foreach"],
                 maximize=group["maximize"],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
@@ -237,6 +242,13 @@ Adafactor.__doc__ = (
         d (float, optional): the clipping threshold, used to avoid larger-than-desired
             updates.
         weight_decay (float, optional): weight decay coefficient (default: 1e-2)
+        foreach (bool, optional): whether foreach implementation of optimizer is used. Note
+            that the foreach implementation uses ~ sizeof(params) more peak memory than the
+            for-loop version due to the intermediates being a tensorlist vs just one tensor.
+            As Adafactor is commonly used when memory is prohibitive, Adafactor will default
+            to the slower single tensor for-loop implementation unless this flag is explicitly
+            True. This behavior is contrary to other optimizers, which will attempt defaulting
+            to foreach on CUDA for faster runtime. (default: None)
         {_maximize_doc}"""
     + r"""
     .. Note::
@@ -357,7 +369,7 @@ def _single_tensor_adafactor(
         step_t += 1
         step_float = step_t.item()
 
-        beta2_t = 1 - step_float**beta2_decay
+        one_minus_beta2_t = step_float**beta2_decay
         rho_t = min(lr, 1 / (step_float**0.5))
         alpha = max(eps2, param.norm(2).item() / (param.numel() ** 0.5)) * rho_t
 
@@ -373,12 +385,12 @@ def _single_tensor_adafactor(
             row_mean = (
                 torch.norm(grad, dim=-1, keepdim=True).square_().div_(grad.size(-1))
             )
-            row_var.lerp_(row_mean, 1 - beta2_t)
+            row_var.lerp_(row_mean, one_minus_beta2_t)
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_mean = (
                 torch.norm(grad, dim=-2, keepdim=True).square_().div_(grad.size(-2))
             )
-            col_var.lerp_(col_mean, 1 - beta2_t)
+            col_var.lerp_(col_mean, one_minus_beta2_t)
             var_estimate = row_var @ col_var
             var_estimate.div_(row_var.mean(dim=-2, keepdim=True).clamp_(min=eps1))
         else:
@@ -386,7 +398,7 @@ def _single_tensor_adafactor(
                 variance is not None
             ), "variance should be defined when grad is a vector"
             grad_squared = grad * grad
-            variance.lerp_(grad_squared, 1 - beta2_t)
+            variance.lerp_(grad_squared, one_minus_beta2_t)
             # avoid writing into variance during update
             var_estimate = variance.clone()
 
@@ -395,6 +407,194 @@ def _single_tensor_adafactor(
         update.mul_(grad)
         denom = max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d))
         param.add_(update, alpha=-alpha / denom)
+
+
+def _group_tensors_by_device_dtype_and_is_multidim(
+    tensorlists: TensorListList,
+) -> Dict[
+    Tuple[Optional[torch.device], Optional[torch.dtype], bool],
+    List[List[Optional[Tensor]]],
+]:
+    """Groups tensors by device, dtype, AND multidimensionality -- whether the tensor
+    has multiple dims or just one dim (is a vector). This allows the foreach impl of
+    Adafactor to assume that every group of params will either be factored or not."""
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(tensorlists)
+    ultra_grouped_tensors: Dict[
+        Tuple[Optional[torch.device], Optional[torch.dtype], bool],
+        List[List[Optional[Tensor]]],
+    ] = {}
+    for (device, dtype), (tensorlists, _) in grouped_tensors.items():
+        matrix_key = (device, dtype, True)
+        vector_key = (device, dtype, False)
+
+        # assumes grad is the second tensorlist
+        for j, tensor in enumerate(tensorlists[1]):
+            assert tensor is not None, "grad should not be None"
+            if tensor.dim() > 1:
+                if matrix_key not in ultra_grouped_tensors:
+                    ultra_grouped_tensors[matrix_key] = [[] for _ in tensorlists]
+                for i in range(len(tensorlists)):
+                    ultra_grouped_tensors[matrix_key][i].append(tensorlists[i][j])
+            else:
+                if vector_key not in ultra_grouped_tensors:
+                    ultra_grouped_tensors[vector_key] = [[] for _ in tensorlists]
+                for i in range(len(tensorlists)):
+                    ultra_grouped_tensors[vector_key][i].append(tensorlists[i][j])
+    return ultra_grouped_tensors
+
+
+def _multi_tensor_adafactor(
+    params: List[Tensor],
+    grads: List[Tensor],
+    # If grad is 1-dimensional (aka a vector), there is no factorization necessary
+    # so row_var and col_var will be None while variance will be filled.
+    # Contrarily, for a grad with multiple dimensions, we will factor along the last
+    # 2 dimensions, and so row_var and col_var will be filled and variance will be None.
+    row_vars: List[Optional[Tensor]],
+    col_vars: List[Optional[Tensor]],
+    variances: List[Optional[Tensor]],
+    state_steps: List[Tensor],
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
+    *,
+    d: float,
+    lr: Union[Tensor, float],
+    beta2_decay: float,
+    weight_decay: float,
+    eps1: Optional[float],
+    eps2: float,
+    maximize: bool,
+    has_complex: bool,
+):
+    if len(params) == 0:
+        return
+
+    assert (
+        grad_scale is None and found_inf is None
+    ), "Grad scaling should occur outside of optimizer.step()"
+
+    grouped_tensors = _group_tensors_by_device_dtype_and_is_multidim(
+        [params, grads, row_vars, col_vars, variances, state_steps]  # type: ignore[list-item]
+    )
+    for (_, dtype, is_multidim), (
+        (
+            device_params_,
+            device_grads_,
+            device_row_vars_,
+            device_col_vars_,
+            device_variances_,
+            device_state_steps_,
+        )
+    ) in grouped_tensors.items():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
+        if eps1 is None:
+            assert (
+                dtype is not None
+            ), "dtype is needed to compute eps1 when eps1 is unset"
+            eps1 = torch.finfo(dtype).eps
+
+        if TYPE_CHECKING:
+            assert device_state_steps[0] is not None
+
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
+
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+            torch._foreach_add_(
+                device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
+            )
+        else:
+            torch._foreach_add_(device_state_steps, 1.0)
+
+        one_minus_beta2_ts = []
+        beta2_ts = []
+        rho_ts = []
+        for s in device_state_steps:
+            one_minus_beta2_ts.append(s.item() ** beta2_decay)
+            beta2_ts.append(1 - s.item() ** beta2_decay)
+            rho_ts.append(min(lr, 1 / (s.item() ** 0.5)))
+
+        alphas = [
+            max(eps2, p.norm(2).item() / (p.numel() ** 0.5)) * r
+            for p, r in zip(device_params, rho_ts)
+        ]
+
+        # Perform stepweight decay
+        if weight_decay != 0:
+            torch._foreach_mul_(device_params, 1 - lr * weight_decay)
+
+        if is_multidim:
+            device_row_vars = cast(List[Tensor], device_row_vars_)
+            device_col_vars = cast(List[Tensor], device_col_vars_)
+            assert (
+                device_row_vars[0] is not None and device_col_vars[0] is not None
+            ), "row_var and col_var should be defined when grad is multidimensional"
+            # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
+            row_means = [
+                torch.norm(grad, dim=-1, keepdim=True) for grad in device_grads
+            ]
+            torch._foreach_mul_(row_means, row_means)
+            torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])
+            torch._foreach_mul_(device_row_vars, beta2_ts)
+            torch._foreach_mul_(row_means, one_minus_beta2_ts)
+            torch._foreach_add_(device_row_vars, row_means)
+            del row_means
+
+            # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
+            col_means = [
+                torch.norm(grad, dim=-2, keepdim=True) for grad in device_grads
+            ]
+            torch._foreach_mul_(col_means, col_means)
+            torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])
+            torch._foreach_mul_(device_col_vars, beta2_ts)
+            torch._foreach_mul_(col_means, one_minus_beta2_ts)
+            torch._foreach_add_(device_col_vars, col_means)
+            del col_means
+
+            var_estimates = [
+                row_var @ col_var
+                for row_var, col_var in zip(device_row_vars, device_col_vars)
+            ]
+            row_var_means = [
+                row_var.mean(dim=-2, keepdim=True) for row_var in device_row_vars
+            ]
+            torch._foreach_clamp_min_(row_var_means, eps1)
+            torch._foreach_div_(var_estimates, row_var_means)
+            del row_var_means
+        else:
+            device_variances = cast(List[Tensor], device_variances_)
+            assert (
+                device_variances[0] is not None
+            ), "variance should be defined when grad is a vector"
+
+            grads_squared = torch._foreach_mul(device_grads, device_grads)
+            torch._foreach_mul_(device_variances, beta2_ts)
+            torch._foreach_mul_(grads_squared, one_minus_beta2_ts)
+            torch._foreach_add_(device_variances, grads_squared)
+            del grads_squared
+
+            # avoid writing into variance during update
+            var_estimates = [v.clone() for v in device_variances]
+
+        # square the eps1 as we sqrt after to keep eps1's magnitude
+        torch._foreach_clamp_min_(var_estimates, eps1 * eps1)
+        torch._foreach_sqrt_(var_estimates)
+        torch._foreach_reciprocal_(var_estimates)
+        torch._foreach_mul_(var_estimates, device_grads)
+        updates = var_estimates
+
+        alphas = [
+            -a / (max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d)))
+            for a, update in zip(alphas, updates)
+        ]
+        torch._foreach_mul_(updates, alphas)
+        torch._foreach_add_(device_params, updates)
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adafactor)
@@ -407,6 +607,7 @@ def adafactor(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    foreach: Optional[bool] = None,
     grad_scale: Optional[Tensor] = None,
     found_inf: Optional[Tensor] = None,
     has_complex: bool = False,
@@ -430,7 +631,10 @@ def adafactor(
             "`state_steps` argument must contain a list of singleton tensors"
         )
 
-    func = _single_tensor_adafactor
+    if foreach:
+        func = _multi_tensor_adafactor
+    else:
+        func = _single_tensor_adafactor
 
     func(
         params,
