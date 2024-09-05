@@ -5322,8 +5322,6 @@ def recover_orig_fp32_precision():
         old_cudnn_conv_p = torch.backends.cudnn.conv.fp32_precision
         old_cudnn_rnn_p = torch.backends.cudnn.rnn.fp32_precision
         old_cuda_matmul_p = torch.backends.cuda.matmul.fp32_precision
-        old_matmul_precision = torch.get_float32_matmul_precision()
-        old_cubls_tf32 = torch.backends.cuda.matmul.allow_tf32
         try:
             yield
         finally:
@@ -5333,8 +5331,6 @@ def recover_orig_fp32_precision():
             torch.backends.cudnn.conv.fp32_precision = old_cudnn_conv_p
             torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
-            torch.set_float32_matmul_precision(old_matmul_precision)
-            torch.backends.cuda.matmul.allow_tf32 = old_cubls_tf32
 
     def wrapper(f):
         @functools.wraps(f)
