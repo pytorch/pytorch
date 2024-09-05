@@ -19,6 +19,7 @@ from torch._higher_order_ops.flex_attention import (
 )
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
@@ -1035,18 +1036,25 @@ def flex_attention(
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
-                out, lse = torch.compile(
-                    _flex_attention_hop_wrapper, backend="eager", fullgraph=True
-                )(
-                    query,
-                    key,
-                    value,
-                    score_mod,
-                    block_mask.as_tuple(),
-                    scale,
-                    kernel_options,
-                )
-                if return_lse:
-                    return out, lse * math.log(2)
-                else:
-                    return out
+                with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                    if metadata_mode:
+                        backend = torch._dynamo.backends.make_eager_backend_with_torch_function_mode(
+                            metadata_mode
+                        )
+                    else:
+                        backend = "eager"
+                    out, lse = torch.compile(
+                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                    )(
+                        query,
+                        key,
+                        value,
+                        score_mod,
+                        block_mask.as_tuple(),
+                        scale,
+                        kernel_options,
+                    )
+                    if return_lse:
+                        return out, lse * math.log(2)
+                    else:
+                        return out
