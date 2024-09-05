@@ -283,7 +283,8 @@ def parse_settings_from_text(settings_text: str) -> Settings:
             # Note: We are actually escaping the backtick with the slash so that the cat step in _runner-determinator.yml
             #       properly adds the backtick character to the script to a python file.
             #       It just so happens that stripping a backslash in these yaml files is usually a no-op, so this is safe.
-            settings_text = settings_text.strip("\r\n\t\` ")
+            settings_text = settings_text.strip("\r\n\t")
+            settings_text = settings_text.strip("`")
             settings = load_yaml(settings_text)
 
             # For now we just load experiments. We can expand this if/when we add more settings
