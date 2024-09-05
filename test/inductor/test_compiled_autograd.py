@@ -1481,7 +1481,7 @@ main()
 
         def make_compiler_fn_with_op_check():
             def _compiler_fn(gm):
-                # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
+                # Checks that `auto_functionalized` op exists in Compiled Autograd's Dynamo graph.
                 self.assertTrue(
                     any(
                         node.target is torch.ops.higher_order.auto_functionalized
