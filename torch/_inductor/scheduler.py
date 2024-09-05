@@ -11,6 +11,7 @@ import operator
 import os
 import pprint
 import textwrap
+import traceback
 import typing
 from typing import (
     Any,
@@ -3082,8 +3083,10 @@ class Scheduler:
             if read_name in self.mutation_renames:
                 read_name = self.mutation_renames[read_name]
 
-            if read.num_vars != write.num_vars:
-                # merge loops
+            if config.loop_ordering_after_fusion and read.num_vars != write.num_vars:
+                # Need merge loops if we do loop ordering after fusion since
+                # we have not merged the loops yet when creating the scheduler
+                # nodes.
                 read = read.normalize()
                 write = write.normalize()
 
@@ -3379,6 +3382,26 @@ class Scheduler:
             return self._codegen()
 
     def _codegen(self) -> None:
+        if config.check_stack_no_cycles_TESTING_ONLY:
+            import torch._dynamo.convert_frame
+
+            stack = traceback.extract_stack()
+            seen = set()
+            for frame in reversed(stack):
+                # This is where maybe_cprofile is
+                if (
+                    frame.name == "_compile_inner"
+                    and frame.filename == torch._dynamo.convert_frame.__file__
+                ):
+                    break
+                key = (frame.filename, frame.lineno)
+                assert key not in seen, (
+                    f"Duplicate stack frame {frame.filename}:{frame.lineno}; "
+                    "did you add a decorator to one of the functions in this stack "
+                    "trace?  If so, try using a context manager instead."
+                )
+                seen.add(key)
+
         for node in self.nodes:
             try:
                 log.debug(
