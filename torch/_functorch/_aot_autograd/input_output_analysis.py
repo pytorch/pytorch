@@ -55,6 +55,10 @@ def remove_dupe_metadata(
         if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
     ]
     traced_tangents = filtered_inp_traced_tangents + other_traced_tangents
+    assert m.traced_tangent_memory_formats is not None
+    traced_tangent_memory_formats = [torch.contiguous_format] * len(
+        filtered_inp_traced_tangents
+    ) + m.traced_tangent_memory_formats[num_data_mutations:]
 
     return ViewAndMutationMeta(
         input_info=[x for i, x in enumerate(m.input_info) if keep_arg_mask[i]],
@@ -74,24 +78,13 @@ def remove_dupe_metadata(
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
+        traced_tangent_memory_formats=traced_tangent_memory_formats,
         # We are guaranteed not to get here, since dupes are not supported today with subclass inputs.
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=[],
         is_train=m.is_train,
     )
-
-
-# Given our ViewAndMutation metadata, this fn constructs a new set of metadata,
-# after adding synthetic base arguments to the function.
-# Most of the work in this fn is slogging through all of the metadata corresponding to inputs,
-# and updating it with our synthetic base calling convention.
-#
-# When config.debug_assert is set, we automatically regenerate the metadata
-# and compare it to this output for sanity.
-#
-# In addition to the updated metadata, also return the list of input indices
-# that will need to be updated in the synthetic base epilogue
 
 
 # Given our ViewAndMutation metadata, this fn constructs a new set of metadata,
@@ -247,6 +240,10 @@ def create_synthetic_base_metadata(
     traced_tangents = (
         inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents) :]
     )
+    assert m.traced_tangent_memory_formats is not None
+    traced_tangent_memory_formats = [torch.contiguous_format] * len(
+        inner_mutated_tangents
+    ) + m.traced_tangent_memory_formats[len(inner_mutated_tangents) :]
 
     return (
         ViewAndMutationMeta(
@@ -255,6 +252,7 @@ def create_synthetic_base_metadata(
             num_intermediate_bases=m.num_intermediate_bases,
             keep_input_mutations=m.keep_input_mutations,
             traced_tangents=traced_tangents,
+            traced_tangent_memory_formats=traced_tangent_memory_formats,
             # We are guaranteed not to get here, since synthetic_base codepaths are not supported today with subclass inputs.
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],

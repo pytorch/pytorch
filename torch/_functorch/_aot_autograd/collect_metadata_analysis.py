@@ -63,7 +63,7 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 # on all tangents at runtime.
 # In the future, you could imagine lifting this restriction, since these contiguous()
 # calls can have noticeable perf overhead depending on the model.
-def coerce_tangent(x, memory_format):
+def coerce_tangent(x, memory_format=torch.contiguous_format):
     if not isinstance(x, Tensor):
         return x
 
@@ -681,8 +681,14 @@ from a multi-output view call"
             assert isinstance(t, Tensor)
             return suggest_memory_format(t)
 
+        output_tangents_start_idx = len(f_input_tangents)
+        output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
+
         traced_tangent_memory_formats = [
-            recursive_suggest_memory_format(tt) for tt in traced_tangents
+            recursive_suggest_memory_format(tt)
+            if (output_tangents_start_idx <= i and i < output_tangents_end_idx)
+            else torch.contiguous_format
+            for i, tt in enumerate(traced_tangents)
         ]
 
         traced_tangents = [

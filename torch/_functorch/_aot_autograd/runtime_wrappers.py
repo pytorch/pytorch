@@ -1879,6 +1879,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     tangents_end_idx = tangents_start_idx + len_tangents
 
+                assert (
+                    CompiledFunction.metadata.traced_tangent_memory_formats is not None
+                )
                 flat_traced_tangent_memory_formats = torch.utils._pytree.tree_leaves(
                     CompiledFunction.metadata.traced_tangent_memory_formats
                 )
