@@ -1800,6 +1800,21 @@ class CppKernel(Kernel):
         for var in reduction_vars:
             replace_acc_var(self.stores, var, f"{var}_local")
 
+    def gen_body(self, code=None):
+        if code is None:
+            code = BracesBuffer()
+        with contextlib.ExitStack() as stack:
+            if hasattr(self, "codegen_inner_loops"):
+                code.splice(self.preloads)
+                self.codegen_inner_loops(code)
+                stack.enter_context(code.indent())
+            code.splice(self.loads)
+            code.splice(self.compute)
+            code.splice(self.stores)
+        if hasattr(self, "codegen_inner_loops"):
+            code.splice(self.poststores)
+        return code
+
     @contextlib.contextmanager
     def masked(self, mask):
         """Context manager to add an additional mask to loads and stores."""
@@ -2026,12 +2041,12 @@ class CppKernel(Kernel):
                     for _loop_nest in kernel.inner:
                         gen_loop_nest(_loop_nest)
                 else:
-                    assert isinstance(kernel, CppKernelDispatcher)
                     if _loop_nest.loops is not None and is_parallel_reduction():
+                        assert isinstance(kernel, CppKernelProxy)
                         kernel.update_stores_with_parallel_reduction()
                     with contextlib.ExitStack() as stack:
                         stack.enter_context(code.indent())
-                        kernel.gen_code(code)
+                        kernel.gen_body(code)
 
             def get_reduction_prefix_suffix(kernel, parallel=False, buffer="prefix"):
                 if buffer == "suffix":
@@ -3438,127 +3453,6 @@ class TilingSelect:
         return sorted(contig_vars_sorted, key=contig_vars_list.count)[-1:]
 
 
-class CppKernelDispatcher(CppKernel):
-    def __init__(
-        self,
-        kernels,
-        inner_loop_reduction_outer_not: bool = False,
-        outer_loop: Optional["LoopLevel"] = None,
-    ):
-        self.kernels: List[CppKernel] = kernels
-        self.call_ranges = kernels[0].call_ranges
-        if inner_loop_reduction_outer_not:
-            assert outer_loop is not None
-        self.aggregate_reduction_buffers(inner_loop_reduction_outer_not, outer_loop)
-
-    def gen_code(self, code):
-        if_prefix = "C10_LIKELY"
-        for kernel in self.kernels:
-            with contextlib.ExitStack() as stack:
-                if kernel.codegen_conditions(code, if_prefix):
-                    if_prefix = "C10_UNLIKELY"
-                    stack.enter_context(code.indent())
-                    kernel_code = self.gen_kernel(kernel)
-                    if kernel.inner_itervars:
-                        for var in kernel.inner_itervars:
-                            start, end = kernel.active_ranges[var]
-                            kernel_code = transform_kernel_codes_under_inner_loop(
-                                kernel_code, var, f"{var}_tail", start, end
-                            )
-                    code.splice(kernel_code)
-
-    def gen_kernel(self, kernel):
-        code = BracesBuffer()
-        with contextlib.ExitStack() as stack:
-            assert kernel
-            if hasattr(kernel, "codegen_inner_loops"):
-                code.splice(kernel.preloads)
-                kernel.codegen_inner_loops(code)
-                stack.enter_context(code.indent())
-            code.splice(kernel.loads)
-            code.splice(kernel.compute)
-            code.splice(kernel.stores)
-        if hasattr(kernel, "codegen_inner_loops"):
-            code.splice(kernel.poststores)
-        return code
-
-    def update_stores_with_parallel_reduction(self):
-        for kernel in self.kernels:
-            kernel.update_stores_with_parallel_reduction()
-
-    def aggregate_reduction_buffers(self, inner_loop_reduction_outer_not, outer_loop):
-        def get_buffer_from_main_loop_kernel(attr):
-            main_kernel = self.kernels[0]
-            setattr(self, attr, getattr(main_kernel, attr))
-
-        def aggregate_reduction_prefix_suffix(outer_loop):
-            assert len(self.kernels) >= 2
-            main_loop_kernel = self.kernels[0]
-            tail_loop_kernel = self.kernels[-1]
-            assert isinstance(main_loop_kernel, CppVecKernel)
-
-            # Prefix
-            if type(tail_loop_kernel) == CppKernel:
-                # if tail loop kernel is a scalar kernel, we need to extend tmp_acc -> tmp_acc_arr[] t
-                # hold the temporal inner loop acc result for outer tail loop
-                prefix_buf = BracesBuffer()
-                prefix_buf.splice(
-                    tail_loop_kernel.gen_tail_reduction_prefix(
-                        main_loop_kernel.tiling_factor
-                    )
-                )
-                prefix_buf.splice(main_loop_kernel.reduction_prefix)
-                self.reduction_prefix = prefix_buf
-            else:
-                get_buffer_from_main_loop_kernel("reduction_prefix")
-
-            # Suffix
-            suffix_buf = BracesBuffer()
-            assert outer_loop  # type: ignore[possibly-undefined]
-            with contextlib.ExitStack() as stack:
-                if main_loop_kernel.codegen_conditions(
-                    suffix_buf, "C10_LIKELY", outer_loop.var
-                ):
-                    stack.enter_context(suffix_buf.indent())
-                    suffix_buf.splice(main_loop_kernel.reduction_suffix)
-            with contextlib.ExitStack() as stack:
-                if tail_loop_kernel.codegen_conditions(
-                    suffix_buf, "C10_UNLIKELY", outer_loop.var
-                ):
-                    stack.enter_context(suffix_buf.indent())
-                    if type(tail_loop_kernel) == CppKernel:
-                        reduction_vars = tail_loop_kernel.get_reduction_vars()
-                        for var in reduction_vars:
-                            new_var = f"{var}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiling_offset)}]"
-                            replace_acc_var(tail_loop_kernel.stores, var, new_var)
-                            replace_acc_var(
-                                tail_loop_kernel.reduction_suffix, var, new_var
-                            )
-                        suffix_buf.splice(
-                            transform_kernel_codes_under_inner_loop(
-                                tail_loop_kernel.reduction_suffix,
-                                outer_loop.var,
-                                f"{outer_loop.var}_tail",
-                                outer_loop.tiling_offset,
-                                outer_loop.size,
-                            )
-                        )
-                    else:
-                        suffix_buf.splice(tail_loop_kernel.reduction_suffix)
-                self.reduction_suffix = suffix_buf
-
-        if inner_loop_reduction_outer_not:
-            aggregate_reduction_prefix_suffix(outer_loop)
-        else:
-            get_buffer_from_main_loop_kernel("reduction_prefix")
-            get_buffer_from_main_loop_kernel("reduction_suffix")
-        get_buffer_from_main_loop_kernel("parallel_reduction_prefix")
-        get_buffer_from_main_loop_kernel("parallel_reduction_suffix")
-        get_buffer_from_main_loop_kernel("local_reduction_init")
-        get_buffer_from_main_loop_kernel("local_reduction_stores")
-        get_buffer_from_main_loop_kernel("non_parallel_reduction_prefix")
-
-
 class CppKernelProxy(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
@@ -3566,6 +3460,7 @@ class CppKernelProxy(CppKernel):
         self.loop_nest = None
         self.call_ranges = None
         self.picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
+        self.kernels: List[CppKernel] = []
 
     def data_type_propagation(self, nodes):
         for _node in nodes:
@@ -3829,7 +3724,8 @@ class CppKernelProxy(CppKernel):
                 # can be removed after masked vec support dynamic ranges
                 could_masked_vec = False
 
-            inner_loop_reduction_outer_not = False
+            _inner_loop_reduction_outer_not = False
+            _outer_loop = None
             if tiling_indices:
                 inner_loop_reduction = False
                 outer_loop_level = tiling_indices[0]
@@ -3841,7 +3737,7 @@ class CppKernelProxy(CppKernel):
                     outer_loop_reduction = self.loop_nest.loops[
                         outer_loop_level
                     ].is_reduction
-                    inner_loop_reduction_outer_not = (
+                    _inner_loop_reduction_outer_not = (
                         inner_loop_reduction and not outer_loop_reduction
                     )
 
@@ -3870,11 +3766,8 @@ class CppKernelProxy(CppKernel):
                     tail_kernel = scalar_kernel
                     scalar_kernel.inner_itervars = [loop.var]
                 tail_kernel.active_ranges = {loop.var: (loop.tiling_offset, loop.size)}
-                kernel = CppKernelDispatcher(
-                    [vec_kernel, tail_kernel], inner_loop_reduction_outer_not, loop
-                )
-
-                self.loop_nest.set_kernel(kernel)
+                self.kernels = [vec_kernel, tail_kernel]
+                _outer_loop = loop
             elif len(tiling_indices) == 2:
                 assert (
                     tiling_indices[1] == len(self.itervars) - 1
@@ -3948,12 +3841,12 @@ class CppKernelProxy(CppKernel):
                     }
                     scalar_kernel.inner_itervars = [inner_loop.var, outer_loop.var]
                     tail_kernel.append(scalar_kernel)
-                kernel = CppKernelDispatcher(
-                    [tile2d_kernel] + tail_kernel,
-                    inner_loop_reduction_outer_not,
-                    outer_loop,
-                )
-                self.loop_nest.set_kernel(kernel)
+                self.kernels = [tile2d_kernel] + tail_kernel
+                _outer_loop = outer_loop
+            else:
+                self.kernels = [scalar_kernel]
+            self.aggregate_reduction_buffers(_inner_loop_reduction_outer_not, _outer_loop)
+            self.loop_nest.set_kernel(self)
 
     def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
         for body in loop_bodies:
@@ -3997,6 +3890,97 @@ class CppKernelProxy(CppKernel):
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
+    def update_stores_with_parallel_reduction(self):
+        for kernel in self.kernels:
+            kernel.update_stores_with_parallel_reduction()
+
+    def gen_body(self, code):
+        if_prefix = "C10_LIKELY"
+        for kernel in self.kernels:
+            with contextlib.ExitStack() as stack:
+                if kernel.codegen_conditions(code, if_prefix):
+                    if_prefix = "C10_UNLIKELY"
+                    stack.enter_context(code.indent())
+                    body = kernel.gen_body()
+                    if kernel.inner_itervars:
+                        for var in kernel.inner_itervars:
+                            start, end = kernel.active_ranges[var]
+                            body = transform_kernel_codes_under_inner_loop(
+                                body, var, f"{var}_tail", start, end
+                            )
+                    code.splice(body)
+
+    def aggregate_reduction_buffers(self, inner_loop_reduction_outer_not, outer_loop):
+        def get_buffer_from_main_loop_kernel(attr):
+            main_kernel = self.kernels[0]
+            setattr(self, attr, getattr(main_kernel, attr))
+
+        def aggregate_reduction_prefix_suffix(outer_loop):
+            assert len(self.kernels) >= 2
+            main_loop_kernel = self.kernels[0]
+            tail_loop_kernel = self.kernels[-1]
+            assert isinstance(main_loop_kernel, CppVecKernel)
+
+            # Prefix
+            if type(tail_loop_kernel) == CppKernel:
+                # if tail loop kernel is a scalar kernel, we need to extend tmp_acc -> tmp_acc_arr[] t
+                # hold the temporal inner loop acc result for outer tail loop
+                prefix_buf = BracesBuffer()
+                prefix_buf.splice(
+                    tail_loop_kernel.gen_tail_reduction_prefix(
+                        main_loop_kernel.tiling_factor
+                    )
+                )
+                prefix_buf.splice(main_loop_kernel.reduction_prefix)
+                self.reduction_prefix = prefix_buf
+            else:
+                get_buffer_from_main_loop_kernel("reduction_prefix")
+
+            # Suffix
+            suffix_buf = BracesBuffer()
+            assert outer_loop  # type: ignore[possibly-undefined]
+            with contextlib.ExitStack() as stack:
+                if main_loop_kernel.codegen_conditions(
+                    suffix_buf, "C10_LIKELY", outer_loop.var
+                ):
+                    stack.enter_context(suffix_buf.indent())
+                    suffix_buf.splice(main_loop_kernel.reduction_suffix)
+            with contextlib.ExitStack() as stack:
+                if tail_loop_kernel.codegen_conditions(
+                    suffix_buf, "C10_UNLIKELY", outer_loop.var
+                ):
+                    stack.enter_context(suffix_buf.indent())
+                    if type(tail_loop_kernel) == CppKernel:
+                        reduction_vars = tail_loop_kernel.get_reduction_vars()
+                        for var in reduction_vars:
+                            new_var = f"{var}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiling_offset)}]"
+                            replace_acc_var(tail_loop_kernel.stores, var, new_var)
+                            replace_acc_var(
+                                tail_loop_kernel.reduction_suffix, var, new_var
+                            )
+                        suffix_buf.splice(
+                            transform_kernel_codes_under_inner_loop(
+                                tail_loop_kernel.reduction_suffix,
+                                outer_loop.var,
+                                f"{outer_loop.var}_tail",
+                                outer_loop.tiling_offset,
+                                outer_loop.size,
+                            )
+                        )
+                    else:
+                        suffix_buf.splice(tail_loop_kernel.reduction_suffix)
+                self.reduction_suffix = suffix_buf
+
+        if inner_loop_reduction_outer_not:
+            aggregate_reduction_prefix_suffix(outer_loop)
+        else:
+            get_buffer_from_main_loop_kernel("reduction_prefix")
+            get_buffer_from_main_loop_kernel("reduction_suffix")
+        get_buffer_from_main_loop_kernel("parallel_reduction_prefix")
+        get_buffer_from_main_loop_kernel("parallel_reduction_suffix")
+        get_buffer_from_main_loop_kernel("local_reduction_init")
+        get_buffer_from_main_loop_kernel("local_reduction_stores")
+        get_buffer_from_main_loop_kernel("non_parallel_reduction_prefix")
 
 class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
@@ -4944,11 +4928,7 @@ class LoopNest:
                 loop.is_reduction = kernel.is_reduction
 
         loop_nest = LoopNest(loops)
-
-        # not split
-        _kernel = CppKernelDispatcher([kernel])
-
-        loop_nest.kernel = _kernel
+        loop_nest.kernel = kernel
         return loop_nest
 
     def __bool__(self):
