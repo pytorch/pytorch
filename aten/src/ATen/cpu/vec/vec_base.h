@@ -1137,13 +1137,18 @@ inline Vectorized<T> flip(const Vectorized<T> & data) {
 
 // Transpose the `src` buffer of type `T` and size (M,N) into the `dst` buffer. `ld_src` is the leading
 // dimension of `src` and `ld_dst` is the leading dimension of `dst`.
-template <typename T, int M, int N>
-inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+template <typename T>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {
       dst[j*ld_dst + i] = src[i*ld_src + j];
     }
   }
+}
+
+template <typename T, int M, int N>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  transpose_mxn<T>(src, ld_src, dst, ld_dst, M, N);
 }
 
 }} // namespace at::vec::CPU_CAPABILITY
