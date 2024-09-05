@@ -295,15 +295,15 @@ class TestExport(TestCase):
     def _check_dynamic_shapes_specs_and_shapes(
         self, model, inputs, specs, passing_shapes, failing_shapes, test_serdes=False
     ):
-        from torch._export.serde.dynamic_shapes import _dump_dynamic_shapes, _load_dynamic_shapes
+        from torch._export.serde.dynamic_shapes import (
+            _dump_dynamic_shapes,
+            _load_dynamic_shapes,
+        )
         from torch.utils._pytree import tree_map
 
         def _construct_inputs(shapes):
             def _is_tensor_leaf(x):
-                return (
-                    isinstance(x, tuple)
-                    and all(isinstance(y, int) for y in x)
-                )
+                return isinstance(x, tuple) and all(isinstance(y, int) for y in x)
 
             return tree_map(
                 lambda x: torch.randn(*x) if _is_tensor_leaf(x) else x,
@@ -323,7 +323,9 @@ class TestExport(TestCase):
                 ep_serdes = export(
                     model,
                     inputs,
-                    dynamic_shapes=_load_dynamic_shapes(_dump_dynamic_shapes(_specs, inputs)),
+                    dynamic_shapes=_load_dynamic_shapes(
+                        _dump_dynamic_shapes(_specs, inputs)
+                    ),
                 )
                 eps.append(ep_serdes)
 
@@ -7075,7 +7077,10 @@ def forward(self, x, y):
         )
 
     def test_dynamic_shapes_serdes_generic(self):
-        from torch._export.serde.dynamic_shapes import _dump_dynamic_shapes, _load_dynamic_shapes
+        from torch._export.serde.dynamic_shapes import (
+            _dump_dynamic_shapes,
+            _load_dynamic_shapes,
+        )
 
         class Foo(torch.nn.Module):
             def forward(self, a, b, c, d):
@@ -7086,7 +7091,7 @@ def forward(self, x, y):
 
         # test de/serialization on some generic specs
         dz = Dim("dz", min=4, max=16)
-        dx = 2*dz
+        dx = 2 * dz
         dy = dx + 1
         inputs = (
             [
@@ -7122,20 +7127,24 @@ def forward(self, x, y):
         )
         self.assertExpectedInline(
             _dump_dynamic_shapes(dynamic_shapes, inputs),
-            """DynamicShapesSpec(dynamic_shapes=([['2*dz', 4], ['2*dz + 1', 4]], ['dz'], ['_DimHint.STATIC', '_DimHint.STATIC'], None), dims={'dz': RootDim(min=4, max=16, derived=['2*dz', '2*dz + 1'])})"""
+            """DynamicShapesSpec(dynamic_shapes=([['2*dz', 4], ['2*dz + 1', 4]], ['dz'], ['_DimHint.STATIC', '_DimHint.STATIC'], None), dims={'dz': RootDim(min=4, max=16, derived=['2*dz', '2*dz + 1'])})""",
         )
         self.assertExpectedInline(
             _dump_dynamic_shapes(dynamic_shapes, inputs, to_dict=True),
-            """{'dynamic_shapes': ([['2*dz', 4], ['2*dz + 1', 4]], ['dz'], ['_DimHint.STATIC', '_DimHint.STATIC'], None), 'dims': {'dz': {'min': 4, 'max': 16, 'derived': ['2*dz', '2*dz + 1']}}}"""
+            """{'dynamic_shapes': ([['2*dz', 4], ['2*dz + 1', 4]], ['dz'], ['_DimHint.STATIC', '_DimHint.STATIC'], None), 'dims': {'dz': {'min': 4, 'max': 16, 'derived': ['2*dz', '2*dz + 1']}}}""",
         )
-        ((dx, _), (dy, _)), (dz,), (_, _), _ = _load_dynamic_shapes(_dump_dynamic_shapes(dynamic_shapes, inputs))
+        ((dx, _), (dy, _)), (dz,), (_, _), _ = _load_dynamic_shapes(
+            _dump_dynamic_shapes(dynamic_shapes, inputs)
+        )
         self.assertEqual(dx.root, dz)
         self.assertEqual(dy.root, dz)
 
-    @testing.expectedFailureRetraceability  # retracing doesn't directly work for _dump_dynamic_shapes(), as re-traced signature changes
     def test_dynamic_shapes_serdes_various(self):
         # serialization for dataclass inputs, Dim.AUTO/STATIC, and kwargs
-        from torch._export.serde.dynamic_shapes import _dump_dynamic_shapes, _load_dynamic_shapes
+        from torch._export.serde.dynamic_shapes import (
+            _dump_dynamic_shapes,
+            _load_dynamic_shapes,
+        )
 
         auto, static = Dim.AUTO, Dim.STATIC
 
@@ -7176,7 +7185,12 @@ def forward(self, x, y):
 
     def test_dynamic_shapes_serdes_user_errors(self):
         # check error messages for dynamic shapes de/serialization
-        from torch._export.serde.dynamic_shapes import _dump_dynamic_shapes, _load_dynamic_shapes, DynamicShapesSpec, RootDim
+        from torch._export.serde.dynamic_shapes import (
+            _dump_dynamic_shapes,
+            _load_dynamic_shapes,
+            DynamicShapesSpec,
+            RootDim,
+        )
         from torch._export.serde.serialize import _dataclass_to_dict
 
         # this stuff should be well tested in `test_mismatched_dynamic_shapes`
@@ -7207,9 +7221,7 @@ def forward(self, x, y):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            re.escape(
-                "Expected `spec` to be a DynamicShapesSpec, got <class 'dict'>"
-            ),
+            re.escape("Expected `spec` to be a DynamicShapesSpec, got <class 'dict'>"),
         ):
             _load_dynamic_shapes(spec_dict, from_dict=False)
 

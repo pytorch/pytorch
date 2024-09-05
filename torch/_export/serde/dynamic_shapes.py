@@ -9,7 +9,7 @@ from torch.export.dynamic_shapes import (
     _Dim,
     _DimHint,
     _tree_map_with_path,
-    Dim
+    Dim,
 )
 from torch.utils._pytree import tree_map
 
@@ -21,6 +21,7 @@ class RootDim:
     """
     This represents a _Dim object.
     """
+
     min: int
     max: Union[int, None]
     derived: List[str]
@@ -31,6 +32,7 @@ class DynamicShapesSpec:
     """
     This stores a dynamic_shapes spec for de/serialization.
     """
+
     dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None]
     dims: Dict[str, RootDim]
 
@@ -147,14 +149,16 @@ def _dump_dynamic_shapes(
                 out.append(s if shape[i] is None else shape[i])
         return out
 
-    def _track_dim_from_dims(val: Union[None, int, _DimHint, _Dim]) -> Union[None, int, str]:
+    def _track_dim_from_dims(
+        val: Union[None, int, _DimHint, _Dim]
+    ) -> Union[None, int, str]:
         """
         Tracks dims, ranges, derived dims from the standardized dynamic_shapes spec.
         """
         if val is None or isinstance(val, int):  # non-tensor input or static
             return val
         if isinstance(val, _DimHint):  # store enum as string
-            return val.__class__.__name__ + '.' + val.name
+            return val.__class__.__name__ + "." + val.name
 
         assert isinstance(val, _Dim)
 
@@ -186,7 +190,9 @@ def _dump_dynamic_shapes(
     # run same check when we're processing shapes for export - is this too lazy?
     _check_dynamic_shapes(dict(enumerate(combined_args)), dynamic_shapes)  # type: ignore[arg-type]
 
-    tree_shapes = _tree_map_with_path(_standardize_shapes, combined_args, dynamic_shapes, tree_name="inputs")
+    tree_shapes = _tree_map_with_path(
+        _standardize_shapes, combined_args, dynamic_shapes, tree_name="inputs"
+    )
     serialized_shapes = tree_map(_track_dim_from_dims, tree_shapes)
     return _postprocess_serialized_shapes(serialized_shapes, dims, to_dict=to_dict)
 
@@ -200,6 +206,7 @@ def _load_dynamic_shapes(
     Deserializes a DynamicShapesSpec or corresponding dictionary into a dynamic_shapes input to export().
     """
     import sympy
+
     from torch.fx.experimental.symbolic_shapes import _is_supported_equivalence
 
     if from_dict:
@@ -237,9 +244,8 @@ def _load_dynamic_shapes(
                     UserErrorType.INVALID_INPUT,
                     f"Expected dims in `spec['dims']` to map `max` to an int or None, got {k}: {v['max']}",
                 )
-            if (
-                not isinstance(v["derived"], list)
-                or any(not isinstance(d, str) for d in v["derived"])
+            if not isinstance(v["derived"], list) or any(
+                not isinstance(d, str) for d in v["derived"]
             ):
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
@@ -266,7 +272,7 @@ def _load_dynamic_shapes(
         if not isinstance(symbol, sympy.Symbol):
             raise UserError(
                 UserErrorType.INVALID_INPUT,
-                f"Expected `spec['dims']` keys to be symbols, got {name}"
+                f"Expected `spec['dims']` keys to be symbols, got {name}",
             )
         dim_cache[name] = Dim(name, min=info.min, max=info.max)  # cache root dim
         for _expr in info.derived:
@@ -274,12 +280,12 @@ def _load_dynamic_shapes(
             if len(expr.free_symbols) != 1 or symbol not in expr.free_symbols:
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
-                    f"Expected derived expressions in to have {name} as the only free symbol, got {expr}"
+                    f"Expected derived expressions in to have {name} as the only free symbol, got {expr}",
                 )
             if not _is_supported_equivalence(expr):
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
-                    f"Expected derived expressions to be linear expressions, got {expr}"
+                    f"Expected derived expressions to be linear expressions, got {expr}",
                 )
             modulus, remainder = sympy.polys.polytools.div(expr, symbol)
             ddim = dim_cache[name]
@@ -289,7 +295,9 @@ def _load_dynamic_shapes(
                 ddim = ddim + int(remainder)
             dim_cache[_expr] = ddim  # cache derived dims
 
-    def deserialize_shape(val: Union[None, int, str]) -> Union[None, int, _Dim, _DimHint]:
+    def deserialize_shape(
+        val: Union[None, int, str]
+    ) -> Union[None, int, _Dim, _DimHint]:
         if val is None or isinstance(val, int):
             return val
         elif val == "_DimHint.AUTO":
