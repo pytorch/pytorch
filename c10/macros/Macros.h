@@ -398,7 +398,7 @@ extern "C" {
 extern SYCL_EXTERNAL void __assert_fail(
     const char* expr,
     const char* file,
-    unsigned int line,
+    int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
@@ -415,7 +415,7 @@ __host__ __device__
     __assert_fail(
         const char* assertion,
         const char* file,
-        unsigned int line,
+        int line,
         const char* function) noexcept __attribute__((__noreturn__));
 
 #endif // __SYCL_DEVICE_ONLY__
