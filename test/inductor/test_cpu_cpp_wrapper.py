@@ -115,9 +115,13 @@ if config.abi_compatible:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cpp_wrapper",), is_skip=False
         )
-        test_failures_cpp_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
+        if not (
+            "test_linear_with_pointwise" in test_name
+            and "bias_False_epilogue_add" not in test_name
+        ):
+            test_failures_cpp_wrapper[
+                f"{test_name}_dynamic_shapes"
+            ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
     skip_list = [
         "test_multihead_attention_cpu",
     ]

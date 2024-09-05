@@ -64,11 +64,12 @@ extern "C" {{export_declaration}}
     const auto Nt_blocks = Nr_blocks;
     const auto Kt_blocks = Kr_blocks;
     {%- endif %}
-    const int64_t Mc_blocks = Mt_blocks;
-    const int64_t Nc_blocks = 1;
-    const int64_t Kc_blocks = Kt_blocks;
+    int64_t Mc_blocks, Nc_blocks, Kc_blocks;
+    mm_get_cache_blocking<{{kernel.dtype(X)}}, {{kernel.dtype(W)}}>(
+        num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks
+    );
     const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
-    const int64_t num_Nc_blocks = Nr_blocks;
+    const int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
     const int64_t num_k_slices = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
 {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
