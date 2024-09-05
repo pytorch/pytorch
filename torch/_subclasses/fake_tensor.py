@@ -1719,6 +1719,7 @@ class FakeTensorMode(TorchDispatchMode):
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
         ) or any(isinstance(a, SymInt) for a in flat_args)
+        has_subclasses = any(is_traceable_wrapper_subclass(a) for a in flat_args)
 
         converter = self.fake_tensor_converter
 
@@ -1736,6 +1737,7 @@ class FakeTensorMode(TorchDispatchMode):
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
+            and not has_subclasses
         ):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
@@ -2216,8 +2218,8 @@ class FakeTensorMode(TorchDispatchMode):
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
-            _, new_kwargs = normalize_function(
-                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            _, new_kwargs = normalize_function(  # type: ignore[misc]
+                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
             )
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"
