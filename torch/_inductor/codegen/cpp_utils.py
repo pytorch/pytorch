@@ -220,18 +220,6 @@ class CppCSEVariable(CSEVariable):
     def depends_on(self, itervar: sympy.Symbol):
         return itervar in self.dependent_itervars
 
-    def clone(self):
-        new_var = CppCSEVariable(self.name, self.bounds)
-        new_var.is_vec = self.is_vec
-        new_var.dtype = self.dtype
-        new_var.dependent_itervars = self.dependent_itervars
-        return new_var
-
-    def clone_rename(self, name):
-        new_var = self.clone()
-        new_var.name = name
-        return new_var
-
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):

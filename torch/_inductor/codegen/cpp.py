@@ -291,13 +291,12 @@ def reduction_prefix_array(acc_var, acc_type, reduction_type, dtype, len, init_f
     return code_buffer
 
 
-def replace_acc_var(buffer, var, new_var):
-    assert "tmp_acc" in var.name
+def replace_acc_name(buffer, name, new_name):
     for i, line in enumerate(buffer._lines):
         if isinstance(line, DeferredLine):
-            line.line = re.sub(r"\b" + f"{var.name}" + r"\b", f"{new_var}", line.line)
+            line.line = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line.line)
         else:
-            buffer._lines[i] = re.sub(r"\b" + f"{var.name}" + r"\b", f"{new_var}", line)
+            buffer._lines[i] = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line)
 
 
 @functools.lru_cache
@@ -1753,6 +1752,7 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
+        self.reduction_var_names = []
 
     def _gen_parallel_reduction_buffers(
         self,
@@ -1796,9 +1796,8 @@ class CppKernel(Kernel):
         )
 
     def update_stores_with_parallel_reduction(self):
-        reduction_vars = self.get_reduction_vars()
-        for var in reduction_vars:
-            replace_acc_var(self.stores, var, f"{var}_local")
+        for var_name in self.reduction_var_names:
+            replace_acc_name(self.stores, var_name, f"{var_name}_local")
 
     def gen_body(self, code=None):
         if code is None:
@@ -1935,6 +1934,7 @@ class CppKernel(Kernel):
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
+        self.reduction_var_names.append(f"{acc}")
         self.is_reduction = True
         init_dtype = src_dtype if argmax_or_argmin else dtype
         acc_type = reduction_acc_type(reduction_type, init_dtype)
@@ -1969,9 +1969,6 @@ class CppKernel(Kernel):
         for gen_fn in self.tail_reduction_prefix_fn:
             tail_reduction_prefix.splice(gen_fn(size))
         return tail_reduction_prefix
-
-    def get_reduction_vars(self):
-        return self.reduction_cse.varname_map.values()
 
     def store_reduction(self, name, index, value):
         index = self.rename_indexing(index)
@@ -2591,12 +2588,9 @@ class CppVecKernel(CppKernel):
             self.loads, f"reduction {reduction_key}", write=False
         )
         assert isinstance(acc, CppCSEVariable)
-        acc_vec = acc.clone_rename(f"{acc}_vec")
-        acc_vec.is_vec = True
-        self.reduction_cse.varname_map[f"{acc_vec}"] = acc_vec
-        masked_acc_vec = acc_vec.clone_rename(f"masked_{acc_vec}")
-        masked_acc_vec.is_vec = True
-        self.reduction_cse.varname_map[f"{masked_acc_vec}"] = masked_acc_vec
+        acc_vec = f"{acc}_vec"
+        masked_acc_vec = f"masked_{acc_vec}"
+        self.reduction_var_names += [f"{acc}", acc_vec, masked_acc_vec]
         self.is_reduction = True
         self.reduction_prefix.writeline(
             f"{acc_type} {acc} = {reduction_init(reduction_type, init_dtype)};"
@@ -3845,7 +3839,9 @@ class CppKernelProxy(CppKernel):
                 _outer_loop = outer_loop
             else:
                 self.kernels = [scalar_kernel]
-            self.aggregate_reduction_buffers(_inner_loop_reduction_outer_not, _outer_loop)
+            self.aggregate_reduction_buffers(
+                _inner_loop_reduction_outer_not, _outer_loop
+            )
             self.loop_nest.set_kernel(self)
 
     def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
@@ -3951,12 +3947,12 @@ class CppKernelProxy(CppKernel):
                 ):
                     stack.enter_context(suffix_buf.indent())
                     if type(tail_loop_kernel) == CppKernel:
-                        reduction_vars = tail_loop_kernel.get_reduction_vars()
-                        for var in reduction_vars:
-                            new_var = f"{var}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiling_offset)}]"
-                            replace_acc_var(tail_loop_kernel.stores, var, new_var)
-                            replace_acc_var(
-                                tail_loop_kernel.reduction_suffix, var, new_var
+                        reduction_vars = tail_loop_kernel.reduction_var_names
+                        for name in reduction_vars:
+                            new_name = f"{name}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiling_offset)}]"
+                            replace_acc_name(tail_loop_kernel.stores, name, new_name)
+                            replace_acc_name(
+                                tail_loop_kernel.reduction_suffix, name, new_name
                             )
                         suffix_buf.splice(
                             transform_kernel_codes_under_inner_loop(
@@ -3981,6 +3977,7 @@ class CppKernelProxy(CppKernel):
         get_buffer_from_main_loop_kernel("local_reduction_init")
         get_buffer_from_main_loop_kernel("local_reduction_stores")
         get_buffer_from_main_loop_kernel("non_parallel_reduction_prefix")
+
 
 class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
