@@ -25,7 +25,10 @@
 #include <c10/util/string_view.h>
 
 #if USE_ROCM
+#if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
 #include <aotriton/flash.h>
+#define USE_AOTRITON 1
+#endif
 #endif
 
 /**
@@ -208,6 +211,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
 #if USE_ROCM
+#if USE_AOTRITON
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -217,6 +221,9 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
       }
       return false;
   }
+#else
+  return false;
+#endif
 #else
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm90>(dprops)) {
@@ -239,6 +246,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
 #if USE_ROCM
+#if USE_AOTRITON
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -248,6 +256,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       }
       return false;
   }
+#else
+  return false;
+#endif
 #else
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm50, sm90>(dprops)) {
@@ -339,9 +350,15 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto d_qk = params.query.sym_size(3);
   const auto d_v = params.value.sym_size(3);
   long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
-  if (d_qk % 8 != 0 || d_v % 8 != 0) {
+  if (cudnn_version < 8903) {
     if (debug) {
-      TORCH_WARN("head_dim should be a multiple of 8");
+      TORCH_WARN("SDPA fprop requires cudnn 8.9.3 or higher");
+    }
+    return false;
+  }
+  if (cudnn_version < 8906 && params.dropout != 0.0) {
+    if (debug) {
+      TORCH_WARN("Dropout reference is only supported on 8.9.6 onwards.");
     }
     return false;
   }
@@ -352,15 +369,15 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     }
     return false;
   }
-  if (cudnn_version < 8903) {
+  if (d_qk % 8 != 0 || d_v % 8 != 0) {
     if (debug) {
-      TORCH_WARN("SDPA fprop requires cudnn 8.9.3 or higher");
+      TORCH_WARN("head_dim should be a multiple of 8");
     }
     return false;
   }
-  if (params.dropout != 0.0 && cudnn_version < 8906) {
+  if (cudnn_version < 8906 && s_k % 64 != 0 ) {
     if (debug) {
-      TORCH_WARN("Dropout reference is only supported on 8.9.6 onwards.");
+      TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
     }
     return false;
   }
@@ -371,19 +388,13 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       }
       return false;
     }
-    if ((s_q % 64 != 0 || s_k % 64 != 0) && params.dropout != 0.0) {
+    if (params.dropout != 0.0 && (s_q % 64 != 0 || s_k % 64 != 0)) {
       if (debug) {
         TORCH_WARN(
             "s_q not a multiple of 64 with padding/dropout is not supported with cudnn version 9.0.0");
       }
       return false;
     }
-  }
-  if (s_k % 64 != 0 && cudnn_version < 8906) {
-    if (debug) {
-      TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
-    }
-    return false;
   }
   return true;
 }
@@ -607,7 +618,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
-        check_batch_size_and_num_heads_dense,
+        check_batch_size_and_num_heads_dense<true /*supports_grouped_query_attention=*/>,
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
     for (auto& constraint : dense_constraints) {
@@ -641,7 +652,12 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
-      check_head_dim_size_mem_efficient);
+#ifdef USE_ROCM
+      check_head_dim_size_flash
+#else
+      check_head_dim_size_mem_efficient
+#endif
+  );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -665,9 +681,9 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
-        check_batch_size_and_num_heads_dense,
         check_nonzero_sequence_lengths_dense,
-        check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>);
+        check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>,
+        check_batch_size_and_num_heads_dense<false /*supports_grouped_query_attention=*/>);
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;

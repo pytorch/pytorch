@@ -176,8 +176,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 device_mesh = init_device_mesh("cuda", (self.world_size,))
 
             orig_model = CompositeParamModel(device=torch.device("cuda"))
-            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
-            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
+            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3, foreach=True)
+            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3, foreach=True)
             if wrapping:
                 strategy = set(wrapping)
             else:
@@ -204,7 +204,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
             if compile_model:
                 dist_model = torch.compile(dist_model)
-            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3)
+            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3, foreach=True)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
         self._test_save_load(init_model_optim)

@@ -32,12 +32,24 @@ from .utils import (
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
 # remove the wrapper call when it's ready.
 class MapWrapper(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("map")
+
     def __call__(self, xs, *args):
         return map_wrapper(xs, *args)
 
 
-map = MapWrapper("map")
-map_impl = HigherOrderOperator("map_impl")
+class MapImpl(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("map_impl")
+
+    def __call__(self, *args, **kwargs):
+        return super().__call__(*args, **kwargs)
+
+
+map = MapWrapper()
+
+map_impl = MapImpl()
 
 dummy_aot_config = AOTConfig(
     fw_compiler=None,  # type: ignore[arg-type]
@@ -218,10 +230,7 @@ def map_autograd(f, xs, pos_args):
 
 @map_impl.py_impl(ProxyTorchDispatchMode)
 def map_proxy_torch_dispatch_mode(mode, f, xs, args):
-    if mode.enable_tracing:
-        return trace_map(mode, map_impl, f, xs, args)
-    else:
-        return map_impl(f, xs, args)
+    return trace_map(mode, map_impl, f, xs, args)
 
 
 @map_impl.py_impl(FakeTensorMode)

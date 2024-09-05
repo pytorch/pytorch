@@ -262,7 +262,7 @@ def _can_use_math_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     return True
 
 
-def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
+def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable_gqa):
     if (
         not flash_sdp_enabled()
         and not mem_efficient_sdp_enabled()
@@ -276,7 +276,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
         SDPBackend.MATH,
     )
 
-    params = SDPAParams(query, key, value, attn_mask, dropout, is_causal)
+    params = SDPAParams(query, key, value, attn_mask, dropout, is_causal, enable_gqa)
 
     for backend in ordering:
         if backend == SDPBackend.FLASH_ATTENTION:
@@ -615,6 +615,66 @@ def _post_process_flash_output(out: torch.Tensor, og_size):
     return out
 
 
+def _is_computing_meta_flops(x):
+    # Note: there's a use case of using meta tensors & the dispatch-based flop counter.
+    # We can use this function to check for this scenario in order to handle it specially.
+    if not torch.jit.is_scripting() and x.device.type == "meta":
+        torch_dispatch_mode_stack = (
+            torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+        )
+        return any(
+            type(x) == torch.utils.flop_counter.FlopCounterMode
+            for x in torch_dispatch_mode_stack
+        )
+    return False
+
+
+def _autocast(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_mask: Optional[torch.Tensor],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    """
+    [Autocasting SDPA for NJT]
+
+    Normal autocasting doesn't work for NJT+SDPA right now:
+    * NJT intercepts the __torch_function__ call for scaled_dot_product_attention, which happens
+      before we get to any aten ops or dispatcher logic; then the torch_function logic calls into
+      efficient attention or flash attention. So, autocasting on the scaled_dot_product_attention
+      op won't work because we never see that aten op.
+    * If we put autocasting on `_flash_attention_forward`, then we'll get autocasting to run, but
+      the kernel selection logic in torch_function handling (ie. jagged_scaled_dot_product_attention)
+      won't work correctly: the kernel selection logic will run before autocasting, and choose
+      a kernel based on the un-autocasted dtypes; but then autocasting will run and the actual
+      attention computation will happen in a different dtype.
+
+    An alternative is to just change the backend selection logic for SDPA+NJT to be autocast-aware
+    and rely on autocasting to do the actual conversions for flash attention / efficient attention.
+    However, by manually doing the actual autocast before the backend selection, we ensure that the
+    autocast handling for backend selection doesn't diverge from the autocast handling for the
+    actual dtype conversions.
+    """
+    device_type = query.device.type
+    # meta device is not supported by autocast, so break early for it
+    if _is_computing_meta_flops(query) or not torch.is_autocast_enabled(device_type):
+        return query, key, value, attn_mask
+
+    def cvt(x):
+        if x is None:
+            return x
+        target_dtype = torch.get_autocast_dtype(device_type)
+        if (
+            (not x.dtype.is_floating_point)
+            or x.dtype == target_dtype
+            or x.dtype == torch.float64
+        ):
+            return x
+        return x.to(target_dtype)
+
+    return cvt(query), cvt(key), cvt(value), cvt(attn_mask)
+
+
 def jagged_scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -623,7 +683,9 @@ def jagged_scaled_dot_product_attention(
     dropout_p=0.0,
     is_causal=False,
     scale=None,
+    enable_gqa=False,
 ):
+    query, key, value, attn_mask = _autocast(query, key, value, attn_mask)
     _validate_sdpa_input(query, key, value, attn_mask, dropout_p, is_causal, scale)
     # for mypy, ugh
     assert (
@@ -653,8 +715,15 @@ def jagged_scaled_dot_product_attention(
     compute_logsumexp = query.requires_grad or key.requires_grad or value.requires_grad
 
     backend_choice = _select_sdp_backend(
-        query, key, value, attn_mask, dropout_p, is_causal
+        query, key, value, attn_mask, dropout_p, is_causal, enable_gqa
     )
+
+    if _is_computing_meta_flops(query):
+        # Backend choice will probably not be correct if we have a meta device,
+        # because backend choice is device-aware. In this case, we mostly just
+        # want to avoid using math backend (which does a .item() call).
+        # Arbitrarily choose flash attention.
+        backend_choice = SDPBackend.FLASH_ATTENTION
 
     if backend_choice == SDPBackend.FLASH_ATTENTION:
         og_size = query.size(-1)

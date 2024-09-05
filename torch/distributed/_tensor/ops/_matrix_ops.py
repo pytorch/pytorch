@@ -2,12 +2,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 
+from typing import List
+
 import torch
 from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementList,
     PlacementStrategy,
+    RuntimeSchemaInfo,
 )
 from torch.distributed._tensor.ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed._tensor.ops.utils import (
@@ -159,7 +162,9 @@ def baddmm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_op_strategy(aten._scaled_dot_product_flash_attention.default)
+@register_op_strategy(
+    aten._scaled_dot_product_flash_attention.default, schema_info=RuntimeSchemaInfo(5)
+)
 def scaled_dot_product_flash_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
@@ -332,7 +337,10 @@ def constant_pad_nd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrateg
     )
 
 
-@register_op_strategy(aten._scaled_dot_product_efficient_attention.default)
+@register_op_strategy(
+    aten._scaled_dot_product_efficient_attention.default,
+    schema_info=RuntimeSchemaInfo(4),
+)
 def scaled_dot_product_efficient_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
@@ -344,7 +352,7 @@ def scaled_dot_product_efficient_attention_strategy(
     has_attn_bias = op_schema.args_schema[3] is not None
     compute_log_sumexp = op_schema.args_schema[4]
 
-    single_mesh_dim_strategies = []
+    single_mesh_dim_strategies: List[PlacementList] = []
 
     # placement list stores placements of [outputs, inputs]
     # in the spda case, we have 2 valid tensor outputs and 3 or 4 tensor inputs
@@ -360,6 +368,20 @@ def scaled_dot_product_efficient_attention_strategy(
     ]
     if has_attn_bias:
         all_replicate.append(Replicate())  # attn bias
+
+    # Context Parallelism: shards on the sequence dim
+    single_mesh_dim_strategies.append(
+        [
+            Shard(2),  # output
+            Shard(2),  # logsumexp
+            None,  # philox_seed
+            None,  # philox_offset
+            Shard(2),  # q
+            Shard(2),  # k
+            Shard(2),  # v
+        ]
+    )
+
     single_mesh_dim_strategies.append(all_replicate)
 
     # second we can accept the sharding pattern of tensor parallelism, which
@@ -452,6 +474,27 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     # namely philox_seed and philox_offset
     num_heads_dim_sharding.extend([Replicate(), Replicate()])
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Context Parallelism: shards on the sequence dim
+    seq_dim_sharding: PlacementList = [
+        Shard(2),  # grad_q
+        Shard(2),  # grad_k
+        Shard(2),  # grad_v
+        Shard(1) if has_attn_bias else None,  # grad_bias
+        Shard(2),  # grad_output
+        Shard(2),  # q
+        Shard(2),  # k
+        Shard(2),  # v
+        Shard(2),  # output
+        Shard(2),  # logsumexp
+    ]
+    # accept replicate on the rest tensor inputs, potentially
+    # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+    # at indices 6, 7, 12, 13, respectively
+    if has_attn_bias:
+        num_heads_dim_sharding.insert(8, Shard(1))
+    seq_dim_sharding.extend([Replicate(), Replicate()])
+    single_mesh_dim_strategies.append(seq_dim_sharding)
 
     return expand_to_full_mesh_op_strategy(
         mesh,
