@@ -175,7 +175,7 @@ def _get_torch_export_args(
 def export(
     model: torch.nn.Module | torch.jit.ScriptModule | torch.jit.ScriptFunction,
     args: tuple[Any, ...] | torch.Tensor,
-    f: str,
+    f: str | None = None,
     *,
     kwargs: dict[str, Any] | None = None,
     export_params: bool = True,

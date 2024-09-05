@@ -86,20 +86,13 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
 PyObject* lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    PyObject* backend) {
+    const PyObject* backend) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
-
-    // The Py_TYPE check should not be required but there is a pre-existing
-    // issue where backend is possibly deallocated (or nullptr) and causes
-    // segfaults. Check test - test_inplace_custom_op_intermediate
-    bool valid = backend == Py_False ||
-        (Py_TYPE(cache_entry.backend) == Py_TYPE(backend) &&
-         PyObject_RichCompareBool(cache_entry.backend, backend, Py_EQ));
-
+    bool valid = backend == Py_False || cache_entry.backend == backend;
     if (valid) {
       try {
         // TODO(anijain2305) - Clean this up when enable_cpp_guard_manager is

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import inspect
-import logging
 import sys
 from collections import defaultdict
 from enum import auto, Enum
@@ -35,9 +34,6 @@ __all__ = [
     "dims",
     "refine_dynamic_shapes_from_suggested_fixes",
 ]
-
-
-log = logging.getLogger(__name__)
 
 
 class _DimHint(Enum):
@@ -641,15 +637,6 @@ class ShapesCollection:
         return dynamic_shapes
 
 
-def _warn_on_None_dynamic_shape_dimension():
-    msg = (
-        "Using None as a dynamic shape dimension is deprecated. "
-        "Please use Dim.STATIC instead"
-    )
-    # TODO(avik): raise an error in the future
-    log.warning(msg)
-
-
 def _check_dynamic_shapes(
     combined_args: Dict[str, Any],
     dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
@@ -687,9 +674,7 @@ def _check_dynamic_shapes(
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
                     check_same_bounds(dim)
-                elif dim is None:
-                    _warn_on_None_dynamic_shape_dimension()
-                elif not (isinstance(dim, (int, _DimHint))):
+                elif not (isinstance(dim, (int, _DimHint)) or dim is None):
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
                         f"Unexpected dimension mapped to index {i} in input tensor shape {shape} "
@@ -701,9 +686,7 @@ def _check_dynamic_shapes(
             for i, dim in enumerate(shape):
                 if isinstance(dim, _Dim):
                     check_same_bounds(dim)
-                elif dim is None:
-                    _warn_on_None_dynamic_shape_dimension()
-                elif not (isinstance(dim, (int, _DimHint))):
+                elif not (isinstance(dim, (int, _DimHint)) or dim is None):
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
                         f"Unexpected dimension #{i} in input tensor shape {shape} "
@@ -716,7 +699,7 @@ def _check_dynamic_shapes(
                 UserErrorType.INVALID_INPUT,
                 f"Unexpected input tensor shape {shape} specified at `dynamic_shapes{keystr(path)}` "
                 f"(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                f" where each dimension is an int, a Dim, Dim.AUTO, or Dim.STATIC)",
+                f" where each dimension is None, an int, a Dim, Dim.AUTO, or Dim.STATIC)",
                 case_name="dynamic_shapes_validation",
             )
 
@@ -854,7 +837,7 @@ def _transform_shapes_for_default_dynamic(
         if isinstance(shape, dict):
             out = {}
             for i, val in enumerate(tensor.shape):
-                dim = shape.get(i, _DimHint.STATIC)
+                dim = shape.get(i, None)
                 if _marked_dynamic(tensor, i) or dim == _DimHint.AUTO:
                     # don't have to specify anything if dynamic
                     # None also works, since assume_static_by_default=False
@@ -867,12 +850,9 @@ def _transform_shapes_for_default_dynamic(
                     # important that this is dim and not val,
                     # so we can raise error if user-specified dim != val
                     out[i] = dim
-                elif dim is None:
-                    _warn_on_None_dynamic_shape_dimension()
-                    out[i] = val
                 else:
                     # make explicitly static
-                    assert dim == _DimHint.STATIC
+                    assert dim is None or dim == _DimHint.STATIC
                     out[i] = val
         elif isinstance(shape, (tuple, list)):
             out = []
@@ -886,11 +866,8 @@ def _transform_shapes_for_default_dynamic(
                     out.append(dim)
                 elif isinstance(dim, int):
                     out.append(dim)
-                elif dim is None:
-                    _warn_on_None_dynamic_shape_dimension()
-                    out.append(val)
                 else:
-                    assert dim == _DimHint.STATIC
+                    assert dim is None or dim == _DimHint.STATIC
                     out.append(val)
             out = type(shape)(out)  # type: ignore[assignment]
         else:
@@ -1069,12 +1046,8 @@ def _get_dim_name_mapping(
         dynamic_shapes,
         is_leaf=lambda x: isinstance(x, _Dim),
     )[0]:
-        if dim is None:
-            # NOTE: this must denote a non-Tensor or automatic at this point.
+        if isinstance(dim, (int, _DimHint)) or dim is None:
             continue
-        if isinstance(dim, int):
-            continue
-        assert isinstance(dim, _Dim)  # dim hints should have boiled away
         name_to_dim[dim.__name__] = dim
         if isinstance(dim, _DerivedDim):
             name_to_dim[dim.root.__name__] = dim.root  # type: ignore[attr-defined]

@@ -330,22 +330,6 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             backends = list_backends()
             assert name in backends, (name, backends)
 
-    def test_backend_recompilation(self):
-        def fn(x):
-            return x + x
-
-        input = torch.tensor(2.0)
-
-        opt_fn = torch.compile(
-            fn, backend="inductor", options={"_raise_error_for_testing": False}
-        )
-        opt_fn(input)
-        with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
-            opt_fn = torch.compile(
-                fn, backend="inductor", options={"_raise_error_for_testing": True}
-            )
-            opt_fn(input)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

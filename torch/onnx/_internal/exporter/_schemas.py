@@ -121,8 +121,6 @@ class Parameter:
 
 @dataclasses.dataclass(frozen=True)
 class AttributeParameter:
-    """A parameter in the function signature that represents an ONNX attribute."""
-
     name: str
     type: ir.AttributeType
     required: bool
@@ -437,7 +435,7 @@ class OpSignature:
         # https://github.com/python/cpython/issues/102405
         type_hints = typing.get_type_hints(func)
 
-        params: list[Parameter | AttributeParameter] = []
+        params = []
         # Create a mapping from type to a unique name
         type_constraints: dict[str, TypeConstraintParam] = {}
 
@@ -448,19 +446,8 @@ class OpSignature:
                     param.name,
                     py_signature,
                 )
-                type_constraint = TypeConstraintParam.any_value(f"T_{param.name}")
-                type_constraints[param.name] = type_constraint
-                params.append(
-                    Parameter(
-                        name=param.name,
-                        type_constraint=type_constraint,
-                        required=param.default is inspect.Parameter.empty,
-                        # TODO: Handle variadic
-                        variadic=False,
-                        default=param.default
-                        if param.default is not inspect.Parameter.empty
-                        else _EMPTY_DEFAULT,
-                    )
+                type_constraints[param.name] = TypeConstraintParam.any_value(
+                    f"T_{param.name}"
                 )
             else:
                 type_ = type_hints[param.name]
@@ -503,7 +490,7 @@ class OpSignature:
                         type_constraints[type_constraint_name] = type_constraint
                     # 4. Create Parameter
                     params.append(
-                        Parameter(
+                        Parameter(  # type: ignore[arg-type]
                             name=param.name,
                             type_constraint=type_constraint,
                             required=param.default is inspect.Parameter.empty,

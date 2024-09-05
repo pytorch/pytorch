@@ -127,7 +127,7 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 PyObject* lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    PyObject* backend);
+    const PyObject* backend);
 
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract

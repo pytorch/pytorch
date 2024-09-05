@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Sequence
+from typing import Sequence
 
+import onnxscript
 from onnxscript import ir
 
 import torch
@@ -162,22 +163,10 @@ def _param_type_compatible_with_arg(
 
 
 def _get_type_from_tensor(
-    tensor: torch.Tensor
-    | torch.SymBool
-    | torch.SymInt
-    | torch.SymFloat
-    | Sequence[torch.Tensor],
+    tensor: torch.Tensor | Sequence[torch.Tensor],
 ) -> ir.TypeProtocol:
     if isinstance(tensor, torch.Tensor):
         return ir.TensorType(_torch_dtype_to_onnx_compatible_dtype(tensor.dtype))
-    if isinstance(tensor, torch.SymBool):
-        return ir.TensorType(ir.DataType.BOOL)
-    if isinstance(tensor, torch.SymInt):
-        return ir.TensorType(ir.DataType.INT64)
-    if isinstance(tensor, torch.SymFloat):
-        return ir.TensorType(ir.DataType.FLOAT)
-
-    # Handle sequences
     first_tensor = next((item for item in tensor if item is not None), None)
     if first_tensor is None:
         return ir.SequenceType(ir.TensorType(ir.DataType.UNDEFINED))
@@ -200,7 +189,7 @@ def _get_first_tensor_in_node_list(
 
 
 def _get_named_fx_node_args(node: torch.fx.Node) -> dict[str, torch.fx.node.Argument]:
-    assert hasattr(node.target, "_schema")
+    # FIXME: node.target may not have a schema
     torch_schema: torch.FunctionSchema = node.target._schema  # type: ignore[union-attr]
     node_args = {}
     for arg, schema_arg in zip(node.args, torch_schema.arguments):
@@ -212,8 +201,8 @@ def _get_named_fx_node_args(node: torch.fx.Node) -> dict[str, torch.fx.node.Argu
 
 def get_matching_overload(
     node: torch.fx.Node,
-    overloads: Sequence[Callable],
-) -> tuple[Callable | None, str]:
+    overloads: Sequence[onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction],
+) -> tuple[onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction | None, str]:
     """Get the overload that matches the node's arguments.
 
     Args:
@@ -223,14 +212,8 @@ def get_matching_overload(
     Returns:
         A tuple containing the matched overload and a string describing the reason for failure or success.
     """
-    if not hasattr(node.target, "_schema"):
-        # FIXME(justinchuby): When the target is a builtin, we should instead
-        # Match only the inputs positionally. Figure out how to do that as right
-        # now we assume all inputs are named.
-        return overloads[
-            0
-        ], "The node target does not have a schema. Return the first one."
     named_args = _get_named_fx_node_args(node)
+    # FIXME: node.target may and builtin and not have a schema
     # FIXME: Handle when we don't know the names of the arguments
     schema_args: dict[str, torch.Argument] = {
         arg.name: arg
@@ -325,7 +308,7 @@ def _arg_has_complex_dtype(arg) -> bool:
 
 def dispatch(
     node: torch.fx.Node, registry: _registration.ONNXRegistry
-) -> tuple[Callable | None, str]:
+) -> tuple[onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction | None, str]:
     """Dispatch a node to an ONNX function based on the node's target and the ONNX registry.
 
     Args:

@@ -1188,7 +1188,10 @@ def get_cpp_torch_cuda_options(
             if config.is_fbcode():
                 libraries += ["cuda"]
             else:
-                libraries += ["c10_cuda", "cuda", "torch_cuda"]
+                if config.is_fbcode():
+                    libraries += ["cuda"]
+                else:
+                    libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
         if config.is_fbcode():
