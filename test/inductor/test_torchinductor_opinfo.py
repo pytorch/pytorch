@@ -226,7 +226,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
-    ("sparse.mm", "reduce"): {f32, f64},
+    ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
         f32,

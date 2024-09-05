@@ -14,6 +14,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.multiprocessing.reductions import StorageWeakRef
 
+from ...utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
@@ -477,6 +478,59 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
 
 @register_graph_pattern(
     CallFunction(
+        torch.ops.prims.iota.default,
+        KeywordArg("length"),
+        start=KeywordArg("start"),
+        step=KeywordArg("step"),
+        dtype=KeywordArg("dtype"),
+        device=KeywordArg("device"),
+        requires_grad=KeywordArg("requires_grad"),
+    ),
+    pass_dict=patterns,
+)
+def fix_iota_device(match: Match, length, start, step, dtype, device, requires_grad):
+    """
+    Eager supports:
+
+        aten.index(cuda_tensor, torch.arange(..., device="cpu"))
+
+    But this results in an implicit host-device-copy and breaks cudagraphs.
+    Rewrite the arange to use CUDA.
+    """
+    (node,) = match.nodes
+    user_devices: OrderedSet[torch.device] = OrderedSet()
+    for user in node.users:
+        if (
+            user.op == "call_function"
+            and user.target in (aten.index.Tensor, aten.index_put.default)
+            and hasattr(user.meta.get("val"), "device")
+        ):
+            user_devices.add(user.meta["val"].device)  # type: ignore[union-attr]
+        else:
+            return  # bail out
+
+    if len(user_devices) == 1 and "val" in node.meta:
+        (user_device,) = user_devices
+        if device.type != user_device.type:
+            repl = match.graph.call_function(
+                torch.ops.prims.iota.default,
+                (length,),
+                {
+                    "start": start,
+                    "step": step,
+                    "dtype": dtype,
+                    "device": user_device,
+                    "requires_grad": requires_grad,
+                },
+            )
+            repl.meta.update(node.meta)
+            repl.meta["val"] = repl.meta["val"].to(user_device)
+            node.replace_all_uses_with(repl)
+            match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
         torch.ops.prims.convert_element_type.default,
         CallFunction(
             torch.ops.prims.convert_element_type.default,
@@ -498,7 +552,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         )
         repl.meta.update(node.meta)
         node.replace_all_uses_with(repl)
-        match.erase_nodes(graph)
+        match.erase_nodes()
 
 
 @register_graph_pattern(
@@ -507,12 +561,11 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
 )
 def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
-    graph = match.graph
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
     if size == arg_size:
-        node.replace_all_uses_with(node.args[0])
-        match.erase_nodes(graph)
+        node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
+        match.erase_nodes()
 
 
 # When softmax is used with temperature or other scaling, we get the pattern
@@ -593,7 +646,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
             inp = inp.to(dtype)
 
         sign: Union[int, float, torch.Tensor]
-        if isinstance(other, (int, float)):
+        if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
             one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
@@ -620,7 +673,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
             inp = inp.to(dtype)
 
         sign: Union[int, float, torch.Tensor]
-        if isinstance(other, (int, float)):
+        if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
             one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
