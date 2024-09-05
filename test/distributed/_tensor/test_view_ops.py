@@ -548,14 +548,19 @@ class TestViewOps(DTensorTestBase):
             with CommDebugMode() as comm_mode:
                 view = dtensor.view(dim0_size, 2, 4)
                 self.assertEqual(len(comm_mode.get_comm_counts()), 0)
+                # when no communication happens, the data pointer should be the same.
+                self.assertEqual(view.to_local().data_ptr(), dtensor.to_local().data_ptr())
 
                 view = dtensor.view(dim0_size, 4, 2)
+                self.assertEqual(view.to_local().data_ptr(), dtensor.to_local().data_ptr())
                 self.assertEqual(len(comm_mode.get_comm_counts()), 0)
 
                 view = dtensor.view(dim0_size, 8)
+                self.assertEqual(view.to_local().data_ptr(), dtensor.to_local().data_ptr())
                 self.assertEqual(len(comm_mode.get_comm_counts()), 0)
 
                 view = dtensor.view(dtensor.shape)
+                self.assertEqual(view.to_local().data_ptr(), dtensor.to_local().data_ptr())
                 self.assertEqual(len(comm_mode.get_comm_counts()), 0)
 
 
