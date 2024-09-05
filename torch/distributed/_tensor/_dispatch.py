@@ -458,6 +458,7 @@ class OpDispatcher:
 
         from torch.distributed.device_mesh import _mesh_resources
 
+        # only allow implicit replication if cur_mesh and mesh have the same root mesh.
         cur_mesh_root = _mesh_resources.get_root_mesh(cur_mesh)
         mesh_root = _mesh_resources.get_root_mesh(mesh)
         if "foreach" in op_call.__name__ and cur_mesh_root == mesh_root:
