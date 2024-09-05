@@ -650,8 +650,6 @@ class WrapperCodeGen(CodeGen):
         self.header.writeline(
             V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         )
-        if config.multiple_streams:
-            self.header.writeline(V.graph.device_ops.generate_stream_creation(V.graph.stream_graph.stream_pool))
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
@@ -848,7 +846,8 @@ class WrapperCodeGen(CodeGen):
             self.cuda_event_create(node_name, kernel_IndentedBuffer)
         stream_id = ssnode.stream_id
         kernel_IndentedBuffer = kernel_IndentedBuffer
-        if stream_id != V.graph.stream_graph.DEFAULT_STREAM_ID:
+        DEFAULT_STREAM_ID = V.graph.stream_graph.DEFAULT_STREAM_ID
+        if stream_id != DEFAULT_STREAM_ID:
             if stream_switch:
                 kernel_IndentedBuffer.writeline(
                     f"torch.cuda.set_stream(stream{stream_id}_raw)"
@@ -858,7 +857,7 @@ class WrapperCodeGen(CodeGen):
             else:
                 kernel_IndentedBuffer.writeline(call_strs)
             if stream_switch:
-                kernel_IndentedBuffer.writeline("torch.cuda.set_stream(stream0_raw)")
+                kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream{DEFAULT_STREAM_ID}_raw)")
         else:
             if isinstance(call_strs, list):
                 kernel_IndentedBuffer.writelines(call_strs)
@@ -974,6 +973,9 @@ class WrapperCodeGen(CodeGen):
     def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
+        if config.multiple_streams:
+            self.header.writeline(V.graph.device_ops.generate_stream_creation(V.graph.stream_graph.stream_pool))
+
         result = IndentedBuffer()
         result.splice(self.header)
         # We do not want the cpp header for intermediate const graph. Headers would be
@@ -1178,7 +1180,7 @@ class WrapperCodeGen(CodeGen):
             )
 
     def finalize_prefix(self):
-        self.write_get_raw_stream_header_once()
+        pass
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
         return pexpr(x, simplify=simplify)
