@@ -10,18 +10,42 @@
 namespace at::native::onednn {
 
 void quantized_matmul_pt2(
-    at::Tensor& result,
-    const at::Tensor& mat1,
-    const at::Tensor& mat2,
-    const at::Tensor& b_raw,
-    bool m2_trans,
-    double input_scale,
-    int64_t input_zero_point,
-    at::Tensor& weight_scales,
-    at::Tensor& weight_zero_points,
-    double output_scale,
-    int64_t output_zero_point,
-    Attr attr) {
+  at::Tensor  mat1, // act
+  double input_scale,
+  int64_t input_zero_point,
+  at::Tensor  mat2, // weight
+  at::Tensor& weight_scales,
+  at::Tensor& weight_zero_points,
+  at::Tensor& b_raw,
+  at::Tensor result, // output
+  double output_scale,
+  int64_t output_zero_point,
+  std::optional<c10::ScalarType> output_dtype,
+  std::optional<at::Tensor> other, // extra input for binary-post-op
+  double other_scale,
+  int64_t other_zero_point,
+  const c10::string_view& binary_post_op,
+  double binary_alpha,
+  const c10::string_view& unary_post_op,
+  torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+  c10::string_view unary_post_op_algorithm){
+
+  bool m2_trans = true;
+
+  auto attr = Attr(output_scale, output_zero_point);
+
+  construct_attr_by_post_op(
+    binary_post_op,
+    binary_alpha,
+    input_scale,
+    input_zero_point,
+    unary_post_op,
+    unary_post_op_args,
+    unary_post_op_algorithm,
+    attr
+  );
+
+
   size_t dims = result.dim();
   at::Device curDevice = at::Device(at::kXPU, c10::xpu::current_device());
   auto engine = GpuEngineManager::Instance().get_engine(curDevice);
@@ -63,7 +87,7 @@ void quantized_matmul_pt2(
     if (b.dim() == 1) {
       TORCH_CHECK(
           b.size(0) == n || b.size(0) == 1,
-          "matmul supports [n] or [1] when bias dim is 1 ...");
+          "matmul supports [n] or [1] when bias dim is 1, but b.size() is:", b.size(0));
       if (b.size(0) == 0) {
         with_bias = false;
       } else if (m1.dim() == 3) {
@@ -157,7 +181,7 @@ void quantized_matmul_pt2(
   std::unordered_map<int, dnnl::memory> args;
 
   dnnl::post_ops po;
-  // attr.extract_post_ops(dst, true);
+  attr.extract_post_ops(dst, true);
   bool m1_need_zp = (input_zero_point != 0);
   // wgh should never have zero point
   bool wgh_is_per_channel = weight_scales.numel() > 1;
