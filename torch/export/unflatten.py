@@ -890,7 +890,15 @@ class _ModuleFrame:
                     self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
             return self.node_to_placeholder[x]
         elif x.op == "call_function" and (
-            x.target == torch.ops.aten.sym_size.int
+            x.target
+            in (
+                torch.ops.aten.sym_size.int,
+                torch.ops.aten.item.default,
+                torch.ops.aten.unbind.int,
+                torch.ops.aten.sum.dim_IntList,
+                torch.ops.aten.view.default,
+                torch.ops.aten.diff.default,
+            )
             or (hasattr(x.target, "__module__") and x.target.__module__ == "_operator")
         ):
             # export deduplicates sym_size nodes, and may need to re-copy them
