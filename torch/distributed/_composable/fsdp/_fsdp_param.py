@@ -462,6 +462,8 @@ class FSDPParam:
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
                 self._unsharded_param
             ):
+                # NOTE: Under compile, we will remove the resize_ and copy_ ops in
+                # a compiler graph pass to recover performance.
                 size = self._unsharded_param.numel() * self._unsharded_param.itemsize
                 if (storage := self._unsharded_param.untyped_storage()).size() != size:
                     storage.resize_(size)
