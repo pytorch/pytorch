@@ -1025,9 +1025,14 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
         emb = torch.nn.Embedding(100, 8, device=device)
         y = emb(x)
-        ys = y.unbind()
-        for i, inp in enumerate(inputs):
-            self.assertEqual(emb(inp), ys[i])
+
+        @torch._dynamo.disable
+        def check(inputs, y):
+            ys = y.unbind()
+            for i, inp in enumerate(inputs):
+                self.assertEqual(emb(inp), ys[i])
+
+        check(inputs, y)
 
     @skipMeta
     @torch.inference_mode()
@@ -7120,9 +7125,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         a, b, c = nt.unbind()
         b.sum().backward()
 
-        expected_grad = torch.zeros_like(nt)
-        expected_grad.unbind()[1].add_(1.0)
-        torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
+        @torch._dynamo.disable
+        def check(nt):
+            expected_grad = torch.zeros_like(nt)
+            expected_grad.unbind()[1].add_(1.0)
+            self.assertEqual(nt.grad, expected_grad)
+
+        check(nt)
 
 
 FORWARD_FAILURES = {
