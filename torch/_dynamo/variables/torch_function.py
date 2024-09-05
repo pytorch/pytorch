@@ -114,12 +114,13 @@ class SymbolicTorchFunctionState:
 
     @contextlib.contextmanager
     def _pop_mode_for_inlining(self):
+        old_mode = self.cur_mode
         self.cur_mode = self.pop_torch_function_mode()
         try:
             yield self.cur_mode
         finally:
             mode = self.cur_mode
-            self.cur_mode = None
+            self.cur_mode = old_mode
             self.push_torch_function_mode(mode)
 
 
