@@ -9,12 +9,7 @@ from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.while_loop import while_loop
-from torch._subclasses.functional_tensor import (
-    CppFunctionalizeAPI,
-    FunctionalTensor,
-    FunctionalTensorMode,
-    PythonFunctionalizeAPI,
-)
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
@@ -24,6 +19,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1557,6 +1553,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref,
     def test_cond_simple_with_linear_compile_check_graph(self):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
@@ -1663,19 +1660,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return (add, getitem_1, getitem_2)
     """,  # noqa: B950
         )
-
-    def _wrap_with_functionalize(self, fn, func_type):
-        mode = None
-        if func_type == "cpp":
-            fn = CppFunctionalizeAPI().functionalize(fn)
-        elif func_type == "python":
-            fn = PythonFunctionalizeAPI().functionalize(fn)
-            mode = FunctionalTensorMode()
-        elif func_type == "functorch":
-            fn = torch.func.functionalize(fn)
-        else:
-            assert func_type == "no"
-        return fn, mode
 
     @parametrize("func_type", ["no", "cpp", "python", "functorch"])
     def test_while_loop_simple_functionalize_check_graph(self, func_type):
@@ -1819,6 +1803,7 @@ def forward(self, arg0_1):
         self._check_compile(fn, inp, backend=backend)
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with cross ref
     def test_while_loop_simple_with_linear_compile_check_graph(self):
         fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
         from torch._dynamo.testing import EagerAndRecordGraphs
@@ -1893,135 +1878,6 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
     child_1 = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
     return (child, child_1)""",  # noqa: B950
             )
-
-    def test_while_loop_nested2_traced(self):
-        fn, inp = WHILE_LOOP_TESTS["nested2"]
-        graphs = self._check_tracing(fn, inp)
-        gm = graphs["symbolic"]
-        outer_body = gm.while_loop_body_graph_0
-        outer_cond = gm.while_loop_cond_graph_0
-        inner_body = outer_body.while_loop_body_graph_0
-        inner_cond = outer_body.while_loop_cond_graph_0
-        self.assertExpectedInline(
-            gm.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    return (getitem, getitem_1, getitem_2, getitem_3)
-    """,  # noqa: B950
-        )
-        self.assertExpectedInline(
-            outer_body.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
-    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
-    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
-    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
-    return (sub, clone, mul, div)
-    """,  # noqa: B950
-        )
-        self.assertExpectedInline(
-            outer_body.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
-    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
-    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
-    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
-    return (sub, clone, mul, div)
-    """,  # noqa: B950
-        )
-        self.assertExpectedInline(
-            inner_body.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(arg2_1, 3.14);  arg2_1 = None
-    sub_1 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  arg3_1 = None
-    return (clone, sub, add, sub_1)
-    """,
-        )
-        self.assertExpectedInline(
-            inner_cond.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    gt = torch.ops.aten.gt.Scalar(arg1_1, 0);  arg1_1 = None
-    return gt
-    """,
-        )
-
-    def test_cond_nested_traced(self):
-        def true_nested(y):
-            return y * y
-
-        def false_nested(y):
-            return y + y
-
-        def true_fn(x, pred2):
-            z = cond(pred2, true_nested, false_nested, [x])
-            return x + z
-
-        def false_fn(x, _):
-            return x.cos()
-
-        def f(x, pred, pred2):
-            return cond(pred, true_fn, false_fn, [x, pred2])
-
-        x = torch.randn(4)
-        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
-
-        result_true_true = graph.forward(
-            x, torch.tensor(True), torch.tensor(True)
-        )  # True + True -> x * x
-        result_true_false = graph.forward(
-            x, torch.tensor(True), torch.tensor(False)
-        )  # True + True -> x + x
-        result_false_true = graph.forward(
-            x, torch.tensor(False), torch.tensor(True)
-        )  # False + either -> cos
-        result_false_false = graph.forward(
-            x, torch.tensor(False), torch.tensor(False)
-        )  # False + either -> cos
-
-        self.assertNotEqual(result_true_true, result_true_false)
-        self.assertFalse(torch.allclose(result_false_true, result_true_true))
-
-        self.assertEqual(result_false_true, result_false_false)
-
-        self.assertEqual(result_true_true, (x * x) + x)
-        self.assertEqual(result_true_false, x + x + x)
-
-        self.assertEqual(result_false_true, torch.cos(x))
-
-        graph = make_fx(f, tracing_mode="symbolic")(
-            x, torch.tensor(False), torch.tensor(False)
-        )
-        self.assertEqual(
-            graph(x, torch.tensor(True), torch.tensor(True)),
-            f(x, torch.tensor(True), torch.tensor(True)),
-        )
 
     def test_cond_functionalized(self):
         def true_fn(x):

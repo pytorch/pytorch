@@ -1020,7 +1020,7 @@ class OutputGraph:
             prefix_insts.clear()
 
         for block in reversed(tx.block_stack):
-            block.exit(tx)
+            block.exit(tx, is_graph_break=reason.graph_break)
 
         self.cleanup_graph()
         tx.prune_dead_locals()
