@@ -15083,7 +15083,8 @@ op_db: List[OpInfo] = [
                ),
                # TF32
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1e-3)}),
+                   toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1e-3),
+                                     torch.complex64: tol(atol=5e-3, rtol=1e-3)}),
                    'TestCommon', 'test_noncontiguous_samples',
                ),
                DecorateInfo(
