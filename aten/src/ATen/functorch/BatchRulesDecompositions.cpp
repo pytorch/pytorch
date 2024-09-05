@@ -23,6 +23,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   OP_DECOMPOSE(dropout_);
   OP_DECOMPOSE(feature_alpha_dropout_);
   OP_DECOMPOSE(feature_dropout_);
+  OP_DECOMPOSE(dropout);
   OP_DECOMPOSE(_scaled_dot_product_attention_math);
   OP_DECOMPOSE(scaled_dot_product_attention);
 }
@@ -386,6 +387,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(to, dtype);
   OP_DECOMPOSE2(to, dtype_layout);
   OP_DECOMPOSE2(to, other);
+
+  // Random ops that are also registered here
+  OP_DECOMPOSE(dropout);
+  OP_DECOMPOSE(_scaled_dot_product_attention_math);
+  OP_DECOMPOSE(scaled_dot_product_attention);
 }
 
 } // namespace at::functorch
