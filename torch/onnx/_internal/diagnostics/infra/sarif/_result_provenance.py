@@ -16,10 +16,10 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 class ResultProvenance(object):
     """Contains information about how and when a result was detected."""
 
-    conversion_sources: Optional[
-        List[_physical_location.PhysicalLocation]
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "conversionSources"}
+    conversion_sources: Optional[List[_physical_location.PhysicalLocation]] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "conversionSources"}
+        )
     )
     first_detection_run_guid: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "firstDetectionRunGuid"}

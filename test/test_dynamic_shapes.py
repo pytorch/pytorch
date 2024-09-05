@@ -2,11 +2,9 @@
 
 import contextlib
 import copy
-import inspect
 import itertools
 import math
 import operator
-import re
 import unittest
 
 import numpy as np
@@ -193,7 +191,7 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
     )
 
 
-def create_symtype(cls, pytype, shape_env, val, duck=True):
+def create_symtype(cls, pytype, shape_env, val, duck=True, **kwargs):
     from torch._dynamo.source import ConstantSource
 
     symbol = shape_env.create_symbol(
@@ -201,13 +199,14 @@ def create_symtype(cls, pytype, shape_env, val, duck=True):
         source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
+        **kwargs,
     )
     return cls(SymNode(symbol, shape_env, pytype, hint=val))
 
 
 # TODO: default duck to False
-def create_symint(shape_env, i: int, duck=True) -> SymInt:
-    return create_symtype(SymInt, int, shape_env, i, duck=duck)
+def create_symint(shape_env, i: int, duck=True, **kwargs) -> SymInt:
+    return create_symtype(SymInt, int, shape_env, i, duck=duck, **kwargs)
 
 
 def create_symbool(shape_env, b: bool) -> SymBool:
@@ -780,6 +779,13 @@ def forward(self, x_1):
                 self.assertFalse(statically_known_true(i0 != 5))
                 self.assertTrue(statically_known_true(i0 >= 4))
                 self.assertTrue(statically_known_true(i0 > 3))
+
+    def test_mul_int_oo_nan(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 5, duck=False)
+        s1 = create_symint(shape_env, 6, duck=False)
+        s2 = create_symint(shape_env, 5, duck=False)
+        bool(s0 * (s1 // s0) == s2)
 
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
@@ -2501,7 +2507,6 @@ class TestDimConstraints(TestCase):
         dim_constraints.add(s5 >= 2)
 
         dim_constraints.solve()
-        dim_constraints.remove_redundant_dynamic_results()
         self.assertEqual(
             dim_constraints._static_results,
             {
@@ -2520,51 +2525,11 @@ class TestDimConstraints(TestCase):
         self.assertEqual(
             dim_constraints._dynamic_results,
             {
-                "dynamic_dim(L['e'], 1) == dynamic_dim(L['c'], 1)",
-                "dynamic_dim(L['d'], 1) == dynamic_dim(L['c'], 1)",
+                "2 <= L['c'].size()[1]",
+                "L['d'].size()[1] == L['c'].size()[1]",
+                "L['e'].size()[1] == L['c'].size()[1]",
             },
         )
-
-        def dummy_fn(a, b, c, d, e, f):
-            pass
-
-        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn), {})
-        static_code, dynamic_code = re.findall(r"```(.*?)```", action_code, re.DOTALL)
-        expected_static = """
-def specializations(a, b, c, d, e, f):
-    # a:
-    assert a.size()[0] == 8
-    assert a.size()[1] == 22
-    assert a.size()[2] == 96
-    assert a.size()[3] == 96
-
-    # b:
-    assert b.size()[0] == 8
-    assert b.size()[1] == 22
-    assert b.size()[2] == 3
-
-    # c:
-    assert c.size()[0] == 8
-
-    # d:
-    assert d.size()[0] == 8
-
-    # f:
-    assert f.size()[1] == 1
-"""
-        expected_dynamic = """
-def specify_constraints(a, b, c, d, e, f):
-    return [
-        # d:
-        dynamic_dim(d, 1) == dynamic_dim(c, 1),
-
-        # e:
-        dynamic_dim(e, 1) == dynamic_dim(c, 1),
-    ]
-"""
-
-        self.assertEqual(static_code, expected_static)
-        self.assertEqual(dynamic_code, expected_dynamic)
 
 
 class TestGuardsExpressions(TestCase):

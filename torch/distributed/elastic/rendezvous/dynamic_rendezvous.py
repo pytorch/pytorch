@@ -1115,7 +1115,6 @@ class DynamicRendezvousHandler(RendezvousHandler):
             bootstrap_store_info.master_port,
             is_master=True,
             multi_tenant=True,
-            use_libuv=True,
         )
 
     @property
