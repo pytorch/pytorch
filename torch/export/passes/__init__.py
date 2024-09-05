@@ -2,20 +2,10 @@ from typing import Dict, Union
 
 import torch
 import torch.utils._pytree as pytree
-from torch.export import ExportedProgram
+from torch.export.exported_program import ExportedProgram
 
 
-def _get_new_device(
-    curr_device: torch.device,
-    location: Union[torch.device, str, Dict[str, str]],
-) -> str:
-    if isinstance(location, dict):
-        if str(curr_device) in location.keys():
-            return location[str(curr_device)]
-        else:
-            return str(curr_device)
-    else:
-        return str(location)
+__all__ = ["move_to_device_pass"]
 
 
 def move_to_device_pass(
@@ -34,6 +24,19 @@ def move_to_device_pass(
     Returns:
         ExportedProgram: The moved exported program.
     """
+
+    def _get_new_device(
+        curr_device: torch.device,
+        location: Union[torch.device, str, Dict[str, str]],
+    ) -> str:
+        if isinstance(location, dict):
+            if str(curr_device) in location.keys():
+                return location[str(curr_device)]
+            else:
+                return str(curr_device)
+        else:
+            return str(location)
+
     # move all the state_dict
     for k, v in ep.state_dict.items():
         if isinstance(v, torch.nn.Parameter):

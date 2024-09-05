@@ -10,6 +10,7 @@ from torch.distributed._tensor._op_schema import (
     OpStrategy,
     PlacementList,
     PlacementStrategy,
+    RuntimeSchemaInfo,
 )
 from torch.distributed._tensor.ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed._tensor.ops.utils import (
@@ -161,7 +162,9 @@ def baddmm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_op_strategy(aten._scaled_dot_product_flash_attention.default)
+@register_op_strategy(
+    aten._scaled_dot_product_flash_attention.default, schema_info=RuntimeSchemaInfo(5)
+)
 def scaled_dot_product_flash_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
@@ -334,7 +337,10 @@ def constant_pad_nd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrateg
     )
 
 
-@register_op_strategy(aten._scaled_dot_product_efficient_attention.default)
+@register_op_strategy(
+    aten._scaled_dot_product_efficient_attention.default,
+    schema_info=RuntimeSchemaInfo(4),
+)
 def scaled_dot_product_efficient_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
