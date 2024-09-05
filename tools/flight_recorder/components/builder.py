@@ -20,15 +20,16 @@ from tools.flight_recorder.components.types import (
     Traceback,
 )
 from tools.flight_recorder.components.utils import (
+    align_trace_from_beginning,
     check_no_missing_dump_files,
     check_size_alltoall,
     check_version,
     find_coalesced_group,
     format_frames,
+    get_version_detail,
     just_print_entries,
     match_coalesced_groups,
     match_one_event,
-    sort_trace_from_beginning,
 )
 
 
@@ -140,6 +141,7 @@ def build_collectives(
     _groups: Dict[str, Group],
     _memberships: Dict[str, Set[Any]],
     _pg_guids: Dict[Tuple[str, int], str],
+    version: str,
 ) -> Tuple[List[Traceback], List[Collective], List[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
@@ -169,6 +171,7 @@ def build_collectives(
         ]
     }
     """
+    major_v, minor_v = get_version_detail(version)
     tracebacks: List[Traceback] = []
 
     collectives: List[Collective] = []
@@ -325,8 +328,10 @@ def build_collectives(
                     fail_check, input_numel, output_numel = check_size_alltoall(
                         alltoall_cases
                     )
-                    # We don't log the input/output sizes for alltoall so we don't consider the size mismatch as an error for now.
-                    fail_check = False
+                    if major_v <= 2 and minor_v <= 3:
+                        # We don't log the input/output sizes for alltoall before v2.4,
+                        # so we don't consider the size mismatch as an error for now.
+                        fail_check = False
                     if fail_check:
                         # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
                         mismatch[pg_name] += 1
@@ -413,19 +418,22 @@ def build_collectives(
     return tracebacks, collectives, nccl_calls
 
 
-def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Database:
+def build_db(
+    details: Dict[str, Dict[str, Any]], args: argparse.Namespace, version: str
+) -> Database:
     # temporary state used for building database
     entries = {}
     pg_config = {}
-    version = {}
+    version_by_ranks = {}
     for dump in details.values():
         rank = dump["rank"]
         entries[rank] = dump["entries"]
-        version[rank] = dump["version"]
+        version_by_ranks[rank] = dump["version"]
         pg_config[rank] = dump["pg_config"]
 
-    check_version(version)
-    entries = sort_trace_from_beginning(entries)
+    # Ensure version is consistent across all ranks.
+    check_version(version_by_ranks, version)
+    entries = align_trace_from_beginning(entries)
 
     # flattened database
     groups, _groups, memberships, _memberships, _pg_guids = build_groups_memberships(
@@ -436,11 +444,11 @@ def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Da
     check_no_missing_dump_files(entries, memberships)
 
     if args.just_print_entries:
-        just_print_entries(entries, _groups, _memberships, _pg_guids)
+        just_print_entries(entries, _groups, _memberships, _pg_guids, args)
         sys.exit(0)
 
     tracebacks, collectives, nccl_calls = build_collectives(
-        entries, _groups, _memberships, _pg_guids
+        entries, _groups, _memberships, _pg_guids, version
     )
     print("built collectives, nccl_calls")
     if args.verbose:
