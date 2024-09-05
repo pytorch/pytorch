@@ -56,6 +56,9 @@ def setup_torchbench_cwd():
         "../../torchbenchmark",
         "../../torchbench",
         "../../benchmark",
+        "../../../torchbenchmark",
+        "../../../torchbench",
+        "../../../benchmark",
     ):
         if exists(torchbench_dir):
             break

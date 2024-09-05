@@ -1,6 +1,6 @@
 # Python dependencies required for development
 astunparse
-expecttest!=0.2.0
+expecttest>=0.2.1
 hypothesis
 numpy
 psutil
@@ -17,7 +17,6 @@ jinja2
 fsspec
 lintrunner
 ninja
-redis
 # setuptools was removed from default python install
 setuptools ; python_version >= "3.12"
 packaging
