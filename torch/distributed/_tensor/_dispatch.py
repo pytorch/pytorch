@@ -27,6 +27,7 @@ from torch.distributed._tensor._tp_conv import (
 from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, TensorMeta
 from torch.distributed._tensor.random import is_rng_supported_mesh
+from torch.distributed.device_mesh import _mesh_resources
 
 
 if TYPE_CHECKING:
@@ -306,19 +307,11 @@ class OpDispatcher:
         kwargs_schema: Dict[str, object] = {}
         local_args: List[object] = []
         local_kwargs: Dict[str, object] = {}
-        mesh: Optional[DeviceMesh] = None
-
-        # record the largest mesh only if implicit replication is turned on
-        if self._allow_implicit_replication:
-            for arg in chain(iter(args_list), iter(kwargs.values())):
-                if isinstance(arg, dtensor.DTensor):
-                    if mesh is None or arg.device_mesh.ndim > mesh.ndim:
-                        mesh = arg.device_mesh
-                    # Currently, we only support implicit replication from 1D to 2D for partial TP
-                    # use cases when using 2D. Therefore, we break out the loop when we find a 2D mesh.
-                    # If we see more generic nD use case, we should remove the constraint.
-                    elif mesh.ndim == 2:
-                        break
+        mesh: Optional[DeviceMesh] = (
+            None
+            if not self._allow_implicit_replication
+            else self._try_find_largest_mesh_from_args(args_list, kwargs)
+        )
 
         for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
@@ -439,6 +432,25 @@ class OpDispatcher:
             )
         return replication_spec
 
+    def _try_find_largest_mesh_from_args(
+        self,
+        args_list: Tuple[object, ...],
+        kwargs: Dict[str, object],
+    ) -> Optional["DeviceMesh"]:
+        """
+        This utils finds the largest mesh from args/kwargs when implicit replication is turned on.
+        """
+        mesh: Optional[DeviceMesh] = None
+        # record the largest mesh only if implicit replication is turned on
+        for arg in chain(iter(args_list), iter(kwargs.values())):
+            if isinstance(arg, dtensor.DTensor):
+                if mesh is None or arg.device_mesh.ndim > mesh.ndim:
+                    mesh = arg.device_mesh
+                # Quick return if we already found a mesh that is a root mesh.
+                elif mesh == _mesh_resources.get_root_mesh(mesh):
+                    return mesh
+        return mesh
+
     def _try_replicate_dtensor_spec_in_missing_dim(
         self,
         op_call: torch._ops.OpOverload,
@@ -456,12 +468,10 @@ class OpDispatcher:
         if not self._allow_implicit_replication:
             raise NotImplementedError(error_msg)
 
-        from torch.distributed.device_mesh import _mesh_resources
-
         # only allow implicit replication if cur_mesh and mesh have the same root mesh.
         cur_mesh_root = _mesh_resources.get_root_mesh(cur_mesh)
         mesh_root = _mesh_resources.get_root_mesh(mesh)
-        if "foreach" in op_call.__name__ and cur_mesh_root == mesh_root:
+        if cur_mesh_root == mesh_root:
             placements = [Replicate() for _ in range(mesh.ndim)]
             cur_mesh_root_idx = _mesh_resources.get_root_mesh_dim(cur_mesh)
             placements[cur_mesh_root_idx] = dtensor_arg.placements[0]  # type: ignore[call-overload]

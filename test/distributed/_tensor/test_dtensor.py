@@ -817,7 +817,7 @@ class DTensorMeshTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_implicit_replication_for_foreach_ops(self):
+    def test_implicit_replication_for_dtensor(self):
         mesh = init_device_mesh(
             self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
