@@ -2741,7 +2741,7 @@ known_graph_breaks_tests = {
     "test_tensor_hooks_inplace_multiple_outputs",  # uses assert in hook
     "test_hooks",  # uses assert in hook
     "test_accumulate_grad_posthooks_can_observe_tensor_prehook",  # allclose
-    "test_save_tensor_hook_version_counter_not_shared",  # assertEqual
+    "test_saved_tensors_hook_version_counter_not_shared",  # assertEqual
     "test_post_accumulate_grad_hook_returns_not_None",  # throws
     "test_custom_function_cycle",  # assertEqual
     "test_mark_non_differentiable_mixed",  # assertTrue
@@ -2808,7 +2808,8 @@ known_failing_tests = {
     "test_custom_function_forward_mode_inplace_checks",  # forward AD
     "test_custom_function_forward_mode_view_checks",  # forward AD
     "test_custom_function_forward_mode_wrong_formula",  # forward AD
-    "test_default_saved_variable_hooks_double_backward",  # create_graph
+    "test_default_saved_tensors_hooks_double_backward",  # create_graph
+    "test_node_post_hook_registered_during_unpack_hook",  # 'NoneType' object has no attribute 'register_hook'
     "test_full_backward_hook_double_backward",  # create_graph
     "test_function",  # create_graph
     "test_grad",  # create_graph
@@ -2865,7 +2866,7 @@ known_failing_tests = {
     "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
     # Category: FakeTensor
     "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
-    "test_wrapped_number_saved_variable_hooks",  # Proxy tensor should carryover is_wrapped_number_ of its original
+    "test_wrapped_number_saved_tensors_hooks",  # Proxy tensor should carryover is_wrapped_number_ of its original
     "test_grad_batched_grad",  # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
     "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
     # Category: Divergence from eager
