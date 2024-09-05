@@ -446,25 +446,22 @@ void cpu_flash_attention(
 
   // Buffer to store padding query
   scalar_t* query_padding_ptr = nullptr;
-  std::unique_ptr<unsigned short[]> query_padding_data;
+  std::unique_ptr<scalar_t[]> query_padding_data;
   if (!headSize_even && need_pack) {
-    query_padding_data =
-        std::make_unique<unsigned short[]>(num_thread * qSplitSize * eheadSize);
-    query_padding_ptr = reinterpret_cast<scalar_t*>(query_padding_data.get());
+    query_padding_data = std::make_unique<scalar_t[]>(num_thread * qSplitSize * eheadSize);
+    query_padding_ptr = query_padding_data.get();
   }
   // Buffer to store Key and Value after transforms
   scalar_t* key_reorder_ptr = nullptr;
-  std::unique_ptr<unsigned short[]> key_reorder_data;
+  std::unique_ptr<scalar_t[]> key_reorder_data;
   scalar_t* value_reorder_ptr = nullptr;
-  std::unique_ptr<unsigned short[]> value_reorder_data;
+  std::unique_ptr<scalar_t[]> value_reorder_data;
   int kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
   if (need_pack) {
-    key_reorder_data = std::make_unique<unsigned short[]>(
-        batchSize * num_head * eheadSize * rkvSize);
-    key_reorder_ptr = reinterpret_cast<scalar_t*>(key_reorder_data.get());
-    value_reorder_data = std::make_unique<unsigned short[]>(
-        batchSize * num_head * kv_padding_size * rHeadSize);
-    value_reorder_ptr = reinterpret_cast<scalar_t*>(value_reorder_data.get());
+    key_reorder_data = std::make_unique<scalar_t[]>(batchSize * num_head * eheadSize * rkvSize);
+    key_reorder_ptr = key_reorder_data.get();
+    value_reorder_data = std::make_unique<scalar_t[]>(batchSize * num_head * kv_padding_size * rHeadSize);
+    value_reorder_ptr = value_reorder_data.get();
   }
 
   // Reorder K, V
@@ -472,12 +469,10 @@ void cpu_flash_attention(
     at::parallel_for(0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
         int64_t i = 0, j = 0, l = 0, n = 0;
         at::native::data_index_init(begin, i, batchSize, j, num_head, l, kvSlice);
-        std::unique_ptr<unsigned short[]> transpose_buffer =
-            std::make_unique<unsigned short[]>(eheadSize * packb_size);
-        scalar_t* transpose_buffer_ptr = reinterpret_cast<scalar_t*>(transpose_buffer.get());
-        std::unique_ptr<unsigned short[]> v_copy_buffer =
-            std::make_unique<unsigned short[]>(ekvSplitSize * packb_size);
-        scalar_t* v_copy_buffer_ptr = reinterpret_cast<scalar_t*>(v_copy_buffer.get());
+        std::unique_ptr<scalar_t[]> transpose_buffer = std::make_unique<scalar_t[]>(eheadSize * packb_size);
+        scalar_t* transpose_buffer_ptr = transpose_buffer.get();
+        std::unique_ptr<scalar_t[]> v_copy_buffer = std::make_unique<scalar_t[]>(ekvSplitSize * packb_size);
+        scalar_t* v_copy_buffer_ptr = v_copy_buffer.get();
         for (const auto z : c10::irange(begin, end)) {
           (void)z; // Suppress unused variable
           n = l * kvSplitSize;
