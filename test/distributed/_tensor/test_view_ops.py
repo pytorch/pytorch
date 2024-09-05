@@ -116,8 +116,8 @@ class TestViewOps(DTensorTestBase):
             view_groups([1, 1, 3, 2, 1, 1], [6, 1, 1, 1]),
             (
                 Flatten((InputDim(2), InputDim(3))),
-                Singleton(),
-                Singleton(),
+                InputDim(4),
+                InputDim(5),
                 Singleton(),
             ),
         )
@@ -126,7 +126,7 @@ class TestViewOps(DTensorTestBase):
             (
                 Split(InputDim(2), (3, 4), 0),
                 Split(InputDim(2), (3, 4), 1),
-                Singleton(),
+                InputDim(3),
                 Flatten((InputDim(6), InputDim(7))),
             ),
         )
@@ -435,7 +435,7 @@ class TestViewOps(DTensorTestBase):
         self.dimmap_test(
             Tensor.view,
             (randn(1, 1, 42, 1, 24, 1), -1),
-            (Flatten((InputDim(2), InputDim(4))),),
+            (Flatten((InputDim(2), InputDim(input_dim=3), InputDim(4))),),
         )
 
         self.dimmap_test(
