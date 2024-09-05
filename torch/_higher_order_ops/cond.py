@@ -18,6 +18,7 @@ from torch._guards import detect_fake_mode
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    _maybe_run_with_interpreter,
     _set_compilation_env,
     reenter_make_fx,
     unique_graph_id,
@@ -39,6 +40,22 @@ from .utils import _from_fun, create_fw_bw_graph
 
 
 log = logging.getLogger(__name__)
+
+"""
+We're going to define a `cond_op` operation.
+In order to do this, we need implementations for each of the dispatch keys.
+"""
+
+
+class CondOp(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("cond")
+
+    def __call__(self, pred, true_fn, false_fn, operands):
+        return super().__call__(pred, true_fn, false_fn, operands)
+
+
+cond_op = CondOp()
 
 
 @exposed_in("torch")
@@ -158,13 +175,6 @@ def cond(pred, true_fn, false_fn, operands):
                 return torch.compile(_cond_op_wrapper, backend="eager", fullgraph=True)(
                     pred, true_fn, false_fn, operands
                 )
-
-
-"""
-We're going to define a `cond_op` operation.
-In order to do this, we need implementations for each of the dispatch keys.
-"""
-cond_op = HigherOrderOperator("cond")
 
 
 def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
@@ -440,8 +450,8 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next() as m:
-        functional_true = ctx.functionalize(true_fn)
-        functional_false = ctx.functionalize(false_fn)
+        functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
+        functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for branch in [functional_true, functional_false]:
             if _has_potential_branch_input_mutation(

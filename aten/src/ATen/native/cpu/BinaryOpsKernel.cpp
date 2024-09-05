@@ -733,7 +733,7 @@ void fmin_kernel(TensorIteratorBase& iter) {
 
 void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
   if (iter.dtype() == kBFloat16) {
-    const float beta_val(beta);
+    const float beta_val(static_cast<float>(beta));
     const Vectorized<float> beta_val_vec(beta_val);
     const Vectorized<float> point_five_vec(static_cast<float>(0.5));
     cpu_kernel_vec(

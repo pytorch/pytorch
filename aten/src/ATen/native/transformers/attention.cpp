@@ -647,9 +647,11 @@ Tensor _safe_softmax(
     int64_t dim,
     std::optional<ScalarType> dtype) {
   auto out = at::softmax(self, dim, dtype);
-  const auto masked = self.eq(-std::numeric_limits<float>::infinity());
+  const auto neg_inf = at::scalar_tensor(-std::numeric_limits<float>::infinity(), at::TensorOptions().dtype(out.dtype()).device(out.device()));
+  const auto masked = self.eq(neg_inf);
   const auto masked_rows = all(masked, dim, true);
-  return at::where(masked_rows, at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device())), out);
+  const auto zero = at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device()));
+  return at::where(masked_rows, zero, out);
 }
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
@@ -735,7 +737,8 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::math:
-      if (query_.device().type() == DeviceType::MPS && dropout_p == 0.0
+      if ((!GradMode::is_enabled() || (!query_.requires_grad() && !key.requires_grad() && !value.requires_grad()))
+          && query_.device().type() == DeviceType::MPS && dropout_p == 0.0
           && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()
           && !query_.is_nested() && !key.is_nested() && !value.is_nested()) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
@@ -837,7 +840,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn.add_(*attn_mask);
       }
     }
-    attn = at::softmax(attn, -1);
+    attn = at::_safe_softmax(attn, -1);
     if (dropout_p > 0.0) {
       if (dropout_mask.has_value()) {
         // In order to validate the correctness of the fused kernels, we need to
@@ -867,7 +870,6 @@ _scaled_dot_product_flash_attention_cpu(
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(2);
   int64_t num_head = query.size(1);
-  int64_t headSize = query.size(3);
 
   TORCH_CHECK(c10::isFloatingType(dtype),
     "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, FP16, but got ", dtype, " instead.");
@@ -885,7 +887,7 @@ _scaled_dot_product_flash_attention_cpu(
           (attn_mask.value().dim() == 2 || attn_mask.value().dim() == 4),
     "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}");
 
-  at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
+  at::Tensor output = at::empty_like(query, query.options()).transpose(1, 2);
   const auto accumulate_dtype = toOpMathType(dtype);
   at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
       query.options().dtype(accumulate_dtype));

@@ -11,6 +11,8 @@ from torch.utils._sympy.functions import (
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
+    Max,
+    Min,
     Mod,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
@@ -169,11 +171,11 @@ class ReferenceAnalysis:
 
     @staticmethod
     def minimum(a, b):
-        return sympy.Min(a, b)
+        return Min(a, b)
 
     @staticmethod
     def maximum(a, b):
-        return sympy.Max(a, b)
+        return Max(a, b)
 
     @staticmethod
     def round_to_int(a, dtype):
