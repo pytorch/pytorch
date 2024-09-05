@@ -30,10 +30,10 @@ dill==0.3.7
 #Pinned versions: 0.3.7
 #test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
 
-expecttest==0.1.6
+expecttest==0.2.1
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
-#Pinned versions: 0.1.6
+#Pinned versions: 0.2.1
 #test that import:
 
 flatbuffers==2.0
