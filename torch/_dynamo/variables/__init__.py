@@ -24,12 +24,14 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    FrozensetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    PolyfilledFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -72,6 +74,8 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
+    RandomClassVariable,
+    RandomVariable,
     RegexPatternVariable,
     StringFormatVariable,
     SuperVariable,
@@ -79,7 +83,12 @@ from .misc import (
     TypingVariable,
     UnknownVariable,
 )
-from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .nn_module import (
+    FSDPManagedNNModuleVariable,
+    NNModuleVariable,
+    UnspecializedBuiltinNNModuleVariable,
+    UnspecializedNNModuleVariable,
+)
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
@@ -138,6 +147,7 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "PlacementVariable",
+    "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "RegexPatternVariable",

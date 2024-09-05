@@ -1626,6 +1626,14 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
 
+        @torch.compile(backend="eager", fullgraph=True)
+        def g(x):
+            typ = type(Foo())
+            typ.__base__
+            return typ.__base__
+
+        self.assertEqual(g(torch.randn(1)), Multistreamable)
+
     @parametrize("dynamic", [False, True])
     def test_subclass_views(self, dynamic):
         def _get_views(t):  # returns (view: Tensor, expects_raises_false)
@@ -2231,6 +2239,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
         for ref_v, res_v in zip(values_copy, values):
             self.assertEqual(ref_v.grad, res_v.grad)
 
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
     def test_unbind(self):
         # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
         # This causes a recompile later on when it realizes the batch and last dim

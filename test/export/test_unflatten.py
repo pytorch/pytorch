@@ -20,15 +20,9 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import (
-    Constraint,
-    Dim,
-    dynamic_dim,
-    export,
-    FlatArgsAdapter,
-    unflatten,
-)
+from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch.export.unflatten import _disable_interpreter
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
@@ -540,6 +534,24 @@ class TestUnflatten(TestCase):
         for m in unflattened.modules():
             check_meta(m)
 
+    def test_unflatten_requires_grad_param(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(3, 3), requires_grad=False)
+
+            def forward(self, x):
+                return self.p + x
+
+        with torch.device("meta"):
+            mod = M()
+
+        inputs = (torch.randn(3, 3, device="meta"),)
+        ep = export(mod, inputs)
+        unflattened = unflatten(ep)
+        self.assertTrue(unflattened.state_dict()["p"].requires_grad is False)
+        self.assertTrue(unflattened.p.requires_grad is False)
+
     def test_placeholder_and_get_attr_ordering_after_unflattened(self):
         class TransposeModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -884,6 +896,77 @@ class TestUnflatten(TestCase):
         self.assertEqual(fn_count_sym_size(unflat.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m1.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m2.graph), 0)
+
+    def test_unflatten_eager(self):
+        class NestedChild(torch.nn.Module):
+            def forward(self, x):
+                return x / x
+
+        class Child1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.nested = NestedChild()
+                self.register_parameter(
+                    "child1param", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = self.nested(x)
+                return x + self.child1param
+
+        class Child2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child2buffer = torch.nn.Buffer(torch.ones(2, 3))
+
+            def forward(self, x):
+                return x - self.child2buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.foo = Child1()
+                self.bar = Child2()
+                self.register_parameter(
+                    "rootparam", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = x * self.rootparam
+                x = self.foo(x)
+                x = self.bar(x)
+                return x
+
+        orig_eager = MyModule()
+        export_module = export(orig_eager, (torch.rand(2, 3),), {})
+        with _disable_interpreter():
+            unflattened = unflatten(export_module)
+
+        self.assertEqual(unflattened._run_with_interpeter, False)
+        self.assertEqual(unflattened.foo._run_with_interpeter, False)
+
+        inputs = (torch.rand(2, 3),)
+
+        # Compare the root modules and all submodules
+        self.compare_outputs(orig_eager, unflattened, inputs)
+        self.compare_outputs(orig_eager.foo, unflattened.foo, inputs)
+        self.compare_outputs(orig_eager.bar, unflattened.bar, inputs)
+        self.compare_outputs(orig_eager.foo.nested, unflattened.foo.nested, inputs)
+
+        # Check state dicts are equal
+        orig_state_dict = orig_eager.state_dict()
+        exported_state_dict = unflattened.state_dict()
+        for name, value in orig_state_dict.items():
+            self.assertTrue(torch.allclose(value, exported_state_dict[name]))
+
+        # Check composability with symbolic trace, as torchrec ddp uses symbolic
+        # tracer
+        symbolic_traced = torch.fx.symbolic_trace(unflattened, concrete_args=inputs)
+        self.assertTrue(torch.allclose(orig_eager(*inputs), symbolic_traced(*inputs)))
+
+        # torch.compile submodule
+        unflattened.foo = torch.compile(unflattened.foo, fullgraph=True)
+        self.compare_outputs(orig_eager, unflattened, inputs)
 
 
 if __name__ == "__main__":
