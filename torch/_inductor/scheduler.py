@@ -195,7 +195,7 @@ class BaseSchedulerNode:
             buf.get_name(): buf for buf in self.outputs
         }
         self.debug_device_str: Callable[
-            [Union[SchedulerNode, FusedSchedulerNode]], List[str]
+            [BaseSchedulerNode], List[str]
         ] = lambda *args, **kwargs: []
 
     def __repr__(self) -> str:
@@ -1181,7 +1181,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
             f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
             for i, node in enumerate(self.snodes)
         ]
-        node = next(self.snodes).node
+        node = self.snodes[0].node
         if node is not None:
             lines.extend(self._debug_str_for_device())
 
