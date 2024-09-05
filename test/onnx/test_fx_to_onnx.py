@@ -664,6 +664,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx_program.save(tmp_onnx_file.name)
             onnx.checker.check_model(tmp_onnx_file.name, full_check=True)
 
+    @pytorch_test_common.skip_if_fake_model_and_inititalizer("segfault")
     @common_utils.parametrize(
         "include_initializer",
         [
