@@ -90,7 +90,7 @@ struct GemmParams : OpParams {
 
     TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
 
-    return std::string(buf);
+    return std::string(buf, ret);
   }
 
   size_t GetSizeA() const {

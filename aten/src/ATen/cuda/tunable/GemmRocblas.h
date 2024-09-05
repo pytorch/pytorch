@@ -203,7 +203,7 @@ auto GetRocBlasGemmTypeStringAndOps() {
     auto callable = std::make_unique<RocblasGemmOp<T>>(solutions[i]);
     val = snprintf(buf, buf_len, "Gemm_Rocblas_%d", solutions[i]);
     TORCH_CHECK(val > 0 && val < buf_len, "TunableOp: Signature formatting error occured. Return value = ", val);
-    ret.emplace_back(std::make_pair(std::string(buf), std::move(callable)));
+    ret.emplace_back(std::make_pair(std::string(buf, val), std::move(callable)));
   }
   return ret;
 }
