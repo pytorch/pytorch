@@ -1181,7 +1181,8 @@ class QuantizationLiteTestCase(QuantizationTestCase):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
-            # FIXME(rec): shouldn't this be passed to quantize?
+            # FIXME(rec): shouldn't qconfig be passed to quantize?
+            # pylint: disable-next=unused-variable
             qconfig = torch.ao.quantization.get_default_qconfig(qengine)
             model = model_class(**kwargs)
             model = quantize(model, test_only_eval_fn, [self.calib_data])

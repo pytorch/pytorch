@@ -7786,7 +7786,8 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(a, args=(c, b))
 
     # type promoting
-    # FIXME(rec): shouldn't this unused variable be used two lines below?
+    # FIXME(rec): shouldn't other_dtype be used two lines below?
+    # pylint: disable-next=unused-variable
     other_dtype = torch.double if dtype is not torch.double else torch.long
     c = make_cond((10, 3), noncontiguous=True)
     a = make_arg((10, 1), dtype=torch.long)
@@ -8774,7 +8775,8 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
         ))
 
     # Add non standard shapes
-    # FIXME(rec): unused variable: should this be appended to samples?
+    # FIXME(rec): should diff_v_head_dim be appended to samples?
+    # pylint: disable-next=unused-variable
     diff_v_head_dim = SampleInput(
         make((batch, num_heads, seq_q, head_dim)),
         make((batch, num_heads, seq_kv, head_dim)),
@@ -8840,7 +8842,8 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         ))
 
     # Add non standard shapes
-    # FIXME(rec): unused variable: should this be appended to samples?
+    # FIXME(rec): should diff_v_head_dim be appended to samples?
+    # pylint: disable-next=unused-variable
     diff_v_head_dim = SampleInput(
         make((batch, seq_q, num_heads, head_dim)),
         make((batch, seq_kv, num_heads, head_dim)),
@@ -15070,7 +15073,8 @@ op_db: List[OpInfo] = [
                ),
                # TF32
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1e-3)}),
+                   toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1e-3),
+                                     torch.complex64: tol(atol=5e-3, rtol=1e-3)}),
                    'TestCommon', 'test_noncontiguous_samples',
                ),
                DecorateInfo(

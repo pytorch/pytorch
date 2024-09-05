@@ -102,10 +102,14 @@ class SuperVariable(VariableTracker):
             type_to_use_source = self.objvar.source
 
         source = None
-        resolved_class = None
-        resolved_attr = None
         search_mro = type_to_use.__mro__
-        start_index = search_mro.index(search_type) + 1
+
+        try:
+            start_index = search_mro.index(search_type) + 1
+        except ValueError:
+            # Corner case where the typevar is not in the mro of the objvar
+            # https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8843-L8844
+            return getattr(super(search_type, type_to_use), name), None
         # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
         # attribute in the class __dict__

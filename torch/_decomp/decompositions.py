@@ -1413,8 +1413,6 @@ def split_with_sizes(
     splits = []
     start_idx = 0
 
-    # Avoid importing sympy at a module level
-
     for i in range(num_splits):
         length = split_sizes[i]
         splits.append(self.narrow(dim, start_idx, length))

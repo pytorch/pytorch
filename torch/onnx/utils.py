@@ -175,7 +175,7 @@ def _get_torch_export_args(
 def export(
     model: torch.nn.Module | torch.jit.ScriptModule | torch.jit.ScriptFunction,
     args: tuple[Any, ...] | torch.Tensor,
-    f: str | None = None,
+    f: str,
     *,
     kwargs: dict[str, Any] | None = None,
     export_params: bool = True,
@@ -1622,7 +1622,7 @@ def _export(
                     proto,
                     export_map,
                     val_use_external_data_format,
-                    node_names,
+                    _,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     {},
                     opset_version,

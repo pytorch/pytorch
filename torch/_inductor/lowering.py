@@ -3928,7 +3928,7 @@ def max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
 
-    *_, height, width = x.get_size()
+    *_, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
 
     indices_loader = indices.make_loader()
@@ -5598,17 +5598,6 @@ def cummax(x, axis=None):
         "argmax", dtype=dtype, arg_break_ties_left=False
     )
 
-    # FIXME(rec): this is apparently not used
-    min_value = (
-        False
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).min
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).min
-        )
-    )
-
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
@@ -5627,17 +5616,6 @@ def cummin(x, axis=None):
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
         "argmin", dtype=dtype, arg_break_ties_left=False
-    )
-
-    # FIXME(rec): this is apparently not used
-    max_value = (
-        True
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).max
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).max
-        )
     )
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)

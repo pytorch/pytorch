@@ -157,7 +157,7 @@ def associative_scan(
         pytree.tree_unflatten(leaves, spec),
         pytree.tree_unflatten(leaves, spec),
     )
-    out_leaves, tree_out = pytree.tree_flatten(out)
+    out_leaves, _ = pytree.tree_flatten(out)
     assert len(leaves) == len(
         out_leaves
     ), "The pytree of the output of the operator needs to match the input pytree"
