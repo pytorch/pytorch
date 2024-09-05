@@ -160,8 +160,8 @@ def generate_ttir(kernel, kwargs):
 
     # Build kernel signature -- doesn't include constexpr arguments.
     signature = {
-        i: kernel._type_of(kernel._key_of(arg))
-        for i, arg in enumerate(ordered_args.values())
+        name: kernel._type_of(kernel._key_of(arg))
+        for i, (name, arg) in enumerate(ordered_args.items())
         if i not in kernel.constexprs
     }
 
