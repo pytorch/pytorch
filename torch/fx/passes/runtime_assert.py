@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import functools
 import logging
 import operator
 import sys
@@ -40,18 +39,6 @@ def _get_example_value(node: fx.Node) -> Optional[str]:
         return node.meta["example_value"]
     elif "val" in node.meta:
         return node.meta["val"]
-    else:
-        return None
-
-
-def _get_example_value_key(node: fx.Node) -> Optional[str]:
-    """
-    actually just run this once at start of pass, based on first node, and constantly use that.
-    """
-    if "example_value" in node.meta:
-        return "example_value"
-    elif "val" in node.meta:
-        return "val"
     else:
         return None
 
@@ -105,7 +92,6 @@ def insert_deferred_runtime_asserts(
     # Import sympy locally
     import sympy
 
-    from torch._export.passes._node_metadata_hook import _set_node_metadata_hook
     from torch.fx.experimental.symbolic_shapes import (
         _has_uninterpretable_sympy_function,
         CallMethodKey,
@@ -158,30 +144,6 @@ def insert_deferred_runtime_asserts(
                 for arg in node.args
             )
         )
-
-    # Figure out what key to use, val or example_value
-    val_key = "val"
-    for node in graph.nodes:
-        if "example_value" in node.meta:
-            val_key = "example_value"
-            break
-        elif "val" in node.meta:
-            break
-
-    def _node_metadata_hook(
-        node: torch.fx.Node,
-        stack_trace: Optional[str] = None,
-        nn_module_stack: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        fake_args = [
-            _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
-            for arg in node.args
-        ]
-        node.meta[val_key] = node.target(*fake_args)  # type: ignore[operator]
-        if stack_trace is not None:
-            node.meta["stack_trace"] = stack_trace
-        if nn_module_stack is not None:
-            node.meta["nn_module_stack"] = nn_module_stack
 
     # Track asserts/checks we've added
     added_asserts: Set[sympy.Expr] = set()
@@ -285,8 +247,7 @@ def insert_deferred_runtime_asserts(
                         and isinstance(s := symint.node.expr, sympy.Symbol)
                         and s not in expr_to_proxy
                     ):
-                        with _set_node_metadata_hook(gm, _node_metadata_hook):
-                            expr_to_proxy[s] = fx.Proxy(cb())
+                        expr_to_proxy[s] = fx.Proxy(cb())
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
                 match_symbol(example_value, lambda: node)
@@ -370,15 +331,7 @@ def insert_deferred_runtime_asserts(
                     if _is_intermediate_tensor_sym_call(
                         node
                     ):  # reify from input shapes
-                        with _set_node_metadata_hook(
-                            gm,
-                            functools.partial(
-                                _node_metadata_hook,
-                                stack_trace=node.meta.get("stack_trace"),
-                                nn_module_stack=node.meta.get("nn_module_stack"),
-                            ),
-                        ):
-                            expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)  # type: ignore[arg-type]
+                        expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)  # type: ignore[arg-type]
                         # won't try DCE-ing tensor compute here
                     hash_node = expr_to_proxy[sym_expr].node  # type: ignore[arg-type]
                     node.replace_all_uses_with(hash_node)
@@ -483,8 +436,7 @@ def insert_deferred_runtime_asserts(
                             raise AssertionError(f"unrecognized keypath {keypath}")
 
                     if s not in expr_to_proxy:
-                        with _set_node_metadata_hook(gm, _node_metadata_hook):
-                            expr_to_proxy[s] = fx.Proxy(go(node, keypath))
+                        expr_to_proxy[s] = fx.Proxy(go(node, keypath))
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
             for i0 in defs:
@@ -567,34 +519,26 @@ def insert_deferred_runtime_asserts(
                         # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
                         # raises AOTAutograd errors on cast_symbool_to_symint_guardless
 
-                        with _set_node_metadata_hook(
-                            gm,
-                            functools.partial(
-                                _node_metadata_hook,
-                                stack_trace=node.meta.get("stack_trace"),
-                                nn_module_stack=node.meta.get("nn_module_stack"),
-                            ),
-                        ):
-                            if (min_val := convert(vr.lower)) is not None:
-                                ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
-                                graph.call_function(
-                                    torch.ops.aten._assert_scalar.default,
-                                    (
-                                        ge,
-                                        f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
-                                    ),
-                                )
-                                added_asserts.add(i0 >= min_val)
-                            if (max_val := convert(vr.upper)) is not None:
-                                le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
-                                graph.call_function(
-                                    torch.ops.aten._assert_scalar.default,
-                                    (
-                                        le,
-                                        f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
-                                    ),
-                                )
-                                added_asserts.add(i0 <= max_val)
+                        if (min_val := convert(vr.lower)) is not None:
+                            ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
+                            graph.call_function(
+                                torch.ops.aten._assert_scalar.default,
+                                (
+                                    ge,
+                                    f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
+                                ),
+                            )
+                            added_asserts.add(i0 >= min_val)
+                        if (max_val := convert(vr.upper)) is not None:
+                            le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
+                            graph.call_function(
+                                torch.ops.aten._assert_scalar.default,
+                                (
+                                    le,
+                                    f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
+                                ),
+                            )
+                            added_asserts.add(i0 <= max_val)
 
                 constrained_unbacked_symbols.add(i0)
                 add_runtime_asserts(ras)
