@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
 import functools
-import platform
 import warnings
 from typing import Any, Optional
 
@@ -324,16 +323,12 @@ class autocast:
                     "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
                 )
         elif self.device == "mps":
-            supported_dtype = [torch.float16, torch.bfloat16]
+            supported_dtype = [torch.float16]
             if self.fast_dtype not in supported_dtype:
                 error_message = "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
                 error_message += (
                     "MPS Autocast only supports dtype of torch.bfloat16 currently."
                 )
-                warnings.warn(error_message)
-                enabled = False
-            elif float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1) < 14.0:
-                error_message = "In MPS autocast, but autocast is not supported before MacOS 14.0. Disabling autocast\n"
                 warnings.warn(error_message)
                 enabled = False
         elif self.device == "xla":
