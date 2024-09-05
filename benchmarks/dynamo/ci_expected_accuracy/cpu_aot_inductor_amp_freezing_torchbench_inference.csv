@@ -90,7 +90,7 @@ detectron2_maskrcnn_r_50_fpn,fail_to_run,0
 
 
 
-dlrm,fail_to_run,0
+dlrm,pass,0
 
 
 
