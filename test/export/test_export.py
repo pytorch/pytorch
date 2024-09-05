@@ -297,6 +297,7 @@ class TestExport(TestCase):
     ):
         from torch._export.serde.dynamic_shapes import (
             _dump_dynamic_shapes,
+            _infer_dynamic_shapes,
             _load_dynamic_shapes,
         )
         from torch.utils._pytree import tree_map
@@ -319,7 +320,8 @@ class TestExport(TestCase):
             if test_serdes:
                 # test dynamic shapes serialization
                 # test that behavior remains the same when exporting with ser/des specs:
-                # serialize + deserialize original specs, and export.
+                # 1) serialize + deserialize original specs, and export
+                # 2) extract spec from ep, deserialize, and export
                 ep_serdes = export(
                     model,
                     inputs,
@@ -327,7 +329,11 @@ class TestExport(TestCase):
                         _dump_dynamic_shapes(_specs, inputs)
                     ),
                 )
-                eps.append(ep_serdes)
+                ep_infer = export(
+                    model, inputs,
+                    dynamic_shapes=_load_dynamic_shapes(_infer_dynamic_shapes(ep)),
+                )
+                eps.extend([ep_serdes, ep_infer])
 
             for ep in eps:
                 for shapes in passing_shapes:
@@ -7111,6 +7117,7 @@ def forward(self, x, y):
     def test_dynamic_shapes_serdes_generic(self):
         from torch._export.serde.dynamic_shapes import (
             _dump_dynamic_shapes,
+            _infer_dynamic_shapes,
             _load_dynamic_shapes,
         )
 
@@ -7171,10 +7178,23 @@ def forward(self, x, y):
         self.assertEqual(dx.root, dz)
         self.assertEqual(dy.root, dz)
 
+        # infer dynamic shapes, and test roundtrippability
+        dumped = _dump_dynamic_shapes(dynamic_shapes, inputs)
+        inferred = _infer_dynamic_shapes(ep)
+        self.assertExpectedInline(
+            inferred,
+            """DynamicShapesSpec(dynamic_shapes=([['2*d0', 4], ['2*d0 + 1', 4]], ['d0'], [4, 4], None), dims={'d0': RootDim(min=4, max=16, derived=['2*d0', '2*d0 + 1'])})""",
+        )
+        inferred_from_dumped = _infer_dynamic_shapes(export(Foo(), inputs, dynamic_shapes=_load_dynamic_shapes(dumped)))
+        inferred_from_inferred = _infer_dynamic_shapes(export(Foo(), inputs, dynamic_shapes=_load_dynamic_shapes(inferred)))
+        self.assertEqual(inferred, inferred_from_dumped)
+        self.assertEqual(inferred, inferred_from_inferred)
+
     def test_dynamic_shapes_serdes_various(self):
         # serialization for dataclass inputs, Dim.AUTO/STATIC, and kwargs
         from torch._export.serde.dynamic_shapes import (
             _dump_dynamic_shapes,
+            _infer_dynamic_shapes,
             _load_dynamic_shapes,
         )
 
