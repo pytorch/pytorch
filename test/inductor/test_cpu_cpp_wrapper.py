@@ -88,8 +88,6 @@ if TEST_WITH_ROCM:
     )
 if config.abi_compatible:
     xfail_list = [
-        "test_conv2d_binary_inplace_fusion_failed_cpu",
-        "test_conv2d_binary_inplace_fusion_pass_cpu",
         "test_dynamic_qlinear_cpu",
         "test_dynamic_qlinear_qat_cpu",
         "test_lstm_packed_change_input_sizes_cpu",
@@ -209,8 +207,12 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["op_mkldnn__convolution_pointwise_binary.call"],
-                ["op_mkldnn__convolution_pointwise__binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise_binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise__binary.call"],
             ],
         ),
         BaseTest(
@@ -219,8 +221,12 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["op_mkldnn__convolution_pointwise__binary.call"],
-                ["op_mkldnn__convolution_pointwise_binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise__binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise_binary.call"],
             ],
         ),
         BaseTest(
