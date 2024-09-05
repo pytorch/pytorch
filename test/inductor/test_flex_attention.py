@@ -2176,47 +2176,82 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
 
 
-class TestBlockMask(InductorTestCase):
+class TestPagedCache(InductorTestCase):
+    def allocate_page_cache(
+        self, n_pages: int, page_size: int, n_heads: int, max_batch_size: int = 3
+    ):
+        head_dim = 8
+        max_seq_len = 128
+        paged_cache = PagedCache(
+            n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads
+        )
+        return paged_cache
+
+    def cdiv(self, x, y):
+        return (x + y - 1) // y
+
+    def roundup(self, x, y):
+        return (x + y - 1) // y * y
+
     @supported_platform
-    @common_utils.parametrize("compile", [True, False])
-    def test_page_allocation(self, compile: bool):
-        n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads = (3, 4, 8, 5, 10, 2)
-        paged_cache = PagedCache(n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads)
+    def test_page_allocation(self):
+        n_pages, page_size, n_head = 12, 4, 2
+        paged_cache = self.allocate_page_cache(n_pages, page_size, n_head)
 
-        allocate = paged_cache.allocate
-        if compile:
-            # No need to support compiling `deallocate`` since it's not on hot path
-            allocate = torch.compile(allocate, backend="inductor")
+        num_pages_to_allocate = torch.tensor([2, 6, 4])
+        paged_cache.allocate(num_pages_to_allocate)
 
-        batch_idx, head_idx = torch.tensor([0]), torch.tensor([0])
-        for logical_block_idx in range(n_pages):
-            allocate(batch_idx, head_idx, torch.tensor([logical_block_idx]))
-
-        new_batch_idx, new_head_idx, new_logical_block_idx = torch.tensor([1]), torch.tensor([0]), torch.tensor([0])
         with self.assertRaisesRegex(
-            AssertionError, "empty_pages must have at least 1 element for allocation"
+            AssertionError, "empty_pages has 0 pages but requested 2 pages"
         ):
-            allocate(new_batch_idx, new_head_idx, new_logical_block_idx)
+            paged_cache.allocate(torch.tensor([2]))
 
-        paged_cache.deallocate(batch_idx, head_idx, torch.tensor([0]))
-        allocate(new_batch_idx, new_head_idx, new_logical_block_idx)
+        paged_cache.deallocate(batch=torch.tensor([1]))
+        paged_cache.allocate(num_pages_to_allocate=torch.tensor([4]))
 
     @supported_platform
-    def test_batch_deallocation(self):
-        n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads = (5, 4, 8, 5, 10, 2)
-        paged_cache = PagedCache(n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads)
+    def test_allocate_until_length(self):
+        n_pages, page_size, n_head = 12, 4, 2
+        paged_cache = self.allocate_page_cache(n_pages, page_size, n_head)
 
-        # params: [batch, head, logical_block_idx]
-        paged_cache.allocate(torch.tensor([0]), torch.tensor([0]), torch.tensor([0]))
-        paged_cache.allocate(torch.tensor([0]), torch.tensor([0]), torch.tensor([1]))
-        paged_cache.allocate(torch.tensor([1]), torch.tensor([0]), torch.tensor([0]))
-        paged_cache.allocate(torch.tensor([2]), torch.tensor([0]), torch.tensor([0]))
-        paged_cache.allocate(torch.tensor([0]), torch.tensor([0]), torch.tensor([2]))
+        target_seq_len = torch.tensor([3, 11, 8])
+        paged_cache.allocate_until_length(target_seq_len)
 
-        breakpoint()
-        paged_cache.batch_deallocate(torch.tensor([0]))
-        
-        # expected_page_table = torch.
+        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum() * n_head
+        self.assertEqual(
+            paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
+        )
+        self.assertEqual(
+            len(paged_cache.empty_pages), n_pages - expected_allocated_pages
+        )
+
+        # deallocate batch 1
+        paged_cache.deallocate(batch=torch.tensor([1]))
+        target_seq_len = torch.tensor([3, 0, 8])
+        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum() * n_head
+        self.assertEqual(
+            paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
+        )
+        self.assertEqual(
+            len(paged_cache.empty_pages), n_pages - expected_allocated_pages
+        )
+
+        # re-allocate
+        target_seq_len = torch.tensor([7, 2, 10])
+        paged_cache.allocate_until_length(target_seq_len)
+        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum() * n_head
+        self.assertEqual(
+            paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
+        )
+        self.assertEqual(
+            len(paged_cache.empty_pages), n_pages - expected_allocated_pages
+        )
+
+        # deallocate all batches
+        paged_cache.deallocate(batch=torch.tensor([0, 1, 2]))
+        self.assertEqual(paged_cache.allocated_seq_len, torch.tensor([0, 0, 0]))
+        self.assertEqual(len(paged_cache.empty_pages), n_pages)
+
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)

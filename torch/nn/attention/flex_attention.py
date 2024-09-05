@@ -855,52 +855,73 @@ class PagedCache(torch.nn.Module):
         self.empty_pages = list(range(n_pages - 1, -1, -1))
 
         # current allocated sequence length for a specific batch index
-        self.allocated_seq_len = torch.zeros(max_batch_size)
+        self.allocated_seq_len = torch.zeros(max_batch_size, dtype=torch.int64)
 
         # Mapping from physical page index to logical page index
-        self.physical_to_logical = -torch.ones(n_pages)
+        self.physical_to_logical = -torch.ones(n_pages, dtype=torch.int64)
 
-    def get_num_pages_to_allocate(self, target_seq_len: Tensor):
+    def get_num_pages_to_allocate(self, target_seq_len: Tensor) -> Tensor:
         (B,) = target_seq_len.shape
         return (
-            torch.maximum(target_seq_len - self.allocated_seq_len[:B], torch.zeros(B))
-            + self.page_size
-            - 1
-        ) // self.page_size  # [B]
+            (
+                torch.maximum(
+                    target_seq_len - self.allocated_seq_len[:B],
+                    torch.zeros(B, dtype=torch.int64),
+                )
+                + self.page_size
+                - 1
+            )
+            // self.page_size
+            * self.n_heads
+        )  # [B]
 
-    def allocate(self, batch_idx: int, num_pages_to_allocate: int, start_page_idx: int):
-        num = num_pages_to_allocate * self.n_heads
-        assert len(self.empty_pages) >= num
-        end_page_idx = start_page_idx + num_pages_to_allocate
-        allocated_pages = torch.tensor(self.empty_pages[-num:])
+    def allocate_single_seq(self, batch_idx: Tensor, num_pages_to_allocate: Tensor):
+        assert num_pages_to_allocate % self.n_heads == 0
+        num_pages_per_head = num_pages_to_allocate // self.n_heads
+        assert (
+            len(self.empty_pages) >= num_pages_to_allocate
+        ), f"empty_pages has {len(self.empty_pages)} pages but requested {num_pages_to_allocate} pages"
+        start_page_idx = self.allocated_seq_len[batch_idx] // self.page_size
+        end_page_idx = start_page_idx + num_pages_per_head
+
+        # find empty physical pages
+        allocated_pages = torch.tensor(self.empty_pages[-num_pages_to_allocate:])
+        self.empty_pages = self.empty_pages[:-num_pages_to_allocate]
+
+        # update page table
         self.page_table[
             batch_idx,
             :,
             start_page_idx:end_page_idx,
-        ] = allocated_pages.view(self.n_heads, num_pages_to_allocate)
+        ] = allocated_pages.view(self.n_heads, num_pages_per_head)
         self.page_table_ref_cnt[
             batch_idx,
             :,
             start_page_idx:end_page_idx,
         ] = 1
-        self.empty_pages = self.empty_pages[:-num]
+
+        # update metadata
         self.physical_to_logical[allocated_pages] = torch.tensor(
             range(start_page_idx, end_page_idx)
-        )
+        ).repeat(self.n_heads)
+        self.allocated_seq_len[batch_idx] += num_pages_per_head * self.page_size
 
-    def batch_allocate(self, num_pages_to_allocate: Tensor):
+    def allocate(self, num_pages_to_allocate: Tensor):
         # num_pages_to_allocate: [B]
         (B,) = num_pages_to_allocate.shape
-        last_allocated_page_idx = self.allocated_seq_len // self.page_size
         for b in range(B):
-            self.allocate(
-                b,
-                num_pages_to_allocate[b].item(),
-                last_allocated_page_idx[b].item() + 1,
+            self.allocate_single_seq(
+                torch.tensor(b),
+                num_pages_to_allocate[b],
             )
 
-    def batch_deallocate(self, batch: Tensor):
+    def allocate_until_length(self, target_seq_len: Tensor):
+        num_pages_to_allocate = self.get_num_pages_to_allocate(target_seq_len)
+        self.allocate(num_pages_to_allocate)
+
+    def deallocate(self, batch: Tensor):
         # batch is a 1D tensor with 1 element
+        breakpoint()
         self.page_table_ref_cnt[batch] -= 1
         zero_ref_pages = self.page_table_ref_cnt[batch] < 1
 
@@ -909,11 +930,13 @@ class PagedCache(torch.nn.Module):
         deallocated_pages = deallocate_candidates[deallocate_candidates != -1]
         self.empty_pages += deallocated_pages.tolist()
 
-        # clean physical_to_logical table
+        # clean metadata
         self.physical_to_logical[deallocated_pages] = -1
+        self.allocated_seq_len[batch] = 0
 
         # deallocate all pages with 0 reference
         self.page_table[batch][zero_ref_pages] = -1
+        self.page_table_ref_cnt[batch][zero_ref_pages] = 0
 
     def update(self, input_pos: Tensor, val: Tensor):
         # input_pos: [B, S], val: [B, H, S, D]
@@ -934,19 +957,13 @@ class PagedCache(torch.nn.Module):
         )  # [BxHxS]
         self.cache[addr] = val.view(B * H * S, D)
 
-    def convert_logical_block_mask(self, block_mask: BlockMask):
+    def convert_logical_block_mask(self, block_mask: BlockMask) -> BlockMask:
         assert block_mask.BLOCK_SIZE[1] == self.page_size
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
 
         new_kv_num_blocks = block_mask.kv_num_blocks.clone()
         new_kv_indices = torch.gather(
             self.page_table, 2, block_mask.kv_indices.view(B, H, -1)
-        )
-
-        new_full_kv_num_blocks = (
-            None
-            if block_mask.full_kv_num_blocks is None
-            else block_mask.full_kv_num_blocks.clone()
         )
 
         new_full_kv_indices, new_full_kv_num_blocks = None, None
@@ -966,7 +983,7 @@ class PagedCache(torch.nn.Module):
             block_mask.mask_mod,
         )
 
-    def get_mask_mod(self, mask_mod: _mask_mod_signature):
+    def get_mask_mod(self, mask_mod: _mask_mod_signature) -> _mask_mod_signature:
         def new_mask_mod(b, h, q_idx, physical_kv_idx):
             logical_kv_idx = (
                 self.physical_to_logical[physical_kv_idx // self.page_size]
@@ -977,7 +994,7 @@ class PagedCache(torch.nn.Module):
 
         return new_mask_mod
 
-    def get_score_mod(self, score_mod: _score_mod_signature):
+    def get_score_mod(self, score_mod: _score_mod_signature) -> _score_mod_signature:
         def new_score_mod(score, b, h, q_idx, physical_kv_idx):
             logical_kv_idx = (
                 self.physical_to_logical[physical_kv_idx // self.page_size]
