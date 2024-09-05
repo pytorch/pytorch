@@ -74,15 +74,20 @@ SETTING_EXPERIMENTS = "experiments"
 LF_FLEET_EXPERIMENT = "lf"
 CANARY_FLEET_SUFFIX = ".c"
 
+
 class Experiment(NamedTuple):
-    rollout_perc: int = 0 # Percentage of workflows to experiment on when user is not opted-in.
+    rollout_perc: int = (
+        0  # Percentage of workflows to experiment on when user is not opted-in.
+    )
 
     # Add more fields as needed
+
 
 class Settings(NamedTuple):
     """
     Settings for the experiments that can be opted into.
     """
+
     experiments: Dict[str, Experiment] = {}
 
 
@@ -241,7 +246,7 @@ class UserOptins(Dict[str, List[str]]):
     """
     Dictionary of users with a list of features they have opted into
     """
-    pass
+
 
 def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
     """
@@ -285,7 +290,9 @@ def parse_settings_from_text(settings_text: str) -> Settings:
                 valid_settings = {}
                 for setting in exp_settings:
                     if setting not in Experiment._fields:
-                        log.warning(f"Unexpected setting in experiment: {setting} = {exp_settings[setting]}")
+                        log.warning(
+                            f"Unexpected setting in experiment: {setting} = {exp_settings[setting]}"
+                        )
                     else:
                         valid_settings[setting] = exp_settings[setting]
 
@@ -293,9 +300,10 @@ def parse_settings_from_text(settings_text: str) -> Settings:
             return Settings(experiments)
 
     except Exception as e:
-        log.exception(f"Failed to parse settings")
+        log.exception("Failed to parse settings")
 
     return Settings()
+
 
 def parse_settings(rollout_state: str) -> Settings:
     """
@@ -309,6 +317,7 @@ def parse_settings(rollout_state: str) -> Settings:
     settings_text, _ = extract_settings_user_opt_in_from_text(rollout_state)
     return parse_settings_from_text(settings_text)
 
+
 def parse_users(rollout_state: str) -> UserOptins:
     """
     Parse users from the rollout state.
@@ -317,13 +326,17 @@ def parse_users(rollout_state: str) -> UserOptins:
     _, users_text = extract_settings_user_opt_in_from_text(rollout_state)
     return parse_user_opt_in_from_text(users_text)
 
+
 def is_user_opted_in(user: str, user_optins: UserOptins, experiment_name: str) -> bool:
     """
     Check if a user is opted into an experiment
     """
     return experiment_name in user_optins.get(user, [])
 
-def get_runner_prefix(rollout_state: str, workflow_requestors: Iterable[str], is_canary: bool = False) -> str:
+
+def get_runner_prefix(
+    rollout_state: str, workflow_requestors: Iterable[str], is_canary: bool = False
+) -> str:
     settings = parse_settings(rollout_state)
     user_optins = parse_users(rollout_state)
 
@@ -333,16 +346,24 @@ def get_runner_prefix(rollout_state: str, workflow_requestors: Iterable[str], is
         enabled = False
 
         # Is any workflow_requestor opted in to this experiment?
-        opted_in_users = [requestor for requestor in workflow_requestors if is_user_opted_in(requestor, user_optins, experiment_name)]
+        opted_in_users = [
+            requestor
+            for requestor in workflow_requestors
+            if is_user_opted_in(requestor, user_optins, experiment_name)
+        ]
         log.info(user_optins)
         if opted_in_users:
-            log.info(f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}.")
+            log.info(
+                f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
+            )
             enabled = True
         else:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
             r = random.randint(1, 100)
             if r <= experiment_settings.rollout_perc:
-                log.info(f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}.")
+                log.info(
+                    f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."
+                )
                 enabled = True
 
         if enabled:
@@ -358,7 +379,9 @@ def get_runner_prefix(rollout_state: str, workflow_requestors: Iterable[str], is
                 prefixes.append(label)
 
     if len(prefixes) > 1:
-        log.error(f"Only a fleet and one other experiment can be enabled for a job at any time. Enabling {prefixes[0]} and ignoring the rest, which are {', '.join(prefixes[1:])}")
+        log.error(
+            f"Only a fleet and one other experiment can be enabled for a job at any time. Enabling {prefixes[0]} and ignoring the rest, which are {', '.join(prefixes[1:])}"
+        )
         prefixes = prefixes[:1]
 
     # Fleet always comes first
@@ -383,11 +406,12 @@ def main() -> None:
     args = parse_args()
 
     if args.github_ref_type == "branch" and is_exception_branch(args.github_branch):
-        log.info(f"Exception branch: '{args.github_branch}', using Meta runners and no experiments.")
+        log.info(
+            f"Exception branch: '{args.github_branch}', using Meta runners and no experiments."
+        )
         runner_label_prefix = DEFAULT_LABEL_PREFIX
     else:
         try:
-
             rollout_state = get_rollout_state_from_issue(
                 args.github_token, args.github_issue_repo, args.github_issue
             )
@@ -402,7 +426,9 @@ def main() -> None:
 
             is_canary = args.github_repo == "pytorch/pytorch-canary"
 
-            runner_label_prefix = get_runner_prefix(rollout_state, (args.github_issue_owner, username), is_canary)
+            runner_label_prefix = get_runner_prefix(
+                rollout_state, (args.github_issue_owner, username), is_canary
+            )
 
         except Exception as e:
             log.error(

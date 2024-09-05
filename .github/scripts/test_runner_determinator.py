@@ -1,10 +1,11 @@
 from unittest import main, TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
 import runner_determinator as rd
 
 
 class TestRunnerDeterminatorIssueParser(TestCase):
-    def test_parse_settings(self):
+    def test_parse_settings(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -32,7 +33,7 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             "otherExp settings not parsed correctly",
         )
 
-    def test_parse_settings_in_code_block(self):
+    def test_parse_settings_in_code_block(self) -> None:
         settings_text = """
 
         ```
@@ -65,7 +66,7 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             "otherExp settings not parsed correctly",
         )
 
-    def test_parse_users(self):
+    def test_parse_users(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -87,7 +88,7 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             "Users not parsed correctly",
         )
 
-    def test_parse_users_without_settings(self):
+    def test_parse_users_without_settings(self) -> None:
         settings_text = """
 
         @User1,lf
@@ -101,10 +102,10 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             users,
             "Users not parsed correctly",
         )
+
 
 class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
-
-    def test_opted_in_user(self):
+    def test_opted_in_user(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -121,7 +122,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         prefix = rd.get_runner_prefix(settings_text, ["User1"])
         self.assertEqual("lf.", prefix, "Runner prefix not correct for User1")
 
-    def test_opted_in_user_two_experiments(self):
+    def test_opted_in_user_two_experiments(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -139,7 +140,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for User1")
 
     @patch("random.randint", return_value=50)
-    def test_opted_out_user(self, mock_randint):
+    def test_opted_out_user(self, mock_randint: Mock) -> None:
         settings_text = """
         experiments:
             lf:
@@ -157,9 +158,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         self.assertEqual("", prefix, "Runner prefix not correct for user")
 
     @patch("random.randint", return_value=10)
-    def test_opted_out_user_was_pulled_in_by_rollout(
-        self, mock_randint
-    ):
+    def test_opted_out_user_was_pulled_in_by_rollout(self, mock_randint: Mock) -> None:
         settings_text = """
         experiments:
             lf:
@@ -178,9 +177,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         prefix = rd.get_runner_prefix(settings_text, ["User3"])
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for user")
 
-    def test_lf_prefix_always_comes_first(
-        self
-    ):
+    def test_lf_prefix_always_comes_first(self) -> None:
         settings_text = """
         experiments:
             otherExp:
@@ -198,9 +195,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         prefix = rd.get_runner_prefix(settings_text, ["User2"])
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for user")
 
-    def test_ignores_commented_users(
-        self
-    ):
+    def test_ignores_commented_users(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -218,9 +213,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         prefix = rd.get_runner_prefix(settings_text, ["User1"])
         self.assertEqual("", prefix, "Runner prefix not correct for user")
 
-    def test_ignores_extra_experiments(
-        self
-    ):
+    def test_ignores_extra_experiments(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -238,7 +231,6 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         prefix = rd.get_runner_prefix(settings_text, ["User1"])
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for user")
-
 
 
 if __name__ == "__main__":
