@@ -3922,6 +3922,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 (query, key, value),
                 in_dims=(2, 1, None),
             )
+
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("randomness", ["error", "same", "different"])
     def test_randomness(self, device, randomness, backend):
@@ -3937,13 +3938,16 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             def f(q, k, v, dropout):
                 return F.scaled_dot_product_attention(q, k, v, dropout_p=dropout)
 
-
             # No matter the randomness mode, dropout=0.0 should pass
-            vmap(functools.partial(f, dropout=0.0), in_dims=(0, 0, 0), randomness=randomness)(query, key, value)
+            vmap(
+                functools.partial(f, dropout=0.0),
+                in_dims=(0, 0, 0),
+                randomness=randomness,
+            )(query, key, value)
 
-            fail_with_randomness = (randomness == "error")
+            fail_with_randomness = randomness == "error"
             if backend != SDPBackend.MATH:
-                fail_with_randomness |= (randomness == "same")
+                fail_with_randomness |= randomness == "same"
             context = (
                 self.assertRaises(RuntimeError)
                 # We currently don't support randomness == "same", and "error" should always error with randomness
@@ -3951,7 +3955,11 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 else contextlib.nullcontext()
             )
             with context:
-                vmap(functools.partial(f, dropout=0.5), in_dims=(0, 0, 0), randomness=randomness)(query, key, value)
+                vmap(
+                    functools.partial(f, dropout=0.5),
+                    in_dims=(0, 0, 0),
+                    randomness=randomness,
+                )(query, key, value)
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
