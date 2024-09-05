@@ -215,6 +215,10 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
                     raise RuntimeError(
                         "Please use icx-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
                     )
+
+                # version check
+                icx_ver = re.search(r"release (\d+[.]\d+)", output_msg)
+                print("icx_ver: ", icx_ver)
         return is_intel_compiler
     except FileNotFoundError as exc:
         return False
