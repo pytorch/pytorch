@@ -282,7 +282,7 @@ void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
   } else if (device_type == at::kPrivateUse1) {
-    at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(
+    at::detail::getPrivateUse1Hooks().resizePrivateUse1Bytes(
         storage, newsize.expect_int());
   } else if (device_type == at::kXPU || device_type == at::kHPU) {
     ptrdiff_t size_bytes_i = newsize.expect_int();
