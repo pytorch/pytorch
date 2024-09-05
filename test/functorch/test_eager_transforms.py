@@ -4993,6 +4993,9 @@ def construct_sum_pyop():
         def __init__(self):
             super().__init__("mysum")
 
+        def __call__(self, *args, **kwargs):
+            return super().__call__(*args, **kwargs)
+
     mysum = MySum()
 
     @mysum.py_impl(torch._C._functorch.TransformType.Vmap)

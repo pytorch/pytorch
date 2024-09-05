@@ -2542,7 +2542,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::call_guard<py::gil_scoped_release>())
           .def(
               "eager_connect_single_device",
-              &::c10d::Backend::eagerConnectSingleDevice)
+              &::c10d::Backend::eagerConnectSingleDevice,
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_get_backend_name",
               &::c10d::Backend::getBackendName,

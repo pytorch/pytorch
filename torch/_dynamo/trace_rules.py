@@ -12,7 +12,6 @@ import enum
 import functools
 import importlib
 import inspect
-import itertools
 import linecache
 import logging
 import multiprocessing
@@ -34,7 +33,7 @@ import unittest
 import weakref
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch._inductor.test_operators
@@ -414,10 +413,11 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
-        "torch._C._cpu._is_cpu_support_avx2",
-        "torch._C._cpu._is_cpu_support_avx512",
-        "torch._C._cpu._is_cpu_support_avx512_vnni",
-        "torch._C._cpu._is_cpu_support_amx_tile",
+        "torch._C._cpu._is_avx2_supported",
+        "torch._C._cpu._is_avx512_supported",
+        "torch._C._cpu._is_avx512_vnni_supported",
+        "torch._C._cpu._is_avx512_bf16_supported",
+        "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._init_amx",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
@@ -2432,10 +2432,11 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.chain_matmul",
         "torch.compile",
         "torch.compiled_with_cxx11_abi",
-        "torch.cpu._is_cpu_support_avx2",
-        "torch.cpu._is_cpu_support_avx512",
-        "torch.cpu._is_cpu_support_avx512_vnni",
-        "torch.cpu._is_cpu_support_amx_tile",
+        "torch._C._cpu._is_avx2_supported",
+        "torch._C._cpu._is_avx512_supported",
+        "torch._C._cpu._is_avx512_vnni_supported",
+        "torch._C._cpu._is_avx512_bf16_supported",
+        "torch._C._cpu._is_amx_tile_supported",
         "torch.cpu._init_amx",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
@@ -2847,8 +2848,8 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 
 @functools.lru_cache(None)
-def get_torch_obj_rule_map():
-    d: Dict[Any, VariableTracker] = {}
+def get_torch_obj_rule_map() -> Dict[Any, Type["VariableTracker"]]:
+    d: Dict[Any, Type[VariableTracker]] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
             if ".py#" not in k:
@@ -2992,9 +2993,6 @@ def _builtin_function_ids() -> Dict[int, str]:
             for k, v in operator.__dict__.items()
             if not k.startswith("_") and callable(v)
         }
-    )
-    rv.update(
-        {id(v): f"itertools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
     rv.update(
         {
@@ -3213,6 +3211,8 @@ if torch.distributed.is_available():
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
     }
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        LEGACY_MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
@@ -3231,6 +3231,7 @@ MOD_INLINELIST = [
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
     "torch._inductor.test_operators",
+    "torch._library.autograd",
     "torch._library.custom_ops",
     "torch._prims",
     "torch._refs",
@@ -3243,6 +3244,8 @@ MOD_INLINELIST = [
     "torch.distributions",
     "torch.export._tree_utils",
     "torch.fx._pytree",
+    "torch.fx._symbolic_trace",
+    "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.overrides",
@@ -3262,6 +3265,8 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)
@@ -3468,9 +3473,7 @@ def check_verbose(obj, is_inlined_call=False):
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: Set[str] = set()
-    rule = torch._dynamo.trace_rules.lookup_inner(
-        fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons
-    )
+    rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
     if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
         return SkipResult(
             False,

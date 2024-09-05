@@ -24,10 +24,10 @@ from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
+    _DimHint,
     _process_dynamic_shapes,
     _transform_shapes_for_default_dynamic,
     _tree_map_with_path,
-    DIM,
 )
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental import _config as config
@@ -136,10 +136,10 @@ def make_fake_inputs(
 
     combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
-    _dynamic_shapes = _transform_shapes_for_default_dynamic(
+    transformed_dynamic_shapes = _transform_shapes_for_default_dynamic(
         combined_args, dynamic_shapes
     )
-    constraints = _process_dynamic_shapes(combined_args, _dynamic_shapes)
+    constraints = _process_dynamic_shapes(combined_args, transformed_dynamic_shapes)
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
@@ -216,7 +216,14 @@ def make_fake_inputs(
             phantom_symbols=list(phantom_symbols.values()),
             warn_only=False,
         )
-        return fake_mode, fake_args, fake_kwargs, equalities_inputs, original_signature
+        return (
+            fake_mode,
+            fake_args,
+            fake_kwargs,
+            equalities_inputs,
+            original_signature,
+            transformed_dynamic_shapes,
+        )
 
 
 def _flatten_dynamic_shapes(
@@ -351,7 +358,7 @@ def make_constraints(
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
                 dim = shape_spec[i] if shape_spec else None
-                if dim is None or isinstance(dim, DIM):
+                if dim is None or isinstance(dim, _DimHint):
                     range_constraints[d.node.expr] = shape_env.var_to_range[
                         d.node._expr
                     ]

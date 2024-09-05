@@ -12,6 +12,7 @@ from sympy import Expr
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from torch._inductor.codegen.debug_utils import IntermediateValueDebuggingLevel
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
@@ -71,7 +72,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def generate_kernel_call(
         self,
-        name,
+        kernel_name: str,
         call_args,
         grid=None,
         device_index=None,
@@ -81,6 +82,7 @@ class CppWrapperCpu(WrapperCodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        autotune_configs=None,
         grid_extra_kwargs="",
     ):
         """
@@ -94,14 +96,18 @@ class CppWrapperCpu(WrapperCodeGen):
         """
         if cuda:
             return super().generate_kernel_call(
-                name,
+                kernel_name,
                 call_args,
                 grid,
                 device_index,
                 cuda,
                 triton,
                 arg_types,
+                raw_args,
                 grid_fn,
+                triton_meta,
+                autotune_configs,
+                grid_extra_kwargs,
             )
         else:
             if config.abi_compatible:
@@ -119,9 +125,9 @@ class CppWrapperCpu(WrapperCodeGen):
                     else:
                         # arg is a scalar
                         new_args.append(arg)
-                self.writeline(self.wrap_kernel_call(name, new_args))
+                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
             else:
-                self.writeline(self.wrap_kernel_call(name, call_args))
+                self.writeline(self.wrap_kernel_call(kernel_name, call_args))
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -1149,6 +1155,10 @@ class CppWrapperCpu(WrapperCodeGen):
         wrapper_body += """
                     input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
         """
+        # Release the inputs for memory reuse.
+        wrapper_body += """
+                    args.clear()
+        """
 
         # unwrap output tensor back to python scalar
         if all(x for x in self.output_is_tensor.values()):
@@ -1200,10 +1210,14 @@ class CppWrapperCpu(WrapperCodeGen):
         self.allow_stack_allocation = False
 
         wrapped_args = []
-        args_to_print = None
-        enable_debug_printer = config.aot_inductor.debug_intermediate_value_printer
-        if enable_debug_printer:
-            args_to_print = []
+
+        args_to_print_or_save = None
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        if (
+            debug_printer_manager.debug_printer_level
+            != IntermediateValueDebuggingLevel.OFF
+        ):
+            args_to_print_or_save = []
 
         for x in args:
             pieces = x.split(", ")
@@ -1219,14 +1233,18 @@ class CppWrapperCpu(WrapperCodeGen):
                 ):
                     # TODO: The current way to find a 'tensor' type arg is hacky also as mentioned above
                     # Find a more reliable way to detect tensor kernel args for extern kernel calls
-                    if enable_debug_printer:
+                    if (
+                        debug_printer_manager.debug_printer_level
+                        != IntermediateValueDebuggingLevel.OFF
+                    ):
                         if piece.startswith(("buf", "arg")):
-                            args_to_print.append(piece)
+                            args_to_print_or_save.append(piece)
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.set_printer_args(args_to_print, kernel, None, None)
+        debug_printer_manager.set_printer_args(
+            args_to_print_or_save, kernel, None, None
+        )
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel)
             self.writeline(
