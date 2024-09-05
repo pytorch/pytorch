@@ -442,29 +442,6 @@ def dynamo_export(
             model, *args, **kwargs, export_options=export_options
         )
         onnx_program.save("my_dynamic_model.onnx")
-
-
-    By printing input dynamic dimensions we can see the input shape is no longer (2,2,2)
-    ::
-
-        >>> print(onnx_program.model_proto.graph.input[0])
-        name: "arg0"
-        type {
-          tensor_type {
-            elem_type: 1
-            shape {
-              dim {
-                dim_param: "arg0_dim_0"
-              }
-              dim {
-                dim_param: "arg0_dim_1"
-              }
-              dim {
-                dim_param: "arg0_dim_2"
-              }
-            }
-          }
-        }
     """
 
     # NOTE: The new exporter is experimental and is not enabled by default.
