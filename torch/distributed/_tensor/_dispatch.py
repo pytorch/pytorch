@@ -316,7 +316,7 @@ class OpDispatcher:
                         mesh = arg.device_mesh
                     # Currently, we only support implicit replication from 1D to 2D for partial TP
                     # use cases when using 2D. Therefore, we break out the loop when we find a 2D mesh.
-                    # If we see more generic nD use case, we should remove the constraint. 
+                    # If we see more generic nD use case, we should remove the constraint.
                     elif mesh.ndim == 2:
                         break
 
@@ -458,13 +458,14 @@ class OpDispatcher:
 
         from torch.distributed.device_mesh import _mesh_resources
 
-        root_mesh = _mesh_resources.get_root_mesh(cur_mesh)
-        if "foreach" in op_call.__name__ and root_mesh == mesh:
-            placements = [Replicate() for _ in range(root_mesh.ndim)]
+        cur_mesh_root = _mesh_resources.get_root_mesh(cur_mesh)
+        mesh_root = _mesh_resources.get_root_mesh(mesh)
+        if "foreach" in op_call.__name__ and cur_mesh_root == mesh_root:
+            placements = [Replicate() for _ in range(mesh.ndim)]
             cur_mesh_root_idx = _mesh_resources.get_root_mesh_dim(cur_mesh)
             placements[cur_mesh_root_idx] = dtensor_arg.placements[0]  # type: ignore[call-overload]
             replicate_spec = DTensorSpec(
-                root_mesh,
+                mesh,
                 tuple(placements),
                 tensor_meta=TensorMeta(
                     shape=dtensor_arg.shape,
