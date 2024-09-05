@@ -68,7 +68,7 @@ class CubeGenVmap(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output, grad_saved):
-        input, dinput = ctx.saved_tensors
+        _, dinput = ctx.saved_tensors
         result = grad_output * dinput + 6 * dinput
         return result
 
@@ -213,7 +213,6 @@ class NumpySort(torch.autograd.Function):
         x = to_numpy(x)
         ind = np.argsort(x, axis=dim)
         ind_inv = np.argsort(ind, axis=dim)
-        result = np.take_along_axis(x, ind, axis=dim)
         return (
             torch.tensor(x, device=device),
             torch.tensor(ind, device=device),
@@ -222,7 +221,7 @@ class NumpySort(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, output):
-        x, dim = inputs
+        _, dim = inputs
         _, ind, ind_inv = output
         ctx.mark_non_differentiable(ind, ind_inv)
         ctx.save_for_backward(ind, ind_inv)
@@ -252,7 +251,6 @@ class SortGenVmap(torch.autograd.Function):
 
     @staticmethod
     def forward(x, dim):
-        device = x.device
         ind = torch.argsort(x, dim=dim)
         ind_inv = torch.argsort(ind, axis=dim)
         result = torch.take_along_dim(x, ind, dim=dim)
@@ -260,7 +258,7 @@ class SortGenVmap(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, outputs):
-        x, dim = inputs
+        _, dim = inputs
         _, ind, ind_inv = outputs
         ctx.mark_non_differentiable(ind, ind_inv)
         ctx.save_for_backward(ind, ind_inv)
@@ -301,7 +299,7 @@ class NumpyTake(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, output):
-        x, ind, ind_inv, dim = inputs
+        _, ind, ind_inv, dim = inputs
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim
@@ -347,7 +345,7 @@ class TakeGenVmap(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, outputs):
-        x, ind, ind_inv, dim = inputs
+        _, ind, ind_inv, dim = inputs
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim

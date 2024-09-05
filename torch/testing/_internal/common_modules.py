@@ -340,6 +340,7 @@ def module_inputs_torch_nn_KLDivLoss(module_info, device, dtype, requires_grad, 
         )
 
         scalar_input = make_input(()).log()
+        # FIXME(rec): scalar_target is unused, perhaps should be argument to FunctionInput?
         scalar_target = make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),

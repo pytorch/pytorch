@@ -41,7 +41,7 @@ def _(x):
 
 def numpy_cube_setup_context(ctx, inputs, output):
     x, = inputs
-    cube, dx = output
+    _, dx = output
     ctx.save_for_backward(x, dx)
 
 def numpy_cube_backward(ctx, grad_out, grad_dx):
@@ -131,7 +131,7 @@ def _(x, dim):
     return torch.empty_like(x), torch.empty_like(x, dtype=torch.long), torch.empty_like(x, dtype=torch.long)
 
 def numpy_sort_setup_context(ctx, inputs, output):
-    out, ind, ind_inv = output
+    _, ind, ind_inv = output
     ctx.dim = inputs[1]
     ctx.save_for_backward(ind, ind_inv)
     ctx.mark_non_differentiable(ind, ind_inv)
@@ -167,7 +167,7 @@ def _(x, ind, ind_inv, dim):
     return torch.empty_like(x)
 
 def numpy_take_setup_context(ctx, inputs, output):
-    x, ind, ind_inv, dim = inputs
+    _, ind, ind_inv, dim = inputs
     ctx.dim = dim
     ctx.save_for_backward(ind, ind_inv)
 

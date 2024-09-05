@@ -67,7 +67,6 @@ except ImportError:
 import copy
 import io
 import functools
-import time
 import os
 
 import unittest
@@ -125,7 +124,7 @@ def test_only_eval_fn(model, calib_data):
     input Tensors and run the model on the dataset
     """
     for inp in calib_data:
-        output = model(*inp)
+        model(*inp)
 
 _default_loss_fn = torch.nn.CrossEntropyLoss()
 def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
@@ -135,7 +134,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loss, correct, total = 0, 0, 0
-    for i in range(10):
+    for _ in range(10):
         model.train()
 
         for data, target in train_data:
@@ -194,7 +193,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
     model.train()
     cnt = 0
     for image, target in data_loader:
-        start_time = time.time()
         print('.', end='')
         cnt += 1
         image, target = image.to(device), target.to(device)
@@ -203,7 +201,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        _, acc5 = accuracy(output, target, topk=(1, 5))
         if cnt >= ntrain_batches:
             return
     return
@@ -1183,6 +1181,7 @@ class QuantizationLiteTestCase(QuantizationTestCase):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
+            # FIXME(rec): shouldn't this be passed to quantize?
             qconfig = torch.ao.quantization.get_default_qconfig(qengine)
             model = model_class(**kwargs)
             model = quantize(model, test_only_eval_fn, [self.calib_data])
@@ -2369,7 +2368,7 @@ class ModelWithSequentialFusion(nn.Module):
         self.conv1 = nn.Conv2d(3, 3, 1)
         self.relu1 = nn.ReLU(inplace=False)
         layers = []
-        for i in range(3):
+        for _ in range(3):
             layers.append(ConvBNReLU())
         self.features = nn.Sequential(*layers)
         head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]

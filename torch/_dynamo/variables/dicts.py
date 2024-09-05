@@ -671,16 +671,6 @@ def _call_hasattr_customobj(
     )
 
 
-class DataClassVariable(ConstDictVariable):
-    """
-    This class doesn't appear to be used anywhere.
-    It used to be used to deal with transformers.file_utils.ModelOutput
-    from huggingface.
-
-    Keeping since we wish to support dataclasses in general in the future
-    """
-
-
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
     def is_matching_cls_hf(cls):
