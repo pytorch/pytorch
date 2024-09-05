@@ -804,16 +804,17 @@ def solve_min_cut(
             if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
         }
         ops_ignored = joint_module_ops - {str(i) for i in op_types.recomputable_ops}
-        print("Ops banned from rematerialization: ", ops_ignored)
+        print("Ops banned from re-materialization: ", ops_ignored)
         print()
 
     def can_fuse_into_auto_functionalized(a, b):
         if b.target != torch.ops.higher_order.auto_functionalized:
             return False
         mutable_op = b.args[0]
-        mutable_arg_names = (
-            torch._higher_order_ops.auto_functionalize.get_mutable_arg_names(mutable_op)
-        )
+        (
+            mutable_arg_names,
+            _,
+        ) = torch._higher_order_ops.auto_functionalize.get_mutable_args(mutable_op)
         for name in mutable_arg_names:
             arg = b.kwargs[name]
             if a is arg:
