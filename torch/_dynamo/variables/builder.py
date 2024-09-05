@@ -744,7 +744,7 @@ class VariableBuilder:
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             actual_saved_tensors = None
             try:
-                actual_saved_tensors = value.saved_tensors
+                actual_saved_tensors = getattr(value, "saved_tensors", ())
             except RuntimeError:
                 pass
 
