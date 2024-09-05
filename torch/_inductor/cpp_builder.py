@@ -203,7 +203,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 def _is_intel_compiler(cpp_compiler: str) -> bool:
     def _check_minimal_version(compiler_version: TorchVersion) -> None:
         """
-        On Windows: early version icx has `-print-file-name` and can't preload correctly for inductor.
+        On Windows: early version icx has `-print-file-name` issue, and can't preload correctly for inductor.
         """
         min_version = "2024.2.1" if _IS_WINDOWS else "0.0.0"
         if compiler_version < TorchVersion(min_version):
