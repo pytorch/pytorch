@@ -119,7 +119,7 @@ fi
 # Test the package
 /builder/check_binary.sh
 
-if [[ "\$BUILD_ENVIRONMENT" != *s390x* && "$PACKAGE_TYPE" != libtorch || "\$BUILD_ENVIRONMENT" == *xpu*  ] ]; then
+if [[ "\$BUILD_ENVIRONMENT" != *s390x* && "\$BUILD_ENVIRONMENT" != *xpu*  && "$PACKAGE_TYPE" != libtorch ]]; then
   # Run smoke test for non-s390x binaries for now
   python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
 fi
