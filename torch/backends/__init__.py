@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import sys
 import types
 from contextlib import contextmanager
 
@@ -59,14 +60,14 @@ class PropModule(types.ModuleType):
         return self.m.__getattribute__(attr)
 
 
-class FP32Precision:
+class _FP32Precision:
     def __init__(self, backend, op):
         self.backend = backend
         self.op = op
 
     def __setattr__(self, name, value):
         if name == "fp32_precision":
-            torch._C._set_fp32_precision(value, self.backend, self.op)
+            torch._C._set_fp32_precision(self.backend, self.op, value)
         elif name in ("backend", "op"):
             super().__setattr__(name, value)
         else:
@@ -82,7 +83,7 @@ class FP32Precision:
 def set_flags(_fp32_precision=None):
     orig_flags = (torch._C._get_fp32_precision("generic", "all"),)
     if _fp32_precision is not None:
-        torch._C._set_fp32_precision(_fp32_precision, "generic", "all")
+        torch._C._set_fp32_precision("generic", "all", _fp32_precision)
     return orig_flags
 
 
@@ -106,7 +107,7 @@ def _get_fp32_precision(backend, op):
 
 def _set_fp32_precision(backend, op):
     def inner(precision):
-        return torch._C._set_fp32_precision(precision, backend, op)
+        return torch._C._set_fp32_precision(backend, op, precision)
 
     return inner
 
@@ -118,9 +119,6 @@ class GenericModule(PropModule):
     fp32_precision = ContextProp(
         _get_fp32_precision("generic", "all"), _set_fp32_precision("generic", "all")
     )
-
-
-import sys
 
 
 sys.modules[__name__] = GenericModule(sys.modules[__name__], __name__)
