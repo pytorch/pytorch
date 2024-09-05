@@ -173,8 +173,45 @@ _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE = [
 ]
 
 
+# Our strategy for deciding if we can preserve a op is following:
+# 1. The op should be known statically that it is functional
+# 2. If it is maybe aliasing, we decompose because we must know if an op
+#    is mutating or aliasing.
+# TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
+# decomp part. (https://github.com/pytorch/pytorch/issues/129431)
+def _assert_valid_to_preserve(op_overload):
+    if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+        raise RuntimeError(
+            f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
+        )
+    if op_overload in FunctionalTensor.metadata_fns:
+        raise RuntimeError(
+            f"{op_overload} is a metadata query function, "
+            "it will be preserved implicitly in our tracing system. "
+            "Please file an issue on github if you see otherwise"
+        )
+
+    alias_info = len(
+        [i for i in op_overload._schema.arguments if i.alias_info is not None]
+    )
+
+    is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
+
+    if is_mutating_or_aliasing:
+        raise RuntimeError(
+            f"{op_overload} is a mutating/aliasing op, we can't preserve it as is"
+        )
+
+    if not torch._C._dispatch_has_kernel(op_overload.name()):
+        raise RuntimeError(
+            f"{op_overload} is a TorchScript op, we can't preserve it as is"
+        )
+
+    return True
+
+
 @contextmanager
-def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True):
+def _override_composite_implicit_decomp(ops_to_preserve, safe=True):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -192,47 +229,10 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True
 
     saved_tables = {}
     patched_ops = set()
-    removed_decomps = {}
     for op_overload in ops_to_preserve:
-        # Our strategy for deciding if we can preserve CIA is following:
-        # 1. The op should be known statically that it is functional
-        # 2. If it is maybe aliasing, we decompose because we must know if an op
-        #    is mutating or aliasing.
-        # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
-        # decomp part. (https://github.com/pytorch/pytorch/issues/129431)
-        def assert_valid_to_preserve(op_overload):
-            if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
-                raise RuntimeError(
-                    f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
-                )
-            if op_overload in FunctionalTensor.metadata_fns:
-                raise RuntimeError(
-                    f"{op_overload} is a metadata query function, "
-                    "it will be preserved implicitly in our tracing system. "
-                    "Please file an issue on github if you see otherwise"
-                )
-
-            alias_info = len(
-                [i for i in op_overload._schema.arguments if i.alias_info is not None]
-            )
-
-            is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
-
-            if is_mutating_or_aliasing:
-                raise RuntimeError(
-                    f"{op_overload} is a mutating/aliasing op, we can't preserve it as is"
-                )
-
-            if not torch._C._dispatch_has_kernel(op_overload.name()):
-                raise RuntimeError(
-                    f"{op_overload} is a TorchScript op, we can't preserve it as is"
-                )
-
-            return True
-
         if safe:
             # If we didn't error, it means we can go ahead
-            assert_valid_to_preserve(op_overload)
+            _assert_valid_to_preserve(op_overload)
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -259,10 +259,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True
                 functools.partial(_register_cia_to_meta, kernel=op_overload)
             )
 
-        if op_overload in decomp_table:
-            removed_decomps[op_overload] = decomp_table[op_overload]
-            del decomp_table[op_overload]
-
     try:
         yield
     finally:
@@ -270,9 +266,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table, safe=True
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
-
-        for op, decomp in removed_decomps.items():
-            decomp_table[op] = decomp
 
 
 @contextmanager
@@ -282,7 +275,6 @@ def _override_decomp_aten_to_variants():
     # We will later replace them with aten._to_copy when functionalizing.
     with _override_composite_implicit_decomp(
         (torch.ops.aten.to.dtype_layout, torch.ops.aten.to.dtype),
-        {},
         safe=False,
     ):
         yield
@@ -292,7 +284,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
     ep,
     *,
     decomp_table: Dict[torch._ops.OperatorBase, Callable],
-    _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
     from torch._functorch.aot_autograd import aot_export_module
@@ -306,6 +297,30 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace,
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
+    # At this point, we have a decomp_table that can contain None entries
+    # for ops user want to preserve in the aten IR.
+    # We need to separate the op into two categories:
+    # 1. CIA op: These are the ops that we want to override
+    #    CompositeImplicitAutograd decomp for. For them, we need to use _override_composite_implicit_decomp
+    #    context manager to plumb it through AOTDispatcher
+    # 2. Non-CIA op: These ops are only relevant after AOTDIspatcher runs, so just
+    #    checking if they are statically functional is enough.
+
+    preserve_cia_ops = []
+    for op in list(decomp_table.keys()):
+        if decomp_table[op] is None:
+            assert isinstance(op, torch._ops.OpOverload)
+            _assert_valid_to_preserve(op)
+            if (
+                torch._C._dispatch_has_kernel_for_dispatch_key(
+                    op.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+                )
+                or torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels
+            ):
+                preserve_cia_ops.append(op)
+            del decomp_table[op]
 
     # TODO Merge this path with inference IR decomp, but it will require some additional work
     # so I will leave it for now. T200307782
@@ -356,8 +371,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         with _ignore_backend_decomps(), (
             fake_mode
         ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
-            _preserve_ops,
-            decomp_table,
+            tuple(preserve_cia_ops),
         ):
             aten_export_artifact = _export_to_aten_ir(
                 mod,
@@ -404,8 +418,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
-        _preserve_ops,
-        decomp_table,
+        preserve_cia_ops
     ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
@@ -611,13 +624,11 @@ def _decompose_exported_program(
     ep,
     *,
     decomp_table: Dict[torch._ops.OperatorBase, Callable],
-    _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
     gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         decomp_table=decomp_table,
-        _preserve_ops=_preserve_ops,
         joint_loss_index=joint_loss_index,
     )
 
@@ -1017,16 +1028,9 @@ class ExportedProgram:
             core_aten_decompositions() if decomp_table is None else dict(decomp_table)
         )
 
-        _preserve_ops = []
-        for op in list(_decomp_table.keys()):
-            if _decomp_table[op] is None:
-                _preserve_ops.append(op)
-                del _decomp_table[op]
-
         return _decompose_exported_program(
             self,
             decomp_table=_decomp_table,
-            _preserve_ops=tuple(_preserve_ops),  # type: ignore[arg-type]
             joint_loss_index=None,
         )
 
