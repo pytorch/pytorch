@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <omp.h>
+#include <stdexcept>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
@@ -39,6 +40,29 @@
 // For calc_erfinv
 #include <ATen/native/Math.h>
 #endif
+
+void* inductor_alloc_aligned(size_t nbytes, size_t alignment) {
+  if (nbytes == 0) {
+    return nullptr;
+  }
+
+  void* data;
+#if defined(_MSC_VER)
+  data = _aligned_malloc(nbytes, alignment);
+#else
+  throw std::runtime_error ("It is only use for MSVC workaround VLA.");
+#endif
+
+  return data;
+}
+
+void inductor_free(void* data) {
+#ifdef _MSC_VER
+  _aligned_free(data);
+#else
+  throw std::runtime_error ("It is only use for MSVC workaround VLA.");
+#endif
+}
 
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;

@@ -3069,11 +3069,21 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = (
+            define_line_vla = (
                 f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}"
                 f"[{cexpr_index(self.outer_num_elems * self.inner_num_elems)}];"
             )
-            self.preloads.writeline(define_line)
+            tile_var_buff_ptr = f"{tile_var}_buff"
+            define_lines_unique_ptr = [
+                f"std::unique_ptr<{DTYPE_TO_CPP[dtype]}, decltype(inductor_free)*> {tile_var_buff_ptr}(({DTYPE_TO_CPP[dtype]}*) "  # noqa: B950
+                f"inductor_alloc_aligned(sizeof({DTYPE_TO_CPP[dtype]}) * {cexpr_index(self.outer_num_elems * self.inner_num_elems)}, "  # noqa: B950
+                f"{factor}), inductor_free);",
+                f"{DTYPE_TO_CPP[dtype]}* {tile_var} = {tile_var_buff_ptr}.get();",
+            ]
+            if cpp_builder.is_msvc_cl():
+                self.preloads.writelines(define_lines_unique_ptr)
+            else:
+                self.preloads.writeline(define_line_vla)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
         if is_store:
