@@ -9,8 +9,9 @@ import os
 import pickle
 import re
 import time
+import typing
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 
 def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]]]:
@@ -38,12 +39,12 @@ def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]
 exp = re.compile(r"([\w\-\_]*?)(\d+)$")
 
 
-def determine_prefix(files):
+def _determine_prefix(files: List[str]) -> str:
     """If the user doesn't specify a prefix, but does pass a dir full of similarly-prefixed files, we should be able to
     infer the common prefix most of the time.  But if we can't confidently infer, just fall back to requring the user
     to specify it
     """
-    possible_prefixes = defaultdict(set)
+    possible_prefixes: typing.DefaultDict[str, Set[int]] = defaultdict(set)
     for f in files:
         m = exp.search(f)
         if m:
@@ -55,7 +56,8 @@ def determine_prefix(files):
         return prefix
     else:
         raise ValueError(
-            "Unable to automatically determine the common prefix for the trace file names.  Please specify --prefix argument manually"
+            "Unable to automatically determine the common prefix for the trace file names. "
+            "Please specify --prefix argument manually"
         )
 
 
@@ -65,7 +67,7 @@ def read_dir(prefix: Optional[str], folder: str) -> Dict[str, Dict[str, Any]]:
     t0 = time.time()
     for root, _, files in os.walk(folder):
         if prefix is None:
-            prefix = determine_prefix(files)
+            prefix = _determine_prefix(files)
         for f in files:
             if f.find(prefix) != 0:
                 continue
