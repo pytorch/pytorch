@@ -1432,6 +1432,15 @@ class AlgorithmSelectorCache(PersistentCache):
             def precompile_with_captured_stdout(choice):
                 with restore_stdout_stderr(initial_stdout, initial_stderr):
                     start_time = time.time()
+
+                    if self.lookup(
+                        [choice],
+                        name,
+                        inputs_key,
+                        benchmark=None,
+                    ):
+                        return time.time() - start_time
+
                     choice.precompile()
                     return time.time() - start_time
 
