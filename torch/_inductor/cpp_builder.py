@@ -24,6 +24,7 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.torch_version import Version
 
 
 if config.is_fbcode():
@@ -216,9 +217,11 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
                         "Please use icx-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
                     )
 
-                # version check
-                icx_ver = re.search(r"(\d+[.]\d+[.]\d+[.]\d+)", output_msg)
-                print("icx_ver: ", icx_ver)
+            # version check
+            icx_ver_search = re.search(r"(\d+[.]\d+[.]\d+[.]\d+)", output_msg)
+            if icx_ver_search is not None:
+                icx_ver = Version(icx_ver_search.group(1))
+                # print(f"{icx_ver.major}.{icx_ver.minor}.{icx_ver.micro}")
         return is_intel_compiler
     except FileNotFoundError as exc:
         return False
