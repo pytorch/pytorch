@@ -434,7 +434,7 @@ class OpDispatcher:
 
     def _try_find_largest_mesh_from_args(
         self,
-        args_list: Tuple[object, ...],
+        args_list: Sequence[object],
         kwargs: Dict[str, object],
     ) -> Optional["DeviceMesh"]:
         """
