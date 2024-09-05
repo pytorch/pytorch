@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import _inductor as inductor
+from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
@@ -26,17 +27,17 @@ from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
-
-# note: these tests are not run on windows due to inductor_utils.HAS_CPU
-
-
-def make_compiler_fn(fullgraph=True, dynamic=True):
+def make_compiler_fn(fullgraph=True, dynamic=True, backend="inductor"):
+    assert backend in ["inductor", "aot_eager"]
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
 
         def _inner_compiler(gm_, example_inputs_):
             counters["compiled_autograd"]["compiles"] += 1
-            return inductor.compile(gm_, example_inputs_)
+            if backend == "inductor":
+                return inductor.compile(gm_, example_inputs_)
+            elif backend == "aot_eager":
+                return aot_eager(gm_, example_inputs_)
 
         return torch.compile(
             gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
@@ -59,53 +60,6 @@ def hook2(grads):
 
 def hook3(gI, gO):
     return (torch.sin(gI[0]) + gO[0],)
-
-torch.library.define(
-    "testlib::foo",
-    "(Tensor(a!) x, Tensor(b!) z) -> (Tensor, Tensor, Tensor)",
-    tags=torch.Tag.pt2_compliant_tag,
-)
-torch.library.define(
-    "testlib::foo_mutated",
-    "(Tensor(a!) x) -> (Tensor, Tensor)",
-    tags=torch.Tag.pt2_compliant_tag,
-)
-torch.library.define(
-    "testlib::foo_functional",
-    "(Tensor x) -> (Tensor)",
-    tags=torch.Tag.pt2_compliant_tag,
-)
-torch.library.define(
-    "testlib::foo_unbacked",
-    "(Scalar x) -> (Tensor)",
-    tags=torch.Tag.pt2_compliant_tag,
-)
-
-
-
-@torch.library.impl("testlib::foo", "cpu")
-@torch._dynamo.disable
-def foo_impl(x, z):
-    x.add_(5)
-    z.add_(5)
-    return x, z, x + z
-
-
-@torch.library.impl_abstract("testlib::foo")
-def foo_abstract(x, z):
-    return x, z, x + z
-
-
-@torch.library.impl("testlib::foo_mutated", "CompositeImplicitAutograd")
-def foo_mutated(x):
-    a, b, c = torch.ops.testlib.foo(x, x.cos())
-    return a, a.cos()
-
-
-@torch.library.impl("testlib::foo_functional", "CompositeImplicitAutograd")
-def foo_functional(x):
-    a, b, c = torch.ops.testlib.foo(x.cos(), x.cos())
-    return a.cos()
 
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
@@ -1478,70 +1432,110 @@ main()
             )
 
     def test_trace_auto_functionalized(self):
-        # def g(all_gather_output, all_gather_input_split_sizes, out, unsharded_params):
-        #     torch.ops.fsdp.split_with_sizes_copy(
-        #         all_gather_output, all_gather_input_split_sizes, dim=1, out=out
-        #     )
-        #     for o, up in zip(out, unsharded_params):
-        #         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(up):
-        #             torch.ops.fsdp.set_(up, o)
-        #     z = unsharded_params[0]
-        #     for up in unsharded_params:
-        #         z = torch.matmul(z, up)
-        #         z = z * z
-        #     return z
+        torch.library.define(
+            "testlib::foo",
+            "(Tensor(a!) x) -> (Tensor)",
+            tags=torch.Tag.pt2_compliant_tag,
+        )
+        torch.library.define(
+            "testlib::foo_mutated",
+            "(Tensor(a!) x) -> (Tensor)",
+            tags=torch.Tag.pt2_compliant_tag,
+        )
 
-        # def g_cp(all_gather_output, all_gather_input_split_sizes, out, unsharded_params):
-        #     return torch.utils.checkpoint.checkpoint(g, all_gather_output, all_gather_input_split_sizes, out, unsharded_params, use_reentrant=False)
 
-        # def f():
-        #     all_gather_output = torch.randn(8, 16)
-        #     all_gather_input_split_sizes = [8, 8]
-        #     dim = 1
-        #     out = [
-        #         torch.empty(8, 8),
-        #         torch.empty(8, 8),
-        #     ]
-        #     unsharded_params = [
-        #         torch.empty(8, 8, requires_grad=True),
-        #         torch.empty(8, 8, requires_grad=True),
-        #     ]
-        #     output = torch.compile(g, fullgraph=True)(
-        #         all_gather_output, all_gather_input_split_sizes, out, unsharded_params
-        #     )
-        #     output.sum().backward()
-        #     return output, *[x.grad for x in unsharded_params]
+        @torch.library.impl("testlib::foo", "cpu")
+        def foo(x):
+            x.add_(5)
+            return x
+
+        @torch.library.impl("testlib::foo", "Meta")
+        def foo_meta(x):
+            return x
+
+
+        @torch.library.impl("testlib::foo_mutated", "CompositeImplicitAutograd")
+        def foo_mutated(x):
+            return torch.ops.testlib.foo(x)
+
+
+        def _get_custom_policy(must_recompute_list=None):
+            def _custom_policy(ctx, func, *args, **kwargs):
+                if must_recompute_list is not None and func in must_recompute_list:
+                    return torch.utils.checkpoint.CheckpointPolicy.MUST_RECOMPUTE
+                else:
+                    return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+
+            return _custom_policy
+
+        def context_fn():
+            must_recompute_list = [
+                torch.ops.higher_order.auto_functionalized,
+            ]
+            return torch.utils.checkpoint.create_selective_checkpoint_contexts(
+                _get_custom_policy(
+                    must_recompute_list=must_recompute_list,
+                ),
+            )
 
         def g(x):
             x = torch.matmul(x, x)
-            o1, o2 = torch.ops.testlib.foo_mutated(x)
-            return torch.matmul(o1, o2)
+            torch.ops.testlib.foo_mutated(x)
+            return torch.matmul(x, x)
 
         def g_cp(x):
-            return torch.utils.checkpoint.checkpoint(g, x, use_reentrant=False)
+            return torch.utils.checkpoint.checkpoint(g, x, use_reentrant=False, context_fn=context_fn)
 
         def f():
             inps = (torch.randn(4, 4, requires_grad=True),)
-            output = torch.compile(g_cp, fullgraph=True)(*inps)
+            output = torch.compile(g_cp, backend="aot_eager", fullgraph=True)(*inps)
             output.sum().backward()
             return output, inps[0].grad
 
         """
         Walkthrough of what happens with `auto_functionalized`:
         1. `auto_functionalized` op is inserted into the graph during AOTAutograd functionalization.
-        2. The Dynamo graph captured by Compiled Autograd looks like:
+           We force the op to be recomputed (by using SAC), so it appears in the backward graph.
+        2. The AOT backward graph looks like:
+        ```
+        ===== Backward graph 0 =====
+        def forward(self, primals_1: "f32[4, 4][4, 1]cpu", tangents_1: "f32[4, 4][4, 1]cpu"):
+            ...
+            auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm);  mm = None
+            ...
+            return (add_1,)
+        ```
+        3. The Compiled Autograd graph looks like:
+        ```
+        ===== Compiled autograd graph =====
+        def forward(self, inputs, sizes, scalars, hooks):
+            ...
+            aot0_auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm);  aot0_mm = None
+            ...
+            return []
+        ```
+        4. The Dynamo graph captured by Compiled Autograd looks like:
         ```
         ===== __compiled_fn_3 =====
-        torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
-            def forward(self, L_inputs_ : list):
-                ...
-                TODO
-                ...
+        def forward(self, L_inputs_ : list):
+            ...
+            auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm);  aot0_mm = None
+            ...
+            return (new_grad,)
         ```
-        3. We want to trace into this `auto_functionalized` op during Dynamo tracing in Compiled Autograd.
+        5. The Compiled Autograd's AOT "forward-only" graph looks like:
+        ```
+        ===== Forward graph 1 =====
+        def forward(self, arg0_1: "f32[][]cpu", arg1_1: "f32[4, 4][4, 1]cpu"):
+            ...
+            auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm);  mm = None
+            ...
+            return (clone_1,)
+        ```
+        6. The `auto_functionalized` op should then be lowered using the normal lowering path in Inductor.
         """
 
-        compiler_fn = make_compiler_fn(fullgraph=True)
+        compiler_fn = make_compiler_fn(fullgraph=True, backend="aot_eager")
 
         def make_compiler_fn_with_op_check():
             def _compiler_fn(gm):
