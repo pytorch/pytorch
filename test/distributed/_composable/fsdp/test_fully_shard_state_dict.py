@@ -105,7 +105,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
         # lazy init without error
         inp = torch.rand((mlp_dim, mlp_dim), device="cuda")
-        model(inp)
+        model(inp).sum().backward()
 
         state_dict = model.state_dict()
         for name, dtensor in state_dict.items():

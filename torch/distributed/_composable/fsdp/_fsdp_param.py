@@ -721,6 +721,8 @@ class FSDPParam:
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
+        if torch.distributed.get_rank() == 0:
+            print(f"{self.sharded_param.device.type=} {self.sharded_param._local_tensor.device.type=}")
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
