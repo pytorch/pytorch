@@ -1545,6 +1545,17 @@ def forward(self, x_1, output_1):
         x = torch.randn(4, device=GPU_TYPE)
         f(x, x)
 
+    @requires_gpu
+    def test_triton_kernel_float64_constant(self):
+        def f(x):
+            return x * (0.12 * x.shape[0])
+
+        x = torch.ones(200, device=GPU_TYPE, dtype=torch.float64)
+
+        eager_out = f(x)
+        compiled_out = torch.compile(f, dynamic=True)(x)
+        self.assertEqual(compiled_out, eager_out)
+
 
 def make_mutation_test(fn):
     @requires_gpu
