@@ -959,6 +959,8 @@ def _get_openmp_args(
                 # TODO: fix issue, can't find omp.h
                 cflags.append("fopenmp")
                 libs.append("gomp")
+            elif _is_intel_compiler(cpp_compiler):
+                cflags.append("fiopenmp")
             else:
                 cflags.append("fopenmp")
                 libs.append("gomp")
@@ -1186,10 +1188,7 @@ def get_cpp_torch_cuda_options(
             if config.is_fbcode():
                 libraries += ["cuda"]
             else:
-                if config.is_fbcode():
-                    libraries += ["cuda"]
-                else:
-                    libraries += ["c10_cuda", "cuda", "torch_cuda"]
+                libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
         if config.is_fbcode():
