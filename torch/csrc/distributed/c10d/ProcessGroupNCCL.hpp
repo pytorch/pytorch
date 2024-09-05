@@ -777,6 +777,18 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       bool avoidRecordStreams = false,
       bool nanCheck = true);
 
+  template <typename Fn, typename PreProcess, typename PostProcess>
+  c10::intrusive_ptr<Work> collective(
+      std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& outputs,
+      Fn fn,
+      PreProcess pre,
+      PostProcess post,
+      OpType opType,
+      const char* profilingTitle = nullptr,
+      bool avoidRecordStreams = false,
+      bool nanCheck = true);
+
   template <typename Fn>
   c10::intrusive_ptr<Work> collectiveCoalesced(
       std::vector<at::Tensor>& input,
