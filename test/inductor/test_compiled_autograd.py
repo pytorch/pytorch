@@ -1411,6 +1411,73 @@ main()
                 f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
             )
 
+    def test_trace_auto_functionalized(self):
+        def fsdp_split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, out=out):
+            return torch.ops.fsdp.split_with_sizes_copy(
+                all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+            )
+
+        def g(all_gather_output, all_gather_input_split_sizes, out=out):
+            torch.utils.checkpoint.checkpoint(
+                fsdp_split_with_sizes_copy, all_gather_output, all_gather_input_split_sizes, out, use_reentrant=False
+            )
+            z = 1.
+            for o in out:
+                z = torch.mul(z, o.sum())
+            return z
+
+        def f():
+            all_gather_output = torch.randn(2, 272, requires_grad=True)
+            all_gather_input_split_sizes = [128, 8, 128, 8]
+            dim = 1
+            out = [
+                torch.empty(2, 128, requires_grad=True),
+                torch.empty(2, 8, requires_grad=True),
+                torch.empty(2, 128, requires_grad=True),
+                torch.empty(2, 8, requires_grad=True),
+            ]
+            out = torch.compile(g, fullgraph=True)(
+                all_gather_output, all_gather_input_split_sizes, out
+            )
+            out.sum().backward()
+            return out, *[x.grad for x in [all_gather_output] + out]
+
+        """
+        Walkthrough of what happens with `auto_functionalized`:
+        1. `auto_functionalized` op is inserted into the graph during AOTAutograd functionalization.
+        2. The Dynamo graph captured by Compiled Autograd looks like:
+        ```
+        ===== __compiled_fn_3 =====
+        torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+            def forward(self, L_inputs_ : list):
+                ...
+                TODO
+                ...
+        ```
+        3. We want to trace into this `auto_functionalized` op during Dynamo tracing in Compiled Autograd.
+        """
+
+        compiler_fn = make_compiler_fn(fullgraph=True)
+
+        def make_compiler_fn_with_op_check():
+            def _compiler_fn(gm):
+                # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
+                self.assertTrue(
+                    any(
+                        node.target is torch.ops.higher_order.auto_functionalized
+                        for node in gm.graph.nodes
+                    ),
+                    f"`torch.ops.higher_order.auto_functionalized` op not found in {gm.graph}",
+                )
+                return compiler_fn(gm)
+
+            return _compiler_fn
+
+        compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+        self.check_output_and_recompiles(
+            f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+        )
+
     def test_non_traceable_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {

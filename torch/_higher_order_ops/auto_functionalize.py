@@ -206,6 +206,7 @@ def do_auto_functionalize(
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> Any:
+    raise Exception()
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
     `outs = auto_functionalized(op, normalized_kwargs)`
     and replacing the mutated (args, kwargs) with the corresponding outputs.
