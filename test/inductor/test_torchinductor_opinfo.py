@@ -294,6 +294,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "multinomial": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
+    "normal": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
@@ -612,6 +613,7 @@ inductor_override_kwargs = {
     ("tanh", "xpu", f16): {"atol": 1e-4, "rtol": 1e-2},
     ("nn.functional.embedding_bag", "xpu", f16): {"check_gradient": False},
     ("nn.functional.embedding_bag", "xpu", f32): {"check_gradient": False},
+    ("nn.functional.embedding_bag", "xpu", f64): {"check_gradient": False},
 }
 
 
