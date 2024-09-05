@@ -377,7 +377,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
 
         if len(to_group_shape) > 0:
             flattened = Flatten.new(
-                tuple(InputDim(fi) for fi in from_group_dim if from_size[fi] > 1)
+                tuple(InputDim(fi) for fi in from_group_dim if from_size[fi] >= 1)
             )
             result_pp += [
                 Split.new(flattened, tuple(to_group_shape), i)
