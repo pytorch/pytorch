@@ -1536,9 +1536,9 @@ def _register_woq_mm_int8_pattern2():
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
 
 
-def _register_woq_mm_int4_pattern(graph_module: torch.fx.GraphModule):
+def register_woq_mm_int4_pattern(graph_module: torch.fx.GraphModule):
     """
-    Replaces torch.ops.aten._weight_int4pack_mm.default with torch.ops.aten._weight_int4pack_mm._derive_groupsize
+    Replaces torch.ops.aten._weight_int4pack_mm.default with torch.ops.quantized_decomposed.int4mm_packed
     because the latter is amenable to auto-tuning with inductor
     """
     for node in graph_module.graph.nodes:

@@ -721,7 +721,7 @@ inline void {{kernel_name}}_kernel(
 
 
 # extra check for CppMicroGemmAMX
-def check_amx_extra(config, m, n, k, alpha, num_threads, q_group_size=None):
+def check_amx_extra(config, m, n, k, alpha, num_threads):
     vnni_size = 4 if config.input_dtype == torch.uint8 else 2
     return k % vnni_size == 0 and alpha == 1
 

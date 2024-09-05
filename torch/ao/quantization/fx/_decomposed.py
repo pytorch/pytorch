@@ -50,13 +50,13 @@ quantized_decomposed_lib.define(
 def int4mm_packed(
     input: torch.Tensor, weight: torch.Tensor, scalesAndZeroPoints: torch.Tensor
 ) -> torch.Tensor:
-    """Custom op that computes weight-only-quantization GEMM for int4 quantization
-    with requiring group size to be known, since it can be derived
+    """Custom op that computes weight-only-quantization GEMM for GPTQ int4 wight only quantization
+    while requiring group size to be unknown, since it can be derived
 
     Args:
-       input (torch.Tensor): original bfloat16 Tensor
-       weight (torch.Tensor): int4 weights packed in int32 dtype
-       scaleAndZeroPoints (torch.tensor):
+       input (torch.Tensor): bfloat16 activation Tensor
+       weight (torch.Tensor): int4 weights packed in int32 dtype Tensor
+       scaleAndZeroPoints (torch.tensor): scales & zero points in BF16.
 
     Returns:
        GEMM output

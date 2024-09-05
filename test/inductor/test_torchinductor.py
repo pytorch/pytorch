@@ -371,7 +371,6 @@ def check_model(
     torch._dynamo.reset()
 
     ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
-
     ref_kwargs = kwargs
     has_lowp_args = False
 

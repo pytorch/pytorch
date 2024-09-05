@@ -116,7 +116,10 @@ def register_woq_mm_ops():
             if use_aten_gemm_kernels()
             else []
         )
+
         qGroupSize = (weight.get_numel() * 8) // (qScaleAndZeros.get_numel() / 2)
+        assert qGroupSize in [32, 64, 128, 256]
+
         if use_cpp_packed_gemm_template(
             aten_layout, mat1, mat2, q_group_size=qGroupSize
         ):
