@@ -1146,11 +1146,6 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, 
   }
 }
 
-template <typename T, int M, int N>
-inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
-  transpose_mxn<T>(src, ld_src, dst, ld_dst, M, N);
-}
-
 }} // namespace at::vec::CPU_CAPABILITY
 
 // additional headers for more operations that depend on vec_base

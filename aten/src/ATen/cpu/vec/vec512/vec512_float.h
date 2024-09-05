@@ -667,12 +667,6 @@ inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, i
   }
 }
 
-template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, float>::value && M <= 16 && N <= 16, int> = 0>
-inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
-  transpose_mxn<float>(src, ld_src, dst, ld_dst, M, N);
-}
-
 #endif
 
 }}}

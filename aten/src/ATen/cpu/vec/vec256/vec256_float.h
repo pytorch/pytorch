@@ -538,102 +538,73 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 }
 
 // Used by Inductor CPP codegen
-template<>
-inline void transpose_mxn<float, 8, 8>(
-    const float* src,
-    int64_t ld_src,
-    float* dst,
-    int64_t ld_dst) {
+// Code referred to FBGEMM:
+// https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/TransposeUtilsAvx2.h#L200-L256
+// kernel for transposing mxn where m, n <= 8
+// M + (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + 2 * N instructions
+template <>
+inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
+  TORCH_CHECK(M <= 8 && N <= 8, "transpose_mxn<float> expects M, N <= 8.");
   // load from src to registers
-  // a: a0  a1  a2  a3  a4  a5  a6  a7
-  // b: b0  b1  b2  b3  b4  b5  b6  b7
-  // c: c0  c1  c2  c3  c4  c5  c6  c7
-  // d: d0  d1  d2  d3  d4  d5  d6  d7
-  // e: e0  e1  e2  e3  e4  e5  e6  e7
-  // f: f0  f1  f2  f3  f4  f5  f6  f7
-  // g: g0  g1  g2  g3  g4  g5  g6  g7
-  // h: h0  h1  h2  h3  h4  h5  h6  h7
-  __m256 a = _mm256_loadu_ps(&src[0 * ld_src]);
-  __m256 b = _mm256_loadu_ps(&src[1 * ld_src]);
-  __m256 c = _mm256_loadu_ps(&src[2 * ld_src]);
-  __m256 d = _mm256_loadu_ps(&src[3 * ld_src]);
-  __m256 e = _mm256_loadu_ps(&src[4 * ld_src]);
-  __m256 f = _mm256_loadu_ps(&src[5 * ld_src]);
-  __m256 g = _mm256_loadu_ps(&src[6 * ld_src]);
-  __m256 h = _mm256_loadu_ps(&src[7 * ld_src]);
+  __m256 input[8];
+  unsigned i;
+  if (N == 8) {
+    for (i = 0; i < M; ++i) {
+      input[i] = _mm256_loadu_ps(&src[i * ld_src]);
+    }
+  } else {
+    __mmask8 src_mask = (1 << N) - 1;
+    for (i = 0; i < M; ++i) {
+      input[i] = _mm256_maskz_loadu_ps(src_mask, &src[i * ld_src]);
+    }
+  }
+  for (; i < 8; ++i) {
+    // Not really needed but to avoid uninitialized variable warning.
+    // Shouldn't be much overhead because xor can be executed in parallel with
+    // other instructions.
+    input[i] = _mm256_setzero_ps();
+  }
 
-  __m256 ta, tb, tc, td, te, tf, tg, th;
   // unpacking and interleaving 32-bit elements
-  // a0  b0  a1  b1  a4  b4  a5  b5
-  // a2  b2  a3  b3  a6  b6  a7  b7
-  // c0  d0  c1  d1 ...
-  // c2  d2  c3  d3 ...
-  // e0  f0  e1  f1 ...
-  // e2  f2  e3  f3 ...
-  // g0  h0  g1  h1 ...
-  // g2  h2  g3  h3 ...
-  ta = _mm256_unpacklo_ps(a, b);
-  tb = _mm256_unpackhi_ps(a, b);
-  tc = _mm256_unpacklo_ps(c, d);
-  td = _mm256_unpackhi_ps(c, d);
-  te = _mm256_unpacklo_ps(e, f);
-  tf = _mm256_unpackhi_ps(e, f);
-  tg = _mm256_unpacklo_ps(g, h);
-  th = _mm256_unpackhi_ps(g, h);
+  __m256 temp[8];
+  for (i = 0; i < (M + 1) / 2; ++i) {
+    temp[2 * i] = _mm256_unpacklo_ps(input[2 * i], input[2 * i + 1]);
+    temp[2 * i + 1] = _mm256_unpackhi_ps(input[2 * i], input[2 * i + 1]);
+  }
+  for (i = i * 2; i < 8; ++i) {
+    temp[i] = _mm256_setzero_ps();
+  }
 
-  // unpacking and interleaving 64-bit elements
-  //  a0  b0  c0  d0  a4  b4  c4  d4
-  //  a1  b1  c1  d1 ...
-  //  a2  b2  c2  d2 ...
-  //  a3  b3  c3  d3 ...
-  //  e0  f0  g0  h0  e4  f4  g4  h4
-  //  e1  f1  g1  h1 ...
-  //  e2  f2  g2  h2 ...
-  //  e3  f3  g3  h3 ...
-  a = _mm256_castpd_ps(
-      _mm256_unpacklo_pd(_mm256_castps_pd(ta), _mm256_castps_pd(tc)));
-  b = _mm256_castpd_ps(
-      _mm256_unpackhi_pd(_mm256_castps_pd(ta), _mm256_castps_pd(tc)));
-  c = _mm256_castpd_ps(
-      _mm256_unpacklo_pd(_mm256_castps_pd(tb), _mm256_castps_pd(td)));
-  d = _mm256_castpd_ps(
-      _mm256_unpackhi_pd(_mm256_castps_pd(tb), _mm256_castps_pd(td)));
-  e = _mm256_castpd_ps(
-      _mm256_unpacklo_pd(_mm256_castps_pd(te), _mm256_castps_pd(tg)));
-  f = _mm256_castpd_ps(
-      _mm256_unpackhi_pd(_mm256_castps_pd(te), _mm256_castps_pd(tg)));
-  g = _mm256_castpd_ps(
-      _mm256_unpacklo_pd(_mm256_castps_pd(tf), _mm256_castps_pd(th)));
-  h = _mm256_castpd_ps(
-      _mm256_unpackhi_pd(_mm256_castps_pd(tf), _mm256_castps_pd(th)));
+  // shuffling the 32-bit elements
+  for (i = 0; i < (M + 3) / 4; ++i) {
+    input[4 * i] = _mm256_shuffle_ps(temp[4 * i], temp[4 * i + 2], 0x44);
+    input[4 * i + 1] = _mm256_shuffle_ps(temp[4 * i], temp[4 * i + 2], 0xee);
+    input[4 * i + 2] =
+        _mm256_shuffle_ps(temp[4 * i + 1], temp[4 * i + 3], 0x44);
+    input[4 * i + 3] =
+        _mm256_shuffle_ps(temp[4 * i + 1], temp[4 * i + 3], 0xee);
+  }
 
-  //  shuffle 128-bits (composed of 4 32-bit elements)
-  //  a0  b0  c0  d0  e0  f0  g0  h0
-  //  a1  b1  c1  d1 ...
-  //  a2  b2  c2  d2 ...
-  //  a3  b3  c3  d3 ...
-  //  a4  b4  c4  d4 ...
-  //  a5  b5  c5  d5 ...
-  //  a6  b6  c6  d6 ...
-  //  a7  b7  c7  d7 ...
-  ta = _mm256_permute2f128_ps(a, e, 0x20);
-  tb = _mm256_permute2f128_ps(b, f, 0x20);
-  tc = _mm256_permute2f128_ps(c, g, 0x20);
-  td = _mm256_permute2f128_ps(d, h, 0x20);
-  te = _mm256_permute2f128_ps(a, e, 0x31);
-  tf = _mm256_permute2f128_ps(b, f, 0x31);
-  tg = _mm256_permute2f128_ps(c, g, 0x31);
-  th = _mm256_permute2f128_ps(d, h, 0x31);
+  // shuffling 128-bit elements
+  for (i = 0; i < N; ++i) {
+    if (i < 4) {
+      temp[i] = _mm256_permute2f128_ps(input[4 + i], input[i], 0x02);
+    } else {
+      temp[i] = _mm256_permute2f128_ps(input[i], input[i - 4], 0x13);
+    }
+  }
 
   // store from registers to dst
-  _mm256_storeu_ps(&dst[0 * ld_dst], ta);
-  _mm256_storeu_ps(&dst[1 * ld_dst], tb);
-  _mm256_storeu_ps(&dst[2 * ld_dst], tc);
-  _mm256_storeu_ps(&dst[3 * ld_dst], td);
-  _mm256_storeu_ps(&dst[4 * ld_dst], te);
-  _mm256_storeu_ps(&dst[5 * ld_dst], tf);
-  _mm256_storeu_ps(&dst[6 * ld_dst], tg);
-  _mm256_storeu_ps(&dst[7 * ld_dst], th);
+  if (M == 8) {
+    for (i = 0; i < N; ++i) {
+      _mm256_storeu_ps(&dst[i * ld_dst], temp[i]);
+    }
+  } else {
+    __mmask8 dst_mask = (1 << M) - 1;
+    for (i = 0; i < N; ++i) {
+      _mm256_mask_storeu_ps(&dst[i * ld_dst], dst_mask, temp[i]);
+    }
+  }
 }
 
 #endif

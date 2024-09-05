@@ -3048,18 +3048,10 @@ class CppTile2DKernel(CppVecKernel):
                 self.outer_num_elems,
                 self.inner_num_elems,
             )
-        if (isinstance(M, sympy.Expr) and not M.is_number) or (
-            isinstance(N, sympy.Expr) and not N.is_number
-        ):
-            load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]}>"
-                f"({src}, {ld_src}, {dst}, {ld_dst}, {cexpr_index(M)}, {cexpr_index(N)});"
-            )
-        else:
-            load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{cexpr_index(M)},{cexpr_index(N)}>"
-                f"({src}, {ld_src}, {dst}, {ld_dst});"
-            )
+        load_or_store = (
+            f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]}>"
+            f"({src}, {ld_src}, {dst}, {ld_dst}, {cexpr_index(M)}, {cexpr_index(N)});"
+        )
         if is_store:
             tile_var = self.cse.newvar()
         elif load_or_store not in self.cse.cache:
