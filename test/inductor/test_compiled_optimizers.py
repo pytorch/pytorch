@@ -148,6 +148,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_weight_decay_maximize_cpu": 4,
     "test_sgd_weight_decay_cpu": 4,
     "test_sgd_weight_decay_cuda": 4,
+    "test_sgd_weight_decay_xpu": 4,
     "test_sgd_momentum_weight_decay_foreach_cuda": 2,
     "test_sgd_momentum_weight_decay_foreach_xpu": 2,
     "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
@@ -216,7 +217,7 @@ def build_opt_kwarg_db():
 
                 has_tensor_lr = False
                 for key, val in kwargs.items():
-                    if not key == "lr" and (
+                    if (not key == "lr" and not key == "betas") and (
                         not isinstance(val, bool) or (isinstance(val, bool) and val)
                     ):
                         name += "_" + key
@@ -224,6 +225,9 @@ def build_opt_kwarg_db():
                     if key == "lr" and isinstance(kwargs["lr"], torch.Tensor):
                         has_tensor_lr = True
                         name += "_tensor_lr"
+
+                    if key == "betas" and isinstance(kwargs["betas"][0], torch.Tensor):
+                        name += "_tensor_betas"
 
                 name += f"_{device}"
 
@@ -365,6 +369,16 @@ def make_test(
             if isinstance(kwargs.get("lr", None), torch.Tensor):
                 kwargs["lr"] = kwargs["lr"].to(device)
                 kwargs_compiled["lr"] = kwargs_compiled["lr"].to(device)
+
+            if "betas" in kwargs and isinstance(kwargs["betas"][0], torch.Tensor):
+                kwargs["betas"] = (
+                    kwargs["betas"][0].to(device),
+                    kwargs["betas"][1].to(device),
+                )
+                kwargs_compiled["betas"] = (
+                    kwargs_compiled["betas"][0].to(device),
+                    kwargs_compiled["betas"][1].to(device),
+                )
 
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
