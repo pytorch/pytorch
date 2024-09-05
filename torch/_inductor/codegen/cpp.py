@@ -3073,6 +3073,13 @@ class CppTile2DKernel(CppVecKernel):
                 f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}"
                 f"[{cexpr_index(self.outer_num_elems * self.inner_num_elems)}];"
             )
+            """
+            MSVC don't support dynamic array(VLA). Please use std::unique_ptr to instead of it.
+            Ref: https://stackoverflow.com/questions/56555406/creating-dynamic-sized-array-using-msvc-c-compiler
+            MSVC is the only one compiler, which not support VLA. And MSVC can't get good inductor performance.
+            So, we can use unique_ptr make it works on MSVC.
+            For other compilers, we continue to use VLA to get best performence.
+            """
             tile_var_buff_ptr = f"{tile_var}_buff"
             define_lines_unique_ptr = [
                 f"std::unique_ptr<{DTYPE_TO_CPP[dtype]}, decltype(inductor_free)*> {tile_var_buff_ptr}(({DTYPE_TO_CPP[dtype]}*) "  # noqa: B950
