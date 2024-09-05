@@ -18,9 +18,6 @@ static char compile_context[MAX_COMPILE_CONTEXT_SIZE];
 static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-// set to true to skip all eval frame callbacks when
-// SKIP_CODE_RECURSIVE is encountered
-static bool skip_code_recursive = false;
 
 inline static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -512,7 +509,7 @@ static PyObject* _custom_eval_frame_shim(
   //  - Python callable(): enables TorchDynamo
   PyObject* callback = eval_frame_callback_get();
 
-  if (skip_code_recursive || callback == Py_None) {
+  if (callback == Py_None) {
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -524,7 +521,7 @@ static PyObject* _custom_eval_frame_shim(
   return result;
 }
 
-static PyObject* SkipCodeRecursiveExceptionType;
+static PyObject* skip_code_recursive_flag;
 
 // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
 // the frame, meaning that unless we default evaluate the original frame,
@@ -587,9 +584,9 @@ static PyObject* _custom_eval_frame(
   }
   if (extra == SKIP_CODE_RECURSIVE) {
     DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
-    skip_code_recursive = true;
+    eval_frame_callback_set(Py_None);
     PyObject* result = eval_frame_default(tstate, frame, throw_flag);
-    skip_code_recursive = false;
+    eval_frame_callback_set(callback);
     return result;
   }
 
@@ -671,29 +668,23 @@ static PyObject* _custom_eval_frame(
       call_callback(callback, frame, locals, cache_entry, frame_state);
   Py_DECREF(locals);
   if (result == NULL) {
-    if (PyErr_Occurred() != NULL && PyErr_ExceptionMatches(SkipCodeRecursiveExceptionType)) {
-      // Dynamo raised SkipCodeRecursiveException, so we should recursively skip code.
-      PyErr_Clear();
-      DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
-      set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
-      // Re-enable custom behavior
-      eval_frame_callback_set(callback);
-
-      skip_code_recursive = true;
-      PyObject* r = eval_frame_default(tstate, frame, throw_flag);
-      skip_code_recursive = false;
-      return r;
-    } else {
-      // internal exception, returning here will leak the exception into user code
-      // this is useful for debugging -- but we dont want it to happen outside of
-      // testing
-      // NB: we intentionally DO NOT re-enable custom behavior to prevent
-      // cascading failure from internal exceptions.  The upshot is if
-      // Dynamo barfs, that's it for Dynamo, even if you catch the exception
-      // inside the torch.compile block we won't try to Dynamo anything else.
-      *should_clear_frame = 1;
-      return NULL;
-    }
+    // internal exception, returning here will leak the exception into user code
+    // this is useful for debugging -- but we dont want it to happen outside of
+    // testing
+    // NB: we intentionally DO NOT re-enable custom behavior to prevent
+    // cascading failure from internal exceptions.  The upshot is if
+    // Dynamo barfs, that's it for Dynamo, even if you catch the exception
+    // inside the torch.compile block we won't try to Dynamo anything else.
+    *should_clear_frame = 1;
+    return NULL;
+  } else if (result == skip_code_recursive_flag) {
+    // Dynamo returned skip_code_recursive_flag, so we should recursively skip code.
+    DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
+    set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
+    PyObject* r = eval_frame_default(tstate, frame, throw_flag);
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
+    return r;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
@@ -909,11 +900,11 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   }
 #endif
 
-  SkipCodeRecursiveExceptionType = PyErr_NewException("torch._C._dynamo.eval_frame.SkipCodeRecursiveException", NULL, NULL);
-  if (SkipCodeRecursiveExceptionType == NULL) {
+  skip_code_recursive_flag = PyObject_New(PyObject, &PyBaseObject_Type);
+  if (skip_code_recursive_flag == NULL) {
     return NULL;
   }
-  if (PyModule_AddObject(module, "SkipCodeRecursiveException", SkipCodeRecursiveExceptionType) != 0) {
+  if (PyModule_AddObject(module, "skip_code_recursive_flag", skip_code_recursive_flag) != 0) {
     return NULL;
   }
 

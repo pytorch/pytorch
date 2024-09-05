@@ -71,6 +71,7 @@ from .exc import (
     CacheLimitExceeded,
     format_error_msg,
     InternalTorchDynamoError,
+    SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
     unimplemented,
@@ -1047,7 +1048,9 @@ class ConvertFrame:
         hooks: Hooks,
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
-    ) -> Optional[GuardedCode]:
+    ) -> Optional[
+        Union[GuardedCode, torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag]
+    ]:
         counters["frames"]["total"] += 1
         try:
             result = self._inner_convert(
@@ -1070,13 +1073,7 @@ class ConvertFrame:
             # need to make these exceptions not get wrapped
 
             # We intentionally don't want to suppress error here.
-            if isinstance(
-                e,
-                (
-                    UncapturedHigherOrderOpError,
-                    torch._C._dynamo.eval_frame.SkipCodeRecursiveException,
-                ),
-            ):
+            if isinstance(e, UncapturedHigherOrderOpError):
                 raise
 
             soft_fail = isinstance(e, Unsupported)
@@ -1118,6 +1115,12 @@ class ConvertFrame:
                 log.info(error_msg, exc_info=True)
             else:
                 log.warning(error_msg, exc_info=True)
+
+            # If we encounter SkipCodeRecursiveException, return skip_code_recursive_flag
+            # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
+            if isinstance(e, SkipCodeRecursiveException):
+                return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+
         return None
 
 
