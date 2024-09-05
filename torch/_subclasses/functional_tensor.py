@@ -113,7 +113,7 @@ class FunctionalTensor(torch.Tensor):
     ]
 
     # Used by auto_functionalize to determine base of tensors during inference mode.
-    _inference_mode_base: Optional[weakref.ref["FunctionalTensor"]] = None
+    _inference_mode_base: Optional[weakref.ReferenceType["FunctionalTensor"]] = None
 
     def __new__(cls, elem, mode):
         assert torch._is_functional_tensor(elem)
@@ -337,7 +337,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._allow_token_discovery = _allow_token_discovery
 
         self._storage_to_base: Dict[
-            torch.storage.UntypedStorage, Optional[weakref.ref[FunctionalTensor]]
+            torch.storage.UntypedStorage, Optional[weakref.ReferenceType[FunctionalTensor]]
         ] = weakref.WeakKeyDictionary()
 
     # No-op if FunctionalTensorMode is already in use
