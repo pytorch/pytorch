@@ -15,6 +15,7 @@ import torch.onnx.operators
 from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch._streambase import _StreamBase
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import config, polyfills, variables
 from ..codegen import PyCodegen
@@ -1024,6 +1025,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # this results in cleaner graphs, but only works for inputs
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
+
+        if is_traceable_wrapper_subclass_type(data.class_type):
+            unimplemented("Parameter constructor with tensor subclass NYI")
 
         if not can_convert_to_tracable_parameter():
             unimplemented("Workaround for issues with nn_parameter construction")
