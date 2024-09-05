@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import typing
-import unitest
+import unittest
 from typing import *  # noqa: F403
 
 import numpy as np
