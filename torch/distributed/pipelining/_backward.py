@@ -159,7 +159,7 @@ def get_param_groups(inputs: List[Node], params: List[Node]) -> List[Dict[str, A
 def stage_backward_input(
     stage_outputs: List[torch.Tensor],
     output_grads: Optional[List[torch.Tensor]],
-    stage_inputs: List[torch.Tensor],
+    input_values: List[torch.Tensor],
     weights: Iterator[Parameter],
 ):
     """
@@ -169,7 +169,7 @@ def stage_backward_input(
         filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs))
     )
     stage_input_grad_fns: List[Node] = list(
-        filter(None, map(_get_grad_fn_or_grad_acc, stage_inputs))
+        filter(None, map(_get_grad_fn_or_grad_acc, input_values))
     )
     weight_grad_fns: List[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, weights))
@@ -197,7 +197,7 @@ def stage_backward_input(
             intermediate.register_prehook(get_hook(param_group, i))
 
     # Stage 0 inputs do not require grads? Should we skip in that case?
-    if all(tensor.requires_grad for tensor in stage_inputs):
+    if all(tensor.requires_grad for tensor in input_values):
         if output_grads is None:
             # In case this is the loss and there are no output_grads, then we just use 1s
             output_grads = [
@@ -206,13 +206,13 @@ def stage_backward_input(
 
         dinputs = torch.autograd.grad(
             stage_outputs,
-            inputs=stage_inputs,
+            inputs=input_values,
             grad_outputs=output_grads,
             retain_graph=True,
         )
 
         # update the gradients for inputs
-        for i, inp in enumerate(stage_inputs):
+        for i, inp in enumerate(input_values):
             if inp.grad is None:
                 inp.grad = dinputs[i]
             else:
@@ -225,7 +225,14 @@ def stage_backward_input(
 def stage_backward_weight(
     weights: Iterator[Parameter], param_groups: List[Dict[str, Any]]
 ):
-    all_dweights = dict()
+    # map weights to param_group_weights
+    grad_acc_to_weight = {}
+    weight_grads = []
+    for index, weight in enumerate(weights):
+        grad_acc = _get_grad_fn_or_grad_acc(weight)
+        grad_acc_to_weight[grad_acc] = weight, index
+        weight_grads.append(weight.grad)
+
     for param_group in param_groups:
         # TODO: Handle case where intermediate can have multiple outputs
         intermediate_edges = tuple(
@@ -242,19 +249,14 @@ def stage_backward_weight(
             weights_edges,
             grad_outputs=sum(param_group["grads"], tuple()),
         )
-        for w, dw in zip(param_group["params"], dweights):
-            all_dweights[w] = dw
+        for grad_acc, dw in zip(param_group["params"], dweights):
+            weight, index = grad_acc_to_weight[grad_acc]
+            if weight.grad is None:
+                weight.grad = dw
+            else:
+                weight.grad += dw
     # return grads in the original order weights were provided in
-    out = []
-    for w in weights:
-        grad_acc = _get_grad_fn_or_grad_acc(w)
-        dweight = all_dweights[grad_acc]
-        out.append(dweight)
-        if w.grad is None:
-            w.grad = dweight
-        else:
-            w.grad += dweight
-    return out
+    return weight_grads
 
 
 def stage_backward(
