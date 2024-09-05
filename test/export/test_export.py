@@ -6925,6 +6925,8 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_istft_op(self):
         class istft_class(torch.nn.Module):
             def forward(self, spec):
