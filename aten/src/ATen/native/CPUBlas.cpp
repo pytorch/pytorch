@@ -41,7 +41,9 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #include <fbgemm/FbgemmI64.h>
 #endif  // USE_FBGEMM
 
+#if AT_MKLDNN_ENABLED()
 #include <oneapi/dnnl/dnnl_version.h>
+#endif // oneDNN
 
 #define ONEDNN_UKERNEL_ENABLED (DNNL_VERSION_MAJOR >=3 && DNNL_VERSION_MINOR >=5)
 
