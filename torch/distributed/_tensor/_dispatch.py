@@ -314,6 +314,11 @@ class OpDispatcher:
                 if isinstance(arg, dtensor.DTensor):
                     if mesh is None or arg.device_mesh.ndim > mesh.ndim:
                         mesh = arg.device_mesh
+                    # Currently, we only support implicit replication from 1D to 2D for partial TP
+                    # use cases when using 2D. Therefore, we break out the loop when we find a 2D mesh.
+                    # If we see more generic nD use case, we should remove the constraint. 
+                    elif mesh.ndim == 2:
+                        break
 
         for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
