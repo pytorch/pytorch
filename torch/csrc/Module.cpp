@@ -2069,25 +2069,16 @@ Call this whenever a new thread is created in order to propagate values from
             at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
       });
 
-  py_module.def(
-      "_get_fp32_precision",
-      [](std::string backend = "generic", std::string op = "all") {
-        return at::globalContext().float32Precision(backend, op);
-      },
-      py::arg("backend") = "generic",
-      py::arg("op") = "all");
+  py_module.def("_get_fp32_precision", [](std::string backend, std::string op) {
+    return at::globalContext().float32Precision(backend, op);
+  });
 
   py_module.def(
       "_set_fp32_precision",
-      [](std::string& precision,
-         std::string backend = "generic",
-         std::string op = "all") {
-        at::globalContext().setFloat32Precision(precision, backend, op);
+      [](std::string backend, std::string op, std::string precision) {
+        at::globalContext().setFloat32Precision(backend, op, precision);
         return precision;
-      },
-      py::arg("precision"),
-      py::arg("backend") = "generic",
-      py::arg("op") = "all");
+      });
 
   py_module.def(
       "_stash_obj_in_tls", [](const std::string& key, py::handle arg) {

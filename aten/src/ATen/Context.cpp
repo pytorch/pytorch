@@ -20,6 +20,11 @@
 namespace at {
 
 namespace {
+  // These const variables defined the fp32 precisions for different backend
+  // We have "generic", "cuda", "mkldnn" backend now and we can choose fp32 prevision from
+  // "default", "tf32", "bf16". The "default" precision means IEEE standard floating point format
+  // "tf32" and "bf16" means we are allowed to use "tf32" or "bf16" as internal computation
+  // data types for fp32 computations.
   const std::vector<std::string> generic_precisions = {"default", "tf32", "bf16"};
   const std::vector<std::string> cuda_precisions = {"default", "tf32"};
   const std::vector<std::string> mkldnn_precisions = {"default", "bf16"};
@@ -62,7 +67,7 @@ namespace {
   }
 
   void warn_deprecated_fp32_precision_api(){
-    TORCH_WARN_DEPRECATION(
+    TORCH_WARN_ONCE(
       "This API is going to be deprecated, please see"
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices"
     );
