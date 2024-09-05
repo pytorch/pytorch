@@ -70,8 +70,6 @@ CHECK_CXX_SOURCE_COMPILES(
      }" CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
 if(CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
   message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
-  # Also see CMakeLists.txt under caffe2/perfkernels.
-  set(CAFFE2_PERF_WITH_AVX512 1)
 endif()
 cmake_pop_check_state()
 

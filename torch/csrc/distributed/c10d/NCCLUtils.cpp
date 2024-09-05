@@ -89,13 +89,6 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
 }
 #endif
 
-#ifndef FBCODE_CAFFE2
-bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf) {
-  // For point-to-point communication on the same process, don't need broadcast.
-  return !isSendRecvSelf;
-}
-#endif
-
 std::string getNcclVersion() {
   static c10::once_flag ncclGetVersionFlag;
   static std::string versionString;
@@ -541,6 +534,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     bool includeStacktraces,
     bool onlyActive) {
   auto entries = new_list();
+  // Entries are returned in the order they were recorded
   auto result = dump_entries();
   std::vector<torch::CapturedTraceback*> tracebacks;
   torch::SymbolizedTracebacks stracebacks;
