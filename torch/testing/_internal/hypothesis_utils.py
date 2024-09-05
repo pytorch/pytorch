@@ -321,7 +321,7 @@ def tensor_conv(
         feature_map_shape.append(draw(st.integers(*feature_map_range)))
 
     kernels = []
-    for i in range(spatial_dim):
+    for _ in range(spatial_dim):
         kernels.append(draw(st.integers(*kernel_range)))
 
     tr = False

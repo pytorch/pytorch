@@ -2967,9 +2967,7 @@ def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
 
 @_onnx_symbolic("aten::index_copy")
 def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
-    _, expanded_index = symbolic_helper._index_fill_reshape_helper(
-        g, self, dim, index
-    )
+    _, expanded_index = symbolic_helper._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
 
 
@@ -3679,7 +3677,7 @@ def eye(g: jit_utils.GraphContext, *args):
         return g.op("EyeLike", tensor)
     if len(args) == 6:
         # aten::eye(n, m, dtype, layout, device, pin_memory)
-        n, m, dtype, layout, device, pin_memory = args
+        n, m, dtype, layout, device, _ = args
         shape = g.op(
             "Concat",
             symbolic_helper._unsqueeze_helper(g, n, [0]),
@@ -5572,7 +5570,7 @@ def linalg_matrix_norm(
                 keepdim=keepdim,
             )
         else:
-            result, indices = min(
+            result, _ = min(
                 g,
                 sum,
                 dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])),

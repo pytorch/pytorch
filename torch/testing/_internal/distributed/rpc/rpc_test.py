@@ -1810,7 +1810,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # No memory profiled if profile_memory=False
         with _profile(profile_memory=False) as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
-            res = fut.wait()
+            fut.wait()
 
         function_events = p.function_events
         event_cpu_mem_usages = {event.cpu_memory_usage for event in function_events}
@@ -2135,7 +2135,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             # Ensure that flipped order of ctx managers results in events being
             # recorded as expected.
             with _profile() as prof:
-                with dist_autograd.context() as context_id:
+                with dist_autograd.context():
                     self.run_profiling_workload(dst)
 
             self.validate_profiling_workload(dst, prof)
@@ -3121,7 +3121,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Wait for all init to complete.
         dist.barrier()
 
-        rref = rpc.remote(
+        rpc.remote(
             worker_name((self.rank + 1) % self.world_size),
             torch.add,
             args=(torch.ones(2, 2), 1),
@@ -5741,9 +5741,6 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_missing_config_not_timeout(self):
-        dst = worker_name((self.rank + 1) % self.world_size)
-        options = self.rpc_backend_options
-
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
@@ -5967,7 +5964,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             RuntimeError,
             "Expected all tensors to be on the same device, but found at least two devices"
         ):
-            rets = rpc.rpc_sync(
+            rpc.rpc_sync(
                 dst,
                 TensorPipeAgentCudaRpcTest._gpu_add_wrong_gpus,
                 args=(x, y)
@@ -6278,22 +6275,22 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_int(self):
-        fut = Future(devices=[0])
+        Future(devices=[0])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_str(self):
-        fut = Future(devices=["cuda:0"])
+        Future(devices=["cuda:0"])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_as_device(self):
-        fut = Future(devices=[torch.device("cuda", 0)])
+        Future(devices=[torch.device("cuda", 0)])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_device_not_cuda(self):
         with self.assertRaisesRegex(
             ValueError, "Expected devices to have indices, got cpu"
         ):
-            fut = Future(devices=["cpu"])
+            Future(devices=["cpu"])
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_cuda_tensor(self):

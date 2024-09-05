@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import math
 import sys
 from typing import Callable, Union
 
@@ -372,6 +373,7 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
+@register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
     if (r := arg.item_memo) is not None:
@@ -454,10 +456,23 @@ def masked_select(fake_mode, func, self, mask):
         _constrain_range_for_size,
         has_free_symbols,
     )
+    from torch.utils._sympy.numbers import IntInfinity
+    from torch.utils._sympy.value_ranges import bound_sympy
 
+    # If num elements is expressed symbolically, calculate
+    # the concrete value based on upper bounds. Otherwise,
+    # we can set max val directly.
     if not has_free_symbols(self.numel()):
-        if self.numel() > 2:
-            maxval = int(self.numel())
+        num_elements = int(self.numel())
+    else:
+        prod_node = math.prod(self.shape).node
+        prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
+        if isinstance(prod_range.upper, IntInfinity):
+            num_elements = sys.maxsize - 1
+        else:
+            num_elements = prod_range.upper
+    if num_elements > 2:
+        maxval = num_elements
 
     _constrain_range_for_size(nnz, max=maxval)
 
@@ -521,7 +536,7 @@ def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -583,7 +598,7 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
-        out = func(*args, **kwargs)
+        func(*args, **kwargs)
 
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -834,7 +849,6 @@ def make_fast_binary_impl(slow_ref):
         cpu = torch.device("cpu")
         common_device = cpu
         common_dtype = None
-        output_dtype = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):
