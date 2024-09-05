@@ -110,8 +110,8 @@ class Node(abc.ABC):
 
         .. note::
             In the rare case where the hook is registered while the Node has already
-            begun execution, there is no longer any guarantee on :attr:`grad_outputs` and
-            so the hook should not access the :attr:`grad_outputs` argument. The
+            begun execution, there is no longer any guarantee on :attr:`grad_outputs`
+            content (it might be as usual or empty depending on other factors). The
             hook can still optionally return a new gradient to be used in place of
             :attr:`grad_inputs` independent of :attr:`grad_outputs`.
 

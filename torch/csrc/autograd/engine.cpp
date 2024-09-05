@@ -826,7 +826,6 @@ static variable_list call_post_hooks(
       outputs = (*hook)(outputs, inputs);
     } else {
       variable_list null_inputs;
-      null_inputs.resize(inputs.size());
       outputs = (*hook)(outputs, null_inputs);
     }
   }
