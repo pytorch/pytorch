@@ -330,7 +330,8 @@ class TestExport(TestCase):
                     ),
                 )
                 ep_infer = export(
-                    model, inputs,
+                    model,
+                    inputs,
                     dynamic_shapes=_load_dynamic_shapes(_infer_dynamic_shapes(ep)),
                 )
                 eps.extend([ep_serdes, ep_infer])
@@ -7185,8 +7186,12 @@ def forward(self, x, y):
             inferred,
             """DynamicShapesSpec(dynamic_shapes=([['2*d0', 4], ['2*d0 + 1', 4]], ['d0'], [4, 4], None), dims={'d0': RootDim(min=4, max=16, derived=['2*d0', '2*d0 + 1'])})""",
         )
-        inferred_from_dumped = _infer_dynamic_shapes(export(Foo(), inputs, dynamic_shapes=_load_dynamic_shapes(dumped)))
-        inferred_from_inferred = _infer_dynamic_shapes(export(Foo(), inputs, dynamic_shapes=_load_dynamic_shapes(inferred)))
+        inferred_from_dumped = _infer_dynamic_shapes(
+            export(Foo(), inputs, dynamic_shapes=_load_dynamic_shapes(dumped))
+        )
+        inferred_from_inferred = _infer_dynamic_shapes(
+            export(Foo(), inputs, dynamic_shapes=_load_dynamic_shapes(inferred))
+        )
         self.assertEqual(inferred, inferred_from_dumped)
         self.assertEqual(inferred, inferred_from_inferred)
 

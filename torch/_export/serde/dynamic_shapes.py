@@ -12,12 +12,7 @@ from torch.export.dynamic_shapes import (
     Dim,
 )
 from torch.export.exported_program import ExportedProgram
-from torch.utils._pytree import (
-    BUILTIN_TYPES,
-    LeafSpec,
-    TreeSpec,
-    tree_map,
-)
+from torch.utils._pytree import BUILTIN_TYPES, LeafSpec, TreeSpec, tree_map
 
 from .serialize import _dataclass_to_dict
 
@@ -56,7 +51,9 @@ def _postprocess_serialized_shapes(
     for dim in dims.values():
         dim.max = None if dim.max is int_oo else dim.max
         dim.derived = sorted(set(dim.derived))
-    spec = DynamicShapesSpec(dynamic_shapes=dynamic_shapes, dims=dict(sorted(dims.items())))
+    spec = DynamicShapesSpec(
+        dynamic_shapes=dynamic_shapes, dims=dict(sorted(dims.items()))
+    )
     if to_dict:
         return _dataclass_to_dict(spec)
     else:
@@ -325,7 +322,9 @@ def _load_dynamic_shapes(
     return tree_map(deserialize_shape, dynamic_shapes)
 
 
-def _infer_dynamic_shapes(ep: ExportedProgram, to_dict: Optional[bool] = False) -> Union[DynamicShapesSpec, Dict[str, Any]]:
+def _infer_dynamic_shapes(
+    ep: ExportedProgram, to_dict: Optional[bool] = False
+) -> Union[DynamicShapesSpec, Dict[str, Any]]:
     """
     Utility function for dynamic shapes serialization.
     Infers placeholder shapes from an ExportedProgram, and returns a DynamicShapesSpec or corresponding dictionary
@@ -334,12 +333,15 @@ def _infer_dynamic_shapes(ep: ExportedProgram, to_dict: Optional[bool] = False) 
     NOTE: this function is not well-supported for programs exported with out-of-order kwargs.
     """
     import sympy
+
     from torch.export.graph_signature import InputKind
 
     dims: Dict[str, RootDim] = {}
     symbol_map: Dict[sympy.Symbol, str] = {}
 
-    def _replace_call_spec(call_spec: Union[LeafSpec, TreeSpec]) -> Union[LeafSpec, TreeSpec]:
+    def _replace_call_spec(
+        call_spec: Union[LeafSpec, TreeSpec]
+    ) -> Union[LeafSpec, TreeSpec]:
         """
         Takes the input spec, and replaces non-builtin types with lists, to match how they'd be specified for dynamic_shapes.
         """
@@ -349,13 +351,17 @@ def _infer_dynamic_shapes(ep: ExportedProgram, to_dict: Optional[bool] = False) 
             return TreeSpec(
                 type=call_spec.type,
                 context=call_spec.context,
-                children_specs=[_replace_call_spec(arg) for arg in call_spec.children_specs],
+                children_specs=[
+                    _replace_call_spec(arg) for arg in call_spec.children_specs
+                ],
             )
         else:
             return TreeSpec(
                 type=list,
                 context=None,
-                children_specs=[_replace_call_spec(arg) for arg in call_spec.children_specs],
+                children_specs=[
+                    _replace_call_spec(arg) for arg in call_spec.children_specs
+                ],
             )
 
     def _extract_shapes_from_placeholders(ep: ExportedProgram) -> Tuple[Any]:
@@ -369,19 +375,25 @@ def _infer_dynamic_shapes(ep: ExportedProgram, to_dict: Optional[bool] = False) 
             if spec.kind == InputKind.USER_INPUT
         }
         placeholders = [
-            node for node in ep.graph.nodes
-            if node.op == "placeholder"
-            and node.name in user_inputs
+            node
+            for node in ep.graph.nodes
+            if node.op == "placeholder" and node.name in user_inputs
         ]
         flat_shapes = [
-            list(val.shape) if isinstance(val := node.meta.get("val"), torch.Tensor) else None
+            list(val.shape)
+            if isinstance(val := node.meta.get("val"), torch.Tensor)
+            else None
             for node in placeholders
         ]
         in_spec = _replace_call_spec(ep.call_spec.in_spec)
         shape_args, shape_kwargs = in_spec.unflatten(flat_shapes)
-        return shape_args + tuple(shape_kwargs.values())  # NOTE: this won't work for out-of-order kwargs
+        return shape_args + tuple(
+            shape_kwargs.values()
+        )  # NOTE: this won't work for out-of-order kwargs
 
-    def _track_dim_from_symints(val: Union[None, int, torch.SymInt]) -> Union[None, int, str]:
+    def _track_dim_from_symints(
+        val: Union[None, int, torch.SymInt]
+    ) -> Union[None, int, str]:
         """
         Tracks dims, ranges, derived dims for FakeTensor shapes extracted from ExportedProgram placeholders.
         """
