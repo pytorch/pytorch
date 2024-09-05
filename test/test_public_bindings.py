@@ -3,6 +3,7 @@
 import importlib
 import inspect
 import json
+import logging
 import os
 import pkgutil
 import unittest
@@ -18,6 +19,9 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 class TestPublicBindings(TestCase):
@@ -267,7 +271,9 @@ class TestPublicBindings(TestCase):
         failures = []
 
         def onerror(modname):
-            failures.append((modname, ImportError))
+            failures.append(
+                (modname, ImportError("exception occurred importing package"))
+            )
 
         for mod in pkgutil.walk_packages(torch.__path__, "torch.", onerror=onerror):
             modname = mod.name
@@ -279,8 +285,8 @@ class TestPublicBindings(TestCase):
                 importlib.import_module(modname)
             except Exception as e:
                 # Some current failures are not ImportError
-
-                failures.append((modname, type(e)))
+                log.exception("import_module failed")
+                failures.append((modname, e))
 
         # It is ok to add new entries here but please be careful that these modules
         # do not get imported by public code.
@@ -441,14 +447,16 @@ class TestPublicBindings(TestCase):
         }
 
         errors = []
-        for mod, excep_type in failures:
+        for mod, exc in failures:
             if mod in public_allowlist:
                 # TODO: Ensure this is the right error type
 
                 continue
             if mod in private_allowlist:
                 continue
-            errors.append(f"{mod} failed to import with error {excep_type}")
+            errors.append(
+                f"{mod} failed to import with error {type(exc).__qualname__}: {str(exc)}"
+            )
         self.assertEqual("", "\n".join(errors))
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
