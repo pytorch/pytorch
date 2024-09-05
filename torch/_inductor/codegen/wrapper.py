@@ -729,8 +729,6 @@ class WrapperCodeGen(CodeGen):
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
         self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
-        if not config.multiple_streams:
-            self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
     def get_codegened_graph(self):
@@ -1180,7 +1178,7 @@ class WrapperCodeGen(CodeGen):
             )
 
     def finalize_prefix(self):
-        pass
+        self.write_get_raw_stream_header_once()
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
         return pexpr(x, simplify=simplify)
