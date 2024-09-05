@@ -6856,7 +6856,7 @@ class LoopBody:
             k: update_index[v] for k, v in other.reads_name2expr.items()
         }
         self.writes_name2expr = {
-            k: update_index[v] for k, v in other.reads_name2expr.items()
+            k: update_index[v] for k, v in other.writes_name2expr.items()
         }
         self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
         self.indirect_vars = [*other.indirect_vars]
