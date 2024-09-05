@@ -16,6 +16,7 @@ from typing import Dict, Generic, List, TYPE_CHECKING
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function
@@ -512,7 +513,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 user_cls_source=self.source,
                 mutable_local=MutableLocal(),
             )
-        elif self.value in self._in_graph_classes():
+        elif (
+            self.value in self._in_graph_classes()
+            or is_traceable_wrapper_subclass_type(self.value)
+        ):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
             if (
