@@ -327,7 +327,7 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
-            if default_prefetch:
+            if default_prefetch and not ca.compiled_autograd_enabled:
                 self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
