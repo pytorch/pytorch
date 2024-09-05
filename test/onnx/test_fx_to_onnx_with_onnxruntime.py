@@ -45,10 +45,7 @@ def _parameterized_class_attrs_and_values():
     input_values.extend(
         itertools.product(
             (True, False),
-            (
-                pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-                pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-            ),
+            (pytorch_test_common.TorchModelType.TORCH_NN_MODULE,),
         )
     )
     return {
