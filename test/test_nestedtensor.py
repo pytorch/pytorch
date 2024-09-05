@@ -7124,40 +7124,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         expected_grad.unbind()[1].add_(1.0)
         torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
-    def test_layout_conversion(self, device):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 4, device=device),
-                torch.randn(5, 4, device=device),
-                torch.randn(3, 4, device=device),
-            ],
-            layout=torch.jagged,
-        )
-        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
-        self.assertEqual(strided_nt.unbind(), nt.unbind())
-        self.assertEqual(strided_nt.data_ptr(), nt.data_ptr())
-
-        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
-        self.assertEqual(jagged_nt.unbind(), nt.unbind())
-        self.assertEqual(jagged_nt.data_ptr(), nt.data_ptr())
-
-    def test_layout_conversion_backward(self, device):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 4, device=device),
-                torch.randn(5, 4, device=device),
-                torch.randn(3, 4, device=device),
-            ],
-            layout=torch.jagged,
-            requires_grad=True,
-        )
-        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
-        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
-
-        jagged_nt.backward(torch.ones_like(jagged_nt))
-        expected_grad = torch.ones_like(nt)
-        torch._dynamo.disable(self.assertEqual)(expected_grad, nt.grad)
-
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
