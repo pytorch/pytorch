@@ -3072,9 +3072,14 @@ class Scheduler:
         if isinstance(read, MemoryDep):
             if read.mode == write.mode and write.mode is not None:
                 return True
-            read_name = read.name
-            if read_name in self.mutation_renames:
-                read_name = self.mutation_renames[read_name]
+            read_name = self.mutation_renames.get(read.name, read.name)
+
+            if (
+                read_name != write.name
+                or free_symbol_is_type(read.index, SymT.TMP)
+                or free_symbol_is_type(write.index, SymT.TMP)
+            ):
+                return False
 
             if read.num_vars != write.num_vars:
                 # merge loops
@@ -3082,10 +3087,7 @@ class Scheduler:
                 write = write.normalize()
 
             return (
-                read_name == write.name
-                and not free_symbol_is_type(read.index, SymT.TMP)
-                and not free_symbol_is_type(write.index, SymT.TMP)
-                and read.index == write.index
+                read.index == write.index
                 and len(read.size) >= len(write.size)
                 and read.size[: len(write.size)] == write.size
             )
