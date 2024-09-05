@@ -1133,10 +1133,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, input, init, dim):
-            return combine_fn, input, init, dim
+        def arg_extractor(combine_fn, init, input, dim, reverse):
+            return combine_fn, init, input, dim, reverse
 
-        combine_fn, input, init, dim = arg_extractor(*args, **kwargs)
+        combine_fn, init, input, dim, reverse = arg_extractor(*args, **kwargs)
 
         if input.python_type() != list:
             unimplemented(
@@ -1163,8 +1163,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         # TODO: Unify handling of sub_args across control flow ops, such as cond, while_loop, etc.
-        sub_args = [
-            inp.call_method(
+        sub_args_init = [
+            ini.call_method(
                 tx,
                 "new_empty",
                 args=(
@@ -1173,29 +1173,50 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         ini.size
                         if ini.size is not None
                         else tuple(
-                            [  # noqa: C416
-                                it
-                                for it in BuiltinVariable(getattr)
-                                .call_function(
-                                    tx,
-                                    [ini, ConstantVariable.create("shape")],
-                                    {},
-                                )
-                                .items
-                            ]
+                            BuiltinVariable(getattr)
+                            .call_function(
+                                tx, [ini, ConstantVariable.create("shape")], {}
+                            )
+                            .items
                         ),
                     ),
                 ),
+                kwargs={
+                    "dtype": SourcelessBuilder.create(tx, ini.dtype),
+                    "device": SourcelessBuilder.create(tx, ini.device),
+                    "requires_grad": SourcelessBuilder.create(tx, ini.requires_grad),
+                },
+            )
+            for ini in init.items
+        ]
+        sub_args_inp_shapes = [
+            tuple(
+                sh if i != dim_fake else 1
+                for i, sh in enumerate(
+                    # get_fake_value(inp.as_proxy().node, tx).size()
+                    tuple(
+                        BuiltinVariable(getattr)
+                        .call_function(tx, [inp, ConstantVariable.create("shape")], {})
+                        .items
+                    )
+                )
+            )
+            for inp in input.items
+        ]
+        sub_args_inp = [
+            inp.call_method(
+                tx,
+                "new_empty",
+                args=(SourcelessBuilder.create(tx, inp_sh),),
                 kwargs={
                     "dtype": SourcelessBuilder.create(tx, inp.dtype),
                     "device": SourcelessBuilder.create(tx, inp.device),
                     "requires_grad": SourcelessBuilder.create(tx, inp.requires_grad),
                 },
             )
-            for inp, ini in itertools.chain(
-                zip(input.items, init.items), zip(input.items, init.items)
-            )
+            for inp, inp_sh in zip(input.items, sub_args_inp_shapes)
         ]
+        sub_args = sub_args_init + sub_args_inp
         (
             (combine_result, combine_treespec),
             combine_graph,
@@ -1215,43 +1236,43 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Combine fn had unexpected freevars: {combine_lifted_freevars}"
             )
 
-        if combine_result.python_type() != list:
+        if any(cr.python_type() != list for cr in combine_result.items):
             unimplemented(
                 f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
             )
 
         input_proxy = input.as_proxy()
         init_proxy = init.as_proxy()
-        combine_result_proxy = combine_result.as_proxy()
-        for result, inp_proxy, ini_proxy, s_args in zip(
-            combine_result_proxy, input_proxy, init_proxy, sub_args
+        combine_carry_proxy = combine_result.items[0].as_proxy()
+        combine_output_proxy = combine_result.items[1].as_proxy()
+        for carry, out, inp_proxy, ini_proxy, s_args in zip(
+            combine_carry_proxy, combine_output_proxy, input_proxy, init_proxy, sub_args
         ):
             inp_meta = inp_proxy.node.meta["example_value"]
             ini_meta = ini_proxy.node.meta["example_value"]
-            combine_result_meta = result.node.meta["example_value"]
-            s_args = s_args.as_proxy().node.meta["example_value"]
-            if combine_result_meta.device != inp_meta.device:
-                unimplemented(
-                    f"Expected combine_fn to return a tensor on device {inp_meta.device} but "
-                    + f"got {combine_result_meta.device}"
-                )
-            if combine_result_meta.dtype != inp_meta.dtype:
-                unimplemented(
-                    f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
-                    + f"got {combine_result_meta.dtype}"
-                )
-            if combine_result_meta.shape != s_args.shape:
-                unimplemented(
-                    f"Expected shape of input with {s_args.shape} to be the same as "
-                    + f"combine_result with {combine_result_meta.shape}"
-                )
+            carry_meta = carry.node.meta["example_value"]
+            out_meta = out.node.meta["example_value"]
             if (
-                combine_result_meta.device != ini_meta.device
-                or combine_result_meta.dtype != ini_meta.dtype
-                or combine_result_meta.shape != ini_meta.shape
+                carry_meta.device != inp_meta.device
+                or out_meta.device != inp_meta.device
+                or ini_meta.device != inp_meta.device
             ):
                 unimplemented(
-                    f"Expected metadata of the combine_fn result {combine_result_meta} to be the same as "
+                    f"Expected the init, the input and the outputs of combine_fn to be a tensor on device {inp_meta.device} but "
+                    + f"got {ini_meta.device}, {inp_meta.device}, {carry_meta.device}, {out_meta.device}"
+                )
+            if carry_meta.dtype != ini_meta.dtype:
+                unimplemented(
+                    f"Expected the init and the new carry produced by the operator to be a tensor of {carry_meta.dtype} but "
+                    + f"got {ini_meta.dtype} and {carry_meta.dtype}"
+                )
+            if (
+                carry_meta.device != ini_meta.device
+                or carry_meta.dtype != ini_meta.dtype
+                or carry_meta.shape != ini_meta.shape
+            ):
+                unimplemented(
+                    f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
                     + f"the metadata of init with {ini_meta}"
                 )
 
@@ -1260,9 +1281,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         p_args = (
             make_attr(tx, combine_fn_name),
-            input_proxy,
             init_proxy,
+            input_proxy,
             dim.as_proxy(),
+            reverse.as_proxy(),
         )
 
         with tx.fake_mode:
@@ -1273,19 +1295,20 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # as a result of the stack operation.
             fake_out_shapes = [
                 tuple(
-                    -1 if i != dim_fake else (dim_len + 1)
-                    for i, sh in enumerate(
-                        get_fake_value(inp.as_proxy().node, tx).size()
-                    )
+                    -1 if i != dim_fake else dim_len
+                    for i, sh in enumerate(get_fake_value(o.as_proxy().node, tx).size())
                 )
-                for inp in input.items
+                for o in combine_result.items[1].items
             ]
-            out_meta = tuple(
-                t.as_proxy()
-                .node.meta["example_value"]
-                .expand(*sh)
-                .clone(memory_format=torch.contiguous_format)
-                for t, sh in zip(init.items, fake_out_shapes)
+            out_meta = (
+                [init_p.node.meta["example_value"].clone() for init_p in init_proxy],
+                list(
+                    t.as_proxy()
+                    .node.meta["example_value"]
+                    .expand(*sh)
+                    .clone(memory_format=torch.contiguous_format)
+                    for t, sh in zip(combine_result.items[1].items, fake_out_shapes)
+                ),
             )
 
         return wrap_fx_proxy(

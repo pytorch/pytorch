@@ -927,14 +927,17 @@ class FakeTensorTest(TestCase):
     @parametrize("reverse", [False, True])
     def test_scan(self, reverse):
         def add(x, y):
-            return x + y
+            return x + y, x + y
 
         with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.randn((3, 5, 7), device="cpu")
-            r = scan(add, x, 1, reverse=reverse)
+            init = torch.randn((3, 1, 7), device="cpu")
+            r = scan(add, init=init, input=x, dim=1, reverse=reverse)
 
-        self.assertIsInstance(r, FakeTensor)
-        self.assertEqual(r.size(), x.size())
+        self.assertIsInstance(r[0], FakeTensor)
+        self.assertIsInstance(r[1], FakeTensor)
+        self.assertEqual(r[0].size(), init.size())
+        self.assertEqual(r[1].size(), x.size())
 
 
 instantiate_parametrized_tests(FakeTensorTest)
