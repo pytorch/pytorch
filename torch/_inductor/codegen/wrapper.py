@@ -1178,7 +1178,7 @@ class WrapperCodeGen(CodeGen):
             )
 
     def finalize_prefix(self):
-        pass
+        self.write_get_raw_stream_header_once()
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
         return pexpr(x, simplify=simplify)
