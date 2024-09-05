@@ -8,10 +8,9 @@ import inspect
 import logging
 from typing import Any, Mapping, Sequence, TYPE_CHECKING
 
-import onnx
-
 import torch
 import torch.export
+from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import _core, _onnx_program
 
 
@@ -108,13 +107,6 @@ def _get_torch_export_args(
     return args, kwargs
 
 
-def _convert_version(path: str | os.PathLike, opset_version: int) -> None:
-    """Convert the ONNX file to a specific version."""
-    model = onnx.load(path, load_external_data=False)
-    model = onnx.version_converter.convert_version(model, opset_version)
-    onnx.save(model, path)
-
-
 def export_compat(
     model: torch.nn.Module
     | torch.export.ExportedProgram
@@ -142,9 +134,13 @@ def export_compat(
     artifacts_dir: str | os.PathLike = ".",
     fallback: bool = False,
     **_,
-) -> _onnx_program.ONNXProgram | None:
+) -> _onnx_program.ONNXProgram:
+    if opset_version is None:
+        # TODO(justinchuby): Change the hardcoded opset version for it to be flexible
+        opset_version = 18
+
     if isinstance(model, torch.export.ExportedProgram):
-        # We the model is already exported program, so the args, kwargs, and dynamic_shapes
+        # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
         # are not used
         dynamic_shapes = dynamic_shapes or {}
     else:
@@ -153,8 +149,6 @@ def export_compat(
             dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
                 model, dynamic_axes, input_names
             )
-
-    should_convert_version = False
 
     try:
         onnx_program = _core.export(
@@ -173,20 +167,6 @@ def export_compat(
             verbose=verbose,
         )
 
-        if f is not None:
-            # Always save the initializers as external data to reduce the size of the ONNX file
-            onnx_program.save(
-                f,
-                include_initializers=export_params,
-                keep_initializers_as_inputs=keep_initializers_as_inputs,
-                external_data=external_data,
-            )
-            if (
-                opset_version is not None
-                and opset_version != onnx_program.model.opset_imports.get("")
-            ):
-                should_convert_version = True
-
     except Exception as e:
         if fallback:
             if verbose is not False:
@@ -194,6 +174,8 @@ def export_compat(
                     "[torch.onnx] Falling back to legacy torch.onnx.export due "
                     f"to the following error: {e}",
                 )
+            if f is None:
+                raise TypeError("f must be provided when fallback is enabled") from e
             torch.onnx.utils.export(
                 model,  # type: ignore[arg-type]
                 args,
@@ -206,20 +188,22 @@ def export_compat(
                 dynamic_axes=dynamic_axes,
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
             )
-            onnx_program = None
-            if opset_version is None:
-                opset_version = 18
-            if opset_version != 17:
-                should_convert_version = True
+            onnx_program = _onnx_program.ONNXProgram(ir.load(f), None)
         else:
             raise
 
-    if f is not None and should_convert_version:
-        assert opset_version is not None
-        if verbose is not False:
-            print(
-                f"[torch.onnx] Converting the ONNX file to opset version {opset_version}..."
-            )
-        _convert_version(f, opset_version)
+    # Converter opset version and optimize
+    onnx_program.model = onnxscript_apis.convert_version(
+        onnx_program.model, opset_version
+    )
+    onnx_program.model = onnxscript_apis.optimize(onnx_program.model)
+
+    if f is not None:
+        onnx_program.save(
+            f,
+            include_initializers=export_params,
+            keep_initializers_as_inputs=keep_initializers_as_inputs,
+            external_data=external_data,
+        )
 
     return onnx_program
