@@ -13,6 +13,7 @@ wheel=0.37.1
 # to run the tests.  In the meantime I need to figure out how to
 # cajole anaconda into updating, or get the package from pypi instead...
 expecttest=0.1.3
+fbscribelogger=0.1.6
 
 # Not pinning certifi so that we can always get the latest certificates
 certifi
