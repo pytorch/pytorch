@@ -1093,7 +1093,7 @@ def _make_temp_remove_mode_context_manager(
             _push_mode(mode)
 
         try:
-            yield
+            yield removed_mode
 
         finally:
             if removed_mode is not None:
