@@ -229,6 +229,14 @@ def normalize_gm(gm_str) -> str:
     return remove_trailing_space(strip_comment(gm_str))
 
 
+def empty_line_normalizer(code: str) -> str:
+    """
+    Normalize code: remove empty lines.
+    """
+    normal_code = re.sub(r"[\r\n]+", "\n", code)
+    return normal_code
+
+
 def standard_test(
     self,
     fn,
@@ -362,6 +370,13 @@ def skipIfPy312(fn):
     if sys.version_info >= (3, 12):
         return unittest.skip(fn)
     return fn
+
+
+def requiresPy310(fn):
+    if sys.version_info >= (3, 10):
+        return fn
+    else:
+        unittest.skip(fn)
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py

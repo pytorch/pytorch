@@ -542,9 +542,20 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::CachingHostAllocator_emptyCache();
+  }
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::emptyCache();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::emptyCache();
+  }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -1282,6 +1293,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
+      "_cuda_beginAllocateToPool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [](cudaStream_t) { return true; });
+      });
+
+  m.def(
       "_cuda_endAllocateCurrentStreamToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
@@ -1830,6 +1848,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaHostAllocator,
      METH_NOARGS,
      nullptr},
+    {"_host_emptyCache", THCPModule_hostEmptyCache, METH_NOARGS, nullptr},
     {"_cuda_cudaCachingAllocator_raw_alloc",
      THCPModule_cudaCachingAllocator_raw_alloc,
      METH_VARARGS,
@@ -1968,6 +1987,9 @@ void initGdsBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
+#if defined(USE_CUSPARSELT)
+void initCusparseltBindings(PyObject* module);
+#endif
 
 } // namespace shared
 
@@ -1979,6 +2001,9 @@ void initModule(PyObject* module) {
   shared::initNvtxBindings(module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
+#endif
+#if defined(USE_CUSPARSELT)
+  shared::initCusparseltBindings(module);
 #endif
   shared::initGdsBindings(module);
   registerCudaDeviceProperties(module);
