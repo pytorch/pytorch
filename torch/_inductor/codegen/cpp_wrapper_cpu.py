@@ -247,6 +247,11 @@ class CppWrapperCpu(WrapperCodeGen):
             """
         )
 
+    @functools.lru_cache(None)  # noqa: B019
+    def include_extra_header(self, header: str):
+        # This is needed for cpp to python dtype conversion
+        self.header.splice(f"#include <{header}>")
+
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
@@ -2255,6 +2260,10 @@ if (custom_op_wrapper.get() == NULL) {
                     raise NotImplementedError(
                         f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
                     )
+            elif isinstance(raw_arg, torch.dtype):
+                # dtype
+                self.include_extra_header("torch/csrc/DynamicTypes.h")
+                return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
             else:
                 raise NotImplementedError(
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
