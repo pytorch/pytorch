@@ -153,8 +153,8 @@ def generate_ttir(kernel, kwargs):
     ]
     specialization = kernel._get_config(*ordered_args.values())
     constants = {
-        i: arg
-        for i, arg in enumerate(ordered_args.values())
+        name: arg
+        for name, arg in ordered_args.items()
         if not isinstance(arg, Tensor)
     }
 
