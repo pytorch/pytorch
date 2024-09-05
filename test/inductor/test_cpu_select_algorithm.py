@@ -244,7 +244,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if (
             (
-                dtype == torch.bfloat16
+                (
+                    dtype == torch.bfloat16
+                    and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                )
                 or (
                     dtype == torch.float16
                     and torch.ops.mkldnn._is_mkldnn_fp16_supported()
@@ -252,7 +255,18 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
-            or (dtype == torch.half and epilogue == "add" and not bias)
+            or (
+                (
+                    dtype == torch.half
+                    and not torch.ops.mkldnn._is_mkldnn_fp16_supported()
+                    or (
+                        dtype == torch.bfloat16
+                        and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                    )
+                )
+                and epilogue == "add"
+                and not bias
+            )
             or (
                 dtype == torch.float32
                 and epilogue == "add"

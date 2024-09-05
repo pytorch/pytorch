@@ -16,6 +16,7 @@
 // in .h files instead of .cpp files, to avoid ABI backward-compatiblity breakage.
 
 #include <ATen/NumericUtils.h>
+#include <ATen/cpu/Utils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 
 #include <c10/util/Float8_e4m3fn.h>
@@ -732,6 +733,66 @@ void mm_get_thread_blocking(
   }
 
   assert(Mt != 0);
+}
+
+template<typename X_t, typename W_t>
+void mm_get_cache_blocking(
+    int num_threads,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
+    int64_t Mt_blocks,
+    int64_t Nt_blocks,
+    int64_t Kt_blocks,
+    int64_t& Mc_blocks,
+    int64_t& Nc_blocks,
+    int64_t& Kc_blocks) {
+  // See NOTE [CPP GEMM Cache Blocking Algorithm] for the cache blocking algorithm.
+  // TODO(jgong5): cache cache blocking results
+  // TODO: tune the factor here
+  float L1_limit_factor = 1.0;
+  float L2_limit_factor = 0.5;
+
+  auto L1_cache_size = at::cpu::L1d_cache_size(); // per core cache size in Bytes
+  assert(L1_cache_size > 0 && "Expect L1_cache_size > 0 but got 0");
+
+  auto L2_cache_size = at::cpu::L2_cache_size(); // per core cache size in Bytes
+  assert(L2_cache_size > 0 && "Expect L2_cache_size > 0 but got 0");
+
+  auto L1 = L1_cache_size * L1_limit_factor;
+  auto L2 = L2_cache_size * L2_limit_factor;
+
+  constexpr size_t num_byte_A = sizeof(X_t);
+  constexpr size_t num_byte_B = sizeof(W_t);
+
+  int64_t size_cache_B = Kr * Kt_blocks * Nr * num_byte_B;
+  Kc_blocks = Kt_blocks;
+  if (size_cache_B > L1) {
+      Kc_blocks = (int64_t)std::floor(L1 / (Kr * Nr * num_byte_B));
+  }
+
+  float min_Mc_ratio = 2;
+  int64_t min_Mc_blocks = std::ceil(min_Mc_ratio * Mr / Nr);
+  auto Kt_bytes = Kt_blocks * Kr * num_byte_A;
+  if (min_Mc_blocks * Mr * Kt_bytes < L2) {
+    Mc_blocks = std::min(Mt_blocks, (int64_t)std::floor(L2 / (Mr * Kt_bytes)));
+    Nc_blocks = 1;
+  } else {
+    Mc_blocks = Mt_blocks;
+    Nc_blocks = std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
+    auto Nc_bytes = Nc_blocks * Nr * 4;
+    auto Kc_bytes = Kc_blocks * Kr * num_byte_A;
+    if (Mc_blocks * Mr * (Kc_bytes + Nc_bytes) > L2) {
+      auto M_max = (std::sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes) / 8;
+      if (M_max < Mc_blocks * Mr) {
+        Mc_blocks = (int64_t)std::floor(M_max / Mr);
+        Nc_blocks = std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
+      }
+    }
+  }
 }
 
 inline void mm_get_thread_blocks(
