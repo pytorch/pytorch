@@ -1453,7 +1453,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_float32_matmul_precision(self):
         make_tensor = functools.partial(
             torch.zeros,
-            (2, 2, 128, 256),
+            (2, 2, 128, 32),
             device="cuda",
             dtype=torch.float32,
             requires_grad=False,
