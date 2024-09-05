@@ -261,6 +261,8 @@ class ConvolutionUnary(ExternKernelAlloc):
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
+            op_overload=self.op_overload,
+            raw_args=[*self.inputs, *self.constant_args],
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -335,6 +337,8 @@ class ConvolutionBinary(ExternKernelAlloc):
             self.cpp_op_schema,
             self.cpp_kernel_key,
             self.cpp_kernel_overload_name,
+            self.op_overload,
+            [*self.inputs, *self.constant_args],
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -428,6 +432,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             self.cpp_op_schema,
             self.cpp_kernel_key,
             self.cpp_kernel_overload_name,
+            self.op_overload,
+            [*self.inputs, *self.constant_args],
         )
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
