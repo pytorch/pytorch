@@ -468,6 +468,8 @@ class Tensor(torch._C.TensorBase):
                     _internal=True,
                 )  # type: ignore[assignment]
 
+            # TODO: remove hasattr, it's a hack to support versions of torch that
+            # don't have _subclasses
             if (
                 hasattr(torch, "_subclasses")
                 and isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
