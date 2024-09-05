@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import dataclasses
 import enum
 import functools
 import inspect
@@ -39,6 +40,7 @@ from ..utils import (
     check_constant_args,
     get_custom_getattr,
     has_torch_function,
+    is_frozen_dataclass,
     is_namedtuple_cls,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -452,6 +454,40 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(items, self.value)
+        elif is_frozen_dataclass(self.value) and self.is_standard_new():
+            from .builder import SourcelessBuilder
+
+            fields = dataclasses.fields(self.value)
+            items = list(args)
+            items.extend([None] * (len(fields) - len(items)))
+
+            default_kwargs = {}
+            for field, var_tracker in zip(fields, items):
+                if var_tracker is None:
+                    if field.name in kwargs:
+                        var_tracker = kwargs[field.name]
+                    else:
+                        if not field.init:
+                            continue
+
+                        if field.default is not dataclasses.MISSING:
+                            var_tracker = SourcelessBuilder.create(tx, field.default)
+                        elif field.default_factory is not dataclasses.MISSING:
+                            factory_fn = SourcelessBuilder.create(
+                                tx, field.default_factory
+                            )
+                            var_tracker = factory_fn.call_function(tx, [], {})
+                        else:
+                            # if we are subclass, the constructor could possibly
+                            # be missing args
+                            continue
+
+                    default_kwargs[field.name] = var_tracker
+            kwargs.update(default_kwargs)
+
+            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
+            var.call_method(tx, "__init__", args, kwargs)
+            return var
         elif (
             self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
@@ -1173,6 +1209,54 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx,
             ODictGetItemSource(self.source, index),
         )(collections.OrderedDict.__getitem__(self.value, key.as_python_constant()))
+
+
+class FrozenDataClassVariable(UserDefinedObjectVariable):
+    @staticmethod
+    def create(tx, value, source):
+        from dataclasses import fields
+
+        assert is_frozen_dataclass(value)
+
+        from .builder import VariableBuilder
+
+        field_map = {}
+        for field in fields(value):
+            if hasattr(value, field.name):
+                field_map[field.name] = VariableBuilder(
+                    tx, AttrSource(source, field.name)
+                )(getattr(value, field.name))
+
+        return FrozenDataClassVariable(value, fields=field_map, source=source)
+
+    def __init__(self, value, fields=None, **kwargs) -> None:
+        super().__init__(value, **kwargs)
+        if fields is None:
+            fields = {}
+        self.fields = fields
+
+    def as_proxy(self):
+        from dataclasses import fields
+
+        args = []
+        kwargs = {}
+        for field in fields(self.value):
+            proxy = self.fields[field.name].as_proxy()
+            if hasattr(field, "kw_only") and field.kw_only:
+                kwargs[field.name] = proxy
+            else:
+                args.append(proxy)
+
+        return self.python_type()(*args, **kwargs)
+
+    # NB: This is called during __init__ for a frozen dataclass
+    # use this to accumulate the most up-to-date field values
+    def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
+        self.fields[name.as_python_constant()] = value
+        return super().method_setattr_standard(tx, name, value)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.value_type.__name__})"
 
 
 class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
