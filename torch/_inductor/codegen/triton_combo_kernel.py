@@ -663,7 +663,7 @@ class ComboKernel(Kernel):
         for num, sub_kernel in enumerate(self.sub_kernels):
             # TODO: we assume all sub_kernels have the same block size
             for tree in sub_kernel.range_trees:
-                if tree.prefix == "r" and (
+                if tree.is_reduction and (
                         not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
                         ):
                     continue

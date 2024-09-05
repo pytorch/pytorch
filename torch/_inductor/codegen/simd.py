@@ -441,7 +441,7 @@ class SIMDKernel(Kernel):
             if tree.tensor_dim is None:
                 continue
 
-            if tree.prefix != "r" or self.inside_reduction:
+            if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
 
@@ -718,7 +718,7 @@ class SIMDKernel(Kernel):
 
     def active_range_trees(self, reorder=False):
         trees = [
-            t for t in self.range_trees if t.prefix != "r" or self.inside_reduction
+            t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
         if reorder and len(trees) > 1:
             count = sum(t.prefix in "xyz" for t in trees)
