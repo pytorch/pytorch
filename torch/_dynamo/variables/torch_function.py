@@ -220,6 +220,9 @@ class TorchFunctionModeVariable(ContextWrappingVariable):
             args,
             kwargs,
         )
+    
+    def _call_func(self, tx: "InstructionTranslator", values):
+        unimplemented("enter/exit for torch function mode NYI")
 
 
 def _get_all_args(args, kwargs):
