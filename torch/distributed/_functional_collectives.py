@@ -1142,7 +1142,6 @@ def broadcast_inplace(
     return tensor.copy_(broadcast(tensor, src, group, tag))
 
 
-
 from torch.distributed.distributed_c10d import (
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
