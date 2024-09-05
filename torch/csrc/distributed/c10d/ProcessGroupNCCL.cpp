@@ -1093,8 +1093,18 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
     std::future<bool>& fut,
     const std::chrono::milliseconds& timeOutMilSec,
     const std::string& futDescription,
-    bool throwException) {
+    bool throwException,
+    bool log) {
   std::string errorMsg;
+
+  ::c10d::C10dLoggingData data;
+  if (log) {
+    data.integers["pg_id"] = local_id_;
+    data.integers["rank"] = rank_;
+    data.integers["global_rank"] = globalRank();
+    data.strings["flight_recorder_version"] = c10d::version_val_str;
+  }
+
   TORCH_CHECK(fut.valid(), "Expected a valid future");
   std::future_status status = fut.wait_for(timeOutMilSec);
   if (status == std::future_status::ready) {
@@ -1105,20 +1115,31 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
       if (result) {
         LOG(INFO) << logPrefix()
                   << "future is successfully executed for: " << futDescription;
+        if (log) {
+          data.strings["status"] = "SUCCESS";
+        }
       }
     } catch (const std::exception& e) {
       errorMsg = c10::str(
           logPrefix(),
-          "Exception thrown when waitng for future ",
+          "Exception thrown when waiting for future ",
           futDescription,
           ": ",
           e.what());
+      if (log) {
+        data.strings["status"] = "EXCEPTION";
+        data.strings["exception"] = e.what();
+      }
       LOG(ERROR) << errorMsg;
     } catch (...) {
       errorMsg = c10::str(
           logPrefix(),
-          "Unknown exception thrown when waitng for future ",
+          "Unknown exception thrown when waiting for future ",
           futDescription);
+      if (log) {
+        data.strings["status"] = "EXCEPTION";
+        data.strings["exception"] = "Unknown exception";
+      }
       LOG(ERROR) << errorMsg;
     }
   } else {
@@ -1129,7 +1150,14 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
         " timed out after ",
         timeOutMilSec.count(),
         " ms");
+    data.strings["status"] = "TIMEOUT";
     LOG(ERROR) << errorMsg;
+  }
+  if (log) {
+    auto logger = c10d::C10dLogger::getLogger();
+    if (logger) {
+      logger->log(data);
+    }
   }
   if (throwException && !errorMsg.empty()) {
     C10_THROW_ERROR(DistBackendError, errorMsg);
@@ -1204,7 +1232,8 @@ void ProcessGroupNCCL::shutdown(std::optional<std::string> reason) {
   std::future<bool> fut = std::async(
       std::launch::async, [this, &reason]() { return this->abort(reason); });
 
-  waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
+  waitForFutureOrTimeout(
+      fut, options_->timeout, "ProcessGroup abort", true, false);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
 
   // We need to wait for abort to finish before we can safely shut down
@@ -1466,11 +1495,13 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     std::future<bool> asyncDebugDump = std::async(
         std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
 
-    // wait for the dump until timeout
+    // wait for the dump until timeout - log data
     waitForFutureOrTimeout(
         asyncDebugDump,
         std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
-        "Flight recorder dump in heartbeatMonitor");
+        "Flight recorder dump in heartbeatMonitor",
+        false,
+        true);
   }
 
   if (get_gil_checker() != nullptr) {

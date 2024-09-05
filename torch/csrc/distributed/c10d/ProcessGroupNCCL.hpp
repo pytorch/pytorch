@@ -902,7 +902,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
       const std::string& futDescription,
-      bool throwException = false);
+      bool throwException = false,
+      bool log = false);
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
