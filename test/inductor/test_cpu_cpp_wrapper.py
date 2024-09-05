@@ -88,8 +88,6 @@ if TEST_WITH_ROCM:
     )
 if config.abi_compatible:
     xfail_list = [
-        "test_dynamic_qlinear_cpu",
-        "test_dynamic_qlinear_qat_cpu",
         "test_lstm_packed_change_input_sizes_cpu",
         "test_qconv2d_add_cpu",
         "test_qconv2d_add_relu_cpu",
@@ -97,12 +95,6 @@ if config.abi_compatible:
         "test_qconv2d_dequant_promotion_cpu",
         "test_qconv2d_maxpool2d_linear_dynamic_cpu",
         "test_qconv2d_relu_cpu",
-        "test_qlinear_cpu",
-        "test_qlinear_add_cpu",
-        "test_qlinear_add_relu_cpu",
-        "test_qlinear_dequant_promotion_cpu",
-        "test_qlinear_gelu_cpu",
-        "test_qlinear_relu_cpu",
         *[
             func
             for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
@@ -325,11 +317,13 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
-                [
+                None
+                if config.abi_compatible
+                else [
                     "op_onednn_qconv2d_pointwise_.call",
                     "op_quantized_max_pool2d_.call",
                     "op_onednn_qlinear_pointwise_tensor.call",
-                ]
+                ],
             ],
         ),
         BaseTest(
