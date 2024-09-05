@@ -606,7 +606,6 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
         ctx.param_group = param_group
-        ctx.set_materialize_grads(False)
         return inputs
 
     @staticmethod
