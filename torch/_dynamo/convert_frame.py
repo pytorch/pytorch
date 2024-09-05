@@ -917,6 +917,8 @@ def _compile(
         except Exception as e:
             fail_type = str(type(e))
             fail_reason = str(e)
+            # NB: e's msg is mutated here to add user stack, but we DON'T want
+            # that stack in the Scuba logged fail_reason
             exception_handler(e, code, frame, export=export)
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
@@ -938,9 +940,9 @@ def _compile(
                 raise
             else:
                 # Rewrap for clarity
-                raise InternalTorchDynamoError(str(e)).with_traceback(
-                    e.__traceback__
-                ) from None
+                raise InternalTorchDynamoError(
+                    f"{type(e).__qualname__}: {str(e)}"
+                ).with_traceback(e.__traceback__) from None
         finally:
             if tracer:
                 tracer.output.local_scope = {}
