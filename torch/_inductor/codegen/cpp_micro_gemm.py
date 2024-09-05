@@ -126,6 +126,10 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
+        ZPS: ir.Buffer,
+        actual_N: int,
+        k_start: int,
+        q_group_size: int,
     ) -> str:
         """
         Generate the code for calling the templated kernel that computes
@@ -143,6 +147,19 @@ inline void {{kernel_name}}(
         res = IndentedBuffer()
         res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
         with res.indent():
+            if ZPS is not None:
+                # int4 GPTQ WoQ GEMM
+                assert (
+                    self.input_dtype is torch.bfloat16
+                    and self.input2_dtype is torch.int32
+                )
+                ZPS_ptr = f"&({kernel.index(ZPS, [0, 0])})"
+                res.writeline(f"{ZPS_ptr},")
+                res.writeline(f"{actual_N},")
+                res.writeline(f"{k_start},")
+                res.writeline(f"{q_group_size},")
+                # in case of int4 GPTQ WoQ GEMM, ldb is 32
+                ldb = self.register_blocking.block_n // 2
             extra_args = self.get_kernel_extra_args()
             if extra_args:
                 res.writeline(extra_args)
@@ -479,25 +496,8 @@ inline void {{kernel_name}}_kernel(
 class CppMicroGemmInt4WoQVec(CppMicroGemmFP32Vec):
     """
     This class generates the code for int4 WoQ micro gemm using AVX512 intrinsics.
+    It is based on the corresponding ATen kernel.
     """
-
-    DECLARE_KERNEL = r"""
-template <bool accum>
-inline void {{kernel_name}}(
-{%- if kernel_extra_args_declare %}
-    {{kernel_extra_args_declare}}
-{%- endif %}
-    const {{input_t}}* {{restrict_keyword}} A,
-    const {{input2_t}}* {{restrict_keyword}} B,
-    {{output_t}}* {{restrict_keyword}} C,
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t lda,
-    int64_t ldb,
-    int64_t ldc
-)
-"""
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
@@ -716,59 +716,9 @@ inline void {{kernel_name}}_kernel(
 }
 """
 
-    def codegen_call(  # type: ignore[override]
-        self,
-        kernel: CppTemplateKernel,
-        X: ir.Buffer,
-        W: ir.Buffer,
-        Y: ir.Buffer,
-        accum: bool,
-        ZPS: ir.Buffer,
-        actual_N: int,
-        k_start: int,
-        q_group_size: int,
-    ) -> str:
-        """
-        Generate the code for calling the templated kernel that computes
-        `C += A @ B` if `accum` is True, or `C = A @ B` otherwise.
-        """
-        X_ptr = f"&({kernel.index(X, [0, 0])})"
-        W_ptr = f"&({kernel.index(W, [0, 0])})"
-        ZPS_ptr = f"&({kernel.index(ZPS, [0, 0])})"
-        Y_ptr = f"&({kernel.index(Y, [0, 0])})"
-        M = kernel.size(Y, 0)
-        N = kernel.size(Y, 1)
-        K = kernel.size(X, 1)
-        lda = kernel.stride(X, 0)
-        ldb = self.register_blocking.block_n // 2
-        ldc = kernel.stride(Y, 0)
-        res = IndentedBuffer()
-        res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
-        with res.indent():
-            extra_args = self.get_kernel_extra_args()
-            if extra_args:
-                res.writeline(extra_args)
-            res.writeline(f"{X_ptr},")
-            res.writeline(f"{W_ptr},")
-            res.writeline(f"{Y_ptr},")
-            res.writeline(f"{M},")
-            res.writeline(f"{N},")
-            res.writeline(f"{K},")
-            res.writeline(f"{lda},")
-            res.writeline(f"{ldb},")
-            res.writeline(f"{ldc},")
-            res.writeline(f"{ZPS_ptr},")
-            res.writeline(f"{actual_N},")
-            res.writeline(f"{k_start},")
-            res.writeline(f"{q_group_size}")
-        res.writeline(");")
-        return res.getvalue()
-
     def get_kernel_extra_args_declare(self) -> str:
-        return "const {{input_t}}* {{restrict_keyword}} ZPS,\n\tint64_t actual_N,\n\tint64_t k_start,\n\tint64_t q_group_size,"
+        return "const bfloat16* __restrict__ ZPS,\nint64_t actual_N,\nint64_t k_start,\nint64_t q_group_size,"
 
-    def get_kernel_extra_args(self) -> str:
-        return "ZPS,\n\tactual_N,\n\tk_start,\n\tq_group_size,"
 
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads, q_group_size=None):

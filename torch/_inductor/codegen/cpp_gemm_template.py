@@ -165,9 +165,9 @@ extern "C" {{export_declaration}}
                             {{ micro_gemm.codegen_call(kernel,
                                                        tile_X,
                                                        tile_W,
-                                                       tile_ZPS_2d,
                                                        acc_slice,
                                                        accum=False,
+                                                       ZPS=tile_ZPS_2d,
                                                        actual_N=N,
                                                        k_start="k_start",
                                                        q_group_size=q_group_size)|indent(28, false)
@@ -176,9 +176,9 @@ extern "C" {{export_declaration}}
                             {{ micro_gemm.codegen_call(kernel,
                                                        tile_X,
                                                        tile_W,
-                                                       tile_ZPS_2d,
                                                        acc_slice,
                                                        accum=True,
+                                                       ZPS=tile_ZPS_2d,
                                                        actual_N=N,
                                                        k_start="k_start",
                                                        q_group_size=q_group_size)|indent(28, false)
