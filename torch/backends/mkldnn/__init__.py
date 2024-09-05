@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 import torch
 from torch.backends import (
     __allow_nonbracketed_mutation,
+    _FP32Precision,
     _get_fp32_precision,
     _set_fp32_precision,
     ContextProp,
-    FP32Precision,
     PropModule,
 )
 
@@ -82,7 +82,7 @@ def set_flags(_enabled=None, _deterministic=None, _fp32_precision=None):
     if _deterministic is not None:
         torch._C._set_mkldnn_deterministic(_deterministic)
     if _fp32_precision is not None:
-        torch._C._set_fp32_precision(_fp32_precision, "mkldnn", "all")
+        torch._C._set_fp32_precision("mkldnn", "all", _fp32_precision)
     return orig_flags
 
 
@@ -105,9 +105,9 @@ class MkldnnModule(PropModule):
     deterministic = ContextProp(
         torch._C._get_mkldnn_deterministic, torch._C._set_mkldnn_deterministic
     )
-    matmul = FP32Precision("mkldnn", "matmul")
-    conv = FP32Precision("mkldnn", "conv")
-    rnn = FP32Precision("mkldnn", "rnn")
+    matmul = _FP32Precision("mkldnn", "matmul")
+    conv = _FP32Precision("mkldnn", "conv")
+    rnn = _FP32Precision("mkldnn", "rnn")
     fp32_precision = ContextProp(
         _get_fp32_precision("mkldnn", "all"), _set_fp32_precision("generic", "all")
     )
