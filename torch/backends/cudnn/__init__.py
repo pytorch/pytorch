@@ -8,10 +8,10 @@ from typing import Optional
 import torch
 from torch.backends import (
     __allow_nonbracketed_mutation,
+    _FP32Precision,
     _get_fp32_precision,
     _set_fp32_precision,
     ContextProp,
-    FP32Precision,
     PropModule,
 )
 
@@ -156,7 +156,7 @@ def set_flags(
     if _allow_tf32 is not None:
         torch._C._set_cudnn_allow_tf32(_allow_tf32)
     if _fp32_precision is not None:
-        torch._C._set_fp32_precision(_fp32_precision, "cuda", "all")
+        torch._C._set_fp32_precision("cuda", "all", _fp32_precision)
     return orig_flags
 
 
@@ -211,8 +211,8 @@ class CudnnModule(PropModule):
     allow_tf32 = ContextProp(
         torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32
     )
-    conv = FP32Precision("cuda", "conv")
-    rnn = FP32Precision("cuda", "rnn")
+    conv = _FP32Precision("cuda", "conv")
+    rnn = _FP32Precision("cuda", "rnn")
     fp32_precision = ContextProp(
         _get_fp32_precision("cuda", "all"), _set_fp32_precision("cuda", "all")
     )

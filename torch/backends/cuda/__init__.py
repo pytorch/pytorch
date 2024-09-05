@@ -142,7 +142,7 @@ class cuBLASModule:
         elif name == "allow_bf16_reduced_precision_reduction":
             return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
         elif name == "fp32_precision":
-            return torch._C._set_fp32_precision(value, "cuda", "matmul")
+            return torch._C._set_fp32_precision("cuda", "matmul", value)
         raise AttributeError("Unknown attribute " + name)
 
 
