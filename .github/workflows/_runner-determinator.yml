@@ -341,7 +341,7 @@ jobs:
                       # for easy reading
                       # Note: Using ascii for the backtick so that the cat step in _runner-determinator.yml doesn't choke on
                       #       the backtick character in shell commands.
-                      backtick = chr(96)
+                      backtick = chr(96)  # backtick character
                       settings_text = settings_text.strip(f"\r\n\t{backtick} ")
                       settings = load_yaml(settings_text)
 
