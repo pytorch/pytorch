@@ -339,7 +339,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
 
-        self._storage_to_base: Dict[
+        self._storage_to_base: weakref.WeakKeyDictionary[
             torch.storage.UntypedStorage, Optional[FunctionalTensor]
         ] = weakref.WeakKeyDictionary()
 
