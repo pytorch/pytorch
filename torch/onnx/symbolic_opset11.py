@@ -943,7 +943,6 @@ def index(g: jit_utils.GraphContext, self, index):
 
 @_onnx_symbolic("aten::index_fill")
 def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
@@ -955,7 +954,6 @@ def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
 
 @_onnx_symbolic("aten::index_copy")
 def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
     _, expanded_index = symbolic_helper._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
 

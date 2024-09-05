@@ -5110,7 +5110,6 @@ def meta__scaled_dot_product_cudnn_attention(
     H = query.size(1)
     S_Q = query.size(2)
     S_KV = key.size(2)
-    D_QK = query.size(-1)
     D_V = value.size(-1)
 
     res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
@@ -5182,7 +5181,6 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
-    head_dim = query.size(3)
 
     attention = torch.empty_like(query)
     logsumexp = torch.empty(
@@ -5264,9 +5262,7 @@ def meta__scaled_dot_product_efficient_attention(
 
     B = query.size(0)
     M = query.size(1)
-    N = key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
     Kv = value.size(-1)
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
@@ -5498,7 +5494,6 @@ def meta__efficient_attention_forward(
     M = query.size(1)
     N = key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
     Kv = value.size(-1)
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)

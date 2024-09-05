@@ -2434,7 +2434,6 @@ def _automatic_dynamic(
     def update_frame_state(size, stride):
         # Intentionally shadow e from parent scope so it is not accidentally
         # called
-        e = None
         frame_state_entry = None
         if name not in tx.output.frame_state:
             # If there is no entry for this source, add the tensor to frame state with its current static size.

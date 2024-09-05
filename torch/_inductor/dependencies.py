@@ -461,7 +461,6 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
-        free_symbols = index.free_symbols
         index_vars = [*var_ranges.keys()]
         sizes = tuple(var_ranges.values())  # type: ignore[assignment]
         new_sizes, reindex, _ = V.graph.sizevars._simplify_loops(

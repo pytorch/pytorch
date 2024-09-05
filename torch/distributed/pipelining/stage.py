@@ -718,7 +718,7 @@ class _PipelineStageBase(ABC):
                     "param_groups": param_groups,
                     "full_backward": False,
                 }
-                weight_grads, _ = self.backward_maybe_with_nosync("weight", bwd_kwargs)
+                self.backward_maybe_with_nosync("weight", bwd_kwargs)
             else:
                 # TODO: figure out a better way to do this:
                 # if inputs does not require gradient,

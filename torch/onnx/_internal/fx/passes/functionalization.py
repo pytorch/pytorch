@@ -84,14 +84,11 @@ class Functionalize(_pass.Transform):
                 out = function(*inputs_functional)
             finally:
                 torch._disable_functionalization()
-            # FIXME(rec): this next variable seems not to be used
-            flat_inputs = pytree.tree_leaves(inputs)
+
             flat_inputs_functional = pytree.tree_leaves(inputs_functional)
             for input_functional in flat_inputs_functional:
                 if isinstance(input_functional, torch.Tensor):
                     torch._sync(input_functional)
-                    # FIXME(rec): this next variable seems not to be used
-                    inpt_new = torch._from_functional_tensor(input_functional)
             pytree.tree_map(torch._sync, out)
             out_unwrapped = pytree.tree_map(torch._from_functional_tensor, out)
             return out_unwrapped

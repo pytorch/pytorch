@@ -43,6 +43,7 @@ class PackagePickler(_Pickler):
         # forces us to copy/paste this function. The only change is marked
         # CHANGED below.
         write = self.write  # type: ignore[attr-defined]
+        # pylint: disable-next=unused-variable
         memo = self.memo  # type: ignore[attr-defined]
 
         # CHANGED: import module from module environment instead of __import__

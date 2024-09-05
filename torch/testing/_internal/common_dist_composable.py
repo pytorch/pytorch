@@ -107,7 +107,8 @@ class NestedSequentialModel(nn.Module):
             ),
         )
 
-        # FIXME(rec): this is not a method, it's a local function inside __init__
+        # FIXME(rec): forward() is not a method, it's a local function inside __init__
         # that is never used. It should probabkly be outdented by four spaces, or removed.
+        # pylint: disable-next=unused-variable
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.seq2(self.lin(self.seq1(x)))

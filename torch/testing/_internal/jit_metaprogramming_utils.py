@@ -514,10 +514,11 @@ def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name
     args_variable, _ = create_input(args)
 
     self_tensor = deepcopy(self_variable.data)
-    # FIXME(rec): args_tensor, f_args_tensor not used
+    # pylint: disable-next=unused-variable
     args_tensor = deepcopy(unpack_variables(args_variable))
 
     f_args_variable = (self_variable,) + args_variable
+    # pylint: disable-next=unused-variable
     f_args_tensor = (self_tensor,) + args_tensor
     with torch._jit_internal._disable_emit_hooks():
         script_fn, inputs = gen_script_fn_and_args(name, "nn_functional", *f_args_variable)

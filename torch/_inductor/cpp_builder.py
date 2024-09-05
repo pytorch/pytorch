@@ -216,7 +216,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
                         "Please use icx-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
                     )
         return is_intel_compiler
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         return False
     except subprocess.SubprocessError:
         # --version args not support.
@@ -825,7 +825,7 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
         omp_path = os.path.join(output.rstrip(), omp_name)
         if os.path.isfile(omp_path):
             os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-            omp_module = cdll.LoadLibrary(omp_path)
+            cdll.LoadLibrary(omp_path)
     except subprocess.SubprocessError:
         pass
 
@@ -841,7 +841,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
             omp_path = output.rstrip()
             if os.path.isfile(omp_path):
                 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-                omp_module = cdll.LoadLibrary(omp_path)
+                cdll.LoadLibrary(omp_path)
                 return True
         except subprocess.SubprocessError:
             pass

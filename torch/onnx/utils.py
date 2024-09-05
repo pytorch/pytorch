@@ -1622,7 +1622,7 @@ def _export(
                     proto,
                     export_map,
                     val_use_external_data_format,
-                    node_names,
+                    _,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     {},
                     opset_version,

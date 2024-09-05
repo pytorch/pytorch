@@ -1446,6 +1446,7 @@ class AlgorithmSelectorCache(PersistentCache):
             print(f"{len(choices)} tuning requests:")
 
         # FIXME(rec): This doesn't seem to be used
+        # pylint: disable-next=unused-variable
         def debug_str(example_inputs, out):
             def tensor_repr(x):
                 return (

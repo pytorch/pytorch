@@ -236,6 +236,7 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
         ns, name = parse_namespace(qualname)
 
         # This also checks whether the refered torch::class_ exists.
+        # pylint: disable-next=unused-variable
         torchbind_class = torch._C._get_custom_class_python_wrapper(ns, name)
 
         from_method = getattr(fake_class, _CONVERT_FROM_REAL_NAME, None)

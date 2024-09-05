@@ -388,7 +388,7 @@ class _Comptime:
         """
 
         def inner(inner_ctx):
-            ctx = inner_ctx.parent()
+            ctx = inner_ctx.parent()  # pylint: disable=unused-variable
             builtins.breakpoint()
 
         comptime(inner)
