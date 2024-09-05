@@ -172,6 +172,35 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("in_features", (1000,))
+    @parametrize("out_features", (1024,))
+    @parametrize("bias", (True,))
+    @dtypes(
+        torch.float,
+    )
+    def test_linear_wgt_multi_users(self, in_features, out_features, bias, dtype):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.embeddings = torch.nn.Embedding(out_features, in_features)
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.linear.weight = self.embeddings.weight
+
+            def forward(self, x):
+                x = self.embeddings(x)
+                return self.linear(x)
+
+        counters.clear()
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        v = torch.LongTensor([[1, 2, 4, 5], [4, 3, 2, 9]])
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("bias", (True, False))
     @dtypes(torch.float)
     def test_linear_input_transpose(self, bias, dtype):
