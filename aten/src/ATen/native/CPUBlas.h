@@ -192,12 +192,7 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 // C = alpha * SUM(A[i] x B[i]) + beta * C, i = 0 to batch size
 // A Base pointer to a tensor A.
 // B Base pointer to a tensor B.
-// Byte offsets vector of pairs of tensors A and B offsets for
-//     each batch. The number of batches must coincide with the
-//     `batch_size` value passed at object construction stage.
 // C Pointer to a tensor C (accumulation buffer).
-// scratchpad Pointer to a scratchpad buffer.
-// Currently, only brgemm with batch size = 1 will be used
 TORCH_API void brgemm(
     int64_t M,
     int64_t N,
