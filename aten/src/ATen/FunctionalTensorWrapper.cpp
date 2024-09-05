@@ -787,8 +787,11 @@ void mutate_view_meta(const at::Tensor& self, const functionalization::ViewMeta&
 // calls each {view} reference implementations with meta tensors.
 // The output meta tensor's stride info serves as a reference for what the correct strides should be.
 void set_sizes_strides_offset(const Tensor& out, const Tensor& reference_out) {
+  out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides(), reference_out.sym_storage_offset());
+
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(out));
   auto value = from_functional_tensor(out);
+
   value.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides(), reference_out.sym_storage_offset());
 }
 
