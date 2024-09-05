@@ -147,20 +147,15 @@ extern "C" {{export_declaration}}
                 for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
                     int64_t k_start = kc * Kr;
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
-                    {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
+{%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
-                        {%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
-                        {%- if w_scale_zp is not none %}
+{%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- if w_scale_zp is not none %}
                         int64_t zp_end = k_end / q_group_size;
                         int64_t zp_start = k_start / q_group_size;
-                            {%- set tile_ZPS_2d = kernel.slice_nd(w_scale_zp, [("zp_start", "zp_end"), ("nci * 2 * Nr", "(nci + 1) * 2 * Nr")]) %}
-                            {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
-                            {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n // 8]) %}
-                        {%- else %}
-                            {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
-                            {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
-                        {%- endif %}
-                        {%- if w_scale_zp is not none %}
+    {%- set tile_ZPS_2d = kernel.slice_nd(w_scale_zp, [("zp_start", "zp_end"), ("nci * 2 * Nr", "(nci + 1) * 2 * Nr")]) %}
+    {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
+    {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n // 8]) %}
                         if (kc == k_block_start) {
                             {{ micro_gemm.codegen_call(kernel,
                                                        tile_X,
@@ -184,7 +179,9 @@ extern "C" {{export_declaration}}
                                                        q_group_size=q_group_size)|indent(28, false)
                             }}
                         }
-                        {%- else %}
+{%- else %}
+    {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
+    {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                         if (kc == k_block_start) {
                             {{ micro_gemm.codegen_call(kernel,
                                                        tile_X,
@@ -200,7 +197,7 @@ extern "C" {{export_declaration}}
                                                        accum=True)|indent(28, false)
                             }}
                         }
-                    {%- endif %}
+{%- endif %}
                     }
                 }
 {%- if maybe_k_slicing %}
@@ -463,7 +460,7 @@ class CppPackedGemmTemplate(CppTemplate):
             # Step 1: Decide Kc assuming B block is L1-reside.
             size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
             if self.is_int4_woq_gemm:
-                size_cache_B = size_cache_B / 2
+                size_cache_B = size_cache_B / 8
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
@@ -696,6 +693,8 @@ class CppPackedGemmTemplate(CppTemplate):
                         .contiguous()
                     )
                 if micro_gemm.get_b_layout() != LayoutType.NORMAL:
+                    # AMX requires a specific layout for tiles of the B matrix for correctness.
+                    # Ref: Intel® 64 and IA-32 Architectures Optimization Reference Manual: Volume 1 section 20.5.3
                     layout_str = (
                         "VNNI4"
                         if micro_gemm.get_b_layout() == LayoutType.VNNI4
