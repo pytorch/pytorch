@@ -31,7 +31,7 @@ concurrency:
 jobs:
   build-wheel:
     name: "Build Triton Wheel"
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: [self-hosted, linux.4xlarge]
     strategy:
       fail-fast: false
       matrix:
