@@ -5854,6 +5854,12 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         out = f(x)
         self.assertEqual(torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0]), out[0])
 
+    def test_raw_function_ctx(self):
+        @torch.compile(backend="eager")
+        def f():
+            _ = torch.autograd.function.FunctionCtx()
+        f()
+
 
 instantiate_parametrized_tests(ReproTests)
 
