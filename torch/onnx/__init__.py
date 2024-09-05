@@ -44,7 +44,6 @@ __all__ = [
     "DiagnosticOptions",
     "ExportOptions",
     "ONNXProgram",
-    "ONNXProgramSerializer",
     "ONNXRuntimeOptions",
     "InvalidExportOptionsError",
     "OnnxExporterError",
@@ -109,7 +108,6 @@ from ._internal._exporter_legacy import (  # usort: skip. needs to be last to av
     DiagnosticOptions,
     ExportOptions,
     ONNXProgram,
-    ONNXProgramSerializer,
     ONNXRuntimeOptions,
     InvalidExportOptionsError,
     OnnxExporterError,
@@ -127,7 +125,6 @@ ExportTypes.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
 ExportOptions.__module__ = "torch.onnx"
 ONNXProgram.__module__ = "torch.onnx"
-ONNXProgramSerializer.__module__ = "torch.onnx"
 ONNXRuntimeOptions.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
 InvalidExportOptionsError.__module__ = "torch.onnx"

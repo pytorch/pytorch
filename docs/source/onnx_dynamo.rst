@@ -28,7 +28,6 @@ The exporter is designed to be modular and extensible. It is composed of the fol
   - **FX Graph Extractor**: :class:`FXGraphExtractor` extracts the FX graph from the PyTorch model.
   - **Fake Mode**: :class:`ONNXFakeContext` is a context manager that enables fake mode for large scale models.
   - **ONNX Program**: :class:`ONNXProgram` is the output of the exporter that contains the exported ONNX graph and diagnostics.
-  - **ONNX Program Serializer**: :class:`ONNXProgramSerializer` serializes the exported model to a file.
   - **ONNX Diagnostic Options**: :class:`DiagnosticOptions` has a set of options that control the diagnostics emitted by the exporter.
 
 Dependencies
@@ -142,9 +141,6 @@ API Reference
 .. autofunction:: torch.onnx.enable_fake_mode
 
 .. autoclass:: torch.onnx.ONNXProgram
-    :members:
-
-.. autoclass:: torch.onnx.ONNXProgramSerializer
     :members:
 
 .. autoclass:: torch.onnx.ONNXRuntimeOptions
