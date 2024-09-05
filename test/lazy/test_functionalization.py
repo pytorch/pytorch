@@ -95,7 +95,6 @@ IR {
         )
 
     def test_storage_offset_after_slice(self):
-
         def run(device):
             base = torch.rand(10).to(device)
             view = base[2:]
