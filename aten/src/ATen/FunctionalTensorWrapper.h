@@ -165,7 +165,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     was_storage_changed_ = true;
   }
 
-  // A tensor is a considered base, if its not a view of another tensor.
+  // A FunctionalTensor is considered a base if its not a view of another
+  // tensor.
   bool isBaseTensor() const {
     return view_metas_.empty();
   }

@@ -664,7 +664,7 @@ void initTorchFunctions(PyObject* module) {
             !at::functionalization::impl::isFunctionalTensor(o));
         at::functionalization::impl::replace_(t, o);
       });
-  py_module.def("_is_functional_tensor_root", [](const at::Tensor& t) {
+  py_module.def("_is_functional_tensor_base", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
     return at::functionalization::impl::isBaseTensor(t);
   });
