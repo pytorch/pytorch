@@ -48,7 +48,6 @@ struct TORCH_API RawTensorMetadataBase {
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
   c10::Layout layout_{c10::Layout::Strided};
   uint32_t size_dim_{0};
-  uint32_t stride_dim_{0};
 };
 
 // Collected during profiling.

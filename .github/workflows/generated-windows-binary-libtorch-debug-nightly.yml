@@ -136,7 +136,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-debug
@@ -394,7 +394,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: libtorch-cuda11_8-shared-with-deps-debug
@@ -654,7 +654,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: libtorch-cuda12_1-shared-with-deps-debug
@@ -914,7 +914,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: libtorch-cuda12_4-shared-with-deps-debug
