@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 from torch._subclasses import FakeTensor
 from torch.ao.quantization import (
+    CUSTOM_KEY,
     NUMERIC_DEBUG_HANDLE_KEY,
     ObserverOrFakeQuantize,
     QConfigMapping,
@@ -459,11 +460,14 @@ def _maybe_insert_output_observer_for_node(
         if (
             isinstance(node, Node)
             and isinstance(new_output, Node)
-            and NUMERIC_DEBUG_HANDLE_KEY in node.meta
+            and CUSTOM_KEY in node.meta
+            and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
         ):
-            new_output.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
-                NUMERIC_DEBUG_HANDLE_KEY
-            ]
+            if CUSTOM_KEY not in new_output.meta:
+                new_output.meta[CUSTOM_KEY] = {}
+            new_output.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
+                CUSTOM_KEY
+            ][NUMERIC_DEBUG_HANDLE_KEY]
         return new_output
     return None
 

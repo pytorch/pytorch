@@ -140,7 +140,12 @@ class AutoHeuristicTest(TestCase):
     # a choice made by the heuristic might be added to the list of choices
     # and if select_algorithm now creates a new precompile key, it will be
     # different from the precompile key created by autoheuristic
-    @inductor_config.patch(autoheuristic_collect="mixed_mm", autoheuristic_use="")
+    @inductor_config.patch(
+        autoheuristic_collect="mixed_mm",
+        autoheuristic_use="",
+        fx_graph_cache=False,
+        fx_graph_remote_cache=False,
+    )
     def test_global_feedback(self):
         self.run_mixed_mm()
         path = self.get_path_to_autoheuristic_log("mixed_mm")

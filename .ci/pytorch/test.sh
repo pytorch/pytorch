@@ -6,6 +6,9 @@
 
 set -ex
 
+# Suppress ANSI color escape sequences
+export TERM=vt100
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -166,7 +169,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # Source Intel oneAPI envrioment script to enable xpu runtime related libraries
-  # refer to https://www.intel.com/content/www/us/en/docs/oneapi/programming-guide/2024-0/use-the-setvars-and-oneapi-vars-scripts-with-linux.html
+  # refer to https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-5.html
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
   # Check XPU status before testing
@@ -358,10 +361,12 @@ test_inductor_shard() {
 test_inductor_aoti() {
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-    CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    # We need to hipify before building again
+    python3 tools/amd_build/build_amd.py
   fi
+  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
 }
 
 test_inductor_cpp_wrapper_abi_compatible() {
@@ -390,7 +395,22 @@ test_inductor_cpp_wrapper_abi_compatible() {
 # .github/workflows/inductor-perf-test-nightly.yml
 DYNAMO_BENCHMARK_FLAGS=()
 
-if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
+pr_time_benchmarks() {
+
+  pip_install --user "fbscribelogger"
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  echo "benchmark results on current PR: "
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+
+}
+
+if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
+  pr_time_benchmarks
+  exit 0
+elif [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend eager)
 elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
@@ -486,6 +506,12 @@ test_perf_for_dashboard() {
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
+        if [[ "$target" == "accuracy" ]]; then
+          # Also collect Export pass rate and display as a separate row
+          $TASKSET python "benchmarks/dynamo/$suite.py" \
+              "${target_flag[@]}" --"$mode" --"$dtype" --export --disable-cudagraphs "$@" \
+              --output "$TEST_REPORTS_DIR/${backend}_export_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+        fi
         TORCHINDUCTOR_ABI_COMPATIBLE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
@@ -549,10 +575,10 @@ test_single_dynamo_benchmark() {
     fi
 
     if [[ "${TEST_CONFIG}" == *_avx2* ]]; then
-      TEST_CONFIG=${TEST_CONFIG::-5}
+      TEST_CONFIG=${TEST_CONFIG//_avx2/}
     fi
     if [[ "${TEST_CONFIG}" == *_avx512* ]]; then
-      TEST_CONFIG=${TEST_CONFIG::-7}
+      TEST_CONFIG=${TEST_CONFIG//_avx512/}
     fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
@@ -639,8 +665,7 @@ test_inductor_torchbench_smoketest_perf() {
   # https://github.com/pytorch/pytorch/actions/runs/7158691360/job/19491437314,
   # and thus we lower its threshold to reduce flakiness. If this continues to be a problem,
   # we switch to use some other model.
-  # lowering threshold from 4.9 to 4.7 for cu124. Will bump it up after cuda 12.4.0->12.4.1 update
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.7
+  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.9
 
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do
@@ -664,7 +689,7 @@ test_inductor_torchbench_smoketest_perf() {
 }
 
 test_inductor_get_core_number() {
-  if [[ "${TEST_CONFIG}" == *aarch64 ]]; then
+  if [[ "${TEST_CONFIG}" == *aarch64* ]]; then
     echo "$(($(lscpu | grep 'Cluster(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per cluster:' | awk '{print $4}')))"
   else
     echo "$(($(lscpu | grep 'Socket(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per socket:' | awk '{print $4}')))"
@@ -674,11 +699,16 @@ test_inductor_get_core_number() {
 test_inductor_set_cpu_affinity(){
   #set jemalloc
   JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
-  IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
-  export LD_PRELOAD="$JEMALLOC_LIB":"$IOMP_LIB":"$LD_PRELOAD"
+  export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
-  export KMP_AFFINITY=granularity=fine,compact,1,0
-  export KMP_BLOCKTIME=1
+
+  if [[ "${TEST_CONFIG}" != *aarch64* ]]; then
+    # Use Intel OpenMP for x86
+    IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
+    export LD_PRELOAD="$IOMP_LIB":"$LD_PRELOAD"
+    export KMP_AFFINITY=granularity=fine,compact,1,0
+    export KMP_BLOCKTIME=1
+  fi
   cores=$(test_inductor_get_core_number)
   export OMP_NUM_THREADS=$cores
   end_core=$((cores-1))
@@ -1449,9 +1479,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.8-gcc11-build ]]; then
-      # Temporarily skip test_inductor_aoti due to https://github.com/pytorch/pytorch/issues/130311
-      test_inductor_aoti
+    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.9-gcc11-build ]]; then
       test_inductor_distributed
     fi
   fi
