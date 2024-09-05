@@ -199,7 +199,7 @@ class FSDPParamGroup:
         # other parameters (e.g. loaded from the state dict).
         if self.is_sharded and not self._reset_sharded_params:
             for fsdp_param in self.fsdp_params:
-                fsdp_param.reset_sharded_param()
+                fsdp_param.reset_sharded_param(skip_same_param=True)
             self._reset_sharded_params = True
         param_names_on_meta = [
             fsdp_param._param_fqn

@@ -695,7 +695,7 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
-    def reset_sharded_param(self):
+    def reset_sharded_param(self, skip_same_param: Optional[bool] = False):
         # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
         # that change the sharded parameter tensor, we may need to re-pad the
         # sharded local tensor and re-save the reference.
@@ -707,6 +707,8 @@ class FSDPParam:
                     f"Expects swap_tensors to preserve object but got {new_param} "
                     f"instead of {self.sharded_param}"
                 )
+        elif skip_same_param:
+            return
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
