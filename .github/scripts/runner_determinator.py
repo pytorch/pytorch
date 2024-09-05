@@ -21,7 +21,7 @@ experiments which the user could be opted in to.
 
 The user list has the following rules:
 
-- Users are GitHub usernames with the @ prefix
+- Users are GitHub usernames, which must start with the @ prefix
 - Each user is also a comma-separated list of features/experiments to enable
 - A "#" prefix opts the user out of all experiments
 
@@ -273,6 +273,9 @@ def parse_settings_from_text(settings_text: str) -> Settings:
     """
     try:
         if settings_text:
+            # Escape the backtick as well so that we can have the settings in a code block on the GH issue
+            # for easy reading
+            settings_text = settings_text.strip("\r\n\t` ")
             settings = load_yaml(settings_text)
 
             # For now we just load experiments. We can expand this if/when we add more settings
@@ -345,7 +348,7 @@ def get_runner_prefix(rollout_state: str, workflow_requestors: Iterable[str], is
         if enabled:
             label = experiment_name
             if experiment_name == LF_FLEET_EXPERIMENT:
-                # We give some special treatment to the "lf" experiment since determins the fleet we use
+                # We give some special treatment to the "lf" experiment since determines the fleet we use
                 #  - If it's enabled, then we always list it's prefix first
                 #  - If we're in the canary branch, then we append ".c" to the lf prefix
                 if is_canary:

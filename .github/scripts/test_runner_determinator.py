@@ -32,6 +32,39 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             "otherExp settings not parsed correctly",
         )
 
+    def test_parse_settings_in_code_block(self):
+        settings_text = """
+
+        ```
+        experiments:
+            lf:
+                rollout_perc: 25
+            otherExp:
+                rollout_perc: 0
+
+        ```
+
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+
+        settings = rd.parse_settings(settings_text)
+
+        self.assertTupleEqual(
+            rd.Experiment(rollout_perc=25),
+            settings.experiments["lf"],
+            "lf settings not parsed correctly",
+        )
+        self.assertTupleEqual(
+            rd.Experiment(rollout_perc=0),
+            settings.experiments["otherExp"],
+            "otherExp settings not parsed correctly",
+        )
+
     def test_parse_users(self):
         settings_text = """
         experiments:
