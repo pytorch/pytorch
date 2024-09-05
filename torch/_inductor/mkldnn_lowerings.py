@@ -1047,6 +1047,10 @@ def register_onednn_fusion_ops():
                     *_, layout, x, transposed_w = mm_args(
                         x, transposed_w, layout=layout
                     )
+                    # TODO: add the check for all if use_max_autotune()
+                    req_stride_order = list(reversed(range(len(x.get_size()))))
+                    x = ir.ExternKernel.require_stride_order(x, req_stride_order)
+
                     if use_cpp_packed_gemm_template(layout, x, transposed_w):
                         CppPackedGemmTemplate.add_choices(
                             choices,
