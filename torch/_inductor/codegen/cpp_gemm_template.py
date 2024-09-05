@@ -685,17 +685,6 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
 
             def get_candidates(input_nodes, new_input_nodes):
-                # Only ConstantBuffer like weight and bias might be changed
-                candidate_nodes = [
-                    node
-                    for node in input_nodes
-                    if (
-                        node not in new_input_nodes
-                        and isinstance(node, (ir.TensorBox, ir.StorageBox))
-                        and node.get_name() in V.graph.constants
-                    )
-                ]
-
                 def node_share_storage(
                     candidate_node: ir.IRNode, new_input_nodes: List[ir.IRNode]
                 ):
@@ -712,12 +701,18 @@ class CppPackedGemmTemplate(CppTemplate):
                                 return True
                     return False
 
+                # Only ConstantBuffer like weight and bias might be changed
                 # Even the Inductor IR Node changed, may still share the storage
                 # For example: bias in bfloat16 case which only do the expand
                 return [
-                    candidate_node
-                    for candidate_node in candidate_nodes
-                    if not node_share_storage(candidate_node, new_input_nodes)
+                    node
+                    for node in input_nodes
+                    if (
+                        node not in new_input_nodes
+                        and isinstance(node, (ir.TensorBox, ir.StorageBox))
+                        and node.get_name() in V.graph.constants
+                        and not node_share_storage(node, new_input_nodes)
+                    )
                 ]
 
             for candidate_node in get_candidates(input_nodes, new_input_nodes):
