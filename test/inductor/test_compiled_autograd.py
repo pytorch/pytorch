@@ -28,6 +28,9 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
 
+# note: these tests are not run on windows due to inductor_utils.HAS_CPU
+
+
 def make_compiler_fn(fullgraph=True, dynamic=True, backend="inductor"):
     assert backend in ["inductor", "aot_eager"]
 
