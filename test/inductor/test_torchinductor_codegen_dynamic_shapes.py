@@ -2,17 +2,11 @@
 import importlib
 import os
 import sys
-import unittest
 
 import torch
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     GPU_TYPE,
@@ -20,14 +14,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
 )
 
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor_codegen_dynamic_shapes yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 importlib.import_module("filelock")
 

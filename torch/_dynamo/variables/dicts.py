@@ -355,6 +355,15 @@ class ConstDictVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return [x.vt for x in self.items.keys()]
 
+    def call_hasattr(self, tx, name):
+        # dict not allow setting arbitrary attributes. To check for hasattr, we can just check the __dict__ of the dict.
+        # OrderedDict though requires side effects tracking because it supports arbitrary setattr.
+        if self.user_cls is dict:
+            if name in self.user_cls.__dict__:
+                return ConstantVariable.create(True)
+            return ConstantVariable.create(False)
+        unimplemented(f"hasattr on {self.user_cls} is not supported")
+
 
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs) -> None:
@@ -660,16 +669,6 @@ def _call_hasattr_customobj(
     unimplemented(
         f"hasattr({self.__class__.__name__}, {name}) {self.mutable_local} {self.source}"
     )
-
-
-class DataClassVariable(ConstDictVariable):
-    """
-    This class doesn't appear to be used anywhere.
-    It used to be used to deal with transformers.file_utils.ModelOutput
-    from huggingface.
-
-    Keeping since we wish to support dataclasses in general in the future
-    """
 
 
 class CustomizedDictVariable(ConstDictVariable):
