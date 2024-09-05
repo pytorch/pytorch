@@ -897,7 +897,7 @@ Tensor logsumexp_backward(
     grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
     result = unsqueeze_multiple(result, dim, self.sym_sizes().size());
   }
-  return grad * (self - result).exp();
+  return grad * (self - result).exp().conj();
 }
 
 Tensor logcumsumexp_backward(
@@ -6689,7 +6689,8 @@ Tensor logsumexp_jvp(
   // forward
   auto self_p_exp = [&self_p, &dim]() {
     if (self_p.sym_numel() > 0) {
-      return (self_p - at::amax(self_p, dim, true))
+      // Use only the real part for complex tensors
+      return (self_p - at::amax(at::real(self_p), dim, true))
           .exp(); // Use the exp-normalize trick
     } else {
       // amax fails if numel() == 0, in which case it doesn't matter anyway
@@ -6713,6 +6714,22 @@ Tensor logsumexp_jvp(
     auto sumexp_t = self_p_exp.sum(dim, keepdim);
     return sumexp_t /= sumexp_p;
   }
+}
+
+Tensor safe_logsumexp_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    IntArrayRef dim,
+    bool keepdim) {
+  auto lse_jvp = logsumexp_jvp(self_p, self_t, dim, keepdim);
+  const auto neg_inf = at::scalar_tensor(
+      -std::numeric_limits<float>::infinity(),
+      at::TensorOptions().dtype(lse_jvp.dtype()).device(lse_jvp.device()));
+  const auto masked = self_p.eq(neg_inf);
+  const auto masked_rows = all(masked, dim, true);
+  const auto zero = at::scalar_tensor(
+      0.0, at::TensorOptions().dtype(lse_jvp.dtype()).device(lse_jvp.device()));
+  return at::where(masked_rows, zero, lse_jvp);
 }
 
 Tensor warn_backwards(const Tensor& grad_output) {
