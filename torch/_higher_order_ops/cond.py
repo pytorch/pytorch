@@ -27,8 +27,8 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_pre_dispatch_torch_function_mode,
     _temp_remove_metadata_torch_function_mode,
+    _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -129,7 +129,10 @@ def cond(pred, true_fn, false_fn, operands):
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
-    from torch._dynamo.backends.debugging import make_eager_backend_with_torch_function_mode
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_mode,
+    )
+
     if isinstance(pred, (bool, int, float)):
         log.warning(
             "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
