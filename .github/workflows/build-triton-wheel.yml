@@ -31,7 +31,7 @@ concurrency:
 jobs:
   build-wheel:
     name: "Build Triton Wheel"
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: [self-hosted, linux.4xlarge]
     strategy:
       fail-fast: false
       matrix:
@@ -39,12 +39,12 @@ jobs:
         device: ["cuda", "rocm", "xpu"]
         include:
           - device: "rocm"
-            rocm_version: "6.1"
+            rocm_version: "6.2"
           - device: "cuda"
             rocm_version: ""
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
@@ -157,7 +157,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           # Download all available artifacts
           path: ${{ runner.temp }}/artifacts-all
@@ -273,7 +273,7 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           # Download all available artifacts
           path: ${{ runner.temp }}/artifacts-all

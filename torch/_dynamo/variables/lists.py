@@ -11,7 +11,7 @@ import torch
 import torch.fx
 from torch._guards import Source
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..source import AttrSource
@@ -136,7 +136,7 @@ class BaseListVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.index),
+                SourcelessBuilder.create(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
@@ -145,7 +145,7 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def list_compare(tx: "InstructionTranslator", op, left, right):
-        return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
+        return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
             tx, [variables.BuiltinVariable(op), left, right], {}
         )
 
@@ -433,6 +433,16 @@ class ListVariable(CommonListMethodsVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
+    def var_getattr(self, tx, name):
+        if name == "__class__":
+            source = AttrSource(self.source, name) if self.source else None
+            class_type = self.python_type()
+            if class_type is list:
+                return variables.BuiltinVariable(class_type, source=source)
+            else:
+                return variables.UserDefinedClassVariable(class_type, source=source)
+        return super().var_getattr(tx, name)
+
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.python_type() is not list:
             return super().call_hasattr(tx, name)
@@ -506,6 +516,9 @@ class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
+
     def debug_repr(self):
         return self.debug_repr_helper("(", ")")
 
@@ -521,6 +534,16 @@ class TupleVariable(BaseListVariable):
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name == "__class__":
+            source = AttrSource(self.source, name) if self.source else None
+            class_type = self.python_type()
+            if class_type is tuple:
+                return variables.BuiltinVariable(class_type, source=source)
+            else:
+                return variables.UserDefinedClassVariable(class_type, source=source)
+        return super().var_getattr(tx, name)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.python_type() is not tuple:
@@ -727,7 +750,7 @@ class NamedTupleVariable(TupleVariable):
         if name not in fields:
             method = check_and_create_method()
             if not method:
-                super().var_getattr(tx, name)
+                return super().var_getattr(tx, name)
             return method
         return self.items[fields.index(name)]
 
