@@ -468,7 +468,11 @@ class Tensor(torch._C.TensorBase):
                     _internal=True,
                 )  # type: ignore[assignment]
 
-            if isinstance(self, torch._subclasses.fake_tensor.FakeTensor) and skip_data:
+            if (
+                hasattr(torch, "_subclasses")
+                and isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and skip_data
+            ):
                 storage._fake_device = self.device
 
             args = (
