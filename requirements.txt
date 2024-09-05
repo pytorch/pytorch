@@ -1,6 +1,6 @@
 # Python dependencies required for development
 astunparse
-expecttest!=0.2.0
+expecttest>=0.2.1
 hypothesis
 numpy
 psutil
