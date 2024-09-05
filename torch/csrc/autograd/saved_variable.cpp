@@ -103,12 +103,14 @@ void SavedVariable::save_metadata(const Variable& data) {
     fw_grad_->set_value(fw_grad, /* level */ 0);
   }
 
-  original_metadata_ = std::make_shared<dynamo::autograd::VariableMetadata>(
-      dynamo::autograd::VariableMetadata{
-          data.layout(),
-          data.device(),
-          data.dtype().toScalarType(),
-          data.sizes()});
+  if (!data.is_nested()) {
+    original_metadata_ = std::make_shared<dynamo::autograd::VariableMetadata>(
+        dynamo::autograd::VariableMetadata{
+            data.layout(),
+            data.device(),
+            data.dtype().toScalarType(),
+            data.sym_sizes()});
+  }
 }
 
 std::unique_ptr<SavedVariableHooks> SavedVariable::get_default_hooks() {
@@ -287,7 +289,9 @@ void SavedVariable::register_hooks(
 
 void SavedVariable::compiled_args(
     torch::dynamo::autograd::CompiledNodeArgs& args) const {
-  TORCH_INTERNAL_ASSERT(original_metadata_ != nullptr);
+  TORCH_CHECK(
+      original_metadata_ != nullptr,
+      "Compiled autograd is not yet supported for NestedTensors");
   hooks_->compiled_args(args, *this, original_metadata_);
 }
 

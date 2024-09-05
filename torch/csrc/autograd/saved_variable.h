@@ -58,10 +58,6 @@ class TORCH_API SavedVariable {
 
   void compiled_args(dynamo::autograd::CompiledNodeArgs& args) const;
 
-  SavedVariableHooks* get_hooks() const {
-    return hooks_.get();
-  }
-
  private:
   // This field contains either:
   // 1. the variable to save

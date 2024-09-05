@@ -30,7 +30,7 @@ struct VariableMetadata {
   at::Layout layout;
   at::Device device;
   at::ScalarType dtype;
-  at::IntArrayRef sizes;
+  at::SymIntArrayRef symsizes;
 };
 
 struct UnpackHookMetadata {
@@ -225,6 +225,7 @@ struct AutogradCompilerCall {
   std::vector<int64_t> dyn_size_inputs;
   std::vector<c10::SafePyObject> hooks;
   std::unordered_map<PyObject*, int> dedup_hook_lookup;
+  std::vector<PyObject*> lifted_hook_args;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
 };

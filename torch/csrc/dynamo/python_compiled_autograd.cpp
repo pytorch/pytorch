@@ -102,6 +102,11 @@ struct VerboseLogger {
     check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
   }
 
+  void verbose_log_fn(PyObject* o) const {
+    TORCH_CHECK(python_verbose_logger != nullptr);
+    check(PyObject_CallFunction(python_verbose_logger, "O", o));
+  }
+
   void log_node_check(
       const Node& fn,
       size_t size_inputs_num,
@@ -455,13 +460,17 @@ PyObject* wrap_unpack_hook_info(const TensorArgs& tensor_args) {
   PyObject* pyinfos = PyTuple_New(static_cast<Py_ssize_t>(infos.size()));
   for (const auto i : c10::irange(infos.size())) {
     const auto& info = infos[i];
+    auto sizes = asIntArrayRefSlowOpt(info.output_info.symsizes);
+    TORCH_INTERNAL_ASSERT(
+        sizes.has_value(),
+        "Unbacked symbolic shapes not supported for compiled autograd");
     PyObject* pyinfo = PyTuple_Pack(
         5,
         autograd::utils::wrap(static_cast<uint64_t>(info.hook_id)),
         autograd::utils::wrap(info.output_info.layout),
         THPDevice_New(info.output_info.device),
         autograd::utils::wrap(info.output_info.dtype),
-        autograd::utils::wrap(info.output_info.sizes));
+        autograd::utils::wrap(sizes.value()));
     PyTuple_SET_ITEM(pyinfos, i, pyinfo);
   }
   return pyinfos;

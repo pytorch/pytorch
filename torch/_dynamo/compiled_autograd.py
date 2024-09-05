@@ -44,7 +44,7 @@ def snapshot_verbose_logging_enabled():
     )
 
 
-def cpp_verbose_log_fn(msg: str) -> None:
+def cpp_verbose_log_fn(msg: Any) -> None:
     verbose_log.debug(msg)
 
 
@@ -198,7 +198,7 @@ class AutogradCompilerInstance:
         return tuple(grad_ins)
 
     def proxy_call_unpack_hook(self, hook_input, hook_info):
-        hook_id, layout, device, dtype, size = hook_info
+        hook_id, layout, device, dtype, symsize = hook_info
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxy = self.proxy_call_hook(
             hook,
@@ -206,7 +206,7 @@ class AutogradCompilerInstance:
             hook_type="unpack_hook",
         )
         with disable_proxy_modes_tracing():
-            out = torch.empty(size=size, dtype=dtype, layout=layout, device=device)
+            out = torch.empty(size=symsize, dtype=dtype, layout=layout, device=device)
             graph = self.fx_tracer.graph
             self.bind_tensors_to_proxies([out], [proxy])
         return out
