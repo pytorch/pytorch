@@ -68,9 +68,9 @@ def coerce_tangent(x, memory_format):
     if not isinstance(x, Tensor):
         return x
 
-    if not is_traceable_wrapper_subclass(x):
-        assert isinstance(memory_format, torch.memory_format)
-        out = x.detach().to(memory_format=memory_format)
+    out = x.detach()
+    if not is_traceable_wrapper_subclass(out):
+        out = out.to(memory_format=memory_format)
 
     # Note [Tangents must be contiguous, Part 2]
     # In the same way that "what strides do we assigns to our tangents" is a question
@@ -671,19 +671,19 @@ from a multi-output view call"
             view_avoid_dupes_with_primals, traced_tangents
         )
 
-        def subcompat_suggest_memory_format(t):
+        def recursive_suggest_memory_format(t):
             suggest_memory_format = torch._prims_common.suggest_memory_format
             if is_traceable_wrapper_subclass(t):
                 return [
                     suggest_memory_format(getattr(t, attr))
-                    for attr in out.__tensor_flatten__()[0]
+                    for attr in t.__tensor_flatten__()[0]
                 ]
 
             assert isinstance(t, Tensor)
             return suggest_memory_format(t)
 
         traced_tangent_memory_formats = [
-            subcompat_suggest_memory_format(tt) for tt in traced_tangents
+            recursive_suggest_memory_format(tt) for tt in traced_tangents
         ]
 
         traced_tangents = [

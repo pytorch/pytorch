@@ -1441,6 +1441,7 @@ class AOTDispatchAutograd:
     def coerce_runtime_tangent_tracing_memory_format(x, memory_format):
         if not isinstance(x, torch.Tensor):
             return x
+
         x = x.to(memory_format=memory_format)
         if not is_traceable_wrapper_subclass(x):
             return x
@@ -1872,13 +1873,14 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     tangents_end_idx = tangents_start_idx + len_tangents
 
+                flat_traced_tangent_memory_formats = torch.utils._pytree.tree_leaves(
+                    CompiledFunction.metadata.traced_tangent_memory_formats
+                )
                 all_args = [
                     (
                         AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
                             t,
-                            CompiledFunction.metadata.traced_tangent_memory_formats[
-                                i - tangents_start_idx
-                            ],
+                            flat_traced_tangent_memory_formats[i - tangents_start_idx],
                         )
                         if (tangents_start_idx <= i < tangents_end_idx)
                         else t
