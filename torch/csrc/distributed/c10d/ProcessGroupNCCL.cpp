@@ -2683,15 +2683,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       initWork(device, rank_, opType, profilingTitle, inputs, outputs, enqueue);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
-  work->outputs_ =
-      std::make_shared<std::vector<at::Tensor>>(std::move(outputs));
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   if (avoidRecordStreams) {
     work->stashed_for_allocator_safety_ =
-        std::make_shared<std::vector<at::Tensor>>();
-    for (const auto& input : inputs) {
-      work->stashed_for_allocator_safety_->push_back(input);
-    }
+        std::make_shared<std::vector<at::Tensor>>(inputs);
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard(device);
