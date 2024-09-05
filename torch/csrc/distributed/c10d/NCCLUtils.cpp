@@ -534,6 +534,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     bool includeStacktraces,
     bool onlyActive) {
   auto entries = new_list();
+  // Entries are returned in the order they were recorded
   auto result = dump_entries();
   std::vector<torch::CapturedTraceback*> tracebacks;
   torch::SymbolizedTracebacks stracebacks;

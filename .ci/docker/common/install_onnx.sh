@@ -15,7 +15,7 @@ pip_install \
   flatbuffers==2.0 \
   mock==5.0.1 \
   ninja==1.10.2 \
-  networkx==2.0 \
+  networkx==2.5 \
   numpy==1.24.2
 
 # ONNXRuntime should be installed before installing
