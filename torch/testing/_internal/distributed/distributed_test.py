@@ -198,6 +198,13 @@ class _Env:
             self._backend = os.environ.get("BACKEND", "nccl")
         return self._backend
 
+    @property
+    def world_size(self) -> int:
+        if self._world_size is None:
+            self._world_size = int(os.environ.get("WORLD_SIZE", "2"))
+        return self._world_size
+
+
 env = _Env()
 
 
@@ -464,7 +471,7 @@ def require_backend_is_available(backends):
 
 
 def require_world_size(world_size):
-    if int(os.environ["WORLD_SIZE"]) < world_size:
+    if env.world_size < world_size:
         return skip_but_pass_in_sandcastle(
             "Test requires world size of %d" % world_size
         )
@@ -642,7 +649,7 @@ class TestDistBackend(MultiProcessTestCase):
     # run these tests under other various world_sizes.
     @property
     def world_size(self):
-        return os.environ["WORLD_SIZE"]
+        return env.world_size
 
 
 class DistributedTest:
@@ -874,14 +881,14 @@ class DistributedTest:
 
             # Explicitly pass world size to the barrier because we've
             # just destroyed any state in torch.distributed.
-            self._barrier(wait_for=int(os.environ["WORLD_SIZE"]))
+            self._barrier(wait_for=env.world_size)
 
             # Reinitialize global process group
             timeout = timedelta(seconds=1)
             dist.init_process_group(
                 init_method=INIT_METHOD,
                 backend=env.backend,
-                world_size=int(os.environ["WORLD_SIZE"]),
+                world_size=env.world_size,
                 rank=self.rank,
                 timeout=timeout,
             )
@@ -4204,7 +4211,7 @@ class DistributedTest:
 
         def _prepare_dummy_data(self, local_bs):
             # global_bs for DDP should be divisible by WORLD_SIZE
-            world_size = int(os.environ["WORLD_SIZE"])
+            world_size = env.world_size
             global_bs = world_size * local_bs
             input_cpu = torch.randn(global_bs, 2)
             target = torch.randn(global_bs, 4)
@@ -4422,7 +4429,7 @@ class DistributedTest:
             env.backend not in DistTestCases.backend_feature["ddp"],
             f"The {env.backend} backend does not support DistributedDataParallel",
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_ddp_zero_output_features(self):
             class ToyModel(nn.Module):
                 def __init__(self) -> None:
@@ -4462,7 +4469,7 @@ class DistributedTest:
             env.backend not in DistTestCases.backend_feature["ddp"],
             f"The {env.backend} backend does not support DistributedDataParallel",
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_DistributedDataParallel_non_default_stream(self):
             stream = torch.cuda.Stream(self.rank)
             rank = self.rank
@@ -4487,7 +4494,7 @@ class DistributedTest:
                     # average. If not, then one of the workers has not correctly
                     # written back the averaged gradient before this all-reduce call.
                     dist.all_reduce(avg)
-                    world_size = int(os.environ["WORLD_SIZE"])
+                    world_size = env.world_size
                     avg.div_(world_size)
                     expected_grad = sum(i for i in range(world_size)) / world_size
                     self.assertEqual(
@@ -4500,7 +4507,7 @@ class DistributedTest:
             env.backend not in DistTestCases.backend_feature["cuda"],
             f"The {env.backend} backend does not support DDP communication hook on CUDA devices",
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_ddp_comm_hook_logging(self):
             hooks = [
                 default.allreduce_hook,
@@ -5139,7 +5146,7 @@ class DistributedTest:
             env.backend not in DistTestCases.backend_feature["cuda"],
             f"The {env.backend} backend does not support DDP communication hook on CUDA devices",
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_ddp_hook_parity_allreduce(self):
             self._test_ddp_hook_parity(state=None, hook=default.allreduce_hook)
 
@@ -5147,7 +5154,7 @@ class DistributedTest:
             env.backend not in DistTestCases.backend_feature["cuda"],
             f"The {env.backend} backend does not support DDP communication hook on CUDA devices",
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_ddp_hook_parity_allreduce_process_group(self):
             # process_group is passed in to both DDP and comm. hook
             world_size = dist.get_world_size()
@@ -5160,7 +5167,7 @@ class DistributedTest:
             env.backend not in DistTestCases.backend_feature["cuda"],
             f"The {env.backend} backend does not support DDP communication hook on CUDA devices",
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_ddp_hook_parity_powerSGD(self):
             for warm_start in [True, False]:
                 powersgd_state = powerSGD.PowerSGDState(
@@ -5182,7 +5189,7 @@ class DistributedTest:
             "Disabled for environments that \
                          don't support multiprocessing with spawn start method",
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_ddp_hook_parity_post_localSGD(self):
             # Although we start run local SGD at iteration 10, since we still use the global process group to run it,
             # the post-LocalSGD actually still allreduces gradients globally for the remaining iterations.
@@ -6531,7 +6538,7 @@ class DistributedTest:
             self.assertEqual(input_tensor_copy, input_tensor)
 
         @require_backend_is_available({"nccl"})
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_nccl_backend_bool_reduce(self):
             torch.cuda.set_device(self.rank)
             inp = {0: [True, True], 1: [False, False]}
@@ -6582,7 +6589,7 @@ class DistributedTest:
             env.backend not in DistTestCases.backend_feature["ddp"],
             f"The {env.backend} backend does not support DistributedDataParallel",
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_DistributedSampler_padding(self):
             # Tests padding of distributed sampler.
             world_size = dist.get_world_size()
@@ -6689,7 +6696,7 @@ class DistributedTest:
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
-            int(os.environ["WORLD_SIZE"]), env.backend
+            env.world_size, env.backend
         )
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         def test_all_gather_object_default_pg(self):
@@ -6697,7 +6704,7 @@ class DistributedTest:
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
-            int(os.environ["WORLD_SIZE"]), env.backend
+            env.world_size, env.backend
         )
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_all_gather_object_subgroup(self):
@@ -7632,7 +7639,7 @@ class DistributedTest:
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
-            int(os.environ["WORLD_SIZE"]), env.backend
+            env.world_size, env.backend
         )
         @with_dist_debug_levels(levels=["DETAIL"])
         @unittest.skip("Test is failing, see https://github.com/pytorch/pytorch/pull/113620")
@@ -7641,7 +7648,7 @@ class DistributedTest:
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
-            int(os.environ["WORLD_SIZE"]), env.backend
+            env.world_size, env.backend
         )
         @with_dist_debug_levels(levels=["DETAIL"])
         def _test_broadcast_object_list_subgroup(self):
@@ -8868,7 +8875,7 @@ class DistributedTest:
 
         @with_nccl_blocking_wait
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_monitored_barrier_allreduce_hang(self):
             # tests expected behavior when nonzero rank hangs and we want to
             # report first timed out rank.
@@ -8876,7 +8883,7 @@ class DistributedTest:
 
         @with_nccl_blocking_wait
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
             # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
             os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
@@ -9766,7 +9773,7 @@ class DistributedTest:
             dist.init_process_group(
                 init_method=INIT_METHOD,
                 backend=env.backend,
-                world_size=int(os.environ["WORLD_SIZE"]),
+                world_size=env.world_size,
                 rank=self.rank,
                 timeout=timeout,
             )
@@ -10313,7 +10320,7 @@ class DistributedTest:
             env.backend not in DistTestCases.backend_feature["cuda"],
             f"The {env.backend} backend does not support DDP communication hook on CUDA devices",
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_lt_x_gpu(env.world_size)
         @skip_but_pass_in_sandcastle_if(
             True, "Skipped due to flakiness"
         )
@@ -10333,7 +10340,7 @@ class DistributedTest:
             """
             Test DDP with device_mesh initialization.
             """
-            world_size = int(os.environ["WORLD_SIZE"])
+            world_size = env.world_size
 
             from torch.distributed.device_mesh import init_device_mesh
             device_mesh = init_device_mesh("cuda", (world_size,))
