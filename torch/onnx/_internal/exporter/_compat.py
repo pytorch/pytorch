@@ -9,7 +9,6 @@ import logging
 from typing import Any, Mapping, Sequence, TYPE_CHECKING
 
 import torch
-import torch.export
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import _core, _onnx_program
 
