@@ -6995,6 +6995,26 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T200904004
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_istft_op(self):
+        class istft_class(torch.nn.Module):
+            def forward(self, spec):
+                window = torch.hann_window(1024).type(torch.FloatTensor)
+                return torch.istft(
+                    spec,
+                    n_fft=1024,
+                    hop_length=512,
+                    window=window,
+                    length=144000,
+                )
+
+        model = istft_class()
+        real_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        imaginary_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        spec = torch.complex(real_part, imaginary_part)
+        export(model, (spec,))
+
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked

@@ -3549,12 +3549,6 @@ def istft(
     y = y.narrow(dim=1, start=start, length=length)
     window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
 
-    window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
-    torch._check(
-        not window_envelop_lowest.item(),
-        lambda: "window overlap add min less than 1e-11",
-    )
-
     y = y / window_envelop
     if original_ndim == 2:
         y = y.squeeze(0)
