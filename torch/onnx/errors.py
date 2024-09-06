@@ -2,59 +2,41 @@
 
 from __future__ import annotations
 
-
-__all__ = [
-    "ConversionError",
-    "DispatchError",
-    "GraphConstructionError",
-    "OnnxExporterError",
-    "OnnxExporterWarning",
-    "SymbolicValueError",
-    "TorchExportError",
-    "UnsupportedOperatorError",
-]
-
 import textwrap
 from typing import TYPE_CHECKING
+
+from torch.onnx import _constants
+from torch.onnx._internal import diagnostics
 
 
 if TYPE_CHECKING:
     from torch import _C
 
+__all__ = [
+    "OnnxExporterError",
+    "OnnxExporterWarning",
+    "CheckerError",
+    "SymbolicValueError",
+    "UnsupportedOperatorError",
+]
+
 
 class OnnxExporterWarning(UserWarning):
-    """Warnings in the ONNX exporter."""
+    """Base class for all warnings in the ONNX exporter."""
 
 
 class OnnxExporterError(RuntimeError):
-    """Errors raised by the ONNX exporter. This is the base class for all exporter errors."""
+    """Errors raised by the ONNX exporter."""
 
 
-class TorchExportError(OnnxExporterError):
-    """Error during graph capturing using torch.export."""
-
-
-class ConversionError(OnnxExporterError):
-    """Error during ExportedProgram to ONNX conversion."""
-
-
-class DispatchError(ConversionError):
-    """Error during ONNX Function dispatching."""
-
-
-class GraphConstructionError(ConversionError):
-    """Error during ONNX graph construction."""
+class CheckerError(OnnxExporterError):
+    """Raised when ONNX checker detects an invalid model."""
 
 
 class UnsupportedOperatorError(OnnxExporterError):
     """Raised when an operator is unsupported by the exporter."""
 
-    # NOTE: This is legacy and is only used by the torchscript exporter
-    # Clean up when the torchscript exporter is removed
     def __init__(self, name: str, version: int, supported_version: int | None):
-        from torch.onnx import _constants
-        from torch.onnx._internal import diagnostics
-
         if supported_version is not None:
             diagnostic_rule: diagnostics.infra.Rule = (
                 diagnostics.rules.operator_supported_in_newer_opset_version
@@ -78,8 +60,6 @@ class UnsupportedOperatorError(OnnxExporterError):
 class SymbolicValueError(OnnxExporterError):
     """Errors around TorchScript values and nodes."""
 
-    # NOTE: This is legacy and is only used by the torchscript exporter
-    # Clean up when the torchscript exporter is removed
     def __init__(self, msg: str, value: _C.Value):
         message = (
             f"{msg}  [Caused by the value '{value}' (type '{value.type()}') in the "
