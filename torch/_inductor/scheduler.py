@@ -46,6 +46,7 @@ from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
+from .loop_body import LoopBody
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -273,9 +274,6 @@ class BaseSchedulerNode:
     def mark_run(self) -> None:
         for buf in self.outputs:
             buf.allocate()
-
-    def op_counts(self) -> Counter[str]:
-        return self.read_writes.op_counts
 
     def used_buffer_names(self) -> OrderedSet[str]:
         return OrderedSet(
@@ -922,7 +920,7 @@ class SchedulerNode(BaseSchedulerNode):
                 buf_name = dep.name
                 buf = V.graph.get_buffer(buf_name)
                 lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
-        if isinstance(self._body, ir.LoopBody):
+        if isinstance(self._body, LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
 
@@ -984,16 +982,15 @@ class SchedulerNode(BaseSchedulerNode):
             log.fatal("Error in codegen for %s", self.node)
             raise
 
+    @cache_on_self
     def pointwise_read_writes(self) -> dependencies.ReadWrites:
         """
         Get the memory dependencies in the non-reduction axis.
         """
         sizes, reduction_sizes = self._sizes
-
-        def fn(index: Sequence[sympy.Symbol]) -> str:
-            return self._body(index, [sympy.Integer(0) for _ in reduction_sizes])
-
-        return dependencies.extract_read_writes(fn, sizes)
+        return dependencies.extract_read_writes(
+            self._body, sizes, hidden_args=[[sympy.Integer(0)] * len(reduction_sizes)]
+        )
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
         if self.is_template():
@@ -1011,7 +1008,7 @@ class SchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def _get_atomic_add_buffers(self) -> OrderedSet[str]:
         buffers_store_as_atomic_add: OrderedSet[str] = OrderedSet()
-        if isinstance(self._body, ir.LoopBody):
+        if isinstance(self._body, LoopBody):
             for node in self._body.get_nodes():
                 if (
                     node.op == "call_method"
@@ -1217,13 +1214,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def has_aliasing_or_mutation(self) -> bool:
         return any(x.has_aliasing_or_mutation() for x in self.snodes)
-
-    @cache_on_self
-    def op_counts(self) -> Counter[str]:
-        op_counts: Counter[str] = collections.Counter()
-        for node in self.snodes:
-            op_counts.update(node.op_counts())
-        return op_counts
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
