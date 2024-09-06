@@ -64,11 +64,28 @@ extern "C" {{export_declaration}}
     const auto Nt_blocks = Nr_blocks;
     const auto Kt_blocks = Kr_blocks;
     {%- endif %}
-    const int64_t Mc_blocks = Mt_blocks;
-    const int64_t Nc_blocks = 1;
-    const int64_t Kc_blocks = Kt_blocks;
+    int64_t Mc_blocks, Nc_blocks, Kc_blocks;
+    uint32_t L1_cache_size = {{L1_cache_size}};
+    uint32_t L2_cache_size = {{L2_cache_size}};
+    mm_get_cache_blocking<{{kernel.dtype(X)}}, {{kernel.dtype(W)}}>(
+        num_threads,
+        M,
+        N,
+        K,
+        Mr,
+        Nr,
+        Kr,
+        Mt_blocks,
+        Nt_blocks,
+        Kt_blocks,
+        Mc_blocks,
+        Nc_blocks,
+        Kc_blocks,
+        L1_cache_size,
+        L2_cache_size
+    );
     const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
-    const int64_t num_Nc_blocks = Nr_blocks;
+    const int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
     const int64_t num_k_slices = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
 {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
@@ -531,7 +548,7 @@ class CppPackedGemmTemplate(CppTemplate):
             new_inputs = list(inputs)
             X = inputs[0]
             W = inputs[1]
-            B = inputs[2] if len(inputs) > 2 else None
+            B = inputs[2] if has_bias else None
             if isinstance(W, ir.IRNode):
                 if trans_w:
                     if not isinstance(W, ir.TensorBox):
@@ -680,8 +697,45 @@ class CppPackedGemmTemplate(CppTemplate):
                 # non-retraceable. To support retracing, we can add a repack node to the
                 # FX graph. For example:
                 # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
+                W_tensor_users = 0
                 for node in reversed(V.graph.graph.nodes):
-                    if node.name == W_node.get_name() and len(node.users) == 1:
+                    # Case may happen when the wgt tensor is used by more than 1 get_attr node
+                    # https://github.com/pytorch/pytorch/issues/134998
+                    if node.op == "get_attr" and hasattr(
+                        V.graph.module, node.name
+                    ):  # wgt might already be deleted
+                        comp_tensor = getattr(V.graph.module, node.name)
+                        if (
+                            W.is_mkldnn == comp_tensor.is_mkldnn
+                            and W.dtype == comp_tensor.dtype
+                            and W.device == comp_tensor.device
+                            and (
+                                (
+                                    not W.is_mkldnn
+                                    and (
+                                        W.untyped_storage().data_ptr()
+                                        == comp_tensor.untyped_storage().data_ptr()
+                                    )
+                                )
+                                or (
+                                    W.is_mkldnn
+                                    and (
+                                        torch.ops.mkldnn.data_ptr(W)
+                                        == torch.ops.mkldnn.data_ptr(comp_tensor)
+                                    )
+                                )
+                            )
+                        ):
+                            W_tensor_users += 1
+
+                for node in reversed(V.graph.graph.nodes):
+                    # The wgt tensor has been used by only 1 get_attr node
+                    # The get_attr node has only 1 user fx node
+                    if (
+                        node.name == W_node.get_name()
+                        and len(node.users) == 1
+                        and W_tensor_users == 1
+                    ):
                         del V.graph.constants[node.name]
                         delattr(V.graph.module, node.name)
                         delattr(V.graph.graph.owning_module, node.name)
@@ -759,6 +813,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         use_local_acc = (
             self.layout.dtype != torch.float
+            or template_buffer_has_other_users
             or int8_gemm
             or self.padded_n != self.n
             or self.maybe_k_slicing()
@@ -874,38 +929,45 @@ class CppPackedGemmTemplate(CppTemplate):
                 reindexers.extend([None] * len(epilogue_nodes))
                 Y_2d = Y
             else:
-                # From template_buffer to Y_ordered (ordered by stride decreasingly, in dense format), for example:
-                #   template_buffer:
-                #       size (324, 512), stride (512, 1)
-                #   Y_ordered (ordered by stride decreasingly, in dense format):
-                #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-                stride_order = list(
-                    ir.get_stride_order(V.graph.sizevars.size_hints(Y.get_stride()))
-                )
-                fill_order = ir.stride_order2fill_order(stride_order)
-                reversed_fill_order = list(reversed(fill_order))
-                size_with_stride_ordered_decreasingly = [
-                    Y.get_size()[i] for i in reversed_fill_order
-                ]
-                reshape_reindex = ir.View.dynamic_reshape_indexer(
-                    size_with_stride_ordered_decreasingly, template_buffer.get_size()
-                )
 
-                # From Y_ordered (ordered by stride decreasingly, in dense format) to Y, for example:
-                #   Y_ordered (ordered by stride decreasingly, in dense format):
-                #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-                #   Y:
-                #       size (1, 18, 18, 512), stride (165888, 1, 9216, 512)
-                from_stride_ordered_decreasingly_to_Y_order = [
-                    (len(stride_order) - 1) - stride_order[i]
-                    for i in range(len(stride_order))
-                ]
-                stride_reindex = ir.same_reorder(
-                    from_stride_ordered_decreasingly_to_Y_order
-                )
+                def get_reindexer(epilogue_node):
+                    # From template_buffer to epilogue_node_ordered (ordered by stride decreasingly, in dense format), for example:
+                    #   template_buffer:
+                    #       size (324, 512), stride (512, 1)
+                    #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
+                    #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
+                    stride_order = list(
+                        ir.get_stride_order(
+                            V.graph.sizevars.size_hints(epilogue_node.get_stride())
+                        )
+                    )
+                    fill_order = ir.stride_order2fill_order(stride_order)
+                    reversed_fill_order = list(reversed(fill_order))
+                    size_with_stride_ordered_decreasingly = [
+                        epilogue_node.get_size()[i] for i in reversed_fill_order
+                    ]
+                    reshape_reindex = ir.View.dynamic_reshape_indexer(
+                        size_with_stride_ordered_decreasingly,
+                        template_buffer.get_size(),
+                    )
 
-                reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
-                reindexers.extend([reindexer] * len(epilogue_nodes))  # type: ignore[list-item]
+                    # From epilogue_node_ordered (ordered by stride decreasingly, in dense format) to epilogue_node, for example:
+                    #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
+                    #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
+                    #   epilogue_node:
+                    #       size (1, 18, 18, 512), stride (165888, 1, 9216, 512)
+                    from_stride_ordered_decreasingly_to_epilogue_node_order = [
+                        (len(stride_order) - 1) - stride_order[i]
+                        for i in range(len(stride_order))
+                    ]
+                    stride_reindex = ir.same_reorder(
+                        from_stride_ordered_decreasingly_to_epilogue_node_order
+                    )
+
+                    reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
+                    return reindexer
+
+                reindexers.extend([get_reindexer(epilogue_node) for epilogue_node in epilogue_nodes])  # type: ignore[list-item]
                 if isinstance(Y, ir.BaseView):
                     storage = ir.StorageBox(Y.unwrap_view())
                 else:
@@ -933,6 +995,12 @@ class CppPackedGemmTemplate(CppTemplate):
         self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
+
+        L1_cache_size = torch._C._cpu._L1d_cache_size()  # per core cache size in Bytes
+        assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+
+        L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
+        assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
         options = dict(
             X=X,
@@ -963,6 +1031,8 @@ class CppPackedGemmTemplate(CppTemplate):
             w_zp=w_zp,
             acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
             DTYPE_TO_CPP=DTYPE_TO_CPP,
+            L1_cache_size=L1_cache_size,
+            L2_cache_size=L2_cache_size,
         )
         with contextlib.ExitStack() as stack:
             for buf in fake_buffers:

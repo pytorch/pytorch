@@ -158,15 +158,13 @@ def generate_ttir(kernel, kwargs):
     ]
     specialization = kernel._get_config(*ordered_args.values())
     constants = {
-        i: arg
-        for i, arg in enumerate(ordered_args.values())
-        if not isinstance(arg, Tensor)
+        name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
     }
 
     # Build kernel signature -- doesn't include constexpr arguments.
     signature = {
-        i: kernel._type_of(kernel._key_of(arg))
-        for i, arg in enumerate(ordered_args.values())
+        name: kernel._type_of(kernel._key_of(arg))
+        for i, (name, arg) in enumerate(ordered_args.items())
         if i not in kernel.constexprs
     }
 
@@ -179,13 +177,18 @@ def generate_ttir(kernel, kwargs):
 
     src = ASTSource(kernel, signature, constants, specialization)
 
-    # Triton changes ASTSource.make_ir to take 3 arguments. Handle
+    # Triton changes ASTSource.make_ir to take 3/4 arguments. Handle
     # backward compatibility here.
-    if len(inspect.signature(src.make_ir).parameters) == 2:
+    make_ir_sig_params = len(inspect.signature(src.make_ir).parameters)
+    if make_ir_sig_params == 2:
         ttir_module = src.make_ir(options, context)
-    else:
+    elif make_ir_sig_params == 3:
         codegen_fns = backend.get_codegen_implementation()
         ttir_module = src.make_ir(options, codegen_fns, context)
+    else:
+        codegen_fns = backend.get_codegen_implementation()
+        module_map = backend.get_module_map()
+        ttir_module = src.make_ir(options, codegen_fns, module_map, context)
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
