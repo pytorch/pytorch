@@ -90,7 +90,6 @@ class TestFullyShardCompileCompute(FSDPTest):
 
 
 def assert_no_aliased_graph_inputs(graph: torch.fx.Graph) -> None:
-    return
     storage_id_to_graph_inputs = defaultdict(list)
     for node in graph.nodes:
         if node.op == "placeholder" and isinstance(
@@ -241,7 +240,6 @@ class TestFullyShardCompile(FSDPTest):
 
     def _maybe_run_decide_global_ordering_of_comms_with_checks(self, fullgraph):
         def _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True):
-            return
             assert_method = self.assertTrue if expect else self.assertFalse
             common_ops = {
                 torch.ops.fsdp.all_gather_copy_in.default,
