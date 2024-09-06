@@ -1615,8 +1615,8 @@ class CppVecOverrides(CppOverrides):
             assert isinstance(kernel, CppVecKernel)
             code = BracesBuffer()
             code.writeline("[&]()")
+            assert isinstance(args[0], CppCSEVariable)
             vec_dtype = args[0].dtype
-            n_vec = kernel._get_num_vectors(vec_dtype)
             size = kernel.tail_size if kernel.tail_size else kernel.tiling_factor
             scalar_args = []
             cdtype = DTYPE_TO_CPP[vec_dtype]
@@ -1631,6 +1631,7 @@ class CppVecOverrides(CppOverrides):
                 if (scalar_func.__name__ == "to_dtype_bitcast")
                 else octype
             )
+            n_vec = kernel._get_num_vectors(vec_dtype if output_mask else octype)
             with code.indent():
                 for argidx, arg in enumerate(args):
                     if isinstance(arg, CppCSEVariable):
