@@ -58,6 +58,7 @@ from .runtime_wrappers import (
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import _get_symint_hints, make_boxed_func, strict_zip, unlift_tokens
+from .fx_passes import remove_fsdp2_unsharded_param_graph_input_usage
 
 
 zip = strict_zip
@@ -333,6 +334,7 @@ def aot_dispatch_autograd(
     fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
+    remove_fsdp2_unsharded_param_graph_input_usage(fx_g.graph)
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
