@@ -58,7 +58,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -176,7 +176,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -290,7 +290,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
       build_name: libtorch-cpu-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -316,7 +316,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -435,7 +435,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -550,7 +550,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
       build_name: libtorch-cuda11_8-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -576,7 +576,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -695,7 +695,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -810,7 +810,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
       build_name: libtorch-cuda12_1-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -836,7 +836,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -955,7 +955,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -1070,7 +1070,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
       build_name: libtorch-cuda12_4-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
