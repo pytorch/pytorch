@@ -32,7 +32,10 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
+from .collect_metadata_analysis import (
+    _tensor_to_memory_format,
+    run_functionalized_fw_and_collect_metadata,
+)
 from .functional_utils import gen_alias_from_base
 from .input_output_analysis import (
     compute_overlapping_inputs,
@@ -1442,7 +1445,8 @@ class AOTDispatchAutograd:
         if not isinstance(x, torch.Tensor):
             return x
 
-        x = x.to(memory_format=memory_format)
+        x = _tensor_to_memory_format(x, memory_format)
+
         if not is_traceable_wrapper_subclass(x):
             return x
         for i, attr in enumerate(x.__tensor_flatten__()[0]):  # type: ignore[attr-defined]

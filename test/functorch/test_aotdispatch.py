@@ -6022,48 +6022,48 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
+    # Next several tests are related to issue:
+    # https://github.com/pytorch/pytorch/issues/134644
+    # AOTD tries to predict tangents for tracing ahead of time.
+    # The first strategy was to coerce traced_tangents and runtime_tangents to be contiguous().
+    # But for models working in channels_last memory format this will add additional contiguous() calls.
+    # The fix is predicting tangents memory format to be similar to outputs memory format.
+    # And coerce runtime tangents to that traced memory format.
     def test_channels_last_grads_no_force_contiguous_dense(self):
-        # https://github.com/pytorch/pytorch/issues/134644
-        # AOTD tries to predict tangents for tracing ahead of time.
-        # The first strategy was to coerce traced_tangents and runtime_tangents to be contiguous().
-        # But for models working in channels_last memory format this will add additional contiguous() calls.
-        # The fix is predicting tangents memory format to be similar to outputs memory format.
-        # And coerce runtime tangents to that traced memory format.
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 
-            def forward(self, x, y):
+            def forward(self, x, y, cont_inp):
                 z = y + 3
                 y.mul_(2)
                 r = self.conv(x)
-                return r, r.transpose(0, 1), z.view(-1), z.transpose(0, 1)
+                return r, r.transpose(0, 1), z.view(-1), z.transpose(0, 1), cont_inp * 2
 
         m = M()
         m.to(memory_format=torch.channels_last)
         m.train()
 
         def dense_inps():
-            ret = (
+            return (
                 torch.randn(2, 3, 5, 5, requires_grad=True).to(
                     memory_format=torch.channels_last
                 ),
                 torch.randn(3, 2, 1, 1, requires_grad=True).to(
                     memory_format=torch.channels_last
                 ),
+                torch.randn(3, 2, 1, 1, requires_grad=True),
             )
-            [inp.retain_grad() for inp in ret]
-            return ret
 
         ref_inps = dense_inps()
         ref_outs = m(*ref_inps)
         ref_outs[0].sum().backward()
 
         inps = dense_inps()
-        outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
+        outs = torch.compile(m, backend="inductor", fullgraph=True)(*inps)
         s = outs[0].sum()
-        # Using torch.profiler to verify that no contiguous() calls happenend
+        # Using torch.profiler to verify that no contiguous() calls happened
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
         ) as prof:
@@ -6089,20 +6089,74 @@ class TestAOTModuleSimplified(AOTTestCase):
         m.train()
 
         def inps_fn():
-            t0 = torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                memory_format=torch.channels_last
-            )
-            t0.retain_grad()
-            t1 = torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                memory_format=torch.channels_last
-            )
-            t1.retain_grad()
-            ret = (
-                TwoTensor(t0, t1),
+            return (
+                TwoTensor(
+                    torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                        memory_format=torch.channels_last
+                    ),
+                    torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                        memory_format=torch.channels_last
+                    ),
+                ),
                 torch.randn(3, 2, requires_grad=True).clone(),
             )
-            [inp.retain_grad() for inp in ret]
-            return ret
+
+        ref_inps = inps_fn()
+        ref_outs = m(*ref_inps)
+        ref_outs[0].sum().backward()
+
+        mc = M()
+        mc.to(memory_format=torch.channels_last)
+        mc.train()
+        inps = inps_fn()
+        outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
+        s = outs[0].sum()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+        ) as prof:
+            s.backward()
+
+        contiguous_events = [
+            event for event in prof.events() if event.name == "aten::contiguous"
+        ]
+        self.assertTrue(len(contiguous_events) == 0)
+
+    def test_channels_last_grads_no_force_contiguous_nested_subclass(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x, y):
+                r = self.conv(x)
+                return r, y + 1
+
+        m = M()
+        m.to(memory_format=torch.channels_last)
+        m.train()
+
+        def inps_fn():
+            return (
+                TwoTensor(
+                    TwoTensor(
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                    ),
+                    TwoTensor(
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                    ),
+                ),
+                torch.randn(3, 2, requires_grad=True).clone(),
+            )
 
         ref_inps = inps_fn()
         ref_outs = m(*ref_inps)

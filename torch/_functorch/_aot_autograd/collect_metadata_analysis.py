@@ -55,6 +55,16 @@ log = logging.getLogger(__name__)
 static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
 
 
+# Workaround of https://github.com/pytorch/pytorch/issues/62027
+# tensor.contiguous() guarantees to return non-zero sorted-stride,
+# tensor.to(memory_format=torch.contiguous_format) can keep zero strides.
+def _tensor_to_memory_format(t: torch.Tensor, memory_format: torch.memory_format):
+    if memory_format == torch.contiguous_format:
+        return t.contiguous()
+
+    return t.to(memory_format=memory_format)
+
+
 # Note [Tangents must be contiguous]
 # We force tangents to be contiguous today.
 # The idea is that we are technically making a guess about the strides of our tangents,
@@ -69,7 +79,7 @@ def coerce_tangent(x, memory_format=torch.contiguous_format):
 
     out = x.detach()
     if not is_traceable_wrapper_subclass(out):
-        out = out.to(memory_format=memory_format)
+        out = _tensor_to_memory_format(out, memory_format)
 
     # Note [Tangents must be contiguous, Part 2]
     # In the same way that "what strides do we assigns to our tangents" is a question
