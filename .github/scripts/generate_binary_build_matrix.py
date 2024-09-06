@@ -340,7 +340,7 @@ def generate_wheels_matrix(
         arches = ["cpu"]
         if os == "linux":
             arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
-        elif os == "windows":
+        elif os == "windows" or XPU_ARCHES:
             arches += CUDA_ARCHES
         elif os == "linux-aarch64":
             # Only want the one arch as the CPU type is different and
@@ -452,7 +452,7 @@ def generate_wheels_matrix(
                         ),
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
-                            if os != "linux"
+                            if os != "linux" and gpu_arch_type != "xpu"
                             else ""
                         ),
                     }
