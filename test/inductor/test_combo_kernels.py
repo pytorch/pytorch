@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import sys
 import unittest
 
@@ -36,12 +37,20 @@ class ComboKernelTests(TestCase):
     def setUp(self):
         super().setUp()
         torch._inductor.metrics.reset()
-        torch._inductor.config.combo_kernels = True
-        torch._inductor.config.benchmark_combo_kernel = False
+        self._test_stack = contextlib.ExitStack()
+        self._test_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": False,
+                }
+            )
+        )
 
     def tearDown(self):
-        super().tearDown()
+        self._test_stack.close()
         torch._inductor.metrics.reset()
+        super().tearDown()
 
     @requires_cuda
     def test_activation_functions(self):
@@ -157,12 +166,20 @@ class ComboKernelBenchmarkTests(TestCase):
     def setUp(self):
         super().setUp()
         torch._inductor.metrics.reset()
-        torch._inductor.config.combo_kernels = True
-        torch._inductor.config.benchmark_combo_kernel = True
+        self._test_stack = contextlib.ExitStack()
+        self._test_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": True,
+                }
+            )
+        )
 
     def tearDown(self):
-        super().tearDown()
+        self._test_stack.close()
         torch._inductor.metrics.reset()
+        super().tearDown()
 
     @requires_cuda
     def test_activation_benchmark(self):
@@ -303,14 +320,28 @@ class ComboKernelDynamicShapesTests(TestCase):
     def setUp(self):
         super().setUp()
         torch._inductor.metrics.reset()
-        torch._inductor.config.combo_kernels = True
-        torch._inductor.config.benchmark_combo_kernel = True
-        torch._dynamo.config.automatic_dynamic_shapes = False
-        torch._dynamo.config.assume_static_by_default = False
+        self._test_stack = contextlib.ExitStack()
+        self._test_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": True,
+                }
+            )
+        )
+        self._test_stack.enter_context(
+            torch._dynamo.config.patch(
+                {
+                    "automatic_dynamic_shapes": False,
+                    "assume_static_by_default": False,
+                }
+            )
+        )
 
     def tearDown(self):
-        super().tearDown()
+        self._test_stack.close()
         torch._inductor.metrics.reset()
+        super().tearDown()
 
     @requires_cuda
     def test_dynamic_shapes_activations(self):
