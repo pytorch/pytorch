@@ -121,16 +121,13 @@ def scan(
     if len(leaves_init) == 0:
         raise RuntimeError("Init tensors must be provided")
     if any(not isinstance(x, torch.Tensor) for x in leaves_init):
-            raise RuntimeError("All init leaves must be a Tensor")
+        raise RuntimeError("All init leaves must be a Tensor")
     if any(not isinstance(x, torch.Tensor) for x in leaves_input):
-            raise RuntimeError("All input leaves must be a Tensor")
+        raise RuntimeError("All input leaves must be a Tensor")
     if any(x.shape[dim] == 0 for x in leaves_input):
-            raise RuntimeError("All input leaves must have a scan dimension > 0")
+        raise RuntimeError("All input leaves must have a scan dimension > 0")
 
     if len(leaves_input) > 0:
-        if reverse:
-            leaves_input = [torch.flip(elem, [dim]) for elem in leaves_input]
-
         shape = leaves_input[0].shape
         ndim = len(shape)
         dim = utils.canonicalize_dim(ndim, dim)
@@ -172,9 +169,6 @@ def scan(
             combine_fn, leaves_init, leaves_input, dim, reverse
         )
 
-        if reverse:
-            result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
-
         return pytree.tree_unflatten(result_carry, spec_init), pytree.tree_unflatten(
             result_flat, tree_out
         )
@@ -202,7 +196,10 @@ def generic_scan(operator, init, input, dim=0, reverse=False):
             return carry, []
 
         num_elems = input[0].shape[dim]
-        ind = 0
+        if reverse:
+            ind = num_elems - 1
+        else:
+            ind = 0
 
         # Compute dummy shapes for the pre-allocation
         dummy_carry, dummy_out = operator(
@@ -227,32 +224,41 @@ def generic_scan(operator, init, input, dim=0, reverse=False):
                 for i, e in enumerate(dummy_out)
             ]
         )
-        op = reversed if reverse else lambda x: x
+
         output_scanned_dim = dummy_out[0].shape[dim]
         real_idx = []
         for idx in idxs:
-            if output_scanned_dim > 1:
-                real_idx.append(
-                    torch.cat(
-                        [
-                            id * t
-                            for id, t in zip(
-                                op(range(output_scanned_dim)),
-                                torch.tensor_split(idx, output_scanned_dim, dim=dim),
-                            )
-                        ],
-                        dim,
-                    )
+            real_idx.append(
+                torch.cat(
+                    [
+                        id * t
+                        for id, t in zip(
+                            range(output_scanned_dim),
+                            torch.tensor_split(idx, output_scanned_dim, dim=dim),
+                        )
+                    ],
+                    dim,
                 )
-            else:
-                real_idx.append(torch.zeros_like(idx))
+            )
 
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
             for o, x, idx in zip(outs, out, real_idx):
                 o.scatter_(dim, idx + (ind * output_scanned_dim), x)
 
-        while ind < num_elems:
+        def cond(i, n, r):
+            if (r and i < 0) or (not r and i > (n - 1)):
+                return False
+            else:
+                return True
+
+        def op(i):
+            if reverse:
+                return i - 1
+            else:
+                return i + 1
+
+        while cond(ind, num_elems, reverse):
             carry, out = operator(
                 *carry,
                 *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in input],
@@ -261,16 +267,23 @@ def generic_scan(operator, init, input, dim=0, reverse=False):
             # Store the inits in the outs matrix.
             store_out_in_outs(out, ind)
 
-            ind += 1
+            ind = op(ind)
 
         return (carry, list(outs))
 
     scans = _scan(init, input)
     return scans
 
+
 def make_expanded_output_shape(dim, scan_length, shapes, use_sh=False):
-    expanded_shapes = [tuple((s if use_sh else -1) if i != dim else scan_length for i, s in enumerate(sh)) for sh in shapes]
+    expanded_shapes = [
+        tuple(
+            (s if use_sh else -1) if i != dim else scan_length for i, s in enumerate(sh)
+        )
+        for sh in shapes
+    ]
     return expanded_shapes
+
 
 def trace_scan(
     proxy_mode,
@@ -279,7 +292,7 @@ def trace_scan(
     init: List[torch.Tensor],
     input: List[torch.Tensor],
     dim: int,
-    reverse: bool
+    reverse: bool,
 ):
     with disable_proxy_modes_tracing():
         sample_inits = [
@@ -320,11 +333,6 @@ def trace_scan(
         ini_meta = ini
         carry_meta = carry.meta["tensor_meta"]
         carry_val = carry.meta["val"]
-        if carry_meta.dtype != ini_meta.dtype:
-            raise RuntimeError(
-                f"Expected the init and the new carry produced by the operator to be a tensor of {carry_meta.dtype} but "
-                + f"got {ini_meta.dtype} and {carry_meta.dtype}"
-            )
         if (
             carry_val.device != ini_meta.device
             or carry_meta.dtype != ini_meta.dtype
@@ -334,36 +342,6 @@ def trace_scan(
                 f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
                 + f"the metadata of init with {ini_meta}"
             )
-
-    # for ini, inp, carry, out, si in zip(init, input, outputs[0], outputs[1], sample_inputs):
-    #     ini_meta = ini
-    #     inp_meta = inp
-    #     carry_meta = carry.meta["tensor_meta"]
-    #     carry_val = carry.meta["val"]
-    #     out_val = out.meta["val"]
-    #     if (
-    #         carry_val.device != inp_meta.device
-    #         or out_val.device != inp_meta.device
-    #         or ini_meta.device != inp_meta.device
-    #     ):
-    #         raise RuntimeError(
-    #             f"Expected the init, the input and the outputs of combine_fn to be a tensor on device {inp_meta.device} but "
-    #             + f"got {ini_meta.device}, {inp_meta.device}, {carry_val.device}, {out_val.device}"
-    #         )
-    #     if carry_meta.dtype != ini_meta.dtype:
-    #         raise RuntimeError(
-    #             f"Expected the init and the new carry produced by the operator to be a tensor of {carry_meta.dtype} but "
-    #             + f"got {ini_meta.dtype} and {carry_meta.dtype}"
-    #         )
-    #     if (
-    #         carry_val.device != ini_meta.device
-    #         or carry_meta.dtype != ini_meta.dtype
-    #         or carry_meta.shape != ini_meta.shape
-    #     ):
-    #         raise RuntimeError(
-    #             f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
-    #             + f"the metadata of init with {ini_meta}"
-    #         )
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
@@ -377,13 +355,19 @@ def trace_scan(
 
     with disable_proxy_modes_tracing():
         scan_length = input[0].shape[dim]
-        fake_out_shapes = make_expanded_output_shape(dim, scan_length, [o.meta["val"].size() for o in outputs[1]])
+        fake_out_shapes = make_expanded_output_shape(
+            dim, scan_length, [o.meta["val"].size() for o in outputs[1]]
+        )
+
         def expand_tensor(t, sh):
             if isinstance(t, torch.Tensor):
                 return t.expand(*sh)
             return t
 
-        expanded_outs = [pytree.tree_map(expand_tensor, t.meta["val"], sh) for t, sh in zip(outputs[1], fake_out_shapes)]
+        expanded_outs = [
+            pytree.tree_map(expand_tensor, t.meta["val"], sh)
+            for t, sh in zip(outputs[1], fake_out_shapes)
+        ]
         out = (init, expanded_outs)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)

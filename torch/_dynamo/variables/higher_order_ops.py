@@ -1129,8 +1129,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder, wrap_fx_proxy
         from torch._higher_order_ops.scan import make_expanded_output_shape
+
+        from .builder import SourcelessBuilder, wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -1155,17 +1156,17 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if type(dim.as_proxy()) == int
             else get_fake_value(dim.as_proxy().node, tx)
         )
-        scan_length = get_fake_value(input.items[0].as_proxy().node, tx).size()[dim_fake]
+        scan_length = get_fake_value(input.items[0].as_proxy().node, tx).size()[
+            dim_fake
+        ]
         if scan_length == 0:
             unimplemented(
                 "scan() operator doesn't support zero-sized tensors during tracing."
             )
-            
+
         init_len = len(init.items)
         if init_len == 0:
-            unimplemented(
-                "scan() operator requires init leaves."
-            )
+            unimplemented("scan() operator requires init leaves.")
 
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
@@ -1196,7 +1197,19 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
             for ini in init.items
         ]
-        sub_args_inp_shapes = make_expanded_output_shape(dim_fake, 1, [tuple(BuiltinVariable(getattr).call_function(tx, [inp, ConstantVariable.create("shape")], {}).items)for inp in input.items], True)
+        sub_args_inp_shapes = make_expanded_output_shape(
+            dim_fake,
+            1,
+            [
+                tuple(
+                    BuiltinVariable(getattr)
+                    .call_function(tx, [inp, ConstantVariable.create("shape")], {})
+                    .items
+                )
+                for inp in input.items
+            ],
+            True,
+        )
         sub_args_inp = [
             inp.call_method(
                 tx,
@@ -1239,18 +1252,11 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         init_proxy = init.as_proxy()
         combine_carry_proxy = combine_result.items[0].as_proxy()
         combine_output_proxy = combine_result.items[1].as_proxy()
-        
+
         # Checks for carry and init
-        for ini_proxy, carry in zip(
-            init_proxy, combine_carry_proxy
-        ):
+        for ini_proxy, carry in zip(init_proxy, combine_carry_proxy):
             ini_meta = ini_proxy.node.meta["example_value"]
             carry_meta = carry.node.meta["example_value"]
-            if carry_meta.dtype != ini_meta.dtype:
-                unimplemented(
-                    f"Expected the init and the new carry produced by the operator to be a tensor of {carry_meta.dtype} but "
-                    + f"got {ini_meta.dtype} and {carry_meta.dtype}"
-                )
             if (
                 carry_meta.device != ini_meta.device
                 or carry_meta.dtype != ini_meta.dtype
@@ -1260,38 +1266,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
                     + f"the metadata of init with {ini_meta}"
                 )
-        
-        
-        # for ini_proxy, inp_proxy, carry, out, s_args in zip(
-        #     init_proxy, input_proxy, combine_carry_proxy, combine_output_proxy, sub_args
-        # ):
-        #     inp_meta = inp_proxy.node.meta["example_value"]
-        #     ini_meta = ini_proxy.node.meta["example_value"]
-        #     carry_meta = carry.node.meta["example_value"]
-        #     out_meta = out.node.meta["example_value"]
-        #     if (
-        #         carry_meta.device != inp_meta.device
-        #         or out_meta.device != inp_meta.device
-        #         or ini_meta.device != inp_meta.device
-        #     ):
-        #         unimplemented(
-        #             f"Expected the init, the input and the outputs of combine_fn to be a tensor on device {inp_meta.device} but "
-        #             + f"got {ini_meta.device}, {inp_meta.device}, {carry_meta.device}, {out_meta.device}"
-        #         )
-        #     if carry_meta.dtype != ini_meta.dtype:
-        #         unimplemented(
-        #             f"Expected the init and the new carry produced by the operator to be a tensor of {carry_meta.dtype} but "
-        #             + f"got {ini_meta.dtype} and {carry_meta.dtype}"
-        #         )
-        #     if (
-        #         carry_meta.device != ini_meta.device
-        #         or carry_meta.dtype != ini_meta.dtype
-        #         or carry_meta.shape != ini_meta.shape
-        #     ):
-        #         unimplemented(
-        #             f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
-        #             + f"the metadata of init with {ini_meta}"
-        #         )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = add_subgraph(tx, "scan_combine_fn", combine_gm)
@@ -1310,10 +1284,17 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # We also do a clone with contiguous_format. This is to be consistent with
             # eager semantic of map, which stacks the outputs. The result is contiguous
             # as a result of the stack operation.
-            fake_out_shapes = make_expanded_output_shape(dim_fake, scan_length, [get_fake_value(o.as_proxy().node, tx).size() for o in combine_result.items[1].items])
+            fake_out_shapes = make_expanded_output_shape(
+                dim_fake,
+                scan_length,
+                [
+                    get_fake_value(o.as_proxy().node, tx).size()
+                    for o in combine_result.items[1].items
+                ],
+            )
             out_meta = (
                 [init_p.node.meta["example_value"].clone() for init_p in init_proxy],
-                list(
+                list(  # noqa: C400
                     t.as_proxy()
                     .node.meta["example_value"]
                     .expand(*sh)

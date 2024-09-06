@@ -1914,7 +1914,7 @@ def forward(self, pred_1, x_1):
             and params["device"] == torch.device("cpu")
         ),
     )
-    def test_associative_scan_downstream_op(
+    def test_associative_scan_downstream_scan_matmul(
         self, combine_mode, compile_mode, reverse, device
     ):
         # Chain with matmul
@@ -1938,6 +1938,25 @@ def forward(self, pred_1, x_1):
         result1 = fct_cmp(inp)
         self.assertEqual(result1, expected_result)
 
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and params["device"] == torch.device("cpu")
+        ),
+    )
+    def test_associative_scan_downstream_scan_scan(
+        self, combine_mode, compile_mode, reverse, device
+    ):
         # Chain with scan
         def chain_fct_same_dim(inp):
             o1 = associative_scan(
@@ -1958,6 +1977,8 @@ def forward(self, pred_1, x_1):
 
         fct_cmp = compile_mode_helper(chain_fct_same_dim, compile_mode)
 
+        inp = torch.randn(3, 10, 2, device=device)
+
         expected_result = _fake_associative_scan(
             get_scan_combine_fn("add", True),
             _fake_associative_scan(
@@ -1969,6 +1990,25 @@ def forward(self, pred_1, x_1):
         result1 = fct_cmp(inp)
         self.assertEqual(result1, expected_result)
 
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and params["device"] == torch.device("cpu")
+        ),
+    )
+    def test_associative_scan_downstream_scan_scan_different_dim(
+        self, combine_mode, compile_mode, reverse, device
+    ):
         # Chain with scan on different dim
         def chain_fct_different_dim(inp):
             o1 = associative_scan(
@@ -1989,6 +2029,7 @@ def forward(self, pred_1, x_1):
 
         fct_cmp = compile_mode_helper(chain_fct_different_dim, compile_mode)
 
+        inp = torch.randn(3, 10, 2, device=device)
         expected_result = _fake_associative_scan(
             get_scan_combine_fn("add", True),
             _fake_associative_scan(
@@ -2005,7 +2046,7 @@ def forward(self, pred_1, x_1):
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_downstream_op(self, compile_mode, reverse, device):
+    def test_scan_downstream_scan_matmul(self, compile_mode, reverse, device):
         inp = torch.randn(3, 10, 2, device=device)
         init = torch.randn(3, 1, 2, device=device)
 
@@ -2033,6 +2074,15 @@ def forward(self, pred_1, x_1):
             )[ind] @ torch.ones(2, 5, device=device)
             result1 = fct_cmp(inp)
             self.assertEqual(result1, expected_result)
+
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_downstream_scan_scan(self, compile_mode, reverse, device):
+        inp = torch.randn(3, 10, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
 
         # Chain with scan
         def chain_fct_same_dim(inp):
@@ -2069,6 +2119,15 @@ def forward(self, pred_1, x_1):
         )
         result1 = fct_cmp(inp)
         self.assertEqual(result1, expected_result)
+
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_downstream_scan_scan_dim(self, compile_mode, reverse, device):
+        inp = torch.randn(3, 10, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
 
         # Chain with scan on different dim
         init2 = torch.randn(1, 10, 2, device=device)
@@ -2854,25 +2913,23 @@ def forward(self, pred_1, x_1):
             gm.code.strip(),
             """\
 def forward(self, fct_1, init_1, input_1):
-    flip = torch.ops.aten.flip.default(input_1, [0]);  input_1 = None
-    slice_1 = torch.ops.aten.slice.Tensor(flip, 0, 0, 1)
+    slice_1 = torch.ops.aten.slice.Tensor(input_1, 0, 0, 1)
     add = torch.ops.aten.add.Tensor(init_1, slice_1);  add = None
     add_1 = torch.ops.aten.add.Tensor(init_1, slice_1);  slice_1 = add_1 = None
     sym_size_int = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 2)
     new_empty = torch.ops.aten.new_empty.default(init_1, [1, sym_size_int, sym_size_int_1],\
  dtype = torch.float32, device = device(type='cpu'), pin_memory = False);  new_empty = None
-    new_empty_1 = torch.ops.aten.new_empty.default(flip, [1, sym_size_int, sym_size_int_1],\
+    new_empty_1 = torch.ops.aten.new_empty.default(input_1, [1, sym_size_int, sym_size_int_1],\
  dtype = torch.float32, device = device(type='cpu'), pin_memory = False);  sym_size_int = sym_size_int_1 = new_empty_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], 0, True);\
-  scan_combine_graph_0 = init_1 = flip = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [input_1], 0, True);\
+  scan_combine_graph_0 = init_1 = input_1 = None
     getitem = scan[0]
     getitem_1 = getitem[0];  getitem = None
     getitem_2 = scan[1];  scan = None
     getitem_3 = getitem_2[0];  getitem_2 = None
-    flip_1 = torch.ops.aten.flip.default(getitem_3, [0]);  getitem_3 = None
-    return (getitem_1, flip_1)""",
+    return (getitem_1, getitem_3)""",
         )
 
         # Check graph
@@ -2886,20 +2943,21 @@ def forward(self, fct_1, init_1, input_1):
 def forward(self, L_init_ : torch.Tensor, L_input_ : torch.Tensor):
     l_init_ = L_init_
     l_input_ = L_input_
-    elem = torch.flip(l_input_, [0]);  l_input_ = None
-    slice_1 = torch.ops.aten.slice(elem, 0, 0, 1, 1)
+    slice_1 = torch.ops.aten.slice(l_input_, 0, 0, 1, 1)
     out_l = l_init_ + slice_1;  out_l = None
     add_1 = l_init_ + slice_1;  slice_1 = add_1 = None
-    child = l_init_.new_empty((1, 10, 2), dtype = torch.float32, device = device(type='cpu'), requires_grad = False);  child = None
-    child_1 = elem.new_empty((1, 10, 2), dtype = torch.float32, device = device(type='cpu'), requires_grad = False);  child_1 = None
+    child = l_init_.new_empty((1, 10, 2), dtype = torch.float32,\
+ device = device(type='cpu'), requires_grad = False);  child = None
+    child_1 = l_input_.new_empty((1, 10, 2), dtype = torch.float32,\
+ device = device(type='cpu'), requires_grad = False);  child_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [elem], 0, True);  scan_combine_fn_0 = l_init_ = elem = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_input_], 0, True);\
+  scan_combine_fn_0 = l_init_ = l_input_ = None
     getitem = scan[0]
     getitem_1 = getitem[0];  getitem = None
     getitem_2 = scan[1];  scan = None
-    elem_1 = getitem_2[0];  getitem_2 = None
-    flip_1 = torch.flip(elem_1, [0]);  elem_1 = None
-    return (getitem_1, flip_1)""",
+    getitem_3 = getitem_2[0];  getitem_2 = None
+    return (getitem_1, getitem_3)""",
         )
 
 
