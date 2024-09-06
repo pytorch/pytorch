@@ -1778,7 +1778,8 @@ class VariableBuilder:
             else:
                 # Apply the updates
                 for sub_state in st.all_states:
-                    update_frame_state(sub_state.input_sizes[name])
+                    if name in sub_state.input_sizes:
+                        update_frame_state(sub_state.input_sizes[name])
                 frame_state_entry = self.tx.output.frame_state[name]
 
             # TODO: This should be dynamic, as we in general do not
