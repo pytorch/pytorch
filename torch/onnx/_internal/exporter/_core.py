@@ -16,8 +16,6 @@ from typing import Any, Callable, Literal, Sequence
 
 import onnxscript
 import onnxscript.evaluator
-import onnxscript.function_libs
-import onnxscript.function_libs.torch_lib
 from onnxscript import ir
 from onnxscript.ir import convenience as ir_convenience
 
