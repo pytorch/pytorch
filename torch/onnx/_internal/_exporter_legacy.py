@@ -1,7 +1,19 @@
 # mypy: allow-untyped-defs
-from __future__ import (  # for onnx.ModelProto (ONNXProgram) and onnxruntime (ONNXRuntimeOptions)
-    annotations,
-)
+from __future__ import annotations
+
+
+__all__ = [
+    "DiagnosticOptions",
+    "ExportOptions",
+    "ONNXProgram",
+    "ONNXRuntimeOptions",
+    "InvalidExportOptionsError",
+    "OnnxRegistry",
+    "UnsatisfiedDependencyError",
+    "dynamo_export",
+    "enable_fake_mode",
+]
+
 
 import abc
 import contextlib
@@ -17,6 +29,7 @@ from typing_extensions import Self
 import torch
 import torch._ops
 import torch.utils._pytree as pytree
+from torch.onnx import errors
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import (
@@ -1061,28 +1074,6 @@ class UnsatisfiedDependencyError(RuntimeError):
         self.package_name = package_name
 
 
-class OnnxExporterError(RuntimeError):
-    """Raised when an ONNX exporter error occurs.
-
-    This exception is thrown when there's an error during the ONNX export process.
-    It encapsulates the :class:`ONNXProgram` object generated until the failure, allowing
-    access to the partial export results and associated metadata.
-    """
-
-    onnx_program: Final[ONNXProgram]  # type: ignore[misc]
-
-    def __init__(self, onnx_program: ONNXProgram, message: str):
-        """
-        Initializes the OnnxExporterError with the given ONNX program and message.
-
-        Args:
-            onnx_program (ONNXProgram): The partial results of the ONNX export.
-            message (str): The error message to be displayed.
-        """
-        super().__init__(message)
-        self.onnx_program = onnx_program
-
-
 class InvalidExportOptionsError(RuntimeError):
     """Raised when user specified an invalid value for the :class:`ExportOptions`."""
 
@@ -1232,10 +1223,7 @@ def dynamo_export(
             "or SARIF web viewer (https://microsoft.github.io/sarif-web-component/). "
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
         )
-        raise OnnxExporterError(
-            ONNXProgram._from_failure(e, resolved_export_options.diagnostic_context),
-            message,
-        ) from e
+        raise errors.OnnxExporterError(message) from e
 
 
 def common_pre_export_passes(
@@ -1313,17 +1301,3 @@ def common_pre_export_passes(
     )
 
     return module
-
-
-__all__ = [
-    "DiagnosticOptions",
-    "ExportOptions",
-    "ONNXProgram",
-    "ONNXRuntimeOptions",
-    "InvalidExportOptionsError",
-    "OnnxExporterError",
-    "OnnxRegistry",
-    "UnsatisfiedDependencyError",
-    "dynamo_export",
-    "enable_fake_mode",
-]
