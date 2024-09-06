@@ -509,7 +509,7 @@ def enforce_comm_ordering_for_fsdp(
                 name_to_fused_node,
             )
 
-            # Find the "all_gather + all_gather_wait_tensor + copy_out + copy_" code block
+            # Find the "all_gather + all_gather_wait_tensor + copy_out" code block
             allowed_ops = {
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
                 torch.ops._c10d_functional.wait_tensor.default,
@@ -525,14 +525,6 @@ def enforce_comm_ordering_for_fsdp(
                     or (
                         isinstance(x, scheduler.ExternKernelSchedulerNode)
                         and x.node.op_overload in allowed_ops  # type: ignore[union-attr]
-                    )
-                    or (
-                        isinstance(x, scheduler.SchedulerNode)
-                        and isinstance(x.node, ir.ComputedBuffer)
-                        and isinstance(x.node.data, ir.Pointwise)
-                        and len(x.node.data.origins) == 1
-                        and next(iter(x.node.data.origins)).target
-                        is torch.ops.fsdp.copy_.default
                     )
                 ),
             )
@@ -567,7 +559,7 @@ def enforce_comm_ordering_for_fsdp(
             assert wait_node_idx is not None
             ag_group_node = _create_group_node(ag_related_snodes[:wait_node_idx])
 
-            # Group "all_gather_wait_tensor + copy_out + copy_" into one GroupedSchedulerNode
+            # Group "all_gather_wait_tensor + copy_out" into one GroupedSchedulerNode
             ag_wait_group_node = _create_group_node(ag_related_snodes[wait_node_idx:])
 
             ag_grouped_node_to_wait_grouped_node[ag_group_node] = ag_wait_group_node
