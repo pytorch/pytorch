@@ -828,10 +828,12 @@ class SchedulerNode(BaseSchedulerNode):
     def _compute_attrs(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
         self._sizes, self._body = self.node.simplify_and_reorder(
-            extra_indexing_constraints=extra_indexing_constraints
+            extra_indexing_constraints=extra_indexing_constraints,
+            recompute_sizes_body_func=recompute_sizes_body_func,
         )
 
         group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
@@ -856,9 +858,14 @@ class SchedulerNode(BaseSchedulerNode):
             )
 
     def recompute_size_and_body(
-        self, extra_indexing_constraints: Tuple[Dict[Any, Any], List[Any]]
+        self,
+        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
-        self._compute_attrs(extra_indexing_constraints=extra_indexing_constraints)
+        self._compute_attrs(
+            extra_indexing_constraints=extra_indexing_constraints,
+            recompute_sizes_body_func=recompute_sizes_body_func,
+        )
 
     def refresh_dependencies(self, normalize: bool) -> None:
         # Fake dependencies are added manually. They can not be analyzed from
@@ -3072,9 +3079,14 @@ class Scheduler:
         if isinstance(read, MemoryDep):
             if read.mode == write.mode and write.mode is not None:
                 return True
-            read_name = read.name
-            if read_name in self.mutation_renames:
-                read_name = self.mutation_renames[read_name]
+            read_name = self.mutation_renames.get(read.name, read.name)
+
+            if (
+                read_name != write.name
+                or free_symbol_is_type(read.index, SymT.TMP)
+                or free_symbol_is_type(write.index, SymT.TMP)
+            ):
+                return False
 
             if config.loop_ordering_after_fusion and read.num_vars != write.num_vars:
                 # Need merge loops if we do loop ordering after fusion since
@@ -3084,10 +3096,7 @@ class Scheduler:
                 write = write.normalize()
 
             return (
-                read_name == write.name
-                and not free_symbol_is_type(read.index, SymT.TMP)
-                and not free_symbol_is_type(write.index, SymT.TMP)
-                and read.index == write.index
+                read.index == write.index
                 and len(read.size) >= len(write.size)
                 and read.size[: len(write.size)] == write.size
             )
