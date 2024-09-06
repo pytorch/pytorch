@@ -599,6 +599,8 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
     """
     if shape_env is None:
         return
+    if shape_env._ignore_fresh_unbacked_symbols_tls():
+        return
     fs = shape_env.pending_fresh_unbacked_symbols
     pending = set(fs)
     if pending:
@@ -1449,6 +1451,7 @@ def _maybe_evaluate_static_worker(
                 'env': env,
                 'res': jsonify(res),
                 'pytest_current_test': os.getenv('PYTEST_CURRENT_TEST'),
+                'argv': sys.argv,
             }
             if unbacked_only:
                 entry['unbacked_only'] = True
@@ -2856,6 +2859,8 @@ class ShapeEnv:
         assert isinstance(new_s, sympy.Symbol), new_s
         assert free_unbacked_symbols(new_s), new_s
         assert free_unbacked_symbols(orig_s), orig_s
+        if self._ignore_fresh_unbacked_symbols_tls():
+            return
         dest = self.replacements.get(orig_s)
         assert not free_unbacked_symbols(dest), f"{orig_s} -> {dest}"
         self._set_replacement(orig_s, new_s, "rename_unbacked_to")

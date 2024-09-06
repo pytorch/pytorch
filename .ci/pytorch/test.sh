@@ -596,6 +596,9 @@ test_single_dynamo_benchmark() {
 
 test_inductor_micro_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    test_inductor_set_cpu_affinity
+  fi
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
@@ -1404,8 +1407,6 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-
-pip_install --user "fbscribelogger"
 if [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
