@@ -65,6 +65,7 @@ from torch._guards import (
     Source,
 )
 from torch._logging import structured
+from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
     EqualityConstraint,
     is_symbolic,
@@ -76,6 +77,7 @@ from torch.utils.weak import TensorWeakRef
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
 from .source import (
+    AttrProxySource,
     AttrSource,
     ChainedSource,
     ConstDictKeySource,
@@ -1060,6 +1062,14 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x._type().qualified_name(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, AttrProxySource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.get_base(),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -2229,9 +2239,16 @@ class CheckFunctionManager:
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)
 
+        guard_on_nn_modules = config.guard_nn_modules and justknobs_check(
+            "pytorch/compiler:guard_nn_modules"
+        )
+
+        if not justknobs_check("pytorch/compiler:guard_nn_modules"):
+            log.warning("guard_nn_modules is turned off using justknobs killswitch")
+
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
-                not config.guard_nn_modules
+                not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
                 # Default func args must be guarded on.
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
