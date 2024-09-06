@@ -542,8 +542,7 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/TransposeUtilsAvx2.h#L200-L256
 // kernel for transposing mxn where m, n <= 8
 // M + (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + 2 * N instructions
-template <>
-inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
+inline void transpose_mxn_8x8(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
   TORCH_CHECK(M <= 8 && N <= 8, "transpose_mxn<float> expects M, N <= 8.");
   // load from src to registers
   __m256 input[8];
@@ -607,6 +606,36 @@ inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, i
   }
 }
 
+template<>
+inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
+  int64_t i = 0;
+  for (; i < M / 8 * 8; i += 8) {
+    int64_t j = 0;
+    for (; j < N / 8 * 8; j += 8) {
+      transpose_mxn_8x8(
+          src + i * ld_src + j, ld_src, dst + j * ld_dst + i, ld_dst, 8, 8);
+    }
+    // handle remainder j
+    int nrem = N - j;
+    if (nrem > 0) {
+      transpose_mxn_8x8(
+          src + i * ld_src + j, ld_src, dst + j * ld_dst + i, ld_dst, 8, nrem);
+    }
+  }
+  // handle remainder i
+  int mrem = M - i;
+  if (mrem > 0) {
+    int j = 0;
+    for (; j < N / 8 * 8; j += 8) {
+      transpose_mxn_8x8(
+          src + i * ld_src + j, ld_src, dst + j * ld_dst + i, ld_dst, mrem, 8);
+    }
+    // handle remainder j
+    int nrem = N - j;
+    transpose_mxn_8x8(
+        src + i * ld_src + j, ld_src, dst + j * ld_dst + i, ld_dst, mrem, nrem);
+  }
+}
 #endif
 
 }} // namespace at::vec::CPU_CAPABILITY
