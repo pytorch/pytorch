@@ -369,7 +369,7 @@ def _templated_ring_attention(
     """
     This is a generalized ring attention implementation that can support multiple attention ops.
 
-    Algorithm Description:
+    Note [Context parallelism load balance algorithm for causal masking]
     =====================
     This explanation uses an example to illustrate the CP algorithm with causal
     masking.
@@ -485,8 +485,8 @@ def _templated_ring_attention(
             rank=rank, world_size=size, i=i, is_causal=is_causal
         )
 
-        # For a detailed understanding of the load balancing algorithm, please
-        # refer to explanation provided in the docstring.
+        # For a detailed understanding of the load balancing algorithm, see
+        # Note [Context parallelism load balance algorithm for causal masking]
         if is_causal_behavior == _CausalBehavior.SKIP:
             # If i > rank and load balancing is not turned on.
             continue
