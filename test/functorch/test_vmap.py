@@ -3495,27 +3495,42 @@ class TestVmapOperators(Namespace.TestVmapBase):
         def op(x):
             return torch.arange(4)[x]
 
-        test = functools.partial(self._vmap_test, check_propagates_grad=False)
-        test(op, (torch.arange(3),))
+        test = functools.partial(
+            self._vmap_test, op, (torch.arange(3),), check_propagates_grad=False
+        )
+        with self.assertRaises(RuntimeError):
+            test()
 
         # indexed tensor has more than one dim
         def op(x):
             return torch.arange(16).view(4, 4)[x]
 
-        test = functools.partial(self._vmap_test, check_propagates_grad=False)
-        test(op, (torch.arange(3),))
+        test = functools.partial(
+            self._vmap_test, op, (torch.arange(3),), check_propagates_grad=False
+        )
+        with self.assertRaises(RuntimeError):
+            test()
 
         # second dim
         def op(x):
             return torch.arange(16).view(4, 4)[:, x]
 
-        test = functools.partial(self._vmap_test, check_propagates_grad=False)
-        test(op, (torch.arange(3),))
+        test = functools.partial(
+            self._vmap_test, op, (torch.arange(3),), check_propagates_grad=False
+        )
+        with self.assertRaises(RuntimeError):
+            test()
 
         # Nested vmap
         op = vmap(lambda x: torch.arange(16).view(4, 4)[:, x])
-        test = functools.partial(self._vmap_test, check_propagates_grad=False)
-        test(op, (torch.arange(4).view(2, 2),))
+        test = functools.partial(
+            self._vmap_test,
+            op,
+            (torch.arange(4).view(2, 2),),
+            check_propagates_grad=False,
+        )
+        with self.assertRaises(RuntimeError):
+            test()
 
     @parametrize("in_dim", [0, 1])
     @parametrize("out_dim", [0, 1])
