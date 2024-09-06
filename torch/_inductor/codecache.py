@@ -62,6 +62,8 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._utils_internal import log_cache_bypass
 
+from .utils import _align
+
 
 T = TypeVar("T")
 
@@ -1728,10 +1730,23 @@ class AotCodeCompiler:
             )
 
             output_o = os.path.splitext(input_path)[0] + ".o"
+
+            all_cuda = all(
+                graph.get_original_value_of_constant(name).is_cuda
+                for name in graph.constants.keys()
+                if name not in graph.folded_constants
+            )
+
+            def get_nbytes_of_tensor(tensor: torch.Tensor, all_cuda: bool) -> int:
+                n_bytes = (
+                    torch.ops.mkldnn._nbytes(tensor)
+                    if tensor.is_mkldnn
+                    else tensor.untyped_storage().nbytes()
+                )
+                return n_bytes if all_cuda else _align(n_bytes)
+
             consts_size = sum(
-                torch.ops.mkldnn._nbytes(tensor)
-                if tensor.is_mkldnn
-                else tensor.untyped_storage().nbytes()
+                get_nbytes_of_tensor(tensor, all_cuda)
                 for (name, tensor) in graph.constants.items()
                 if name not in graph.folded_constants
             )
@@ -1825,11 +1840,6 @@ class AotCodeCompiler:
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-            all_cuda = all(
-                graph.get_original_value_of_constant(name).is_cuda
-                for name in graph.constants.keys()
-                if name not in graph.folded_constants
-            )
             serialized_weights = b"".join(
                 _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
                 for name in graph.constants.keys()

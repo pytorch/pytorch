@@ -116,9 +116,9 @@ class LoopBody:
         """
         self.indexing_exprs = other.indexing_from_args(args)
         self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
-        self.indirect_vars = [*other.indirect_vars]
-        self.indirect_var_ranges = {**other.indirect_var_ranges}
-        self.memory_usage = {k: [*v] for k, v in other.memory_usage.items()}
+        self.indirect_vars = other.indirect_vars
+        self.indirect_var_ranges = other.indirect_var_ranges
+        self.memory_usage = other.memory_usage
         self.root_block = other.root_block.clone(self)
 
         submodules = {**other.submodules}
@@ -450,7 +450,9 @@ class LoopBodyBlock:
                 indexing_dtype: torch.dtype,
                 right: bool,
             ):
-                offsets_size = add_index(offsets_size, MemoryUsageType.BUCKETIZE, buffer_name=offsets_name)
+                offsets_size = add_index(
+                    offsets_size, MemoryUsageType.BUCKETIZE, buffer_name=offsets_name
+                )
                 return self._inner.bucketize(
                     values, offsets_name, offsets_size, indexing_dtype, right
                 )
