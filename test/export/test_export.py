@@ -892,6 +892,25 @@ graph():
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
 
+    def test_export_script_module(self):
+        class Foo(torch.nn.Module):
+            def forward(self, rv: torch.Tensor, t: torch.Tensor):
+                i = t.item()
+                return rv + i
+
+        foo = Foo()
+        foo_script = torch.jit.script(foo)
+        inp = (torch.zeros(3, 4), torch.tensor(7))
+
+        with self.assertRaisesRegex(
+            ValueError, "Exporting a ScriptModule is not supported"
+        ):
+            export(foo_script, inp)
+
+        from torch._export.converter import TS2EPConverter
+
+        TS2EPConverter(foo_script, inp).convert()
+
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
