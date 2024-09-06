@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
-
 namespace torch::jit {
 namespace onnx {
 using namespace ::c10::onnx;
@@ -71,4 +70,3 @@ void CastAllConstantToFloating(const std::shared_ptr<Graph>& graph) {
   CastAllConstantToFloating(graph->block());
 }
 } // namespace torch::jit
-

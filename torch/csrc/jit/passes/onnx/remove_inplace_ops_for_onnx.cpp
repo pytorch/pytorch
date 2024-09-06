@@ -13,7 +13,6 @@
 
 #include <limits>
 
-
 namespace torch::jit {
 
 namespace {
@@ -891,4 +890,3 @@ void RemoveInplaceOpsForONNX(
 }
 
 } // namespace torch::jit
-

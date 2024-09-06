@@ -2,8 +2,6 @@
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 #include <torch/csrc/jit/passes/onnx/naming.h>
 
-
-
 namespace torch::jit::onnx {
 
 namespace {
@@ -88,7 +86,9 @@ struct FunctionExtractor {
       scope_ctx_map& scope_ctxs,
       const std::shared_ptr<Graph>& graph);
 
-  static void HandleNoScopeNodes(scope_ctx_map&, const node_list& no_scope_nlist);
+  static void HandleNoScopeNodes(
+      scope_ctx_map&,
+      const node_list& no_scope_nlist);
   std::tuple<scope_ctx_map, node_list> PartitionNodesByScope(Block* b);
   scope_ctx_map PartitionNodesByScope(const std::shared_ptr<Graph>& graph);
   static std::unordered_map<ScopePtr, scope_list> PartitionIdenticalScopes(
@@ -1182,5 +1182,3 @@ void ONNXTrackScopeAttributes(
 }
 
 } // namespace torch::jit::onnx
-
-

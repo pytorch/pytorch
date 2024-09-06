@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
-
 namespace torch::jit {
 
 namespace onnx {
@@ -230,4 +229,3 @@ void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
 }
 
 } // namespace torch::jit
-

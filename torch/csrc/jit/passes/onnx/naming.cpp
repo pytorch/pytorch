@@ -3,8 +3,6 @@
 
 #include <utility>
 
-
-
 namespace torch::jit::onnx {
 
 namespace ONNXScopeName {
@@ -106,7 +104,8 @@ NodeNameGenerator::~NodeNameGenerator() = default;
 
 class ScopedNodeNameGenerator : public NodeNameGenerator {
  public:
-  ScopedNodeNameGenerator(std::shared_ptr<Graph> g) : NodeNameGenerator(std::move(g)){};
+  ScopedNodeNameGenerator(std::shared_ptr<Graph> g)
+      : NodeNameGenerator(std::move(g)){};
 
  protected:
   void CreateNodeName(Node* n) override;
@@ -204,5 +203,3 @@ void AssignScopedNamesForNodeAndValue(std::shared_ptr<Graph>& graph) {
 }
 
 } // namespace torch::jit::onnx
-
-

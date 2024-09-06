@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <iostream>
 
-
-
 namespace torch::jit::onnx {
 
 namespace {
@@ -27,5 +25,3 @@ std::ostream& _get_log_output_stream() {
 }
 
 } // namespace torch::jit::onnx
-
-

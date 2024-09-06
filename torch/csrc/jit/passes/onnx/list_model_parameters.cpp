@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
 
-
 namespace torch::jit {
 
 namespace onnx {
@@ -192,4 +191,3 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
 }
 
 } // namespace torch::jit
-

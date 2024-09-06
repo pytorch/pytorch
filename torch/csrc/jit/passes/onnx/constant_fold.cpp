@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <optional>
 
-
 namespace torch::jit {
 
 namespace onnx {
@@ -708,4 +707,3 @@ void ConstantFoldONNX(
 }
 
 } // namespace torch::jit
-

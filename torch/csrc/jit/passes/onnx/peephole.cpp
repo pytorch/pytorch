@@ -23,7 +23,6 @@
 typedef SSIZE_T ssize_t;
 #endif
 
-
 namespace torch::jit {
 
 namespace onnx {
@@ -1069,4 +1068,3 @@ void PeepholeOptimizeONNX(
 }
 
 } // namespace torch::jit
-

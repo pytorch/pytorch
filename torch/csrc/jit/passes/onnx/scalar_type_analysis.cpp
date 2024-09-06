@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
-
 namespace torch::jit {
 
 namespace onnx {
@@ -480,4 +479,3 @@ void ScalarTypeAnalysisNodeForONNX(Node* n) {
 }
 
 } // namespace torch::jit
-

@@ -4,7 +4,6 @@
 
 #include <c10/util/irange.h>
 
-
 namespace torch::jit {
 
 namespace onnx {
@@ -100,4 +99,3 @@ void DeduplicateInitializers(
 }
 
 } // namespace torch::jit
-

@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
 
-
 namespace torch::jit {
 
 // onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0,
@@ -44,4 +43,3 @@ void PrepareDivisionForONNX(const std::shared_ptr<Graph>& graph) {
 }
 
 } // namespace torch::jit
-

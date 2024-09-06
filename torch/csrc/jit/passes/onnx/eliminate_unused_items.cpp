@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
-
 namespace torch::jit {
 
 namespace onnx {
@@ -17,4 +16,3 @@ void EliminateUnusedItemsONNX(Block* b, ParamMap& paramsDict) {
 }
 
 } // namespace torch::jit
-
