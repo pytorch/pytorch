@@ -1051,15 +1051,31 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
 
   // Print summary stats of the tensor
   std::cout << "Number of elements: " << numel << std::endl;
+  std::cout << "Dtype: " << t->dtype() << std::endl;
   if (numel > 0) {
-    std::cout << "Mean value: " << t->mean().item() << std::endl;
-    std::cout << "Min value: " << t->min().item<float>() << std::endl;
-    std::cout << "Max value: " << t->max().item<float>() << std::endl;
+    // torch/aten `mean()` function only supports float and complex dtypes
+    // See:
+    // https://github.com/pytorch/pytorch/blob/a0e062c6f1a03ec93e87413e42c4d0b336518131/aten/src/ATen/native/ReduceOps.cpp#L304-L309
+    auto mean_value = [t](at::ScalarType dtype) {
+      return t->to(dtype).mean().item();
+    };
+    bool is_complex_type =
+        at::isComplexType(at::typeMetaToScalarType(t->dtype()));
+    at::ScalarType float_dtype =
+        is_complex_type ? at::kComplexFloat : at::kFloat;
+    std::cout << "Mean value: " << mean_value(float_dtype) << std::endl;
+    if (!is_complex_type) {
+      // "min_all_cuda" function is not implemented for 'ComplexFloat' type.
+      // (similar for max) Skip printing min/max value for complex type tensors
+      // here If encountered complex dtypes (rare occasions), suggest to print
+      // out the whole value of the tensor.
+      std::cout << "Min value: " << t->min().item<float>() << std::endl;
+      std::cout << "Max value: " << t->max().item<float>() << std::endl;
+    }
   }
   std::cout << "Device: " << t->device() << std::endl;
   std::cout << "Size: " << t->sizes() << std::endl;
   std::cout << "Stride: " << t->strides() << std::endl;
-  std::cout << "Dtype: " << t->dtype() << std::endl;
   std::cout << "Layout: " << t->layout() << std::endl;
   std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
   std::cout << "Requires grad: " << t->requires_grad() << std::endl;
