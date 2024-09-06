@@ -607,6 +607,11 @@ test_inductor_halide() {
   assert_git_not_dirty
 }
 
+test_inductor_triton_cpu() {
+  python test/run_test.py --include inductor/test_triton_cpu_backend.py --verbose
+  assert_git_not_dirty
+}
+
 test_dynamo_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -1433,6 +1438,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
+  test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
