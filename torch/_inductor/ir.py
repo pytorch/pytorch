@@ -6804,9 +6804,6 @@ class LoopBody:
 
     indexing_exprs: Dict[str, sympy.Expr]
     indexing_exprs_name: Dict[sympy.Expr, str]
-    reads: List[sympy.Expr]
-    writes: List[sympy.Expr]
-    other: List[sympy.Expr]
     reads_name2expr: Dict[str, sympy.Expr]
     writes_name2expr: Dict[str, sympy.Expr]
     submodules: Dict[str, Any]
@@ -6839,11 +6836,8 @@ class LoopBody:
         """Do an FX trace of an arbitrary callable to construct self"""
         self.indexing_exprs = {}
         self.indexing_exprs_name = {}
-        self.reads = []
-        self.writes = []
         self.reads_name2expr = {}
         self.writes_name2expr = {}
-        self.other = []
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
@@ -6866,9 +6860,6 @@ class LoopBody:
         ) == len(indexing_exprs)
 
         self.indexing_exprs = indexing_exprs
-        self.reads = [update_index[x] for x in other.reads]
-        self.writes = [update_index[x] for x in other.writes]
-        self.other = [update_index[x] for x in other.other]
         self.reads_name2expr = {
             k: update_index[v] for k, v in other.reads_name2expr.items()
         }
@@ -7024,7 +7015,6 @@ class LoopBody:
     __repr__ = debug_str
 
     def add_index_expr(self, expr: sympy.Expr, category, buf_name):
-        getattr(self, category).append(expr)
         if buf_name is not None:
             getattr(self, f"{category}_name2expr")[buf_name] = expr
         if expr not in self.indexing_exprs_name:
