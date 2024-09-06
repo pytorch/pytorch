@@ -232,7 +232,7 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
 def init_backend_registration():
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
-    from .cpp_wrapper_cuda import CppWrapperGpu
+    from .cpp_wrapper_gpu import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .triton import TritonScheduling
