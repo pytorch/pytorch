@@ -54,6 +54,7 @@ class MemoryEntry(NamedTuple):
 class MemoryUsageType(Enum):
     # These are 1:1 with the opcode generating the usage
     LOAD = auto()
+    LOAD_SEED = auto()
     STORE = auto()
     STORE_REDUCTION = auto()
     INDEX_EXPR = auto()
@@ -116,9 +117,9 @@ class LoopBody:
         """
         self.indexing_exprs = other.indexing_from_args(args)
         self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
-        self.indirect_vars = [*other.indirect_vars]
-        self.indirect_var_ranges = {**other.indirect_var_ranges}
-        self.memory_usage = {k: [*v] for k, v in other.memory_usage.items()}
+        self.indirect_vars = other.indirect_vars
+        self.indirect_var_ranges = other.indirect_var_ranges
+        self.memory_usage = other.memory_usage
         self.root_block = other.root_block.clone(self)
 
         submodules = {**other.submodules}
@@ -424,6 +425,13 @@ class LoopBodyBlock:
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, MemoryUsageType.LOAD, buffer_name=name)
                 return self._inner.load(name, index)
+
+            def load_seed(self, name: str, index: int):
+                assert isinstance(index, int)
+                self.body.add_index_expr(
+                    sympy.Integer(index), MemoryUsageType.LOAD_SEED, buffer_name=name
+                )
+                return self._inner.load_seed(name, index)
 
             def store(self, name, index, value, mode=None):
                 index = add_index(
