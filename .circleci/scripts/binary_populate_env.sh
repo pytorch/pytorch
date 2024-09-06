@@ -153,7 +153,10 @@ export DOCKER_IMAGE="$DOCKER_IMAGE"
 
 
 export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
-export USE_GLOO_WITH_OPENSSL="ON"
+
+if [[ "\$BUILD_ENVIRONMENT" != *aarch64* ]]; then
+  export USE_GLOO_WITH_OPENSSL="ON"
+fi
 # =================== The above code will be executed inside Docker container ===================
 EOL
 
