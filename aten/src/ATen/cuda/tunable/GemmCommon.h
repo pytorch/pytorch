@@ -167,7 +167,15 @@ private:
 template <typename T>
 struct GemmAndBiasParams : OpParams {
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    const int buf_len = 64;
+    char buf[buf_len];
+    int ret;
+
+    ret = snprintf(buf, buf_len, "%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+
+    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
+
+    return std::string(buf, ret);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -237,7 +245,15 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
+    const int buf_len = 64;
+    char buf[buf_len];
+    int ret;
+
+    ret = snprintf(buf, buf_len, "%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
+
+    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
+
+    return std::string(buf, ret);
   }
 
   size_t GetSizeA() const {
@@ -322,7 +338,15 @@ struct ScaledGemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    const int buf_len = 64;
+    char buf[buf_len];
+    int ret;
+
+    ret = snprintf(buf, buf_len, "%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+
+    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
+
+    return std::string(buf, ret);
   }
 
   size_t GetSizeA() const {
