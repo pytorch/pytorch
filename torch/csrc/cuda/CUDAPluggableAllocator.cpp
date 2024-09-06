@@ -1,3 +1,4 @@
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <mutex>
@@ -364,7 +365,7 @@ void CUDAPluggableAllocator::copy_data(
       cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
 }
 
-std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
     current_custom_allocator;
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
@@ -390,6 +391,7 @@ void changeCurrentAllocator(
       !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");
   c10::cuda::CUDACachingAllocator::allocator.store(allocator.get());
+  c10::SetAllocator(DeviceType::CUDA, allocator.get(), 0);
   current_custom_allocator = allocator;
 }
 

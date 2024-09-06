@@ -3710,48 +3710,48 @@ CUDAAllocator* allocator();
 
 } // namespace CudaMallocAsync
 
-struct BackendStaticInitializer {
-  // Parses env for backend at load time, duplicating some logic from
-  // CUDAAllocatorConfig. CUDAAllocatorConfig double-checks it later (at
-  // runtime). Defers verbose exceptions and error checks, including Cuda
-  // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
-  // works, maybe we should move all of CUDAAllocatorConfig here?
-  CUDAAllocator* parseEnvForBackend() {
-    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
-    if (val != nullptr) {
-      const std::string config(val);
+// Parses env for backend at load time, duplicating some logic from
+// CUDAAllocatorConfig. CUDAAllocatorConfig double-checks it later (at
+// runtime). Defers verbose exceptions and error checks, including Cuda
+// version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
+// works, maybe we should move all of CUDAAllocatorConfig here?
+CUDAAllocator* parseEnvForBackend() {
+  const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+  if (val != nullptr) {
+    const std::string config(val);
 
-      std::regex exp("[\\s,]+");
-      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-      std::sregex_token_iterator end;
-      std::vector<std::string> options(it, end);
+    std::regex exp("[\\s,]+");
+    std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
+    std::sregex_token_iterator end;
+    std::vector<std::string> options(it, end);
 
-      for (auto option : options) {
-        std::regex exp2("[:]+");
-        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-        std::sregex_token_iterator end2;
-        std::vector<std::string> kv(it2, end2);
-        if (kv.size() >= 2) {
-          if (kv[0] == "backend") {
-            if (kv[1] == "cudaMallocAsync")
-              return CudaMallocAsync::allocator();
-            if (kv[1] == "native")
-              return &Native::allocator;
-          }
+    for (auto option : options) {
+      std::regex exp2("[:]+");
+      std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+      std::sregex_token_iterator end2;
+      std::vector<std::string> kv(it2, end2);
+      if (kv.size() >= 2) {
+        if (kv[0] == "backend") {
+          if (kv[1] == "cudaMallocAsync")
+            return CudaMallocAsync::allocator();
+          if (kv[1] == "native")
+            return &Native::allocator;
         }
       }
     }
-    return &Native::allocator;
   }
+  return &Native::allocator;
+}
 
-  BackendStaticInitializer() {
-    auto r = parseEnvForBackend();
-    allocator.store(r);
-  }
-};
+static Allocator* getDefaultAllocator() {
+  auto r = parseEnvForBackend();
+  allocator.store(r);
+
+  return r;
+}
 
 std::atomic<CUDAAllocator*> allocator;
-BackendStaticInitializer backend_static_initializer;
+REGISTER_ALLOCATOR(DeviceType::CUDA, getDefaultAllocator())
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
 

@@ -338,24 +338,20 @@ static PyObject* THPStorage_pynew(
     torch::utils::maybe_initialize_device(device);
 
     switch (device.type()) {
-      case at::kCPU:
-        allocator = c10::GetDefaultCPUAllocator();
-        break;
-#ifdef USE_CUDA
-      case at::kCUDA:
-        allocator = c10::cuda::CUDACachingAllocator::get();
-        break;
-#endif
 #ifdef USE_MPS
       case at::kMPS:
         allocator = at::mps::GetMPSAllocator();
         break;
 #endif
-      case at::DeviceType::XPU:
-      case at::DeviceType::HPU:
-      case at::DeviceType::Meta:
-      case at::DeviceType::PrivateUse1:
-      case at::DeviceType::MAIA:
+      case at::kCPU:
+#ifdef USE_CUDA
+      case at::kCUDA:
+#endif
+      case at::kXPU:
+      case at::kHPU:
+      case at::kMeta:
+      case at::kPrivateUse1:
+      case at::kMAIA:
         allocator = c10::GetAllocator(device.type());
         break;
       default:
