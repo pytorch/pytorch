@@ -88,16 +88,32 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   return extra_state;
 }
 
+bool backend_match(PyObject* saved_backend, PyObject* backend) {
+  // Pointer equality check for common case
+  if (saved_backend != backend) {
+    // The Py_TYPE check should not be required but there is a pre-existing
+    // issue where backend is possibly deallocated (or nullptr) and causes
+    // segfaults. Check test - test_inplace_custom_op_intermediate
+    return (
+        Py_TYPE(saved_backend) == Py_TYPE(backend) &&
+        PyObject_RichCompareBool(saved_backend, backend, Py_EQ));
+  }
+  return true;
+}
+
 PyObject* lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    const PyObject* backend) {
+    PyObject* backend) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
-    bool valid = backend == Py_False || cache_entry.backend == backend;
+
+    bool valid =
+        backend == Py_False || backend_match(cache_entry.backend, backend);
+
     if (valid) {
       try {
         // TODO(anijain2305) - Clean this up when enable_cpp_guard_manager is

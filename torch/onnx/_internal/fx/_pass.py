@@ -176,7 +176,7 @@ class Transform(abc.ABC):
 
     One important aspect to note is that if the transformation modifies the model input and/or output signature,
     (e.g. additional inputs/outputs are added to the model), :class:`InputAdaptStep` and/or :class:`OutputAdaptStep`
-    are needed to reconcile :attr:`ONNXProgram.model_signature` and :attr:`ONNXProgram.model_proto`.
+    are needed to reconcile :attr:`ONNXProgram.model_proto`.
     That is, the model signature and the model representation must match.
 
     As an additional feature, this class provides builtin support for transformation recording using the diagnostics.
