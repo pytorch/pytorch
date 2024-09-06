@@ -158,15 +158,13 @@ def generate_ttir(kernel, kwargs):
     ]
     specialization = kernel._get_config(*ordered_args.values())
     constants = {
-        i: arg
-        for i, arg in enumerate(ordered_args.values())
-        if not isinstance(arg, Tensor)
+        name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
     }
 
     # Build kernel signature -- doesn't include constexpr arguments.
     signature = {
-        i: kernel._type_of(kernel._key_of(arg))
-        for i, arg in enumerate(ordered_args.values())
+        name: kernel._type_of(kernel._key_of(arg))
+        for i, (name, arg) in enumerate(ordered_args.items())
         if i not in kernel.constexprs
     }
 
