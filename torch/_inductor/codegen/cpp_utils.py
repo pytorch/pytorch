@@ -880,3 +880,37 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
         inner_fn=inner_fn,
         ranges=input_buffer.get_size(),
     )
+
+
+def _get_loop_body(fn_list):
+    loop_bodies = None
+    if all(isinstance(fn, ir.LoopBody) for fn in fn_list):
+        loop_bodies = fn_list
+    else:
+        if hasattr(fn_list[0], "original_fn"):
+            # For the case of local buffer, we wrap the fn with localize_function
+            assert all(hasattr(fn, "original_fn") for fn in fn_list)
+            assert all(
+                isinstance(fn.original_fn.args[0]._body, ir.LoopBody) for fn in fn_list
+            )
+            loop_bodies = [fn.original_fn.args[0]._body for fn in fn_list]
+        else:
+            assert all(isinstance(fn, functools.partial) for fn in fn_list)
+            assert all(isinstance(fn.args[0]._body, ir.LoopBody) for fn in fn_list)
+            loop_bodies = [fn.args[0]._body for fn in fn_list]
+    assert loop_bodies is not None
+    return loop_bodies
+
+
+def _get_dtype_from_loopbodies(loop_bodies):
+    dtypes = set()
+    for loop_body in loop_bodies:
+        graphs = [loop_body.root_block.graph] + [
+            body.graph for body in list(loop_body.subblocks.values())
+        ]
+        for graph in graphs:
+            for node in graph.nodes:
+                if node.op != "call_method":
+                    continue
+                dtypes.add(node.meta[OptimizationContext.key].dtype)
+    return dtypes

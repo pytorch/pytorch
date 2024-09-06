@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/CallOnce.h>
+#include <c10/util/Gauge.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
@@ -1463,6 +1464,12 @@ class DeviceCachingAllocator {
     if (block->size >= CUDAAllocatorConfig::max_split_size())
       increase_stat(stats.oversize_allocations, 1);
 
+    auto allocated_bytes_gauge =
+        STATIC_GAUGE(pytorch.CUDACachingAllocator.allocated_bytes);
+    allocated_bytes_gauge.record(
+        stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+            .current);
+
     c10::reportMemoryUsageToProfiler(
         block->ptr,
         static_cast<int64_t>(block->size),
@@ -1490,6 +1497,11 @@ class DeviceCachingAllocator {
       decrease_stat(stats.allocation[stat_type], 1);
       decrease_stat(stats.allocated_bytes[stat_type], block->size);
     });
+    auto allocated_bytes_gauge =
+        STATIC_GAUGE(pytorch.CUDACachingAllocator.allocated_bytes);
+    allocated_bytes_gauge.record(
+        stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+            .current);
 
     record_trace(
         TraceEntry::FREE_REQUESTED,
@@ -2279,6 +2291,11 @@ class DeviceCachingAllocator {
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       increase_stat(stats.reserved_bytes[stat_type], mapped_range.size);
     });
+    auto reserved_bytes_gauge =
+        STATIC_GAUGE(pytorch.CUDACachingAllocator.reserved_bytes);
+    reserved_bytes_gauge.record(
+        stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+            .current);
 
     stats.num_device_alloc++;
     record_trace(
@@ -2611,7 +2628,7 @@ class DeviceCachingAllocator {
       while (it != large_blocks.blocks.end()) {
         Block* block = *it;
         ++it;
-        if (!block->is_split() &&
+        if (!block->is_split() && !block->expandable_segment_ &&
             static_cast<double>(block->gc_count()) >= age_threshold) {
           block_freed = true;
           gc_reclaimed += block->size;
@@ -2674,7 +2691,12 @@ class DeviceCachingAllocator {
         // any potential exceptions in the cudaMallocMaybeCapturing function.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
         lock.unlock();
-        p.err = cudaMallocMaybeCapturing(&ptr, size);
+      }
+      auto active_pool = MemPoolContext::getActiveMemPool();
+      if (active_pool && active_pool->allocator() &&
+          p.pool->owner_PrivatePool) {
+        ptr = active_pool->allocator()->raw_alloc(size);
+        p.err = ptr ? cudaSuccess : cudaErrorMemoryAllocation;
       } else {
         p.err = cudaMallocMaybeCapturing(&ptr, size);
       }
@@ -2716,6 +2738,11 @@ class DeviceCachingAllocator {
     });
     if (size >= CUDAAllocatorConfig::max_split_size())
       increase_stat(stats.oversize_segments, 1);
+    auto reserved_bytes_gauge =
+        STATIC_GAUGE(pytorch.CUDACachingAllocator.reserved_bytes);
+    reserved_bytes_gauge.record(
+        stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+            .current);
 
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
@@ -2749,7 +2776,8 @@ class DeviceCachingAllocator {
         ? CUDAAllocatorConfig::max_split_size()
         : key.size;
     auto it = pool.blocks.lower_bound(&key);
-    if (it == pool.blocks.end() || (*it)->stream != p.stream()) {
+    if (it == pool.blocks.end() || (*it)->stream != p.stream() ||
+        (*it)->expandable_segment_) {
       // No single block is large enough; free multiple oversize blocks,
       // starting with the largest
       if (it == pool.blocks.begin())
@@ -2761,12 +2789,15 @@ class DeviceCachingAllocator {
              ((*it)->size >= CUDAAllocatorConfig::max_split_size()) &&
              ((*it)->stream == p.stream())) {
         auto cur = it;
-        totalReleased += (*it)->size;
-        if (it != pool.blocks.begin()) {
+        bool is_first = cur == pool.blocks.begin();
+        if (!is_first) {
           --it;
+        }
+        if (!(*cur)->expandable_segment_) {
           release_block(*cur, context);
-        } else {
-          release_block(*cur, context);
+          totalReleased += (*cur)->size;
+        }
+        if (is_first) {
           break;
         }
       }
@@ -2849,6 +2880,11 @@ class DeviceCachingAllocator {
       decrease_stat(stats.segment[stat_type], 1);
       decrease_stat(stats.reserved_bytes[stat_type], block->size);
     });
+    auto reserved_bytes_gauge =
+        STATIC_GAUGE(pytorch.CUDACachingAllocator.reserved_bytes);
+    reserved_bytes_gauge.record(
+        stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+            .current);
 
     if (block->size >= CUDAAllocatorConfig::max_split_size())
       decrease_stat(stats.oversize_segments, 1);
@@ -2905,6 +2941,11 @@ class DeviceCachingAllocator {
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       decrease_stat(stats.reserved_bytes[stat_type], unmapped.size);
     });
+    auto reserved_bytes_gauge =
+        STATIC_GAUGE(pytorch.CUDACachingAllocator.reserved_bytes);
+    reserved_bytes_gauge.record(
+        stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+            .current);
 
     if (block->pool->owner_PrivatePool) {
       // The cudaFreed block belonged to a CUDA graph's PrivatePool.
