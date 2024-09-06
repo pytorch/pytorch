@@ -3,7 +3,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, cast, Dict, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional, Tuple
 
 import requests
 import rockset  # type: ignore[import]
@@ -93,7 +93,7 @@ PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
 
 
 def git_api(
-    url: str, params: Dict[str, str], type: str = "get", token: str = UPDATEBOT_TOKEN
+    url: str, params: Dict[str, Any], type: str = "get", token: str = UPDATEBOT_TOKEN
 ) -> Any:
     headers = {
         "Accept": "application/vnd.github.v3+json",
@@ -147,7 +147,7 @@ def make_comment(source_repo: str, pr_number: int, msg: str) -> None:
     )
 
 
-def add_labels(source_repo: str, pr_number: int, labels: list[str]) -> None:
+def add_labels(source_repo: str, pr_number: int, labels: List[str]) -> None:
     params = {"labels": labels}
     git_api(
         f"/repos/{source_repo}/issues/{pr_number}/labels",
