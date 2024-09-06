@@ -715,6 +715,61 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_unbacked_to_cond(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return (x + 1).sum()
+
+                def false_fn(x):
+                    return (x + 3).sum()
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
+    def test_unbacked_to_cond_passthrough(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return x + 1
+
+                def false_fn(x):
+                    return x + 3
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cond_contains_unbacked_no_escape(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b1, b2, c):
+                def true_fn(x):
+                    return x * b1.item()
+
+                def false_fn(x):
+                    return x * b2.item()
+
+                r = torch.cond(a, true_fn, false_fn, (c,))
+                return r * 2
+
+        args = (
+            torch.tensor(True),
+            torch.tensor([4]),
+            torch.tensor([4]),
+            torch.randn(10, requires_grad=True),
+        )
+        torch.export.export(M(), args)
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
