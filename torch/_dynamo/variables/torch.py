@@ -671,10 +671,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
                 # and rewrite args to have only proxyable args, then insert call_function
                 args_as_value = [x.as_python_constant() for x in args[1:]]
-                kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+                kwargs_as_value = {
+                    k: v.as_python_constant()
+                    for k, v in kwargs.items()
+                    if k not in ["shape", "stride"]
+                }
+                kwargs_to_be_proxied = {
+                    k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
+                }
 
-                def fn_with_prim_types(x):
-                    return self.value(x, *args_as_value, **kwargs_as_value)
+                def fn_with_prim_types(x, shape=None, stride=None):
+                    return self.value(
+                        x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
+                    )
 
                 # attach the same function name for better debugging
                 fn_with_prim_types.__name__ = "prim " + self.value.__name__
@@ -684,7 +693,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     proxy=tx.output.create_proxy(
                         "call_function",
                         fn_with_prim_types,
-                        *proxy_args_kwargs([args[0]], {}),
+                        *proxy_args_kwargs(
+                            [args[0]],
+                            kwargs_to_be_proxied,
+                        ),
                     ),
                 )
 
