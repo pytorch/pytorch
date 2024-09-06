@@ -6390,14 +6390,14 @@ class StorageBox(MutableBox):
         that is used multiple times.
         """
 
-        def should_realize_on_cpu(loops: Union[Pointwise, Reduction], users):
+        def should_realize_on_cpu(loops: Union[Pointwise, Reduction]):
             """
             The heuristic for realizing reused result of heavy ops on cpu
             """
             heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
             multi_users = (
-                users > 5
+                users > config.realize_opusers_threshold
                 and self.inner_fn_opcount() > config.realize_opcount_threshold - 2
             )
             return any((op + "(") in fn_str for op in heavy_ops) or multi_users
@@ -6408,7 +6408,7 @@ class StorageBox(MutableBox):
             and (
                 self.num_reads() > config.realize_reads_threshold
                 or self.has_large_inner_fn()
-                or (is_cpu(self.data) and should_realize_on_cpu(self.data, users))
+                or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
         ):
             self.realize()
