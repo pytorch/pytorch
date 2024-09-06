@@ -15083,7 +15083,8 @@ op_db: List[OpInfo] = [
                ),
                # TF32
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1e-3)}),
+                   toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1e-3),
+                                     torch.complex64: tol(atol=5e-3, rtol=1e-3)}),
                    'TestCommon', 'test_noncontiguous_samples',
                ),
                DecorateInfo(
@@ -23796,8 +23797,6 @@ python_ref_db = [
         "_refs.tensor_split",
         torch_opinfo_name="tensor_split",
         skips=(
-            # TensorMeta doesn't support tolist
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # RuntimeError: no _refs support for torch.Tensor.tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         ),
