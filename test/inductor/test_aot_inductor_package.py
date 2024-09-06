@@ -3,6 +3,7 @@ import copy
 import sys
 import tempfile
 import unittest
+import zipfile
 
 from parameterized import parameterized_class
 
@@ -14,31 +15,30 @@ from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.triton_utils import HAS_CUDA
 
 
-try:
-    try:
-        from .test_torchinductor import copy_tests
-    except ImportError:
-        from test_torchinductor import copy_tests
-except (unittest.SkipTest, ImportError) as e:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
-
-
 def compile(
-    model, example_inputs, dynamic_shapes, inductor_configs, device
+    model,
+    args,
+    kwargs=None,
+    *,
+    dynamic_shapes=None,
+    package_path=None,
+    inductor_configs=None,
+    additional_sources=None,
 ) -> AOTICompiledModel:
     ep = torch.export.export(
         model,
-        example_inputs,
+        args,
         dynamic_shapes=dynamic_shapes,
         strict=False,
     )
-    with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
-        torch._inductor.aoti_compile_and_package(
-            f.name, ep, example_inputs, inductor_configs=inductor_configs
-        )  # type: ignore[arg-type]
-        loaded = load_package(f.name)
+    package_path = torch._inductor.aoti_compile_and_package(
+        ep,
+        args,
+        package_path=package_path,
+        inductor_configs=inductor_configs,
+        additional_sources=additional_sources,
+    )  # type: ignore[arg-type]
+    loaded = load_package(package_path)
     return loaded
 
 
@@ -58,6 +58,8 @@ class TestAOTInductorPackage(TestCase):
         self: TestCase,
         model,
         example_inputs,
+        *,
+        additional_sources=None,
         inductor_configs=None,
         dynamic_shapes=None,
         disable_constraint_solver=False,
@@ -75,13 +77,15 @@ class TestAOTInductorPackage(TestCase):
             inductor_configs["aot_inductor.package_cpp_only"] = self.package_cpp_only
 
             torch.manual_seed(0)
-            compiled_model = compile(
-                model,
-                example_inputs,
-                dynamic_shapes,
-                inductor_configs,
-                self.device,
-            )
+            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+                compiled_model = compile(
+                    model,
+                    example_inputs,
+                    dynamic_shapes,
+                    package_path=f.name,
+                    inductor_configs=inductor_configs,
+                    additional_sources=additional_sources,
+                )
 
             actual = compiled_model(*example_inputs)
 
@@ -191,6 +195,39 @@ class TestAOTInductorPackage(TestCase):
 
         self.assertEqual(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
         self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
+
+    def test_package_additional_file(self):
+        options = {
+            "aot_inductor.package": True,
+            "aot_inductor.package_cpp_only": self.package_cpp_only,
+        }
+
+        layernorm = torch.nn.LayerNorm(10)
+        m = torch.nn.Sequential(
+            layernorm,
+            torch.nn.ReLU(),
+            layernorm,
+            torch.nn.ReLU(),
+        )
+        m.eval()
+
+        example_inputs = (torch.randn(10, device=self.device),)
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".pt2"
+        ) as package_f, tempfile.NamedTemporaryFile(suffix=".cpp") as additional_cpp_f:
+            compile(
+                m.to(self.device),
+                example_inputs,
+                package_path=package_f.name,
+                inductor_configs=options,
+                additional_sources=[additional_cpp_f.name],
+            )
+
+            with zipfile.ZipFile(package_f.name, "r") as zipf:
+                self.assertTrue(
+                    f"extra/model{additional_cpp_f.name}" in zipf.namelist()
+                )
 
 
 if __name__ == "__main__":
