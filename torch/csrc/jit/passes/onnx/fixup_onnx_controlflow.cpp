@@ -8,12 +8,9 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 
-namespace torch {
-namespace jit {
 
-namespace onnx {
-using namespace ::c10::onnx;
-}
+namespace torch::jit {
+
 
 namespace {
 const int ONNX_OPSET_13 = 13;
@@ -191,7 +188,7 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   return new_outputs;
 }
 
-Node* ONNXOptionalNode(OptionalTypePtr opt_type, Graph* g) {
+Node* ONNXOptionalNode(const OptionalTypePtr& opt_type, Graph* g) {
   TORCH_INTERNAL_ASSERT(opt_type);
   TypePtr elem_type = opt_type->getElementType();
   Node* opt_node = g->create(::c10::onnx::Optional, 1);
@@ -208,11 +205,11 @@ Node* ONNXOptionalNode(OptionalTypePtr opt_type, Graph* g) {
 // 2. Loop Op: insert Optional node before output, if input is Optional type
 // or output type is None.
 void ReplaceBlockOutputWithOptional(
-    OptionalTypePtr opt_type,
+    const OptionalTypePtr& opt_type,
     Block* block,
     size_t i) {
-  Node* opt_node = ONNXOptionalNode(opt_type, block->owningGraph());
-  opt_node->insertBefore(block->return_node());
+ const  Node* opt_node& = ONNXOptionalNode(opt_type, block->owningGraph());
+  opt_node->insertBefore(blo_node())
   Value* block_output = block->outputs().at(i);
   // replace only the last value as Optional type only affects
   // the value right before output
@@ -741,5 +738,5 @@ void FixupONNXControlflowNodeOutputs(Node* n) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
