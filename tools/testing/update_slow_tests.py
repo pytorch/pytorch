@@ -147,6 +147,15 @@ def make_comment(source_repo: str, pr_number: int, msg: str) -> None:
     )
 
 
+def add_labels(source_repo: str, pr_number: int, labels: list[str]) -> None:
+    params = {"labels": labels}
+    git_api(
+        f"/repos/{source_repo}/issues/{pr_number}/labels",
+        params,
+        type="post",
+    )
+
+
 def search_for_open_pr(
     source_repo: str, search_string: str
 ) -> Optional[Tuple[int, str]]:
@@ -204,5 +213,6 @@ if __name__ == "__main__":
         # no existing pr, so make a new one and approve it
         pr_num = make_pr("pytorch/pytorch", params)
         time.sleep(5)
+        add_labels("pytorch/pytorch", pr_num, ["ciflow/slow", "ci-no-td"])
         approve_pr("pytorch/pytorch", pr_num)
     make_comment("pytorch/pytorch", pr_num, "@pytorchbot merge")

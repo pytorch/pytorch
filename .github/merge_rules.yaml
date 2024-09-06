@@ -86,6 +86,17 @@
   - pull
   - inductor
 
+- name: OSS CI / pytorchbot / slow tests
+  patterns:
+  - test/slow_tests.json
+  approved_by:
+  - pytorchbot
+  ignore_flaky_failures: false
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: OSS CI /pytorchbot / Executorch
   patterns:
   - .ci/docker/ci_commit_pins/executorch.txt
