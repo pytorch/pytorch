@@ -1291,7 +1291,6 @@ class FxGraphCache:
         cache_state = None
         cache_event_time = None
         cache_info: Dict[str, Any] = {}
-        bypass_reason = None
         try:
             FxGraphCache._check_can_cache(gm)
             key, debug_lines = compiled_fx_graph_hash(
@@ -1357,21 +1356,17 @@ class FxGraphCache:
                         cache_info["ephemeral_timeout_increase"] = ephemeral_increase
             compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache as e:
-            bypass_reason = str(e)
-
-        if bypass_reason is not None:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
-            log.info("Bypassing FX Graph Cache because '%s'", bypass_reason)
-            cache_info["cache_bypass_reason"] = bypass_reason
+            log.info("Bypassing FX Graph Cache because '%s'", e)
+            cache_info["cache_bypass_reason"] = str(e)
             if remote:
-                log_cache_bypass("bypass_fx_graph", bypass_reason)
+                log_cache_bypass("bypass_fx_graph", str(e))
             cache_event_time = time_ns()
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
-
         assert compiled_graph is not None
         cache_info["cache_state"] = cache_state
         chromium_log = get_chromium_event_logger()
