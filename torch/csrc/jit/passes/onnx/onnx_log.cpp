@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <iostream>
 
-namespace torch {
-namespace jit {
-namespace onnx {
+
+
+namespace torch::jit::onnx {
 
 namespace {
 bool log_enabled = false;
@@ -26,6 +26,6 @@ std::ostream& _get_log_output_stream() {
   return out ? *out : std::cout;
 }
 
-} // namespace onnx
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::onnx
+
+

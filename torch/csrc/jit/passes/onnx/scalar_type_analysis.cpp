@@ -4,8 +4,8 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -479,5 +479,5 @@ void ScalarTypeAnalysisNodeForONNX(Node* n) {
   ImplicitCastNodeForONNX(n);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
