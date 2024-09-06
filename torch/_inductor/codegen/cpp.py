@@ -6,6 +6,7 @@ import itertools
 import math
 import re
 import sys
+import warnings
 from copy import copy, deepcopy
 from enum import Enum
 from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
@@ -1582,7 +1583,11 @@ class CppVecOverrides(CppOverrides):
             if n_vec == 1
             else f"at::vec::VectorizedN<{cdtype}, {n_vec}>"
         )
-        code.writeline(f"at::vec::Vectorized<int32_t> {exponent};")
+        code.writeline(
+            f"at::vec::Vectorized<int32_t> {exponent};"
+            if n_vec == 1
+            else f"at::vec::VectorizedN<int32_t, {n_vec}> {exponent};"
+        )
         code.writeline(f"{mantissa_t} {mantissa};")
         code.writeline("[&]()")
         with code.indent():
@@ -1603,6 +1608,8 @@ class CppVecOverrides(CppOverrides):
                 )
             code.writeline(
                 f"{exponent} = at::vec::Vectorized<int32_t>::loadu(tmpbuf_exponent.data(), {cexpr_index(size)});"
+                if n_vec == 1
+                else f"{exponent} = at::vec::VectorizedN<int32_t, {n_vec}>::loadu(tmpbuf_exponent.data(), {cexpr_index(size)});"
             )
             code.writeline(
                 f"{mantissa} = {mantissa_t}::loadu(tmpbuf_mantissa.data(), {cexpr_index(size)});"
@@ -2667,9 +2674,9 @@ class CppVecKernel(CppKernel):
                 )
                 is_bool = dtype == torch.bool
                 # we are using at::vec::VecMask<float, N> for bool
-                vec_dtype = "float" if is_bool else DTYPE_TO_CPP[dtype]
-                vec = f"at::vec::Vectorized<{vec_dtype}>"
-                vec_reduce_all_func = f"at::vec::vec_reduce_all<{vec_dtype}>"
+                vec_dtype = torch.float if is_bool else dtype
+                vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
+                vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
@@ -2697,6 +2704,8 @@ class CppVecKernel(CppKernel):
             if out_dtype.is_floating_point
             else torch.int64
         )
+        out_num_vectors = V.kernel._get_num_vectors(out_dtype)
+        src_num_vectors = V.kernel._get_num_vectors(dtype)
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2710,7 +2719,15 @@ class CppVecKernel(CppKernel):
                 if out_dtype == torch.bool:
                     convert = f"{value}.template cast<bool,{self._get_num_vectors(torch.bool)}>()"
                 else:
-                    convert = f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value})"
+                    if src_num_vectors == out_num_vectors == 1:
+                        convert = (
+                            f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value})"
+                        )
+                    else:
+                        convert = (
+                            f"at::vec::convert<{DTYPE_TO_CPP[out_dtype]},"
+                            f"{out_num_vectors},{DTYPE_TO_CPP[dtype]},{src_num_vectors}>({value})"
+                        )
                 code.writeline(f"auto {converted_value} = {convert};")
                 value = converted_value
             code.splice(self._get_store_line(value, var, index, out_dtype))
@@ -3069,10 +3086,7 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = (
-                f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}"
-                f"[{cexpr_index(self.outer_num_elems * self.inner_num_elems)}];"
-            )
+            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -3167,15 +3181,16 @@ class CppTile2DKernel(CppVecKernel):
         )
 
 
-def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Optional[torch.dtype]:
+def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Tuple[Optional[torch.dtype], bool]:
     """
-    Returns the low precision float data type (torch.float16/torch.bfloat16) if all the
-    nodes can codegen with this data type. Otherwise returns None.
+    Returns the low precision data type (torch.float16/torch.bfloat16) contained in the nodes
+    and if all the nodes can codegen with this data type without converting to float.
+    Otherwise returns None and True.
     """
     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
 
     _lowp_fp_type: Optional[torch.dtype] = None
-
+    _use_fp32 = False
     for sub_block in sub_blocks:
         for _node in sub_block.graph.nodes:
             if _node.op == "placeholder" or _node.target in (
@@ -3192,23 +3207,22 @@ def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Optional[torch.dtype]:
                 "neg",
                 "output",
             ]:
-                return None
+                _use_fp32 = True
 
             if hasattr(_node, "meta") and _node.meta:
                 assert OptimizationContext.key in _node.meta
                 opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
                 if not opt_ctx.dtype or opt_ctx.dtype not in DTYPE_LOWP_FP:
-                    return None
-                if _lowp_fp_type:
-                    assert (
-                        _lowp_fp_type == opt_ctx.dtype
-                    ), "do not support bf16/fp16 mix"
+                    _use_fp32 = True
+                elif _lowp_fp_type is not None:
+                    if _lowp_fp_type != opt_ctx.dtype:
+                        warnings.warn("bf16 and fp16 are mixed in the scheduler node.")
                 else:
                     _lowp_fp_type = opt_ctx.dtype
             else:
-                return None
+                _use_fp32 = True
 
-    return _lowp_fp_type
+    return _lowp_fp_type, _use_fp32
 
 
 class TilingSelect:
@@ -3232,9 +3246,9 @@ class TilingSelect:
         if any(dtype not in VECTORIZABLE_DTYPES for dtype in all_dtypes):
             return [], []
         dtype = torch.float
-        _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])
+        _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])[0]
         if _lowp_fp_dtype and all(
-            (get_loop_body_lowp_fp(loop_body) == _lowp_fp_dtype)
+            (get_loop_body_lowp_fp(loop_body)[0] == _lowp_fp_dtype)
             for loop_body in loop_bodies[1:]
         ):
             dtype = _lowp_fp_dtype
@@ -3243,7 +3257,13 @@ class TilingSelect:
         tiling_indices = self._select_tiling_indices(
             fn_list, var_sizes_list, tiling_factor
         )
+
         if tiling_indices:
+            group, reduction_group = max(
+                var_sizes_list, key=lambda sizes: len(sizes[1])
+            )
+            call_ranges = tuple(group) + tuple(reduction_group)
+
             if config.cpp.enable_tiling_heuristics:
 
                 def _try_get_stride(
@@ -3279,10 +3299,6 @@ class TilingSelect:
                         < len(itervars)
                     )
 
-                group, reduction_group = max(
-                    var_sizes_list, key=lambda sizes: len(sizes[1])
-                )
-                call_ranges = tuple(group) + tuple(reduction_group)
                 itervars = [
                     sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
                     for n in range(len(call_ranges))
@@ -3359,6 +3375,27 @@ class TilingSelect:
                     # when needed.
                     return [], []
 
+            if dtype in DTYPE_LOWP_FP:
+                # For lower precision data type, if the call_range is not long enough,
+                # use tiling_factor // 2 for better performance
+                factor_lowp = cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype)
+                for tiling_indice in tiling_indices:
+                    if tiling_indice < 0:
+                        tiling_indice = tiling_indice + len(call_ranges)
+                    if tiling_indice < 0 or tiling_indice >= len(call_ranges):
+                        continue
+                    if has_free_symbols(call_ranges):
+                        call_range = V.graph.sizevars.size_hint(
+                            call_ranges[tiling_indice], fallback=0
+                        )
+                        if call_range < factor_lowp:
+                            V.graph.sizevars.guard_lt(call_range, factor_lowp)
+                            tiling_factor = factor_lowp // 2
+                            break
+                    elif call_ranges[tiling_indice] < factor_lowp:
+                        tiling_factor = factor_lowp // 2
+                        break
+
             if len(tiling_indices) == 1:
                 return [tiling_factor], tiling_indices
             if len(tiling_indices) == 2:
@@ -3433,7 +3470,10 @@ class CppKernelProxy(CppKernel):
             return True
         # Propagate the dtype to check if all the fx node is bf16/fp16
         DataTypePropagation.propagate_scheduler_node(scheduler_node)
-        return get_loop_body_lowp_fp(scheduler_node._body) is not None
+        return (
+            get_loop_body_lowp_fp(scheduler_node._body)[0] is not None
+            and not get_loop_body_lowp_fp(scheduler_node._body)[1]
+        )
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
