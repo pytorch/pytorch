@@ -1627,7 +1627,7 @@ class CppVecOverrides(CppOverrides):
             )
             octype = "bool" if output_mask else cdtype
             octype = (
-                DTYPE_TO_CPP[args[1]]
+                DTYPE_TO_CPP[args[-2]]
                 if (scalar_func.__name__ == "to_dtype_bitcast")
                 else octype
             )
