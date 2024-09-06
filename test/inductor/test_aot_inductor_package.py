@@ -24,10 +24,10 @@ def compile(
         strict=False,
     )
     with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
-        torch._inductor.aoti_compile_and_package(
-            f.name, ep, example_inputs, inductor_configs=inductor_configs
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep, example_inputs, inductor_configs=inductor_configs
         )  # type: ignore[arg-type]
-        loaded = load_package(f.name)
+        loaded = load_package(package_path)
     return loaded
 
 

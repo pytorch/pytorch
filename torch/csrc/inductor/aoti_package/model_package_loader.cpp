@@ -52,7 +52,7 @@ std::string create_temp_dir() {
   throw std::runtime_error("Not implemented");
 #else
   std::string temp_dir = "/tmp/XXXXXX";
-  if (mkdtemp(temp_dir.data()) == NULL) {
+  if (mkdtemp(temp_dir.data()) == nullptr) {
     throw std::runtime_error(
         std::string("Failed to create temporary directory: ") +
         strerror(errno));
