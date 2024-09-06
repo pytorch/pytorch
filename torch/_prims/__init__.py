@@ -38,6 +38,8 @@ prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
 prim_backend_select_impl = torch.library.Library("prims", "IMPL", "BackendSelect")
 prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
 prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
+prim_conj_impl = torch.library.Library("prims", "IMPL", "Conjugate")
+prim_neg_impl = torch.library.Library("prims", "IMPL", "Negative")
 
 # Experimental module containing prototype "primitive" operations.
 
@@ -311,6 +313,10 @@ def _make_prim(
         prim_impl.impl(name, _prim_impl)
         prim_autograd_impl.impl(name, _autograd_impl)
         prim_meta_impl.impl(name, meta)
+        # all view ops get conj/neg fallthroughs
+        if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
+            prim_conj_impl.impl(name, torch.library.fallthrough_kernel)
+            prim_neg_impl.impl(name, torch.library.fallthrough_kernel)
     else:
         mutates_args = []
         for arg in cpp_schema.arguments:
