@@ -6,7 +6,7 @@ import string
 from collections import namedtuple
 from contextlib import nullcontext
 from typing import Callable, Optional
-from unittest import expectedFailure, skip, skipUnless
+from unittest import expectedFailure, skip, skipIf, skipUnless
 from unittest.mock import patch
 
 import torch
@@ -526,6 +526,7 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
+    @skipIf(torch.cuda.get_device_capability() >= (9, 0), "H100 Triton bug")
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -540,6 +541,7 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
+    @skipIf(torch.cuda.get_device_capability() >= (9, 0), "H100 Triton bug")
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
