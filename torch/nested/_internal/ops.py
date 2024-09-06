@@ -1519,7 +1519,7 @@ def all_default(func, *args, **kwargs):
     torch.ops.aten.to_padded_tensor.default, "self: jt, padding: any, output_size: any?"
 )
 def to_padded_tensor_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1532,11 +1532,14 @@ def to_padded_tensor_default(func, *args, **kwargs):
     else:
         max_seq_len = inp._max_seqlen
 
-    # > 2D values is not supported by the underlying FBGEMM kernel so do shape gymnastics
+    # only 2D values is supported by the underlying FBGEMM kernel so do shape
+    # gymnastics if needed
     values = inp.values()
     values_shape = values.shape
     if values.dim() > 2:
         values = values.flatten(start_dim=1)
+    elif values.dim() == 1:
+        values = values.unsqueeze(-1)
 
     padded_out = torch.ops.aten._jagged_to_padded_dense_forward(
         values,
@@ -1548,6 +1551,8 @@ def to_padded_tensor_default(func, *args, **kwargs):
     # shape gymnastics part 2
     if len(values_shape) > 2:
         padded_out = padded_out.unflatten(-1, values_shape[1:])
+    elif len(values_shape) == 1:
+        padded_out = padded_out.squeeze(-1)
 
     return padded_out
 
@@ -1557,7 +1562,7 @@ def to_padded_tensor_default(func, *args, **kwargs):
     "padded: t, offsets: t, dummy: jt, ragged_idx: any?, min_seqlen: any?, max_seqlen: any?, sum_S: any?",
 )
 def _nested_from_padded_tensor_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
