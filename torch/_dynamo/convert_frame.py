@@ -33,6 +33,7 @@ from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
+    justknobs_check,
     maybe_upload_prof_stats_to_manifold,
     signpost_event,
 )
@@ -68,8 +69,10 @@ from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
+    CacheLimitExceeded,
     format_error_msg,
     InternalTorchDynamoError,
+    SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
     unimplemented,
@@ -850,7 +853,13 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            unimplemented(f"{limit_type} reached")
+            if config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
+                "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
+            ):
+                raise CacheLimitExceeded(f"{limit_type} reached")
+            else:
+                # do not recursively skip frames
+                unimplemented(f"{limit_type} reached")
 
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
@@ -1047,7 +1056,9 @@ class ConvertFrame:
         hooks: Hooks,
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
-    ) -> Optional[GuardedCode]:
+    ) -> Optional[
+        Union[GuardedCode, torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag]
+    ]:
         counters["frames"]["total"] += 1
         try:
             result = self._inner_convert(
@@ -1112,6 +1123,12 @@ class ConvertFrame:
                 log.info(error_msg, exc_info=True)
             else:
                 log.warning(error_msg, exc_info=True)
+
+            # If we encounter SkipCodeRecursiveException, return skip_code_recursive_flag
+            # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
+            if isinstance(e, SkipCodeRecursiveException):
+                return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+
         return None
 
 
