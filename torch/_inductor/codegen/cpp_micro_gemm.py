@@ -717,7 +717,7 @@ inline void {{kernel_name}}_kernel(
 """
 
     def get_kernel_extra_args_declare(self) -> str:
-        return "const bfloat16* __restrict__ ZPS,\nint64_t actual_N,\nint64_t k_start,\nint64_t q_group_size,"
+        return "const bfloat16* __restrict__ ZPS,\n    int64_t actual_N,\n    int64_t k_start,\n    int64_t q_group_size,"
 
 
 # extra check for CppMicroGemmAMX
