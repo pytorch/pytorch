@@ -1556,12 +1556,12 @@ static void loadModule(const CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw ErrorReport(forward_tuple->sourceRange())
-          << "gradient must return literal a tuple";
+      throw(
+          ErrorReport(forward_tuple->sourceRange())
+          << "gradient must return literal a tuple");
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* context;
+    Value* context = nullptr;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
 
