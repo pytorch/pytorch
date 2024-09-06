@@ -415,7 +415,7 @@ class LoopBodyBlock:
             return tracer.create_proxy(
                 "call_module",
                 "get_index",
-                (self.body.add_index_expr(expr, mtype, **kwargs),),
+                (body.add_index_expr(expr, mtype, **kwargs),),
                 {},
             )
 
@@ -428,7 +428,7 @@ class LoopBodyBlock:
 
             def load_seed(self, name: str, index: int):
                 assert isinstance(index, int)
-                self.body.add_index_expr(
+                body.add_index_expr(
                     sympy.Integer(index), MemoryUsageType.LOAD_SEED, buffer_name=name
                 )
                 return self._inner.load_seed(name, index)
