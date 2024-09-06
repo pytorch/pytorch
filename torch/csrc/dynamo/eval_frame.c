@@ -10,9 +10,11 @@
 #include <opcode.h>
 #include <stdbool.h>
 
+#define MAX_COMPILE_CONTEXT_SIZE 100
+
 PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
-
+static char compile_context[MAX_COMPILE_CONTEXT_SIZE];
 static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
@@ -483,7 +485,8 @@ inline static PyObject* eval_custom_code(
     PyCodeObject* code,
     int throw_flag,
     int free_vars_copied) {
-  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
+  const char* trace_id = compile_context;
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter_with_context("Torch-Compiled Region", trace_id);
   PyObject* result = eval_custom_code_impl(
     tstate,
     frame,
@@ -817,12 +820,27 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+static PyObject* set_context_frame(PyObject* dummy, PyObject* obj) {
+    int frame_id, frame_compile_id, attempt;
+    if (!PyArg_ParseTuple(obj, "iii", &frame_id, &frame_compile_id, &attempt)) {
+        PyErr_SetString(PyExc_TypeError, "Expected three integers");
+        return NULL;
+    }
+    if (attempt == 0) {
+      sprintf(compile_context, "%d/%d", frame_id, frame_compile_id);
+    } else {
+      sprintf(compile_context, "%d/%d_%d", frame_id, frame_compile_id, attempt);
+    }
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"set_context_frame", set_context_frame, METH_O, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
