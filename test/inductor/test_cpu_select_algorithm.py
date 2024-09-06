@@ -222,7 +222,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(in_features, batch_size).to(dtype=dtype)
         self.common(mod, (v.transpose(0, 1),))
         # TODO(jgong5): support transposed input
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -514,8 +514,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
     @inductor_config.patch({"freezing": True})
     @patches

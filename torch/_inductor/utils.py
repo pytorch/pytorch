@@ -1251,9 +1251,22 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
         num_threads=parallel_num_threads(),
     )
 
+    def is_contiguous_along_the_last_dim(x):
+        if isinstance(x.layout, ir.FixedLayout):
+            return x.get_stride()[-1] == 1
+
+        if isinstance(x.data, ir.ComputedBuffer):
+            return x.data.get_fill_order()[-1] == 0
+
+        # TODO: any other case that we can also check if it's contiguous?
+        return False
+
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
+        and is_contiguous_along_the_last_dim(
+            mat1
+        )  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
     )
