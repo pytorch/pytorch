@@ -4168,7 +4168,6 @@ class CppScheduling(BaseScheduling):
         split_var = None
         split_number = None
         divide_index_name = None
-        num_div = 0
         match_div = False
         matched_node = None
 
@@ -4176,21 +4175,16 @@ class CppScheduling(BaseScheduling):
             assert isinstance(node.node, ir.ComputedBuffer)
             _, original_body, _ = node.node.get_default_sizes_body()
             for name, expr in original_body.indexing_exprs.items():
-                num_div += expr.count(FloorDiv)
-                if num_div > 1:
-                    return nodes
-                if expr.count(FloorDiv) == 1:
-                    div_expr = expr.find(FloorDiv).pop()
+                for div_expr in expr.find(FloorDiv):
                     split_var = div_expr.args[0]
                     split_number = div_expr.args[1]
                     divide_index_name = name
                     if (
                         isinstance(split_number, sympy.core.numbers.Integer)
-                        and isinstance(split_var, sympy.core.symbol.Symbol)
                         and split_var in original_body.iter_vars
                         and divide_index_name is not None
                         and all(
-                            stride_at_vec_range(expr, split_var) == 1
+                            stride_at_vec_range(expr, split_var) in (0, 1)
                             for name, expr in original_body.indexing_exprs.items()
                             if name != divide_index_name
                         )
