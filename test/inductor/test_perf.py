@@ -32,6 +32,9 @@ from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 
 if HAS_CUDA:
+    import triton
+    import triton.language as tl
+
     from torch.testing._internal.triton_utils import add_kernel
 
 aten = torch.ops.aten
@@ -857,6 +860,99 @@ class InplacingTests(TestCase):
 
         inp = (T(10, 10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """42""")
+
+    @requires_cuda
+    def test_inplace_triton_kernel_training(self):
+        @triton.jit
+        def sin_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            output = tl.sin(x)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def sin_triton(x, out):
+            n_elements = x.numel()
+            sin_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=4)
+
+        factory_op = torch.empty_like
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = factory_op(x)
+                sin_triton(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = factory_op(grad)
+                sin_triton(saved, out)
+                return out
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel_train(f, x), """9""")
+
+    @requires_cuda
+    def test_inplace_custom_op_training_two_mutated_inputs(self):
+        @torch.library.custom_op(
+            "_reinplacing::sin_cos", mutates_args={"out_sin", "out_cos"}
+        )
+        def sin_cos(
+            x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor
+        ) -> None:
+            out_sin.copy_(x.sin())
+            out_cos.copy_(x.cos())
+
+        def f(x):
+            out0 = torch.empty_like(x)
+            out1 = torch.empty_like(x)
+            sin_cos(x, out0, out1)
+            return x.clone(), out0, out1
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel(f, x), """21""")
+
+    @requires_cuda
+    def test_inplace_custom_op_training(self):
+        @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
+        def sin(x: torch.Tensor, result: torch.Tensor) -> None:
+            result.copy_(x.sin())
+
+        factory_op = torch.empty_like
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = factory_op(x)
+                sin(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = factory_op(grad)
+                sin(saved, out)
+                return out
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel_train(f, x), """9""")
 
     @requires_cuda
     def test_inplace_custom_op(self):

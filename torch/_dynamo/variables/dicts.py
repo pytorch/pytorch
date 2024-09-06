@@ -355,6 +355,15 @@ class ConstDictVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return [x.vt for x in self.items.keys()]
 
+    def call_hasattr(self, tx, name):
+        # dict not allow setting arbitrary attributes. To check for hasattr, we can just check the __dict__ of the dict.
+        # OrderedDict though requires side effects tracking because it supports arbitrary setattr.
+        if self.user_cls is dict:
+            if name in self.user_cls.__dict__:
+                return ConstantVariable.create(True)
+            return ConstantVariable.create(False)
+        unimplemented(f"hasattr on {self.user_cls} is not supported")
+
 
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs) -> None:
@@ -531,6 +540,53 @@ class SetVariable(ConstDictVariable):
         raise RuntimeError("Illegal to getitem on a set")
 
 
+class FrozensetVariable(SetVariable):
+    def __init__(
+        self,
+        items: List[VariableTracker],
+        **kwargs,
+    ) -> None:
+        super().__init__(items, **kwargs)
+
+    def debug_repr(self):
+        if not self.items:
+            return "frozenset()"
+        else:
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+
+    @property
+    def set_items(self):
+        return self.items.keys()
+
+    def python_type(self):
+        return frozenset
+
+    def as_python_constant(self):
+        return {k.vt.as_python_constant() for k in self.set_items}
+
+    def reconstruct(self, codegen):
+        codegen.foreach([x.vt for x in self.set_items])
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_global("frozenset"),
+                ]
+            )
+        )
+        codegen.extend_output(create_call_function(0, False))
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> "VariableTracker":
+        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
+            raise RuntimeError(f"Illegal call_method {name} on a frozenset")
+        return super().call_method(tx, name, args, kwargs)
+
+
 class DictView(VariableTracker):
     """
     Models _PyDictViewObject
@@ -660,16 +716,6 @@ def _call_hasattr_customobj(
     unimplemented(
         f"hasattr({self.__class__.__name__}, {name}) {self.mutable_local} {self.source}"
     )
-
-
-class DataClassVariable(ConstDictVariable):
-    """
-    This class doesn't appear to be used anywhere.
-    It used to be used to deal with transformers.file_utils.ModelOutput
-    from huggingface.
-
-    Keeping since we wish to support dataclasses in general in the future
-    """
 
 
 class CustomizedDictVariable(ConstDictVariable):
