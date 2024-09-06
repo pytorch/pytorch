@@ -675,8 +675,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     for k, v in kwargs.items()
                     if k not in ["shape", "stride"]
                 }
+                kwargs_to_be_proxied = {
+                    k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
+                }
 
-                def fn_with_prim_types(x, shape, stride):
+                def fn_with_prim_types(x, shape=None, stride=None):
                     return self.value(
                         x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
                     )
@@ -691,7 +694,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         fn_with_prim_types,
                         *proxy_args_kwargs(
                             [args[0]],
-                            {"shape": kwargs["shape"], "stride": kwargs["stride"]},
+                            kwargs_to_be_proxied,
                         ),
                     ),
                 )
