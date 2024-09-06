@@ -1627,7 +1627,6 @@ class WrapperCodeGen(CodeGen):
         elif isinstance(arg, list):
             return f"[{', '.join(self.generate_example_arg_value(a, type(a)) for a in arg)}]"
         else:
-            breakpoint()
             raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def _grid_dim_str(self, grid_per_dim):
