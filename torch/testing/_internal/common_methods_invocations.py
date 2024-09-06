@@ -23797,8 +23797,6 @@ python_ref_db = [
         "_refs.tensor_split",
         torch_opinfo_name="tensor_split",
         skips=(
-            # TensorMeta doesn't support tolist
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # RuntimeError: no _refs support for torch.Tensor.tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         ),
