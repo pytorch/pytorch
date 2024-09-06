@@ -4187,6 +4187,7 @@ class CppScheduling(BaseScheduling):
                     if (
                         isinstance(split_number, sympy.core.numbers.Integer)
                         and isinstance(split_var, sympy.core.symbol.Symbol)
+                        and split_var in original_body.iter_vars
                         and divide_index_name is not None
                         and all(
                             stride_at_vec_range(expr, split_var) == 1
