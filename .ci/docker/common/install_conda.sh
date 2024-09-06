@@ -5,32 +5,22 @@ set -ex
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
+  CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
+  if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+    BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"
+    CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
+  fi
 
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
   MINOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 2)
 
-if [[ $(uname -m) == "aarch64" ]]; then
-  BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"
   case "$MAJOR_PYTHON_VERSION" in
-    3)
-      CONDA_FILE="Miniforge3-Linux-aarch64.sh"
-    ;;
+    3);;
     *)
       echo "Unsupported ANACONDA_PYTHON_VERSION: $ANACONDA_PYTHON_VERSION"
       exit 1
       ;;
   esac
-else
-  case "$MAJOR_PYTHON_VERSION" in
-    3)
-      CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
-    ;;
-    *)
-      echo "Unsupported ANACONDA_PYTHON_VERSION: $ANACONDA_PYTHON_VERSION"
-      exit 1
-      ;;
-  esac
-fi
 
   mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
