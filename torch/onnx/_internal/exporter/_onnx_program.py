@@ -5,25 +5,23 @@ from __future__ import annotations
 
 __all__ = ["ONNXProgram"]
 
+import copy
 import gc
 import logging
 import os
-import pathlib
 import tempfile
 import textwrap
-from typing import Callable, IO, Sequence, TYPE_CHECKING
+from typing import Callable, Sequence, TYPE_CHECKING
 
 import torch
-from torch.onnx._internal import _lazy_import
-from torch.utils import _pytree as pytree
-
-
-onnx = _lazy_import.onnx
-ir = _lazy_import.onnxscript_ir
+from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
+from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
     import onnxruntime as ort
+
+_LARGE_MODEL_THRESHOLD = 1536 * 1024 * 1024  # 1536MB
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +42,15 @@ def _ort_session_initializer(model: str | bytes) -> ort.InferenceSession:
     ]
     return ort.InferenceSession(
         model, providers=providers, sess_options=session_options
+    )
+
+
+def _count_initializer_size(graph: ir.Graph) -> int:
+    """Count the total size of the initializers in bytes."""
+    return sum(
+        v.const_value.nbytes
+        for v in graph.initializers.values()
+        if v.const_value is not None
     )
 
 
@@ -105,7 +112,7 @@ ONNXProgram(
 
     def save(
         self,
-        destination: str | os.PathLike | IO[bytes],
+        destination: str | os.PathLike,
         *,
         include_initializers: bool = True,
         keep_initializers_as_inputs: bool = False,
@@ -128,44 +135,30 @@ ONNXProgram(
         Raises:
             TypeError: If `external_data` is `True` and `destination` is not a file path.
         """
+        original_initializers = copy.copy(self.model.graph.initializers)
+        original_inputs = copy.copy(self.model.graph.inputs)
+
+        # Adjust the model based on options
         if not include_initializers:
             self.model.graph.initializers.clear()
-            logger.warning(
-                "The initializers have been removed from the model. This is destructive. "
-                "Developers: Please implement ir.Model copy() and remove initializers on the copied model."
-            )
         if keep_initializers_as_inputs:
             self.model.graph.inputs.extend(self.model.graph.initializers.values())  # type: ignore[arg-type]
-            logger.warning(
-                "The initializers have been added as inputs to the model. This is destructive. "
-                "Developers: Please implement ir.Model copy() and remove initializers on the copied model."
-            )
-        proto = ir.serde.serialize_model(self.model)
-        byte_size = proto.ByteSize()
-        model_too_large = (byte_size) >= 1 << 31
-        if external_data or model_too_large:
-            # TODO: Create an IR pass to handle external tensors conversion
-            if model_too_large:
-                logger.warning(
-                    "The serialized ONNX model is larger than 2GB (%s). "
-                    "Saving the weights as external data in a separate file.",
-                    byte_size,
-                )
-            if not isinstance(destination, (str, os.PathLike)):
-                raise TypeError(
-                    "Saving the weights as external data is only supported when destination is a file path"
-                )
-            destination_path = pathlib.Path(destination)
-            # Create the directory if it does not exist
-            data_path = f"{destination_path.name}.data"
-            onnx.save_model(
-                proto,
-                destination,
-                save_as_external_data=True,
-                location=data_path,
-            )
+
+        # Save the model to disk
+        if (
+            external_data
+            or _count_initializer_size(self.model.graph) > _LARGE_MODEL_THRESHOLD
+        ):
+            onnxscript_apis.save_model_with_external_data(self.model, destination)
         else:
-            onnx.save_model(proto, destination)
+            ir.save(self.model, destination)
+
+        # Revert the changes to the model
+        if not include_initializers:
+            self.model.graph.initializers.update(original_initializers)
+        if keep_initializers_as_inputs:
+            self.model.graph.inputs.clear()
+            self.model.graph.inputs.extend(original_inputs)
 
     def initialize_inference_session(
         self,
@@ -182,27 +175,17 @@ ONNXProgram(
         """
         # TODO(justinchuby): Allow different inference options
         logger.debug("Initializing the inference session.")
-        proto = ir.serde.serialize_model(self.model)
-        byte_size = proto.ByteSize()
-        model_too_large = (byte_size) >= 1 << 31
-
-        if model_too_large:
-            logger.debug(
-                "The serialized ONNX model is larger than 2GB (%s).", byte_size
-            )
+        if (
+            byte_size := _count_initializer_size(self.model.graph)
+        ) > _LARGE_MODEL_THRESHOLD:
+            logger.debug("The model initializers is larger than 1.5GB (%s).", byte_size)
             # Save the model to a temporary file if too large
             self._tempdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
             model_path = os.path.join(self._tempdir.name, "model.onnx")
-            data_path = "model.onnx.data"
-            onnx.save_model(
-                proto,
-                model_path,
-                save_as_external_data=True,
-                location=data_path,
-            )
+            self.save(model_path, external_data=True)
             model = model_path
         else:
-            model = proto.SerializeToString()  # type: ignore[assignment]
+            model = self.model_proto.SerializeToString()  # type: ignore[assignment]
 
         self._inference_session = initializer(model)
         logger.debug("Inference session initialized.")
@@ -231,7 +214,7 @@ def _process_args(args, kwargs) -> tuple[torch.Tensor, ...]:
 
 
 def _flatten_inputs(model_args, model_kwargs):
-    flattened_args, _ = pytree.tree_flatten((model_args, model_kwargs))
+    flattened_args, _ = _pytree.tree_flatten((model_args, model_kwargs))
     return flattened_args
 
 
