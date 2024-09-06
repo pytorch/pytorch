@@ -4,7 +4,7 @@
 import functools
 import string
 from collections import namedtuple
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from typing import Callable, Optional
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
@@ -55,6 +55,22 @@ torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
+
+
+@contextmanager
+def temp_float32_matmul_precision(precision: str):
+    """
+    Temporarily set the float32 matmul precision and restore it after the context is exited.
+
+    Args:
+    precision (str): The precision to set ('highest', 'high', or 'medium').
+    """
+    original_precision = torch.get_float32_matmul_precision()
+    try:
+        torch.set_float32_matmul_precision(precision)
+        yield
+    finally:
+        torch.set_float32_matmul_precision(original_precision)
 
 
 def rmse(ref, res):
@@ -1469,6 +1485,37 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(
             v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
         )
+
+    @supported_platform
+    def test_float32_matmul_precision(self):
+        make_tensor = functools.partial(
+            torch.zeros,
+            (2, 2, 128, 32),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query.fill_(0.2)
+        key.fill_(0.3)
+        value.fill_(0.4)
+
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
+
+        def score_mod(score, b, h, q, kv):
+            return score * 2
+
+        with temp_float32_matmul_precision("highest"):
+            out_eager = flex_attention(query, key, value, score_mod)
+            flex_compiled = torch.compile(flex_attention, fullgraph=True)
+            out_compiled = flex_compiled(query, key, value, score_mod)
+
+            grads_eager = torch.autograd.grad(out_eager.sum(), (query, key, value))
+            grads_compile = torch.autograd.grad(out_compiled.sum(), (query, key, value))
+
+        torch.testing.assert_close(grads_eager, grads_compile)
 
     @supported_platform
     @common_utils.parametrize("score_mod_name", ["_head_offset"])
