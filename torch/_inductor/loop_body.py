@@ -54,6 +54,7 @@ class MemoryEntry(NamedTuple):
 class MemoryUsageType(Enum):
     # These are 1:1 with the opcode generating the usage
     LOAD = auto()
+    LOAD_SEED = auto()
     STORE = auto()
     STORE_REDUCTION = auto()
     INDEX_EXPR = auto()
@@ -402,7 +403,7 @@ class LoopBodyBlock:
             return tracer.create_proxy(
                 "call_module",
                 "get_index",
-                (self.body.add_index_expr(expr, mtype, **kwargs),),
+                (body.add_index_expr(expr, mtype, **kwargs),),
                 {},
             )
 
@@ -412,6 +413,13 @@ class LoopBodyBlock:
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, MemoryUsageType.LOAD, buffer_name=name)
                 return self._inner.load(name, index)
+
+            def load_seed(self, name: str, index: int):
+                assert isinstance(index, int)
+                body.add_index_expr(
+                    sympy.Integer(index), MemoryUsageType.LOAD_SEED, buffer_name=name
+                )
+                return self._inner.load_seed(name, index)
 
             def store(self, name, index, value, mode=None):
                 index = add_index(
