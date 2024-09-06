@@ -282,7 +282,8 @@ class SubclassCreationMeta:
             if isinstance(x, torch.SymInt):
                 # Replace nested ints by a dummy value (-1) as NJT ignores
                 # the outer_size/outer_stride at runtime
-                return dummy if x.node.is_nested_int() else None
+                # return dummy if x.node.is_nested_int() else None
+                return None
             return x
 
         assert self.original_subclass is not None

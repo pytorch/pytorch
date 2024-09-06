@@ -36,7 +36,9 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
-def create_subclass_metadata(a: object, start_idx: int, count_symints: bool):
+def create_subclass_metadata(
+    a: object, start_idx: int, count_symints: bool, include_nested_int: bool
+):
     if not is_traceable_wrapper_subclass(a):
         return None, start_idx + 1
 
@@ -48,6 +50,7 @@ def create_subclass_metadata(a: object, start_idx: int, count_symints: bool):
             getattr(a, key),
             new_start_idx,
             count_symints=False,  # only count symints in the outer class
+            include_nested_int=False,  # This only applies to the outer class
         )
         attrs[key] = new_subclass_meta
 
@@ -56,8 +59,8 @@ def create_subclass_metadata(a: object, start_idx: int, count_symints: bool):
 
     new_start_idx = (
         new_start_idx
-        + count_symints * len(filter_symints(a.size()))
-        + count_symints * len(filter_symints(a.stride()))
+        + count_symints * len(filter_symints(a.size(), include_nested_int))
+        + count_symints * len(filter_symints(a.stride(), include_nested_int))
     )
 
     return (
@@ -91,7 +94,10 @@ def get_types_for_subclass(tensor_subclass):
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[List[Any], Tuple[Any, ...]], *, count_symints: bool = True
+    curr_args: Union[List[Any], Tuple[Any, ...]],
+    *,
+    count_symints: bool = True,
+    include_nested_int: bool = True,
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
@@ -100,7 +106,10 @@ def create_subclass_meta(
             assert isinstance(a, Tensor)
             start_idx = idx
             subclass_meta, _ = create_subclass_metadata(
-                a, start_idx, count_symints=count_symints
+                a,
+                start_idx,
+                count_symints=count_symints,
+                include_nested_int=include_nested_int,
             )
             infos.append(subclass_meta)
             cnt = subclass_meta.arg_count
@@ -124,12 +133,20 @@ def create_subclass_meta(
 # NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
 
 
-def filter_symints(lst: Iterable[Union[int, SymInt]]) -> List[SymInt]:
-    return [s for s in lst if isinstance(s, SymInt) and not s.node.is_nested_int()]
+def filter_symints(lst: Iterable[Union[int, SymInt]], include_nested_int: bool = True):
+    # Capture all SymInts from the iterable. A SymInt is not included if it is
+    # a nested int and filter_nested_int is True
+    def symint_check(s: Union[int, SymInt]) -> bool:
+        return isinstance(s, SymInt) and (
+            (not s.node.is_nested_int())
+            or (s.node.is_nested_int() and include_nested_int)
+        )
+
+    return [s for s in lst if symint_check(s)]
 
 
 def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> List[bool]:
-    # Non-nested symints are replaced with None values in `make_runtime_safe()`
+    # Non-nested symints are replaced with None in `make_runtime_safe()`
     return [s is None for s in lst]
 
 
@@ -150,6 +167,7 @@ def unwrap_tensor_subclasses(
     *,
     is_runtime: bool,
     append_symints: bool,
+    include_nested_int: bool = True,
     subclass_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None,
 ):
     xs_inner: List[Union[int, Tensor, SymInt]] = []
@@ -190,8 +208,8 @@ def unwrap_tensor_subclasses(
                     ]
                 )
             else:
-                xs_inner.extend(filter_symints(size))
-                xs_inner.extend(filter_symints(stride))
+                xs_inner.extend(filter_symints(size, include_nested_int))
+                xs_inner.extend(filter_symints(stride, include_nested_int))
     return xs_inner
 
 
@@ -204,8 +222,8 @@ def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
         if is_traceable_wrapper_subclass(arg):
             num_indices = (
                 len(get_plain_tensors(typing.cast(Tensor, arg)))
-                + len(filter_symints(arg.size()))
-                + len(filter_symints(arg.stride()))
+                + len(filter_symints(arg.size(), include_nested_int=True))
+                + len(filter_symints(arg.stride(), include_nested_int=True))
             )
 
         for _ in range(num_indices):

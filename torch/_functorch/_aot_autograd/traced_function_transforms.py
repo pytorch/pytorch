@@ -773,22 +773,27 @@ def aot_dispatch_subclass(
             assert isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2
             # Don't need fw outs since we already have subclass metadata on them
             grad_inputs = wrapped_outs[1]
-            subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
+            subclass_meta.grad_input_metas = create_subclass_meta(
+                grad_inputs, include_nested_int=False
+            )
 
             # Add extra symints as outputs to the forward/backward graphs
-            primals = unwrap_tensor_subclasses(
+            # ignore nested ints here
+            forward_outs = unwrap_tensor_subclasses(
                 wrapped_outs[0],
                 is_runtime=False,
                 append_symints=True,
                 subclass_metas=None,
             )
-            tangents = unwrap_tensor_subclasses(
+            # ignore nested ints here
+            backward_outs = unwrap_tensor_subclasses(
                 wrapped_outs[1],
                 is_runtime=False,
                 append_symints=True,
+                include_nested_int=False,
                 subclass_metas=None,
             )
-            return (primals, tangents)
+            return (forward_outs, backward_outs)
 
         # Step 3: Unwrap any subclass outputs back into dense tensors
         unwrapped_outs = unwrap_tensor_subclasses(
@@ -811,7 +816,7 @@ def aot_dispatch_subclass(
 
     if is_joint_structure:
         args_unwrapped = (
-            # Add extra symints (size/strides) for primals
+            # Add extra symints (size/strides) as input to the forward graph
             unwrap_tensor_subclasses(
                 args[0], is_runtime=False, append_symints=True, subclass_metas=None
             ),

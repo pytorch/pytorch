@@ -1856,7 +1856,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             is_runtime=False,
                             # any extra symint will be captured by the partitioner
                             append_symints=False,
-                            subclass_metas=None,
                         )
                     )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
@@ -1886,7 +1885,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         all_args,
                         is_runtime=False,
                         append_symints=False,
-                        subclass_metas=None,
                     )
                     tangents_start_idx = (
                         len(all_args) - len_tangents - len(rng_args) - len(bw_tokens)
