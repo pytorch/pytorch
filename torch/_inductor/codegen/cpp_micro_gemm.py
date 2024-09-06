@@ -126,10 +126,10 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
-        ZPS: ir.Buffer,
-        actual_N: int,
-        k_start: int,
-        q_group_size: int,
+        ZPS: Optional[ir.Buffer] = None,
+        actual_N: Optional[int] = 0,
+        k_start: Optional[int] = 0,
+        q_group_size: Optional[int] = 0,
     ) -> str:
         """
         Generate the code for calling the templated kernel that computes
