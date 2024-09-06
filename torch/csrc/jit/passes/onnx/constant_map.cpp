@@ -7,7 +7,6 @@
 #include <string>
 #include <unordered_map>
 
-
 namespace torch::jit {
 
 // Meyer’s Singleton for C++ 14
@@ -381,4 +380,3 @@ void ConstantValueMap::PrintMaps() {
 }
 
 } // namespace torch::jit
-

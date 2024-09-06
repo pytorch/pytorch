@@ -22,7 +22,6 @@
 #include <unordered_set>
 #include <utility>
 
-
 namespace torch::jit {
 
 inline bool PyNone_Check(PyObject* o) {
@@ -1652,7 +1651,8 @@ void SpecialPostProcess(Node* n) {
       auto seq_node = n->input(0)->node();
       auto t_type = n->input(1)->type()->cast<TensorType>();
 
-      auto update_sequence_empty_dtype = [](Node* n, const TensorTypePtr& t_type) {
+      auto update_sequence_empty_dtype = [](Node* n,
+                                            const TensorTypePtr& t_type) {
         TORCH_INTERNAL_ASSERT(n && n->kind() == ::c10::onnx::SequenceEmpty);
         TORCH_INTERNAL_ASSERT(t_type && t_type->scalarType().has_value());
         auto scalar_type = t_type->scalarType().value();
@@ -2510,4 +2510,3 @@ void UpdateShapeConstantIfReliable(torch::jit::Value* node_output) {
 }
 
 } // namespace torch::jit
-

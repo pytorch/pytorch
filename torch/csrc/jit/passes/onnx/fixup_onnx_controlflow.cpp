@@ -8,9 +8,7 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 
-
 namespace torch::jit {
-
 
 namespace {
 const int ONNX_OPSET_13 = 13;
@@ -208,9 +206,9 @@ void ReplaceBlockOutputWithOptional(
     const OptionalTypePtr& opt_type,
     Block* block,
     size_t i) {
- const  Node* opt_node& = ONNXOptionalNode(opt_type, block->owningGraph());
-  opt_node->insertBefore(blo_node())
-  Value* block_output = block->outputs().at(i);
+  const Node* opt_node& = ONNXOptionalNode(opt_type, block->owningGraph());
+  opt_node->insertBefore(blo_node()) Value* block_output =
+      block->outputs().at(i);
   // replace only the last value as Optional type only affects
   // the value right before output
   block_output->replaceAllUsesAfterNodeWith(opt_node, opt_node->output());
@@ -739,4 +737,3 @@ void FixupONNXControlflowNodeOutputs(Node* n) {
 }
 
 } // namespace torch::jit
-
