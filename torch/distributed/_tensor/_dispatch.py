@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import functools
+import logging
 import operator
 import warnings
 from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
@@ -23,7 +24,13 @@ from torch.distributed._tensor._tp_conv import (
     convolution_handler,
 )
 from torch.distributed._tensor._utils import try_find_mesh_from_args
-from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, TensorMeta
+from torch.distributed._tensor.placement_types import (
+    DTensorSpec,
+    Partial,
+    Placement,
+    Replicate,
+    TensorMeta,
+)
 from torch.distributed._tensor.random import is_rng_supported_mesh
 
 
@@ -36,6 +43,7 @@ except ImportError:
     from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
+logger = logging.getLogger(__name__)
 
 
 def decompose_handler(
@@ -64,11 +72,58 @@ def is_same_size_handler(
     return lhs.shape == rhs.shape
 
 
+def found_inf_reduce_handler(
+    op_call: torch._ops.OpOverload,
+    args: Tuple[object, ...],
+    kwargs: Dict[str, object],
+) -> None:
+    op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+    local_tensor_args = pytree.tree_unflatten(
+        cast(List[object], op_info.local_args), op_info.args_tree_spec
+    )
+    local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+
+    grad_dtensor = cast(list[dtensor.DTensor], args[0])[0]
+    grad_placements = grad_dtensor.placements
+    mesh = grad_dtensor.device_mesh
+
+    found_inf_placements: list[Placement] = []
+    for placement in grad_placements:
+        if isinstance(placement, Replicate):
+            found_inf_placements.append(placement)
+        else:
+            found_inf_placements.append(Partial("max"))
+
+    target_tensor = cast(torch.Tensor, args[1])
+    spec = DTensorSpec(
+        mesh=mesh,
+        placements=tuple(found_inf_placements),
+        tensor_meta=TensorMeta(
+            shape=target_tensor.size(),
+            stride=target_tensor.stride(),
+            dtype=target_tensor.dtype,
+        ),
+    )
+    found_inf_dtensor = dtensor.DTensor(
+        local_tensor=target_tensor, spec=spec, requires_grad=False
+    )
+    found_inf = found_inf_dtensor.full_tensor()
+    target_tensor.copy_(found_inf)
+
+
 class OpDispatcher:
     """
     Op dispatching class instance to handle args/kwargs pre-processing (un-wrapping), sharding
     propagation, redistribute local args, local compute, and post-processing (re-wrapping). It
     also handles any op specific logic if necessary.
+
+    NOTE: Given the runtime overhead of Tensor subclass (__torch_dispatch__), the OpDispatcher
+    is designed to minimize the CPU overhead by using the tricks of proper unflattening, faster
+    pytree if needed, and leveraging various caching mechanisms implemented in the sharding
+    propagation and redistribute modules. The CPU overhead is critical to eager mode performance,
+    one need to carefully measure the CPU overhead when making significant changes to the
+    OpDispatcher and ShardingPropagator.
     """
 
     def __init__(self) -> None:
@@ -90,6 +145,7 @@ class OpDispatcher:
             aten.is_same_size.default: is_same_size_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
+            aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
         }
 
         # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
@@ -113,61 +169,19 @@ class OpDispatcher:
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
+        logger.debug("Dispatching op_call: %s", op_info.schema)
 
         self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
+        logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.mesh
-        if mesh.get_coordinate() is None:
-            # For a non-participating device, we do:
-            #   1. if the return type is scalar, set the local result to None.
-            #   The local results from all devices will then be all-gathered
-            #   and a reduce op will be performed on the list of results
-            #   with appropriate operators:
-            #       for bool type, we by default use AND to reduce;
-            #       we can extend for more ops if necessary.
-            #   2. if the return type is Tensor or List[Tensor], return empty
-            #   tensor(s) with correct dtype.
-            spec = output_sharding.output_spec
-            ret_list = op_info.schema.op._schema.returns
-
-            if spec is None:
-                # For a scalar return type, the non-participating device has None
-                # as its local result
-                local_results: object = None
-            else:
-
-                def default_tensor(spec: DTensorSpec) -> torch.Tensor:
-                    if spec.tensor_meta is not None:
-                        shape = spec.tensor_meta.shape
-                        dtype = spec.tensor_meta.dtype
-                        if len(shape) == 0:
-                            # scalar tensor
-                            return torch.zeros((), dtype=dtype)
-                        else:
-                            # non-scalar tensor
-                            return torch.tensor([], dtype=dtype)
-                    else:
-                        raise RuntimeError(f"{spec} has no tensor metadata.")
-
-                if isinstance(spec, DTensorSpec):
-                    # return a Tensor value
-                    local_results = default_tensor(spec)
-                elif isinstance(spec, Sequence):
-                    # return a List[Tensor] value
-                    local_results = [
-                        default_tensor(s) if s is not None else None for s in spec
-                    ]
-                    assert isinstance(local_results, List)
-                    if None in local_results:
-                        ret_type = str(ret_list[0].type)
-                        raise NotImplementedError(
-                            f"return type {ret_type} in DTensor op is not supported"
-                        )
-        else:
+        if mesh.get_coordinate() is not None:
+            # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
-                # compute locally with redistribute first if needed
+                # If sharding propagation decision needs redistribute, perform redistribute
+                # on args first, which could potentially modify args (i.e. allgather certain arg)
                 assert output_sharding.redistribute_schema is not None
                 self.redistribute_local_args(
                     op_info, output_sharding.redistribute_schema
@@ -197,16 +211,62 @@ class OpDispatcher:
                     if random._rng_tracker and not first_local_arg.is_meta
                     else contextlib.nullcontext()
                 )
-
-                # For DTensor random operator, run it within a distribute region
+                # For DTensor random operator, run it within a RNGTracker context to
+                # ensure the random number generator is properly distributed.
                 with rng_context:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
+                # normal case, run local sharded op computation
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
-        # communicate the result to all ranks for some operators that return scalar value
+        else:
+            # For a non-participating device (happens on rank that does not belong to
+            # the device mesh), we do:
+            #   1. if the return type is scalar, set the local result to None.
+            #   2. if the return type is Tensor or List[Tensor], return empty
+            #   tensor(s) with correct dtype.
+            spec = output_sharding.output_spec
+            ret_list = op_info.schema.op._schema.returns
+
+            if spec is None:
+                # For a scalar return type, the non-participating device has None
+                # as its local result
+                local_results = None
+            else:
+
+                def default_tensor(spec: DTensorSpec) -> torch.Tensor:
+                    if spec.tensor_meta is not None:
+                        shape = spec.tensor_meta.shape
+                        dtype = spec.tensor_meta.dtype
+                        if len(shape) == 0:
+                            # scalar tensor
+                            return torch.zeros((), dtype=dtype)
+                        else:
+                            # non-scalar tensor
+                            return torch.tensor([], dtype=dtype)
+                    else:
+                        raise RuntimeError(f"{spec} has no tensor metadata.")
+
+                if isinstance(spec, DTensorSpec):
+                    # return a Tensor value
+                    local_results = default_tensor(spec)
+                elif isinstance(spec, Sequence):
+                    # return a List[Tensor] value
+                    local_results = [
+                        default_tensor(s) if s is not None else None for s in spec
+                    ]
+                    assert isinstance(local_results, List)
+                    if None in local_results:
+                        ret_type = str(ret_list[0].type)
+                        raise NotImplementedError(
+                            f"return type {ret_type} in DTensor op is not supported"
+                        )
+
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
+                # For equal operator, The local results from all devices should be all-gathered
+                # and a reduce op (AND) will be performed on the list of results to ensure SPMD
+                # execution. We can extend this for more ops if necessary.
                 obj_list = [None for _ in range(dist.get_world_size())]
                 dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
                 obj_list = list(filter(lambda x: x is not None, obj_list))
@@ -246,9 +306,6 @@ class OpDispatcher:
         suggested_input_schema: OpSchema,
     ) -> None:
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
-
-        # TODO: the op schema should probably just remain flattened so that we can avoid this tree flatten
-        # Need to fix all the ops before doing this.
         if op_info.args_tree_spec is not None:
             flatten_args_schema_to_reshard = tuple(
                 pytree.tree_leaves(suggested_input_schema.args_schema)
@@ -279,13 +336,13 @@ class OpDispatcher:
         args: Tuple[object, ...],
         kwargs: Dict[str, object],
     ) -> OpInfo:
-        # get runtime schema to determine whether to use pytree to flatten inputs
+        # get runtime schema info to determine whether to use pytree to flatten inputs
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
             op_call, None
         )
 
         if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
-            # flatten args/kwargs when necessary
+            # flatten args/kwargs when op says necessary
             tree_args, args_spec = pytree.tree_flatten(args)
             args_list: Sequence[object] = tree_args
         else:
@@ -297,55 +354,27 @@ class OpDispatcher:
         local_kwargs: Dict[str, object] = {}
         mesh: Optional[DeviceMesh] = None
 
-        def try_get_replicate_spec(
-            tensor_arg: torch.Tensor, mesh: "DeviceMesh"
-        ) -> DTensorSpec:
-            # tensor_arg is an instance of torch.Tensor and could be an arg or kwarg.
-            if tensor_arg.numel() == 1 and tensor_arg.ndim == 1:
-                warnings.warn(
-                    "Found a non-scalar tensor with numel=1 and ndim!=0, "
-                    "we are implicitly creating a replicated DTensor for it. "
-                    "However, please consider changing it to a scalar tensor "
-                    "or explicitly create a DTensor under distributed enviroment."
-                )
-
-            # if the arg.numel() == 1, arg.ndim could be 0 or 1.
-            if (
-                tensor_arg.ndim <= 1
-                and tensor_arg.numel() == 1
-                or self._allow_implicit_replication
-            ):
-                # scalar tensor can be safely treated as replicated
-                replication_spec = DTensorSpec(
-                    mesh,
-                    (Replicate(),) * mesh.ndim,
-                    tensor_meta=TensorMeta(
-                        shape=tensor_arg.shape,
-                        stride=tensor_arg.stride(),
-                        dtype=tensor_arg.dtype,
-                    ),
-                )
-            else:
-                raise RuntimeError(
-                    f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
-                    " torch.Tensor to DTensor before calling distributed operators!"
-                )
-            return replication_spec
-
         for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
-                args_schema.append(arg._spec)
                 local_args.append(arg._local_tensor)
-                if mesh is not None:
-                    if mesh != arg.device_mesh:
-                        raise NotImplementedError(
-                            f"{op_call}: DTensor does not support cross-mesh operation yet!"
-                        )
+                if mesh is not None and mesh != arg.device_mesh:
+                    # TODO: try replicate dtensor spec in missing dimension would work
+                    # for most cases for foreach case except when the first DTensor in
+                    # the list is one that also need to be replicated. We need to revisit
+                    # how we want to handle this corner case. For now, this case would hit
+                    # the cross mesh error even if implicit replication is turned on.
+                    spec = self._try_replicate_dtensor_spec_in_missing_dim(
+                        op_call, arg, mesh
+                    )
+                    args_schema.append(spec)
                 else:
                     mesh = arg.device_mesh
+                    args_schema.append(arg._spec)
             elif isinstance(arg, torch.Tensor):
                 mesh = mesh or try_find_mesh_from_args(op_call, args_list)
-                args_schema.append(try_get_replicate_spec(arg, mesh))
+                args_schema.append(
+                    self._try_replicate_spec_for_scalar_tensor(op_call, arg, mesh)
+                )
                 local_args.append(arg)
             else:
                 args_schema.append(arg)
@@ -353,18 +382,20 @@ class OpDispatcher:
 
         for k, v in kwargs.items():
             if isinstance(v, dtensor.DTensor):
-                kwargs_schema[k] = v._spec
                 local_kwargs[k] = v._local_tensor
-                if mesh is not None:
-                    if mesh != v.device_mesh:
-                        raise NotImplementedError(
-                            f"{op_call}: DTensor does not support cross-mesh operation yet!"
-                        )
+                if mesh is not None and mesh != v.device_mesh:
+                    spec = self._try_replicate_dtensor_spec_in_missing_dim(
+                        op_call, v, mesh
+                    )
+                    kwargs_schema[k] = spec
                 else:
                     mesh = v.device_mesh
+                    kwargs_schema[k] = v._spec
             elif isinstance(v, torch.Tensor):
                 mesh = mesh or try_find_mesh_from_args(op_call, args_list)
-                kwargs_schema[k] = try_get_replicate_spec(v, mesh)
+                kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
+                    op_call, v, mesh
+                )
                 local_kwargs[k] = v
             else:
                 kwargs_schema[k] = v
@@ -413,3 +444,72 @@ class OpDispatcher:
             # if the res contains only non tensor values (i.e. int/float/none), we simply return it
             # without rewrapping to DTensor.
             return res
+
+    def _try_replicate_spec_for_scalar_tensor(
+        self,
+        op_call: torch._ops.OpOverload,
+        tensor_arg: torch.Tensor,
+        mesh: "DeviceMesh",
+    ) -> DTensorSpec:
+        # util function to produce a replicate spec for a scalar tensor arg/kwarg
+        if tensor_arg.numel() == 1 and tensor_arg.ndim == 1:
+            warnings.warn(
+                "Found a non-scalar tensor with numel=1 and ndim!=0, "
+                "we are implicitly creating a replicated DTensor for it. "
+                "However, please consider changing it to a scalar tensor "
+                "or explicitly create a DTensor under distributed enviroment."
+            )
+
+        if tensor_arg.numel() == 1 or self._allow_implicit_replication:
+            # scalar tensor can be safely treated as replicated
+            replication_spec = DTensorSpec(
+                mesh,
+                (Replicate(),) * mesh.ndim,
+                tensor_meta=TensorMeta(
+                    shape=tensor_arg.shape,
+                    stride=tensor_arg.stride(),
+                    dtype=tensor_arg.dtype,
+                ),
+            )
+        else:
+            raise RuntimeError(
+                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
+                " torch.Tensor to DTensor before calling distributed operators!"
+            )
+        return replication_spec
+
+    def _try_replicate_dtensor_spec_in_missing_dim(
+        self,
+        op_call: torch._ops.OpOverload,
+        dtensor_arg: "dtensor.DTensor",
+        mesh: "DeviceMesh",
+    ) -> DTensorSpec:
+        # util function to produce a new spec for a DTensor arg/kwarg
+        # that puts Replicate() placement in the missing dimension for foreach ops
+        from torch.distributed.device_mesh import _mesh_resources
+
+        cur_mesh = dtensor_arg.device_mesh
+        root_mesh = _mesh_resources.get_root_mesh(cur_mesh)
+        if (
+            self._allow_implicit_replication
+            and "foreach" in op_call.__name__
+            and root_mesh == mesh
+        ):
+            placements = [Replicate() for _ in range(root_mesh.ndim)]
+            cur_mesh_root_idx = _mesh_resources.get_root_mesh_dim(cur_mesh)
+            placements[cur_mesh_root_idx] = dtensor_arg.placements[0]  # type: ignore[call-overload]
+            replicate_spec = DTensorSpec(
+                root_mesh,
+                tuple(placements),
+                tensor_meta=TensorMeta(
+                    shape=dtensor_arg.shape,
+                    stride=dtensor_arg.stride(),
+                    dtype=dtensor_arg.dtype,
+                ),
+            )
+        else:
+            raise NotImplementedError(
+                f"{op_call}: DTensor does not support cross-mesh operation yet! "
+                f"Got meshes: {mesh} {cur_mesh}"
+            )
+        return replicate_spec

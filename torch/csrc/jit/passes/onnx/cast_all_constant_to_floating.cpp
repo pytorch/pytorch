@@ -31,8 +31,7 @@ void CastAllConstantToFloating(Block* block) {
       auto val_type = TensorType::create(val);
       if (dtype != at::ScalarType::Double && dtype != at::ScalarType::Float &&
           dtype != at::ScalarType::Half) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int to_type;
+        int to_type = 0;
         switch (val.scalar_type()) {
           case at::ScalarType::Byte:
           case at::ScalarType::Char:

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
 import functools
@@ -10,11 +11,13 @@ import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
+
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -60,8 +63,7 @@ def _get_pattern_output_dtype(match: Match):
     output_node = pattern_output_nodes[0]
     assert isinstance(output_node, torch.fx.Node)
     output_dtype = output_node.meta["val"].dtype
-    if output_dtype is torch.uint8:
-        output_dtype = None
+    assert output_dtype in [torch.uint8, torch.float32, torch.bfloat16]
     return output_dtype
 
 
@@ -287,7 +289,7 @@ def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_val
 def _is_valid_quantized_conv2d_optimization_pattern():
     def fn(match):
         output_dtype = _get_pattern_output_dtype(match)
-        if output_dtype is not None:
+        if output_dtype in [torch.float32, torch.bfloat16]:
             # Only keep matched pattern with same output_dtype
             qconv_node_after_weight_prepack = filter_nodes(
                 match.nodes, torch.ops.onednn.qconv2d_pointwise
@@ -333,10 +335,10 @@ def _register_quantized_conv_lowering(
             kwargs["groups"],
         )
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype in [None, torch.float32, torch.bfloat16]
+        assert output_dtype in [torch.uint8, torch.float32, torch.bfloat16]
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
+        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
+        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
         assert (
             kwargs["attr"] == "none"
         )  # Expected no post op fused in weight prepack phase
@@ -374,7 +376,7 @@ def _register_quantized_conv_lowering(
 def _is_valid_quantized_linear_optimization_pattern():
     def fn(match):
         output_dtype = _get_pattern_output_dtype(match)
-        if output_dtype is not None:
+        if output_dtype in [torch.float32, torch.bfloat16]:
             # Only keep matched pattern with same output_dtype
             qlinear_node_after_weight_prepack = filter_nodes(
                 match.nodes, torch.ops.onednn.qlinear_pointwise
@@ -417,8 +419,8 @@ def _register_quantized_linear_lowering(
         b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
+        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
+        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
         assert (
             kwargs["postop_name"] == "none"
         )  # Expected no post op fused in weight prepack phase
@@ -458,6 +460,7 @@ def _register_quantized_linear_binary_lowering(
     )
     def qlinear_binary(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
+        assert output_dtype is not None
         # Activation QParams
         x, x_scale, x_zp = (
             kwargs["x"],
@@ -480,26 +483,23 @@ def _register_quantized_linear_binary_lowering(
         # bias
         b = kwargs["b"] if "b" in kwargs else None
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
+        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
+        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
 
         x2.realize()
         from .mkldnn_fusion import _can_be_inplace
 
-        if binary_unary_attr.binary_op_name == "sum":
-            assert _can_be_inplace(
-                x2
-            ), "QLinear Binary Inplace Fusion requires accum is not an alias or mutation."
+        binary_op_name = binary_unary_attr.binary_op_name
 
-        # if the binary post op is sum but output dtype is not the same as accum,
-        # use accum's dtype as output dtype
-        out_dtype = output_dtype
-        if (
-            output_dtype
-            and binary_unary_attr.binary_op_name == "sum"
-            and output_dtype != x2.dtype
-        ):
-            out_dtype = x2.dtype
+        if binary_op_name == "sum" and not _can_be_inplace(x2):
+            # When we enable the GEMM Template, the output of QLinear
+            # will be reshaped from 2D back to 3D if the input is 3D.
+            # This causes _can_be_inplace(x2) to return False if x2 happens
+            # to be the output of QLinear in this scenario.
+            # Change the post op from sum to binary add for this case.
+            # Refer to test case:
+            #   test_mkldnn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
+            binary_op_name = "add"
 
         computation_args = (
             x,
@@ -508,14 +508,14 @@ def _register_quantized_linear_binary_lowering(
             packed_weight,
             w_scale,
             w_zp,
+            x2,
             b,
             o_inv_scale,
             o_zero_point,
-            out_dtype,
-            x2,
+            output_dtype,
             x2_scale,
             x2_zp,
-            binary_unary_attr.binary_op_name,
+            binary_op_name,
             binary_unary_attr.alpha,
             binary_unary_attr.unary_op_name,
             binary_unary_attr.scalars_attr,
@@ -561,7 +561,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             return False
         binary_node_inputs = next(iter(compute_node.users)).args
         assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
-        if output_dtype is not None:
+        if output_dtype in [torch.float32, torch.bfloat16]:
             extra_input_of_binary_node = None
             for arg in binary_node_inputs:
                 if arg != compute_node:
@@ -605,18 +605,12 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             if "other" in match.kwargs
             else (
                 match.kwargs["accum"]
-                if output_dtype is None or (not extra_input_from_dequant)
+                if output_dtype == torch.uint8 or (not extra_input_from_dequant)
                 else match.kwargs["accum_after_dequant"]
             )
         )
         if (
-            len(
-                _get_remaining_users(
-                    extra_input_of_pattern,
-                    compute_node,
-                )
-            )
-            > 1
+            len(_get_remaining_users(extra_input_of_pattern, compute_node)) > 1
             or extra_input_of_pattern == compute_node.args[0]
         ):
             return False
@@ -638,12 +632,15 @@ def _register_quantized_conv_binary_lowering(
     )
     def qconv_binary(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
+        assert output_dtype is not None
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
         accum = (
-            kwargs["accum"] if output_dtype is None else kwargs["accum_after_dequant"]
+            kwargs["accum"]
+            if output_dtype == torch.uint8
+            else kwargs["accum_after_dequant"]
         )
-        accum_scale = kwargs["accum_scale"] if output_dtype is None else 1.0
-        accum_zp = kwargs["accum_zp"] if output_dtype is None else 0
+        accum_scale = kwargs["accum_scale"] if output_dtype == torch.uint8 else 1.0
+        accum_zp = kwargs["accum_zp"] if output_dtype == torch.uint8 else 0
         packed_weight, w_scale, w_zp = (
             kwargs["packed_weight"],
             kwargs["w_scale"],
@@ -657,8 +654,8 @@ def _register_quantized_conv_binary_lowering(
             kwargs["groups"],
         )
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
+        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
+        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
 
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
@@ -708,7 +705,9 @@ def _register_quantization_unary_fusion():
     )
 
     class UnaryAttr:
-        def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+        def __init__(
+            self, op_name: str, scalars_attr=None, algorithm_attr=None
+        ) -> None:
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
@@ -904,7 +903,7 @@ def _register_quantization_binary_fusion():
             unary_op_name: str = "none",
             scalars_attr=None,
             algorithm_attr=None,
-        ):
+        ) -> None:
             self.binary_op_name = binary_op_name
             self.alpha = alpha if alpha else 1.0
             self.unary_op_name = unary_op_name
@@ -1190,8 +1189,6 @@ def _register_quantization_binary_fusion():
                 patterns,
                 2,  # pass_number
                 qlinear_binary_op,  # computation_op
-                # Output dtype should be the same as accum's dtype but we don't know
-                # its dtype. So, leave it to be determined in the lowering function
                 binary_unary_attr,
             )
         # Priority 3.2: QLinear Binary pattern with fp32/bfloat16 output
@@ -1890,14 +1887,14 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             graph.erase_node(conv_node)
             # Erase the dequant pattern
             if dtype == torch.bfloat16:
-                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined]
-            graph.erase_node(dequant_node)
+                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined, arg-type]
+            graph.erase_node(dequant_node)  # type: ignore[arg-type]
             # Erase the dequant per channel pattern
             if clone_node is not None:
-                graph.erase_node(clone_node)
+                graph.erase_node(clone_node)  # type: ignore[arg-type]
             if dtype == torch.bfloat16:
-                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
-            graph.erase_node(dequant_per_channel)
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined, arg-type]
+            graph.erase_node(dequant_per_channel)  # type: ignore[arg-type]
             counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
                 match.nodes
@@ -2584,8 +2581,8 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
                     new_args = map_arg(new_quant_node.args, maybe_replace_node)
                     new_kwargs = map_arg(new_quant_node.kwargs, maybe_replace_node)
-                    new_quant_node.args = new_args
-                    new_quant_node.kwargs = new_kwargs
+                    new_quant_node.args = new_args  # type: ignore[assignment]
+                    new_quant_node.kwargs = new_kwargs  # type: ignore[assignment]
                     graph_module.graph.erase_node(quant_node)
 
     graph_module.graph.lint()

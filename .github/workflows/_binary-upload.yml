@@ -55,6 +55,13 @@ on:
         required: false
         type: string
         description: Desired python version
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
     secrets:
       github-token:
         required: true
@@ -93,6 +100,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -118,7 +126,7 @@ jobs:
         # NB: When the previous build job is skipped, there won't be any artifacts and
         # this step will fail. Binary build jobs can only be skipped on CI, not nightly
         continue-on-error: true
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"

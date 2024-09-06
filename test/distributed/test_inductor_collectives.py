@@ -539,8 +539,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             FileCheck()
             .check("buf0 = empty_strided")
             .check(".run(arg0_1, buf0, 16")
-            .check("buf1 = torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("buf3 = torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             .check("return (buf0")
             .run(code)
         )
@@ -571,8 +571,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             FileCheck()
             .check("buf0 = empty_strided")
             .check(".run(arg0_1, buf0")
-            .check("buf1 = torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("buf3 = torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             .check("buf5 = empty_strided")
             .check(".run(buf5, 16")
             .check("return (buf0, buf5")
@@ -609,8 +609,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf0 = empty_strided")
             .check("buf5 = empty_strided")
             .check(".run(arg0_1, buf0, buf5, 16")
-            .check("buf1 = torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("buf3 = torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             .check("buf6 = empty_strided")
             .check(".run(buf6, 16")
             .check("return (buf0, buf5, buf6")
@@ -1013,22 +1013,17 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             return ar
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
-        # TODO implement backwards
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "element 0 of tensors does not require grad and does not have a grad_fn",
-        ):
-            compiled = torch.compile(
-                func, backend="aot_eager"
-            )  # inductor bug with single-op allreduce graph
-            out = compiled(input)
-            out.sum().backward()
+        compiled = torch.compile(
+            func, backend="aot_eager"
+        )  # inductor bug with single-op allreduce graph
+        out = compiled(input)
+        out.sum().backward()
 
-            correct_input = input.clone().detach().requires_grad_()
-            correct = func(correct_input)
-            correct.sum().backward()
-            self.assertTrue(same(out, correct))
-            self.assertTrue(same(input.grad, correct_input.grad))
+        correct_input = input.clone().detach().requires_grad_()
+        correct = func(correct_input)
+        correct.sum().backward()
+        self.assertTrue(same(out, correct))
+        self.assertTrue(same(input.grad, correct_input.grad))
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")
@@ -1070,10 +1065,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             )
             .check("buf2 = buf1[0]")
             .check("buf3 = buf1[1]")
-            .check("buf4 = torch.ops._c10d_functional.wait_tensor.default(buf2")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
             .check("buf7 = buf0; del buf0  # reuse")
             .check(".run(buf7, 16")
-            .check("buf8 = torch.ops._c10d_functional.wait_tensor.default(buf3")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
             .check("return (buf2, buf6, buf7, buf3")
             .run(code)
         )
@@ -1116,10 +1111,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             )
             .check("buf2 = buf1[0]")
             .check("buf3 = buf1[1]")
-            .check("buf4 = torch.ops._c10d_functional.wait_tensor.default(buf2")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
             .check("buf7 = buf0; del buf0  # reuse")
             .check(".run(buf7, 16")
-            .check("buf8 = torch.ops._c10d_functional.wait_tensor.default(buf3")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
             .check("return (buf2, buf6, buf7, buf3")
             .run(code)
         )

@@ -421,11 +421,11 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
 
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
     auto [res, grad_refl] = reflect_coordinates_get_grad(unnormalize(in));
-    Vec grad_clip, grad(scaling_factor);
+    Vec grad(scaling_factor);
     grad = grad_refl * grad;
-    std::tie(res, grad_clip) = clip_coordinates_get_grad(res);
+    auto [res2, grad_clip] = clip_coordinates_get_grad(res);
     grad = grad_clip & grad;
-    return std::make_pair(res, grad);
+    return std::make_pair(res2, grad);
   }
 };
 
