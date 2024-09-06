@@ -285,52 +285,6 @@ def _templated_ring_attention(
     """
     This is a generalized ring attention implementation that can support multiple attention ops.
 
-    Algorithm:
-    ----------
-    We use an example to explain the algorithm of CP with causal masking.
-    Assume the sequence length of q, k, and v is 4, e.g., q = (q0, q1, q2, q3) and
-    there are only 2 ranks. We will ignore V in the discussion for simplicity but
-    it is the same as K.
-
-    The following figure represent a full QK^T operation without parallelism. V is
-    ignored to simplied the explanation. `****` fields means the result is not
-    required due to causal masking, e.g., q0k1 is marked as `****`.
-    +----+------------------------+
-    |    |  k0    k1   k2     k3  |
-    +----+------------------------+
-    | q0 | q0k0, ****, ****, **** |
-    | q1 | q1k0, q1k1, ****, **** |
-    | q2 | q2k0, q2k1, q2k2, **** |
-    | q3 | q3k0, q3k1, q3k2, q3k3 |
-    +----+------------------------+
-
-    No load balance:
-    In this case, rank0 owns (q0, q1) and (k0, k1); rank1 owns (q2, q3) and (k2, k3).
-    For the first iteration, both ran0 and rank1 has to do SDPA with the local qkv.
-    Note that for this SDPA call, we also need to turn on causal because some results
-    are not required, e.g., q0, k1.
-
-    For the next iteration, local queries are not exchanged but local kv are exchanged.
-    Rank0 own (q0, q1) and (k2, k3); rank1 owns (q2, q3) and (k0, k1). For this
-    iteration, rank0 doesn't have to perform any computatoin. Rank1 needs to compute
-    the local computation without causal masking with (q2, q3) and (k0, k1) because
-    all the results are needed.
-
-    Round-robin load balance:
-    In this case, rank0 owns (q0, q3) and (k0, k3); rank1 owns (q1, q2) and (k1, k2).
-    For the first iteration, both rank0 and rank1 still need do SDPA with the local qkv.
-    This is identical as the no-load-balance case. This corresponds to the `if` in the
-    if/elif/else statement in the implementation.
-
-    In the second iteraion, rank0 owns (q0, q3) and (k1, k2); rank1 owns (q1, q2) and
-    (k0, k3). For the local query, q0, rank0 doesn't have to any computation. But
-    both the result of q3k1 and q3k2 are required. So we need to chunk out q3 as that
-    is the only query needed to call SDPA. This corresponds to the `else` in the
-    if/elif/else statement in the implementation. As for rank1, the key, k0, is not
-    required for q1 and q2. So we need to chunk out k3 as it is the only key required
-    for calling SDPA. This corresponds to the `elif` statement.
-
-
     Algorithm Description:
     =====================
     This explanation uses an example to illustrate the CP algorithm with causal
@@ -355,8 +309,9 @@ def _templated_ring_attention(
 
     ### No Load Balance:
 
-    In this scenario, rank0 manages (q0, q1) and (k0, k1); rank1 manages (q2, q3) and
-    (k2, k3).
+    In this scenario, each rank owns a local chunk of q, k, and v, with each chunk
+    containing two elements. Rank0 is responsible for managing (q0, q1) and (k0, k1),
+    while rank1 manages (q2, q3) and (k2, k3).
 
     First Iteration: Both rank0 and rank1 perform SDPA with their local qkv pairs.
     Causal masking is enabled as some results are not required (e.g., q0k1).
@@ -368,8 +323,11 @@ def _templated_ring_attention(
 
     ### Round-robin Load Balance:
 
-    In this setup, rank0 manages (q0, q3) and (k0, k3); rank1 manages (q1, q2) and
-    (k1, k2).
+    In this setup, each rank owns two local chunks of q, k, and v, with each chunk
+    containing one element. Rank0 manages (q0, q3) and (k0, k3); Rank1 manages (q1, q2)
+    and (k1, k2). Although the local chunks are not consecutive, they are concatenated to
+    enable SDPA to be performed in a single call for each step. Consequently, the chunk()
+    function may be required to prepare the correct q, k, and v configurations.
 
     First Iteration: Both ranks perform SDPA with their local qkv pairs, similar to the
     no-load-balance case. This iteration corresponds to the `if` of the
@@ -390,49 +348,6 @@ def _templated_ring_attention(
         additional args are passed to the op
     **kwargs:
         additional kwargs are passed to the op
-
-    Algorithm Description:
-    =====================
-    This explanation uses an example to illustrate the CP algorithm with causal masking.
-    Consider a scenario where the sequence length of q, k, and v is 4 (e.g.,
-    q = (q0, q1, q2, q3)), and there are two ranks. For simplicity, we will focus only on
-    q and k, as v follows the same pattern as k.  The diagram below represents a complete
-    QK^T operation without parallelism. The `****` entries indicate that the result is not
-    required due to causal masking (e.g., q0k1 is marked as `****`).
-    +----+------------------------+
-    |    |  k0    k1   k2     k3  |
-    +----+------------------------+
-    | q0 | q0k0, ****, ****, **** |
-    | q1 | q1k0, q1k1, ****, **** |
-    | q2 | q2k0, q2k1, q2k2, **** |
-    | q3 | q3k0, q3k1, q3k2, q3k3 |
-    +----+------------------------+
-
-    ### No Load Balance:
-    In this scenario, rank0 manages (q0, q1) and (k0, k1); rank1 manages (q2, q3) and
-    (k2, k3).
-
-    First Iteration: Both rank0 and rank1 perform SDPA with their local qkv pairs.
-    Causal masking is enabled for this SDPA as some results are not required (e.g., q0k1).
-
-    Second Iteration: Local queries remain the same, but local kv pairs are exchanged.
-    Rank0 now has (q0, q1) and (k2, k3); rank1 has (q2, q3) and (k0, k1). Rank0 performs
-    no computation, while rank1 computes locally without causal masking since all results
-    (q2k0, q2k1, q3k0, q3k1) are needed.
-
-    ### Round-robin Load Balance:
-    In this setup, rank0 manages (q0, q3) and (k0, k3); rank1 manages (q1, q2) and (k1, k2).
-
-    First Iteration: Both ranks perform SDPA with their local qkv pairs, similar to the
-    no-load-balance case. This iteration corresponds to the `if` condition in the
-    (`if`, `elif`, `else`) structure of the implementation.
-
-    Second Iteration: Rank0 now has (q0, q3) and (k1, k2); rank1 has (q1, q2) and (k0, k3).
-    For rank0, no computation is needed for q0. However, computations for q3k1 and q3k2
-    are required, so only q3 is used for SDPA. This corresponds to the `else` condition
-    in the (`if`, `elif`, `else`) structure. For rank1, k0 is not needed for q1 and q2,
-    so only k3 is used for SDPA. This corresponds to the `elif` condition in the
-    (`if`, `elif`, `else`) structure.
 
     Returns
     -------
