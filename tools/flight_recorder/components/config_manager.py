@@ -39,8 +39,11 @@ class JobConfig:
         self.parser.add_argument(
             "-p",
             "--prefix",
-            help="prefix to strip such that rank can be extracted",
-            default="rank_",
+            help=(
+                "Common filename prefix to strip such that rank can be extracted. "
+                "If not specified, will attempt to infer a common prefix."
+            ),
+            default=None,
         )
         self.parser.add_argument("-j", "--just_print_entries", action="store_true")
         self.parser.add_argument("-v", "--verbose", action="store_true")
