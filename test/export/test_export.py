@@ -999,16 +999,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
     return (getitem, getitem_1, getitem_2)""",
         )
 
-    # TODO(yidi)
-    # Expected failure for test cases that calls run_decomposition().
-    # The top-level cond node has pre-existing metadata,
-    # which overrides the metadata for operators in subgraph due to interpreter.run(),
-    # where cond is a single node in the interpreter.run(). And we preserve metadata
-    # by copying current node's metadata for all nodes created during interpreting.
-    @testing.expectedFailurePreDispatchRunDecomp
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700910
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -2296,8 +2286,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v3
         export(N(), (t,), strict=strict)
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
     @testing.expectedFailureSerDer  # T195866111
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
@@ -2427,6 +2415,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
                 strict=strict,
             )
+
+    def test_tolist(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.tolist()
+
+        ep = export(M(), (torch.ones(3, dtype=torch.int),))
+        self.assertEqual(ep.module()(torch.tensor([1, 2, 3])), [1, 2, 3])
 
     def test_if_functional(self):
         class Module(torch.nn.Module):
@@ -7929,13 +7925,6 @@ class TestExportCustomClass(TorchTestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
-
-    def test_tolist_nonstrict_output(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                x.tolist()
-
-        ep = torch.export.export(M(), (torch.ones(3),), strict=False)
 
     def test_preserve_non_cia_op(self):
         class M(torch.nn.Module):
