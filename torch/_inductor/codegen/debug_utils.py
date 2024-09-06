@@ -89,7 +89,7 @@ class DebugPrinterManager:
                 len(self.filtered_kernel_names_to_print) > 0
                 and self.filtered_kernel_names_to_print[0]
                 != self.DEBUG_FILTER_DEFAULT_PRINT_ALL
-                and kernel_name not in self.filtered_kernel_names_to_print
+                and kernel_name.lower() not in self.filtered_kernel_names_to_print
             ):
                 continue
             launch_prefix = "before_launch" if before_launch else "after_launch"
