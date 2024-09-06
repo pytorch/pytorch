@@ -4,7 +4,6 @@ from __future__ import annotations
 
 
 __all__ = [
-    "OnnxExporterError",
     "OnnxExporterWarning",
     "SymbolicValueError",
     "UnsupportedOperatorError",

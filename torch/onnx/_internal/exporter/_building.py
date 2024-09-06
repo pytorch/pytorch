@@ -20,8 +20,7 @@ from onnxscript import evaluator, ir
 from onnxscript.ir import convenience as ir_convenience
 
 import torch
-from torch.onnx._internal.exporter import _errors
-from torch.onnx._internal.exporter import _schemas, _tensors
+from torch.onnx._internal.exporter import _errors, _schemas, _tensors
 
 
 if TYPE_CHECKING:
