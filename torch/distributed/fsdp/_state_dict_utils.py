@@ -17,9 +17,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
-
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor import (
@@ -29,7 +27,6 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import _mesh_resources
-
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,
@@ -68,12 +65,10 @@ logger = logging.getLogger(__name__)
 
 
 def _should_unshard_params(fsdp_state: _FSDPState) -> bool:
-    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD and (
-        _is_composable(fsdp_state) or fsdp_state._use_orig_params
-    ):
-        return False
-    else:
-        return True
+    return not (
+        fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+        and (_is_composable(fsdp_state) or fsdp_state._use_orig_params)
+    )
 
 
 def _convert_to_wrapped_module_name(module_name: str) -> str:
@@ -302,7 +297,7 @@ def _full_pre_state_dict_hook(
     ``nn.Module``.
     """
     if getattr(fsdp_state, "_device_mesh", False):
-        parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+        root_mesh = _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
 
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
@@ -670,9 +665,9 @@ def _sharded_pre_load_state_dict_hook(
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
 
-            parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+            root_mesh = _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
             local_tensor = _ext_all_gather_dtensor(
-                param, parent_mesh, fsdp_state._fsdp_extension
+                param, root_mesh, fsdp_state._fsdp_extension
             )
 
             if fqn_to_param_ext.get(fqn) is not None:

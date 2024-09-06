@@ -29,8 +29,7 @@
 #endif
 #endif
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 enum class can_mutate_inplace_result {
   success,
   non_default_backward_view,
@@ -217,7 +216,7 @@ inline at::Tensor as_view(
           tensor,
           diff_view_meta->get_backward_view().chain(
               base, tensor, std::move(view_func), std::move(rev_view_func)),
-          c10::nullopt,
+          std::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
           allow_tensor_metadata_change);
@@ -225,7 +224,7 @@ inline at::Tensor as_view(
       return make_variable_differentiable_view(
           tensor,
           ViewInfo(base, std::move(view_func), std::move(rev_view_func)),
-          c10::nullopt,
+          std::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
           allow_tensor_metadata_change);
@@ -438,5 +437,4 @@ Return run_jit_decomposition_with_args_for_jvp(
 
 } // namespace impl
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

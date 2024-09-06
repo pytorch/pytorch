@@ -11,14 +11,15 @@ import datetime
 import logging
 from typing import cast, Optional
 
-from torch.distributed import Store, TCPStore, PrefixStore
+from torch.distributed import PrefixStore, Store, TCPStore
 from torch.distributed.elastic.rendezvous import (
-    RendezvousInfo,
     RendezvousHandler,
+    RendezvousInfo,
+    RendezvousParameters,
     RendezvousStoreInfo,
-    RendezvousParameters
 )
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
+
 
 __all__ = ["StaticTCPRendezvous", "create_rdzv_handler"]
 
@@ -121,6 +122,7 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
         timeout = int(params.config["timeout"])
     else:
         timeout = _default_timeout_seconds
+
     return StaticTCPRendezvous(
         master_addr, master_port, rank, world_size, run_id, timeout
     )

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import os
 import warnings
@@ -15,6 +16,7 @@ from .default_planner import DefaultLoadPlanner
 from .planner import LoadPlan, LoadPlanner
 from .storage import StorageReader
 from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
+
 
 __all__ = ["load_state_dict", "load"]
 

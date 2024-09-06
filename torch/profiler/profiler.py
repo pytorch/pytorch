@@ -95,6 +95,8 @@ class _KinetoProfile:
             representation of AI/ML workloads and enable replay benchmarks, simulators, and emulators.
             When this argument is included the observer start() and stop() will be called for the
             same time window as PyTorch profiler.
+        acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
+
 
     .. note::
         This API is experimental and subject to change in the future.
@@ -116,6 +118,7 @@ class _KinetoProfile:
         with_modules: bool = False,
         experimental_config: Optional[_ExperimentalConfig] = None,
         execution_trace_observer: Optional[_ITraceObserver] = None,
+        acc_events: bool = False,
     ):
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
@@ -125,6 +128,7 @@ class _KinetoProfile:
         self.with_modules = with_modules
         self.experimental_config = experimental_config
         self.execution_trace_observer = execution_trace_observer
+        self.acc_events = acc_events
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
@@ -132,11 +136,13 @@ class _KinetoProfile:
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
             self.use_device = "xpu"
+        elif ProfilerActivity.MTIA in self.activities:
+            self.use_device = "mtia"
         elif ProfilerActivity.PrivateUse1 in self.activities:
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
-        self.preset_metadata: Dict[str, str] = dict()
+        self.preset_metadata: Dict[str, str] = {}
 
     def start(self):
         self.prepare_trace()
@@ -146,10 +152,9 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self):
-        if self.profiler is None:
+        if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
-                use_mtia=(ProfilerActivity.MTIA in self.activities),
                 use_device=self.use_device,
                 record_shapes=self.record_shapes,
                 with_flops=self.with_flops,
@@ -158,6 +163,7 @@ class _KinetoProfile:
                 with_modules=self.with_modules,
                 use_kineto=True,
                 experimental_config=self.experimental_config,
+                acc_events=self.acc_events,
             )
         self.profiler._prepare_trace()
 
@@ -232,6 +238,39 @@ class _KinetoProfile:
         """
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
+
+    def toggle_collection_dynamic(
+        self, enable: bool, activities: Iterable[ProfilerActivity]
+    ):
+        """Toggle collection of activities on/off at any point of collection. Currently supports toggling Torch Ops
+        (CPU) and CUDA activity supported in Kineto
+
+        Args:
+            activities (iterable): list of activity groups to use in profiling, supported values:
+                ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``
+        Examples:
+
+        .. code-block:: python
+
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            ) as p:
+                code_to_profile_0()
+                // turn off collection of all CUDA activity
+                p.toggle_collection_dynamic(False, [torch.profiler.ProfilerActivity.CUDA])
+                code_to_profile_1()
+                // turn on collection of all CUDA activity
+                p.toggle_collection_dynamic(True, [torch.profiler.ProfilerActivity.CUDA])
+                code_to_profile_2()
+            print(p.key_averages().table(
+                sort_by="self_cuda_time_total", row_limit=-1))
+        """
+        if not self.profiler:
+            return
+        self.profiler.toggle_collection_dynamic(enable, activities)
 
     def key_averages(
         self, group_by_input_shape: bool = False, group_by_stack_n: int = 0
@@ -477,6 +516,7 @@ class profile(_KinetoProfile):
             representation of AI/ML workloads and enable replay benchmarks, simulators, and emulators.
             When this argument is included the observer start() and stop() will be called for the
             same time window as PyTorch profiler. See the examples section below for a code sample.
+        acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -594,6 +634,7 @@ class profile(_KinetoProfile):
         with_modules: bool = False,
         experimental_config: Optional[_ExperimentalConfig] = None,
         execution_trace_observer: Optional[_ITraceObserver] = None,
+        acc_events: bool = False,
         # deprecated:
         use_cuda: Optional[bool] = None,
     ):
@@ -619,6 +660,7 @@ class profile(_KinetoProfile):
             with_modules=with_modules,
             experimental_config=experimental_config,
             execution_trace_observer=execution_trace_observer,
+            acc_events=acc_events,
         )
 
         if schedule:
@@ -771,7 +813,7 @@ class ExecutionTraceObserver(_ITraceObserver):
     incurring any overheads.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes the default states.
         """

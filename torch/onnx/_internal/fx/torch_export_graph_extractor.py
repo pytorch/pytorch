@@ -6,19 +6,20 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional, Sequence, TYPE_CHECKING, Union
+from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
 import torch._dynamo
 import torch.fx
-import torch.onnx
-from torch.onnx._internal import _beartype, exporter, io_adapter
+from torch.onnx._internal import _exporter_legacy, io_adapter
 from torch.onnx._internal.diagnostics import infra
 
+
 if TYPE_CHECKING:
+    import torch.onnx
     from torch.export.exported_program import ExportedProgram
 
 
-class TorchExport(exporter.FXGraphExtractor):
+class TorchExport(_exporter_legacy.FXGraphExtractor):
     """Generates a FX GraphModule using torch.export API
     Args:
         aten_graph: If True, exports a graph with ATen operators.
@@ -27,15 +28,15 @@ class TorchExport(exporter.FXGraphExtractor):
 
     def __init__(
         self,
-        aten_graph: Optional[bool] = None,
+        aten_graph: bool | None = None,
     ):
         super().__init__()
         self.aten_graph = aten_graph or True
 
     def generate_fx(
         self,
-        options: exporter.ResolvedExportOptions,
-        model: "ExportedProgram",  # type: ignore[override]
+        options: _exporter_legacy.ResolvedExportOptions,
+        model: ExportedProgram,  # type: ignore[override]
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
@@ -94,13 +95,14 @@ class TorchExport(exporter.FXGraphExtractor):
         model = model.run_decompositions(options.decomposition_table)
 
         # Export FX graph to ONNX ModelProto.
-        return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]
+        return self.pre_export_passes(  # type: ignore[return-value]
+            options, model, model.graph_module, updated_model_args
+        )
 
-    @_beartype.beartype
     def pre_export_passes(
         self,
-        options: exporter.ResolvedExportOptions,
-        original_model: Union[torch.nn.Module, Callable],
+        options: _exporter_legacy.ResolvedExportOptions,
+        original_model: torch.nn.Module | Callable,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):
