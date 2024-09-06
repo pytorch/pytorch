@@ -3,8 +3,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 // Utility functions for PyTorch to ONNX conversion.
 
@@ -73,5 +73,5 @@ class ScalarTypeHashFunction {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+

@@ -2,8 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 // EliminateUnusedItemsONNX pass is removing unused
 // initializers and inputs, this is needed because
@@ -12,6 +12,6 @@ void EliminateUnusedItemsONNX(
     Block* b,
     std::map<std::string, IValue>& paramDict);
 
-} // namespace jit
+} // namespace torch::jit
 
-} // namespace torch
+

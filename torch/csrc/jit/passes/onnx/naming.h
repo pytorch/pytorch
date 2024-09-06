@@ -2,9 +2,9 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace onnx {
+
+
+namespace torch::jit::onnx {
 
 namespace ONNXScopeName {
 
@@ -25,6 +25,6 @@ bool isCompatibleScope(const torch::jit::ScopePtr& scope);
 
 TORCH_API void AssignScopedNamesForNodeAndValue(std::shared_ptr<Graph>& graph);
 
-} // namespace onnx
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::onnx
+
+

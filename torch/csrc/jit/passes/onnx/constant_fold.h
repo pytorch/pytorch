@@ -5,8 +5,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <optional>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 const int ONNX_OPSET_9 = 9;
 const int ONNX_OPSET_10 = 10;
@@ -30,6 +30,6 @@ void ConstantFoldONNX(
     std::map<std::string, IValue>& paramDict,
     int opset_version);
 
-} // namespace jit
+} // namespace torch::jit
 
-} // namespace torch
+

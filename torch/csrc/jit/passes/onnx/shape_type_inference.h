@@ -6,8 +6,8 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 // Merges existing_type and inferred_type.
 // Returns {merged type, whether or not inferred_type was used}.
@@ -96,5 +96,5 @@ void UpdateReliable(
 void UpdateReliable(torch::jit::Node* n);
 void UpdateShapeConstantIfReliable(torch::jit::Value* output);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
