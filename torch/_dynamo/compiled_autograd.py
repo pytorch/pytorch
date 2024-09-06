@@ -444,9 +444,7 @@ class AutogradCompilerInstance:
         # can it be torch.SymInt as the code used to imply?
         assert isinstance(t, torch.Tensor)
         proxy_tensor = fetch_object_proxy(self.fx_tracer, t)
-        assert isinstance(
-            proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor
-        ), f"Expected ProxyTensor, got {type(proxy_tensor)}"
+        assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
         return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(self, tensors, proxies):
