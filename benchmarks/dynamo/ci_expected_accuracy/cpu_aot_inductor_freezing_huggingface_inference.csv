@@ -10,10 +10,6 @@ AlbertForQuestionAnswering,pass,0
 
 
 
-AllenaiLongformerBase,pass,4
-
-
-
 BartForCausalLM,pass,0
 
 
@@ -82,7 +78,7 @@ ElectraForQuestionAnswering,pass,0
 
 
 
-GPT2ForSequenceClassification,pass,2
+GPT2ForSequenceClassification,pass,0
 
 
 
@@ -94,7 +90,7 @@ LayoutLMForMaskedLM,pass,0
 
 
 
-LayoutLMForSequenceClassification,pass,2
+LayoutLMForSequenceClassification,pass,0
 
 
 
@@ -127,10 +123,6 @@ MobileBertForMaskedLM,pass,0
 
 
 MobileBertForQuestionAnswering,pass,0
-
-
-
-OPTForCausalLM,pass,0
 
 
 
