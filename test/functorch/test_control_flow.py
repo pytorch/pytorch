@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1405,6 +1406,7 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual([r.device.type for r in result2], [device.type] * len(result2))
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
