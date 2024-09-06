@@ -12,11 +12,13 @@ on:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
     paths:
       - '.ci/docker/manywheel/*'
+      - '.ci/docker/manywheel/build_scripts/*'
       - '.ci/docker/common/*'
       - .github/workflows/build-manywheel-images.yml
   pull_request:
     paths:
       - '.ci/docker/manywheel/*'
+      - '.ci/docker/manywheel/build_scripts/*'
       - '.ci/docker/common/*'
       - .github/workflows/build-manywheel-images.yml
 
@@ -108,7 +110,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinux2_28-builder:cuda${{matrix.cuda_version}}
   build-docker-cuda-aarch64:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.arm64.2xlarge
+    runs-on: linux.arm64.2xlarge.ephemeral
     strategy:
       matrix:
         cuda_version: ["12.4"]
@@ -236,7 +238,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinux2_28-builder:cpu
   build-docker-cpu-aarch64:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.arm64.2xlarge
+    runs-on: linux.arm64.2xlarge.ephemeral
     env:
       GPU_ARCH_TYPE: cpu-aarch64
     steps:
@@ -267,7 +269,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinuxaarch64-builder:cpu-aarch64
   build-docker-cpu-aarch64-2_28:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.arm64.2xlarge
+    runs-on: linux.arm64.2xlarge.ephemeral
     env:
       GPU_ARCH_TYPE: cpu-aarch64-2_28
     steps:
