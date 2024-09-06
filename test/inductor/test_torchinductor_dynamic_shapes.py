@@ -7,7 +7,7 @@ import os
 import sys
 import unittest
 from functools import partial
-from typing import List
+from typing import List, Tuple
 
 import torch
 import torch.library
@@ -557,6 +557,28 @@ class TestInductorDynamic(TestCase):
             r = torch.ops.test.foo(x)
             y = r.stride(0)
             return torch.empty(y, device=x.device)
+
+        f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_multi_output_unbacked_custom_op(self, device):
+        @torch.library.custom_op("test::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
+
+        @foo.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            u0 = ctx.new_dynamic_size()
+            return torch.empty(u0, device=x.device), torch.empty(3, device=x.device)
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            a, b = torch.ops.test.foo(x)
+            return a.sum() + b.sum()
 
         f(torch.tensor([3], device=device))
 
