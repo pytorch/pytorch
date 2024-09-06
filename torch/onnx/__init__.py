@@ -38,13 +38,15 @@ __all__ = [
     "unregister_custom_op_symbolic",
     "disable_log",
     "enable_log",
-    # Base error
-    "OnnxExporterError",
+    # Errors
+    "CheckerError",  # Backwards compatibility
     # Dynamo Exporter
     "DiagnosticOptions",
     "ExportOptions",
     "ONNXProgram",
     "ONNXRuntimeOptions",
+    "InvalidExportOptionsError",
+    "OnnxExporterError",
     "OnnxRegistry",
     "dynamo_export",
     "enable_fake_mode",
@@ -67,7 +69,7 @@ from ._internal.onnxruntime import (
     OrtExecutionProvider as _OrtExecutionProvider,
 )
 from ._type_utils import JitScalarType
-from .errors import OnnxExporterError
+from .errors import CheckerError  # Backwards compatibility
 from .utils import (
     _optimize_graph,
     _run_symbolic_function,
@@ -107,6 +109,8 @@ from ._internal._exporter_legacy import (  # usort: skip. needs to be last to av
     ExportOptions,
     ONNXProgram,
     ONNXRuntimeOptions,
+    InvalidExportOptionsError,
+    OnnxExporterError,
     OnnxRegistry,
     enable_fake_mode,
 )
@@ -116,19 +120,20 @@ if TYPE_CHECKING:
     import os
 
 # Set namespace for exposed private names
-DiagnosticOptions.__module__ = "torch.onnx"
-ExportOptions.__module__ = "torch.onnx"
 ExportTypes.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
+ExportOptions.__module__ = "torch.onnx"
 ONNXProgram.__module__ = "torch.onnx"
 ONNXRuntimeOptions.__module__ = "torch.onnx"
+InvalidExportOptionsError.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
-OnnxRegistry.__module__ = "torch.onnx"
-_OrtBackend.__module__ = "torch.onnx"
-_OrtBackendOptions.__module__ = "torch.onnx"
-_OrtExecutionProvider.__module__ = "torch.onnx"
 enable_fake_mode.__module__ = "torch.onnx"
+OnnxRegistry.__module__ = "torch.onnx"
+DiagnosticOptions.__module__ = "torch.onnx"
 is_onnxrt_backend_supported.__module__ = "torch.onnx"
+_OrtExecutionProvider.__module__ = "torch.onnx"
+_OrtBackendOptions.__module__ = "torch.onnx"
+_OrtBackend.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION

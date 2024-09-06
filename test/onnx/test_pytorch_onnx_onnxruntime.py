@@ -13582,7 +13582,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         ):
             if self.opset_version < 20:
                 with self.assertRaises(
-                    torch.onnx.OnnxExporterError,
+                    torch.onnx.errors.OnnxExporterError,
                 ):
                     self.run_test(
                         GridSampleModule(mode, padding_mode, align_corners),
