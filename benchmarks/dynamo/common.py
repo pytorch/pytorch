@@ -4275,7 +4275,6 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.slow_models)
 
     if args.devices == ["cpu"]:
-        runner.skip_models.update(runner.very_slow_models)
         runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)

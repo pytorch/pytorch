@@ -353,6 +353,10 @@ class HuggingfaceRunner(BenchmarkRunner):
         return self._skip["all"]
 
     @property
+    def skip_models_for_cpu(self):
+        return self._skip["device"]["cpu"]
+
+    @property
     def fp32_only_models(self):
         return self._config["only_fp32"]
 

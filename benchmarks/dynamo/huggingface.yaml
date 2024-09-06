@@ -10,6 +10,9 @@ skip:
     - GPTJForCausalLM
     - GPTJForQuestionAnswering
 
+  device:
+    cpu: []
+
   control_flow:
     - AllenaiLongformerBase
 
