@@ -413,6 +413,8 @@ class DDP_TP_Test(InductorTestCase):
         data = torch.randn([1, DIM])
         with compiled_autograd.enable(compiler_fn()):
             loss = compiled_replicate_model(data).sum()
+            # TODO: We need "pre-dispatch tracing of backward graph" to make this work:
+            # https://github.com/pytorch/pytorch/issues/127797#issuecomment-2291695474
             with self.assertRaisesRegex(
                 AssertionError,
                 "Expected ProxyTensor, got <class 'torch.distributed._tensor.api.DTensor'>",
