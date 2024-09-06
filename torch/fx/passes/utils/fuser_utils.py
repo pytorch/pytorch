@@ -7,6 +7,7 @@ import torch.fx
 from torch.fx.graph_module import GraphModule
 from torch.fx.graph import Graph
 from torch.fx.node import Node
+from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
 from torch.fx.passes.utils import lift_subgraph_as_module
 from torch.fx._compatibility import compatibility
