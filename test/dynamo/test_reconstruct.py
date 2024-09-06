@@ -2,6 +2,7 @@
 
 import contextlib
 import dis
+import unittest
 from typing import List
 
 import torch
@@ -43,10 +44,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         t = torch.randn(3, 4)
         d = {1: t}
+        d_opt = d.copy()
         f(d, t)
 
         with self.register_bytecode_hook(hook):
-            d_opt = d.copy()
             opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
@@ -65,6 +66,32 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         def f(d, t):
             d.pop(2)
             d[40] = t + 1
+
+        t = torch.randn(3, 4)
+        d = {1: t, 2: t + 1}
+        d_opt = d.copy()
+
+        f(d, t)
+
+        with self.register_bytecode_hook(hook):
+            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+            opt_f(d_opt, t)
+            self.assertEqual(d, d_opt)
+
+    @unittest.expectedFailure
+    def test_ConstDict_popitem_reconstruct(self):
+        """
+        If something is pop'ed from the dict, we reconstruct everything
+        """
+
+        def hook(instructions: List[dis.Instruction]):
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
+            self.assertEqual(len(build_map), 1)
+            # reconstruct everything
+            self.assertEqual(build_map[0].argval, 1)
+
+        def f(d, t):
+            d.popitem()
 
         t = torch.randn(3, 4)
         d = {1: t, 2: t + 1}
@@ -117,7 +144,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def f(d, t):
             d[456] = d.get(456) + t
-            # d[40] = d.get(1) + 1
 
         t = torch.randn(3, 4)
         d = {123: t, 456: t + 1}

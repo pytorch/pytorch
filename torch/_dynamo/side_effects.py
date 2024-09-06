@@ -579,14 +579,11 @@ class SideEffects:
                 #   + only if a key was removed from the input dict
                 # (4) update the original dictionary with the dict created in (2)
 
-                # if not var.has_side_effect_mutation():
-                #     continue
-
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.load_method("update")
                 cg(var, allow_cache=False)
 
-                if var.pop_items:
+                if var.was_any_key_deleted:
                     cg(var.mutable_local.source)  # type: ignore[attr-defined]
                     cg.load_method("clear")
 
@@ -597,7 +594,7 @@ class SideEffects:
                     ]
                 )
 
-                if var.pop_items:
+                if var.was_any_key_deleted:
                     suffixes.append(
                         [
                             *create_call_method(0),  # clear
