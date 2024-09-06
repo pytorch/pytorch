@@ -11332,6 +11332,7 @@ class TestTracer(JitTestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
 
+
 class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
     def test_autograd_function_with_matmul_folding_at_output(self):
         """
