@@ -24,7 +24,6 @@ from onnxscript.ir import convenience as ir_convenience
 import torch
 import torch.fx
 from torch.export import graph_signature
-from torch.onnx import errors
 from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import (
     _analysis,
@@ -38,6 +37,7 @@ from torch.onnx._internal.exporter import (
     _reporting,
     _tensors,
     _verification,
+    errors,
 )
 
 
@@ -547,7 +547,7 @@ def _add_nodes(
                     # No lowering
                     _handle_call_function_node(model.graph, node, node_name_to_values)
         except Exception as e:
-            raise errors.ConversionError(
+            raise errors.OnnxConversionError(
                 f"Error when translating node {node.format_node()}. See the stack trace for more information."
             ) from e
     return node_name_to_values
@@ -958,7 +958,7 @@ def export(
 
     Raises:
         TorchExportError: If the export process fails with torch.export.
-        ConversionError: If the ExportedProgram to ONNX translation fails.
+        OnnxConversionError: If the ExportedProgram to ONNX translation fails.
     """
     # Set up the error reporting facilities
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
@@ -1099,7 +1099,7 @@ def export(
         else:
             report_path = None
 
-        raise errors.ConversionError(
+        raise errors.OnnxConversionError(
             _STEP_TWO_ERROR_MESSAGE
             + (f"\nError report has been saved to '{report_path}'." if report else "")
             + _summarize_exception_stack(e)
@@ -1163,7 +1163,7 @@ def export(
         else:
             report_path = None
 
-        raise errors.ConversionError(
+        raise errors.OnnxConversionError(
             _STEP_TWO_ERROR_MESSAGE
             + (f"\nError report has been saved to '{report_path}'." if report else "")
             + _summarize_exception_stack(e)
