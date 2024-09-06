@@ -606,6 +606,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_set_grad_enabled":
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "auto_functionalized":
+            return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1738,6 +1740,26 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        p_args = tuple(arg.as_proxy() for arg in args)
+        p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=None,
+        )
+
+
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     """
     Handles torch._dynamo._trace_wrapped_higher_order_op.inner_trace
@@ -1996,6 +2018,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
+            enable_grad=False,
             set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
