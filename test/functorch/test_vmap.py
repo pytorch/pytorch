@@ -2257,7 +2257,9 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
     def test_index_select(self):
-        def op(x, y): return torch.Tensor.index_select(x, 0, y)
+        def op(x, y):
+            return torch.Tensor.index_select(x, 0, y)
+
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
 
         test(op, (torch.arange(12), torch.zeros(12, dtype=torch.long)), in_dims=(0, 0))
@@ -2273,11 +2275,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
         )
         test(op, (torch.arange(12), torch.arange(3)), in_dims=(None, 0))
 
-        def op(x, y): return torch.Tensor.index_select(x, 1, y)
+        def op(x, y):
+            return torch.Tensor.index_select(x, 1, y)
+
         test(op, (torch.arange(12).view(1, 12), torch.arange(3)), in_dims=(None, 0))
 
         x = torch.arange(12).view(3, 4)
-        def op(y): return torch.Tensor.index_select(x, 0, y)
+
+        def op(y):
+            return torch.Tensor.index_select(x, 0, y)
+
         test(op, (torch.arange(3),))
 
     def test_fill_and_zero_inplace(self):
@@ -3946,6 +3953,44 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 (query, key, value),
                 in_dims=(2, 1, None),
             )
+
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    @parametrize("randomness", ["error", "same", "different"])
+    def test_randomness(self, device, randomness, backend):
+        if device == "cpu":
+            raise unittest.SkipTest("This test is only for CUDA for now")
+        backend_ctx = sdpa_kernel([backend])
+        with backend_ctx:
+            B = 4
+            query = torch.rand(B, 4, 32, 8, 128, dtype=torch.float16, device=device)
+            key = torch.rand(B, 4, 32, 8, 128, dtype=torch.float16, device=device)
+            value = torch.rand(B, 4, 32, 8, 128, dtype=torch.float16, device=device)
+
+            def f(q, k, v, dropout):
+                return F.scaled_dot_product_attention(q, k, v, dropout_p=dropout)
+
+            # No matter the randomness mode, dropout=0.0 should pass
+            vmap(
+                functools.partial(f, dropout=0.0),
+                in_dims=(0, 0, 0),
+                randomness=randomness,
+            )(query, key, value)
+
+            fail_with_randomness = randomness == "error"
+            if backend != SDPBackend.MATH:
+                fail_with_randomness |= randomness == "same"
+            context = (
+                self.assertRaises(RuntimeError)
+                # We currently don't support randomness == "same", and "error" should always error with randomness
+                if fail_with_randomness
+                else contextlib.nullcontext()
+            )
+            with context:
+                vmap(
+                    functools.partial(f, dropout=0.5),
+                    in_dims=(0, 0, 0),
+                    randomness=randomness,
+                )(query, key, value)
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):

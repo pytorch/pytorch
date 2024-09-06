@@ -43,7 +43,9 @@ IF(NOT MKLDNN_FOUND)
       endif()
     endif()
     if(LINUX)
-      set(ABI_NEUTRAL_FLAGS -fpreview-breaking-changes)
+      set(DNNL_CXX_FLAGS "-DCMAKE_CXX_FLAGS=-fpreview-breaking-changes")
+    else()
+      set(DNNL_CXX_FLAGS "")
     endif()
     ExternalProject_Add(xpu_mkldnn_proj
       SOURCE_DIR ${MKLDNN_ROOT}
@@ -51,7 +53,7 @@ IF(NOT MKLDNN_FOUND)
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
       -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
-      -DCMAKE_CXX_FLAGS=${ABI_NEUTRAL_FLAGS}
+      ${DNNL_CXX_FLAGS}
       -DDNNL_GPU_RUNTIME=SYCL
       -DDNNL_CPU_RUNTIME=THREADPOOL
       -DDNNL_BUILD_TESTS=OFF
