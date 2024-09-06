@@ -14,6 +14,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
+    Any,
     Callable,
     cast,
     Dict,
@@ -893,28 +894,14 @@ class FakeTensor(Tensor):
             )
         return self.nested_int_memo * coeff
 
-    # We must handle tolist in a special way for FakeTensors here in the case
-    # where tolist is called from torch dispatch for tensor subclasses.
-    # Ordinarily, if a program calls .tolist compiling still works because there is
-    # special handling in dynamo, but for tensor subclasses if .tolist is called
-    # inside torch dispatch, the .tolist call may be directly on a FakeTensor.
-    # This would result in an error since wrapper subclasses don't have storage.
-    # To avoid this, we handle the FakeTensor case by (1) specializing on the size
-    # of the tensor to create the output Python list, and (2) creating unbacked
-    # symints for each element of the list.
-    def tolist(self) -> List[SymInt]:
-        assert self.dim() == 1, "NYI for higher dims"
-        shape_env = self.fake_mode.shape_env
-        assert shape_env is not None
-        out = []
-        # Specialize on the length of the list
-        for _ in range(self.shape[0]):
-            s = shape_env.create_unbacked_symint()
-            # max value?
-            torch._check_is_size(s)
-            torch._check(s >= 2)
-            out.append(s)
-        return out
+    # Similar to FunctionalTensor.tolist
+    def tolist(self) -> Any:
+        if self.dim() == 0:
+            return self.item()
+        elif self.dim() == 1:
+            return [elem.item() for elem in self]
+        else:
+            return [elem.tolist() for elem in self]
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
