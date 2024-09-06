@@ -11,6 +11,7 @@ namespace c10d {
 
 // CUDA kernel to check if data has NAN, device side assert
 // is raised if NAN is found
+/*
 template <typename T>
 __global__ void checkForNaN(T* data, size_t size) {
   size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -19,6 +20,28 @@ __global__ void checkForNaN(T* data, size_t size) {
   for (size_t i = tid; i < size; i += stride) {
     CUDA_KERNEL_ASSERT(!isnan(data[i]));
   }
+}
+*/
+
+union BytePack16 {
+  ulong2 data;
+  double f64[2];
+};
+
+typedef union BytePack16 BytePack;
+
+template <typename T>
+__global__ void checkForNaN(T* data, size_t size) {
+  BytePack* ptr = (BytePack*)data;
+  size_t sizeInBP = size *  sizeof(T) / sizeof(BytePack);
+  size_t loopSize = blockDim.x * gridDim.x;
+  size_t gridOffset = blockIdx.x * blockDim.x + threadIdx.x;
+  bool hasNan = false;
+  for (size_t i = gridOffset; i < sizeInBP; i += loopSize) {
+    BytePack tmp = ptr[i];
+    hasNan |= isnan(tmp.f64[0]) || isnan(tmp.f64[1]);
+  }
+  CUDA_KERNEL_ASSERT(!hasNan);
 }
 
 // CHECK if a Tensor contains NAN in any of its element
