@@ -72,10 +72,7 @@ def signature_to_meta(
 ) -> Dict[int, str]:
     if indices is None:
         indices = list(range(len(signature)))
-    return {
-        i: signature_of(arg, size_dtype=size_dtype)
-        for i, arg in zip(indices, signature)
-    }
+    return {arg.name: signature_of(arg, size_dtype=size_dtype) for arg in signature}
 
 
 def is_unaligned_buffer(arg: TensorArg):
