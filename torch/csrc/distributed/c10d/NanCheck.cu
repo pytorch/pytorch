@@ -31,23 +31,34 @@ union BytePack16 {
 typedef union BytePack16 BytePack;
 #define UNROLL 8
 
+__device__ __forceinline__ void checkChunk(BytePack* ptr) {
+  BytePack tmp[UNROLL];
+  int nWorkers = blockDim.x * gridDim.x;
+  #pragma unroll 8
+  for (int j = 0; j < UNROLL; j++) {
+    tmp[j] = ptr[nWorkers * j];
+  }
+  #pragma unroll 8
+  for (int j = 0; j < UNROLL; j++) {
+    if (isnan(tmp[j].f64[0]) || isnan(tmp[j].f64[1])) __trap();
+  }
+}
+
 template <typename T>
 __global__ void checkForNaN(T* data, size_t size) {
   BytePack* ptr = (BytePack*)data;
   size_t sizeInBP = size *  sizeof(T) / sizeof(BytePack);
   size_t loopSize = blockDim.x * gridDim.x * UNROLL;
-  size_t gridOffset = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
 
-  for (size_t i = gridOffset; i < sizeInBP; i += loopSize) {
-    BytePack tmp[UNROLL];
-    #pragma unroll 8
-    for (int j = 0; j < UNROLL; j++) {
-      tmp[j] = ptr[i + blockDim.x * gridDim.x * j];
-    }
-    #pragma unroll 8
-    for (int j = 0; j < UNROLL; j++) {
-      if (isnan(tmp[j].f64[0]) || isnan(tmp[j].f64[1])) __trap();
-    }
+  // Fast path
+  for (; offset + loopSize <= sizeInBP; offset += loopSize) {
+    checkChunk(ptr + offset);
+  }
+  // Slow path
+  for (; offset < sizeInBP; offset += blockDim.x * gridDim.x) {
+    BytePack tmp = ptr[offset];
+    if (isnan(tmp.f64[0]) || isnan(tmp.f64[1])) __trap();
   }
 }
 
