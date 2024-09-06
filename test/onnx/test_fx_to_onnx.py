@@ -736,7 +736,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx_program.save(
                 tmp_onnx_file.name,
                 include_initializers=include_initializer,
-                model_state=state_dict if include_initializer else None,
             )
             onnx_model = onnx.load(tmp_onnx_file.name)
             self.assertEqual(
