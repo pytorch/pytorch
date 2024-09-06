@@ -34,7 +34,7 @@ ValidAttributeType = Union[
 ]
 
 AllowedArgType = Union[
-    ir.Value, Sequence[ir.Value | ValidAttributeType], ValidAttributeType
+    ir.Value, Sequence[Union[ir.Value, ValidAttributeType]], ValidAttributeType
 ]
 
 
