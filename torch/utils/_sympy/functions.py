@@ -95,6 +95,46 @@ def fuzzy_eq(x, y):
     return x == y
 
 
+def simple_floordiv_gcd(p, q):
+    """
+    Fast path for sympy.gcd, using a simple factoring strategy.
+
+    We try to rewrite p and q in the form n*e*p1 + n*e*p2 and n*e*q0,
+    where n is the greatest common integer factor and e is the largest
+    syntactic common factor (i.e., common sub-expression) in p and q.
+    Then the gcd returned is n*e, cancelling which we would be left with
+    p1 + p2 and q0.
+
+    Note that further factoring of p1 + p2 and q0 might be possible with
+    sympy.factor (which uses domain-specific theories). E.g., we are unable
+    to find that x*y + x + y + 1 is divisible by x + 1. More generally,
+    when q is of the form q1 + q2 (instead of being already factored) it
+    might be necessary to fall back on sympy.gcd.
+    """
+
+    def integer_coefficient(x):
+        integer_coefficients = [
+            abs(int(arg))
+            for arg in sympy.Mul.make_args(x)
+            if isinstance(arg, (int, sympy.Integer))
+        ]
+        return math.prod(integer_coefficients)
+
+    def integer_factor(expr):
+        integer_factors = map(integer_coefficient, sympy.Add.make_args(expr))
+        return functools.reduce(math.gcd, integer_factors)
+
+    gcd = math.gcd(integer_factor(p), integer_factor(q))
+    p, q = p / gcd, q / gcd
+
+    base_splits = list(map(sympy.Mul.make_args, sympy.Add.make_args(p)))
+    divisor_split = sympy.Mul.make_args(q)
+    for x in divisor_split:
+        if all(x in base_split for base_split in base_splits):
+            gcd = gcd * x
+    return gcd
+
+
 # It would be nice to have assertions on whether or not inputs is_integer
 # However, with bugs like https://github.com/sympy/sympy/issues/26620 sympy
 # sometimes inconsistently reports floats an integers.
@@ -202,7 +242,9 @@ class FloorDiv(sympy.Function):
                 return FloorDiv(base - term, divisor) + quotient
 
         try:
-            gcd = sympy.gcd(base, divisor)
+            gcd = simple_floordiv_gcd(base, divisor)
+            if equal_valued(gcd, 1) and isinstance(divisor, sympy.Add):
+                gcd = sympy.gcd(base, divisor)
             if not equal_valued(gcd, 1):
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
