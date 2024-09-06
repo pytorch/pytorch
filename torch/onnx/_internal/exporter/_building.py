@@ -20,7 +20,7 @@ from onnxscript import evaluator, ir
 from onnxscript.ir import convenience as ir_convenience
 
 import torch
-from torch.onnx import errors
+from torch.onnx._internal.exporter import _errors
 from torch.onnx._internal.exporter import _schemas, _tensors
 
 
@@ -373,7 +373,7 @@ class OpRecorder(evaluator.Evaluator):
                 op_signature, named_inputs, type_binding, self.constant_farm, self.opset
             )
         except Exception as e:
-            raise errors.GraphConstructionError(
+            raise _errors.GraphConstructionError(
                 f"Error processing Python constants for operator '{op_signature.domain}::{op_signature.name}'. "
                 f"named_inputs={named_inputs}, named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
             ) from e
@@ -385,7 +385,7 @@ class OpRecorder(evaluator.Evaluator):
                 )
             )
         except Exception as e:
-            raise errors.GraphConstructionError(
+            raise _errors.GraphConstructionError(
                 f"Error constructing node for operator '{op_signature.domain}::{op_signature.name}'. "
                 f"named_inputs={named_inputs}, converted_named_inputs={converted_named_inputs}, "
                 f"named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
@@ -429,7 +429,7 @@ class OpRecorder(evaluator.Evaluator):
                 return outputs[0]
             return outputs
         except Exception as e:
-            raise errors.GraphConstructionError(
+            raise _errors.GraphConstructionError(
                 f"Error calling operator '{schema.name}' with args {args} and kwargs {kwargs}."
             ) from e
 
@@ -514,7 +514,7 @@ class OpRecorder(evaluator.Evaluator):
                 _, lineno = inspect.getsourcelines(function.function)
             except Exception:
                 source_file = lineno = None
-            raise errors.GraphConstructionError(
+            raise _errors.GraphConstructionError(
                 f"Error calling function '{function.name}' with args {args} and kwargs {kwargs}."
                 + f" The function is defined at '{source_file}:{lineno}'."
                 if source_file
