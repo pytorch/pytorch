@@ -596,6 +596,9 @@ test_single_dynamo_benchmark() {
 
 test_inductor_micro_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    test_inductor_set_cpu_affinity
+  fi
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
@@ -1479,7 +1482,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.8-gcc11-build ]]; then
+    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.9-gcc11-build ]]; then
       test_inductor_distributed
     fi
   fi

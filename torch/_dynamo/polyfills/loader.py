@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 
+# See also the TYPE_CHECKING block in torch/_dynamo/polyfills/__init__.py
 POLYFILLED_MODULE_NAMES: Tuple[str, ...] = (
     "builtins",
     "functools",

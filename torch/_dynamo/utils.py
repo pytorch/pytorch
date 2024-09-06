@@ -21,7 +21,6 @@ import operator
 import os
 import re
 import sys
-import textwrap
 import threading
 import time
 import types
@@ -30,6 +29,7 @@ import uuid
 import warnings
 import weakref
 from contextlib import contextmanager
+from dataclasses import is_dataclass
 from functools import lru_cache
 from types import MethodWrapperType
 from typing import (
@@ -1728,6 +1728,26 @@ def same(
 
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
+                # Fix a corner case that res and fp64_ref does not contains NaN and match (with loose tolerance)
+                # while the ref contains NaN. In this case, RMSE should not match any ways.
+                # But res is 'BETTER' than ref so we count it pass.
+                #
+                # This happens for Super_SloMo when loop ordering after fusion is enabled:
+                # https://gist.github.com/shunting314/11f235c70f7db0d52718d26f4a701cab
+                loose_tol = 1e-2 * 4
+                if (
+                    not fp64_ref.isnan().any()
+                    and not res.isnan().any()
+                    and ref.isnan().any()
+                    and torch.allclose(
+                        fp64_ref.to(dtype=res.dtype),
+                        res,
+                        atol=loose_tol,
+                        rtol=loose_tol,
+                        equal_nan=equal_nan,
+                    )
+                ):
+                    return True
                 ref_error = rmse(fp64_ref, ref).item()
                 # ref unable to produce this with stable numerics in this precision, ignore
                 if math.isnan(ref_error):
@@ -1890,104 +1910,6 @@ graph_break_reasons: List[torch._dynamo.output_graph.GraphCompileReason] = []
 seen_code_map = ExactWeakKeyDictionary()
 
 
-class CompileProfiler:
-    """Utility for profiling how and what dynamo would compile.
-
-    Can be used for
-     * diagnosing recompilation issues
-     * determining an appropriate compile cache limit
-     * (TODO)confirming which functions got compiled/skipped
-    """
-
-    def __init__(self):
-        self.frame_count = 0
-        self.op_count = 0
-        self.backend_ctx_ctor = disable_cache_limit
-
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        self.frame_count += 1
-        for node in gm.graph.nodes:
-            if "call" in node.op:
-                self.op_count += 1
-        return gm.forward
-
-    # no-op __enter__ and __exit__ to preserve BC
-    def __enter__(self):
-        return self
-
-    def __exit__(self, typ, val, traceback):
-        pass
-
-    def get_metrics(self):
-        return {"guard_failures": guard_failures}
-
-    def report(self):
-        metrics = self.get_metrics()
-        gf = metrics["guard_failures"]
-
-        def num_recompiles(code):
-            return len(gf[code])
-
-        def recompile_reasons(code):
-            return "\n".join([str(x) for x in gf[code]])
-
-        summarized_gf = [
-            [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
-            for code in gf
-        ]
-
-        def graph_break_report():
-            if "graph_break" in counters:
-                graph_breaks = counters["graph_break"]
-                return tabulate(
-                    [[msg, graph_breaks[msg]] for msg in graph_breaks],
-                    headers=["Graph Break Reason", "Count"],
-                )
-
-        def recompilation_report():
-            if len(gf):
-                max_recompiles = max(num_recompiles(code) for code in gf)
-                recomp_table = tabulate(
-                    summarized_gf,
-                    headers=["Function", "Recompiles", "Recompile Reasons"],
-                )
-                return recomp_table + textwrap.dedent(
-                    f"""
-
-                    Set torch._dynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.
-                """
-                )
-
-        report = textwrap.dedent(
-            """
-            Torchdynamo Profiler Report
-            ===========================
-
-            Graph Breaks
-            ------------
-            Graph breaks happen when torchdynamo encounters code it can't safely trace.
-            If you want to find out why breaks are happening, check below for each break reason
-            You may gain additional insight by passing `fullgraph=True` to torch.compile,
-            to stop at the first break.
-
-        """
-        )
-        report += graph_break_report() or "No graph breaks detected."
-        report += textwrap.dedent(
-            """
-
-            Recompilation
-            -------------
-            These subgraphs were recompiled more than once due to guard failures
-            Guard failures indicate some condition assumed to be static by the tracer changed,
-            making it unsafe to reuse the compiled program.
-
-        """
-        )
-        report += recompilation_report() or "No recompilation detected.\n"
-        return report
-
-
 # return same dir unless user changes config between calls
 @functools.lru_cache(None)
 def _get_debug_dir(root_dir):
@@ -2143,10 +2065,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         ):
             raise UserError(  # noqa: B904
                 UserErrorType.CONSTRAINT_VIOLATION,
-                "Tried to use data-dependent value in the subsequent computation. "
-                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
-                "You will need to explicitly give hint to the compiler. Please take a look at "
-                f"torch._check OR torch._check_is_size APIs.  {cause}",
+                str(cause),
                 case_name="constrain_as_size_example",
             )
         elif isinstance(cause, ValueRangeError):
@@ -2313,9 +2232,13 @@ def import_submodule(mod: types.ModuleType):
 
 
 def object_has_getattribute(value: Any):
+    return class_has_getattribute(type(value))
+
+
+def class_has_getattribute(cls: type):
     try:
         if isinstance(
-            inspect.getattr_static(type(value), "__getattribute__"),
+            inspect.getattr_static(cls, "__getattribute__"),
             types.FunctionType,
         ):
             return True
@@ -2958,6 +2881,16 @@ def to_fake_tensor(t, fake_mode):
 
     return fake_mode.from_tensor(
         t, static_shapes=False, symbolic_context=symbolic_context, source=source
+    )
+
+
+# NB: this works for both classes and instances
+def is_frozen_dataclass(value):
+    return (
+        not object_has_getattribute(value)
+        and not class_has_getattribute(value)
+        and is_dataclass(value)
+        and value.__dataclass_params__.frozen
     )
 
 
