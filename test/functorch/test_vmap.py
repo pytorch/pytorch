@@ -3492,17 +3492,23 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
     def test_vmap_getitem(self):
         # vanilla
-        def op(x): return torch.arange(4)[x]
+        def op(x):
+            return torch.arange(4)[x]
+
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
         test(op, (torch.arange(3),))
 
         # indexed tensor has more than one dim
-        def op(x): return torch.arange(16).view(4, 4)[x]
+        def op(x):
+            return torch.arange(16).view(4, 4)[x]
+
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
         test(op, (torch.arange(3),))
 
         # second dim
-        def op(x): return torch.arange(16).view(4, 4)[:, x]
+        def op(x):
+            return torch.arange(16).view(4, 4)[:, x]
+
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
         test(op, (torch.arange(3),))
 
