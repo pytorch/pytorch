@@ -11,7 +11,7 @@ import re
 import time
 import typing
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]]]:
@@ -61,10 +61,13 @@ def _determine_prefix(files: List[str]) -> str:
         )
 
 
-def read_dir(prefix: Optional[str], folder: str) -> Dict[str, Dict[str, Any]]:
+def read_dir(
+    prefix: Optional[str], folder: str
+) -> Tuple[Dict[str, Dict[str, Any]], str]:
     gc.disable()
     details = {}
     t0 = time.time()
+    version = ""
     for root, _, files in os.walk(folder):
         if prefix is None:
             prefix = _determine_prefix(files)
@@ -72,6 +75,8 @@ def read_dir(prefix: Optional[str], folder: str) -> Dict[str, Dict[str, Any]]:
             if f.find(prefix) != 0:
                 continue
             details[f] = read_dump(prefix, os.path.join(root, f))
+            if not version:
+                version = str(details[f]["version"])
     tb = time.time()
     print(f"loaded {len(files)} files in {tb - t0}s")
-    return details
+    return details, version
