@@ -531,7 +531,7 @@ class CppPackedGemmTemplate(CppTemplate):
             new_inputs = list(inputs)
             X = inputs[0]
             W = inputs[1]
-            B = inputs[2] if len(inputs) > 2 else None
+            B = inputs[2] if has_bias else None
             if isinstance(W, ir.IRNode):
                 if trans_w:
                     if not isinstance(W, ir.TensorBox):
