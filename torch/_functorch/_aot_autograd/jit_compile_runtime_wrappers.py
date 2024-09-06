@@ -334,7 +334,6 @@ def aot_dispatch_autograd(
     fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
-    remove_fsdp2_unsharded_param_graph_input_usage(fx_g.graph)
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -384,6 +383,8 @@ def aot_dispatch_autograd(
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
+            remove_fsdp2_unsharded_param_graph_input_usage(fw_module.graph)
+            remove_fsdp2_unsharded_param_graph_input_usage(bw_module.graph)
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if config.unlift_effect_tokens and (
