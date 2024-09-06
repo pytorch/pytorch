@@ -1376,9 +1376,8 @@ class InstructionTranslatorBase(
 
         # 2) when user raises exception instance
         if isinstance(val, variables.ExceptionVariable):
-            if val.exc_type is StopIteration:
-                # StopIteration is used to find the end of iteration while tracing __next__
-                raise exc.ObservedUserStopIteration(f"raised exception {val}")
+            if observed_exception_type := exc.observed_exception_map.get(val.exc_type):
+                raise observed_exception_type(f"raised exception {val}")
             raise exc.ObservedException(f"raised exception {val}")
         unimplemented(f"raise {exc}")
 

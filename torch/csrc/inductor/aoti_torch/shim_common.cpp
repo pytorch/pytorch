@@ -10,8 +10,10 @@
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -43,6 +45,14 @@
 #include <ATen/ops/wrapped_linear_prepack.h>
 #include <ATen/ops/wrapped_quantized_linear_prepacked.h>
 
+#endif
+
+#if __has_include("filesystem")
+#include <filesystem>
+namespace fs = std::filesystem;
+#else
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
 #endif
 
 using namespace torch::aot_inductor;
@@ -986,12 +996,44 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
   });
 }
 
+AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
+    AtenTensorHandle self,
+    const char* tensor_name,
+    const char* launch_prefix,
+    const char* kernel_name) {
+  at::Tensor* t = tensor_handle_to_tensor_pointer(self);
+#ifndef C10_MOBILE
+  // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
+  std::string cwd = fs::current_path().string();
+  std::string tmp_folder = cwd + "/tmp/aoti_torch/";
+  if (!fs::exists(tmp_folder)) {
+    std::cout
+        << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
+        << tmp_folder << std::endl;
+
+    if (!fs::create_directories(tmp_folder)) {
+      std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
+                << tmp_folder << std::endl;
+      return;
+    }
+  }
+  std::string tensor_filepath_to_save = tmp_folder + launch_prefix + "_" +
+      kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
+
+  auto bytes = torch::jit::pickle_save(c10::IValue(*t));
+  std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
+  fout.write(bytes.data(), bytes.size());
+  fout.close();
+
+  std::cout << "aoti_torch_save_tensor_handle: Saved tensor to: "
+            << tensor_filepath_to_save << std::endl;
+#endif // !defined(C10_MOBILE)
+}
+
 AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     AtenTensorHandle self,
     const char* msg) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
-
-  auto device = t->device();
 
   // Display message
   std::cout << "[";
@@ -1009,15 +1051,31 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
 
   // Print summary stats of the tensor
   std::cout << "Number of elements: " << numel << std::endl;
+  std::cout << "Dtype: " << t->dtype() << std::endl;
   if (numel > 0) {
-    std::cout << "Mean value: " << t->mean().item() << std::endl;
-    std::cout << "Min value: " << t->min().item<float>() << std::endl;
-    std::cout << "Max value: " << t->max().item<float>() << std::endl;
+    // torch/aten `mean()` function only supports float and complex dtypes
+    // See:
+    // https://github.com/pytorch/pytorch/blob/a0e062c6f1a03ec93e87413e42c4d0b336518131/aten/src/ATen/native/ReduceOps.cpp#L304-L309
+    auto mean_value = [t](at::ScalarType dtype) {
+      return t->to(dtype).mean().item();
+    };
+    bool is_complex_type =
+        at::isComplexType(at::typeMetaToScalarType(t->dtype()));
+    at::ScalarType float_dtype =
+        is_complex_type ? at::kComplexFloat : at::kFloat;
+    std::cout << "Mean value: " << mean_value(float_dtype) << std::endl;
+    if (!is_complex_type) {
+      // "min_all_cuda" function is not implemented for 'ComplexFloat' type.
+      // (similar for max) Skip printing min/max value for complex type tensors
+      // here If encountered complex dtypes (rare occasions), suggest to print
+      // out the whole value of the tensor.
+      std::cout << "Min value: " << t->min().item<float>() << std::endl;
+      std::cout << "Max value: " << t->max().item<float>() << std::endl;
+    }
   }
-  std::cout << "Device: " << device << std::endl;
+  std::cout << "Device: " << t->device() << std::endl;
   std::cout << "Size: " << t->sizes() << std::endl;
   std::cout << "Stride: " << t->strides() << std::endl;
-  std::cout << "Dtype: " << t->dtype() << std::endl;
   std::cout << "Layout: " << t->layout() << std::endl;
   std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
   std::cout << "Requires grad: " << t->requires_grad() << std::endl;
