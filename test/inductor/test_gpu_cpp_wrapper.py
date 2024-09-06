@@ -5,13 +5,13 @@ from typing import NamedTuple
 
 import torch
 from torch._inductor import config
-from torch._inductor.utils import is_gpu
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import is_gpu
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 try:
@@ -87,7 +87,6 @@ test_failures_gpu_wrapper = {
     "test_unspec_inputs_xpu": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
     ),
-
 }
 
 
@@ -221,7 +220,7 @@ if RUN_GPU:
         make_test_case(item.name, item.device, item.tests)
 
     if GPU_TYPE != "xpu":
-        #TODO enable the following cases on XPU
+        # TODO: enable the following cases on XPU
         for item in [
             BaseTest(
                 "test_foreach_cpp_wrapper",
