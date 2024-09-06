@@ -507,8 +507,8 @@ def forward_block_mn(
     if IS_DIVISIBLE:
         v = tl.load(V_block_ptr)
     else:
-        v = tl.load(V_block_ptr, boundary_check=(0,), padding_option = "zero", input_precision=FLOAT32_PRECISION)
-    acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+        v = tl.load(V_block_ptr, boundary_check=(0,), padding_option = "zero")
+    acc = tl.dot(p.to(MATMUL_PRECISION), v, acc, input_precision=FLOAT32_PRECISION)
 
     # -- update m_i
     m_i = m_ij
