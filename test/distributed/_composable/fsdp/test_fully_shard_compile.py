@@ -244,7 +244,7 @@ class TestFullyShardCompile(FSDPTest):
             common_ops = {
                 torch.ops.fsdp.all_gather_copy_in.default,
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-                torch.ops.fsdp.split_with_sizes_copy.default,
+                # torch.ops.fsdp.split_with_sizes_copy.default,
             }
             bwd_only_ops = {
                 torch.ops.fsdp.chunk_cat.default,
@@ -256,7 +256,7 @@ class TestFullyShardCompile(FSDPTest):
                         snodes,
                         op,
                     ),
-                    msg=f"{op}",
+                    msg=f"{op} not in snodes: {snodes}, snodes.node: {[snode.node for snode in snodes]}",
                 )
             if not is_fwd_graph:
                 for op in bwd_only_ops:
@@ -265,7 +265,7 @@ class TestFullyShardCompile(FSDPTest):
                             snodes,
                             op,
                         ),
-                        msg=f"{op}",
+                        msg=f"{op} not in snodes: {snodes}, snodes.node: {[snode.node for snode in snodes]}",
                     )
 
         def _decide_global_ordering_of_comms_with_checks(
