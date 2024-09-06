@@ -435,8 +435,29 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
     return default_generator.get_offset()
 
 
-from .memory import *  # noqa: F403
-from .random import *  # noqa: F403
+# import here to avoid circular import
+from .memory import (
+    empty_cache,
+    max_memory_allocated,
+    max_memory_reserved,
+    memory_allocated,
+    memory_reserved,
+    memory_stats,
+    memory_stats_as_nested_dict,
+    reset_accumulated_memory_stats,
+    reset_peak_memory_stats,
+)
+from .random import (
+    get_rng_state,
+    get_rng_state_all,
+    initial_seed,
+    manual_seed,
+    manual_seed_all,
+    seed,
+    seed_all,
+    set_rng_state,
+    set_rng_state_all,
+)
 
 
 __all__ = [
