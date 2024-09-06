@@ -1626,6 +1626,11 @@ class CppVecOverrides(CppOverrides):
                 "signbit",
             )
             octype = "bool" if output_mask else cdtype
+            octype = (
+                DTYPE_TO_CPP[args[1]]
+                if (scalar_func.__name__ == "to_dtype_bitcast")
+                else octype
+            )
             with code.indent():
                 for argidx, arg in enumerate(args):
                     if isinstance(arg, CppCSEVariable):
@@ -1650,9 +1655,9 @@ class CppVecOverrides(CppOverrides):
                 else:
                     load_args = f"tmpbuf_out.data(), {size}"
                     if n_vec == 1:
-                        load_fn = f"at::vec::Vectorized<{cdtype}>::loadu"
+                        load_fn = f"at::vec::Vectorized<{octype}>::loadu"
                     else:
-                        load_fn = f" at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu"
+                        load_fn = f" at::vec::VectorizedN<{octype}, {n_vec}>::loadu"
                 code.writeline(f"return {load_fn}({load_args});")
             code.writeline("()")
             return code

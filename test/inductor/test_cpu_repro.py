@@ -1907,6 +1907,16 @@ class CPUReproTests(TestCase):
         res = cfn(x, bit_num)
         self.assertEqual(res_aten_eager, res)
 
+    def test_view_dtype(self):
+        def f(x):
+            return x.view(torch.int32) >> 2
+
+        input = torch.ones(16, 16)
+        res_aten_eager = f(input)
+        cfn = torch.compile(f)
+        res = cfn(input)
+        self.assertEqual(res_aten_eager, res)
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
