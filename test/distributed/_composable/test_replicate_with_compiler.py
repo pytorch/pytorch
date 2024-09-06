@@ -412,8 +412,7 @@ class DDP_TP_Test(InductorTestCase):
         compiled_replicate_model = torch.compile(compiled_replicate_model)
         data = torch.randn([1, DIM])
         with compiled_autograd.enable(compiler_fn()):
-            out = compiled_replicate_model(data)
-            loss = out.sum()
+            loss = compiled_replicate_model(data).sum()
             with self.assertRaisesRegex(
                 AssertionError,
                 "Expected ProxyTensor, got <class 'torch.distributed._tensor.api.DTensor'>",
