@@ -70,7 +70,7 @@ class TestRunnerDeterminatorIssueParser(TestCase):
         settings_text = """
         experiments:
             lf:
-                rollout_perc: 25
+                rollout_perc: 0
             otherExp:
                 rollout_perc: 0
         ---
@@ -109,9 +109,9 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         settings_text = """
         experiments:
             lf:
-                rollout_perc: 25
+                rollout_perc: 0
             otherExp:
-                rollout_perc: 25
+                rollout_perc: 0
         ---
 
         Users:
@@ -126,9 +126,9 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         settings_text = """
         experiments:
             lf:
-                rollout_perc: 25
+                rollout_perc: 0
             otherExp:
-                rollout_perc: 25
+                rollout_perc: 0
         ---
 
         Users:
@@ -137,10 +137,10 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
         prefix = rd.get_runner_prefix(settings_text, ["User2"])
-        self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for User1")
+        self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for User2")
 
-    @patch("random.randint", return_value=50)
-    def test_opted_out_user(self, mock_randint: Mock) -> None:
+    @patch("random.uniform", return_value=50)
+    def test_opted_out_user(self, mock_uniform: Mock) -> None:
         settings_text = """
         experiments:
             lf:
@@ -157,8 +157,8 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         prefix = rd.get_runner_prefix(settings_text, ["User3"])
         self.assertEqual("", prefix, "Runner prefix not correct for user")
 
-    @patch("random.randint", return_value=10)
-    def test_opted_out_user_was_pulled_in_by_rollout(self, mock_randint: Mock) -> None:
+    @patch("random.uniform", return_value=10)
+    def test_opted_out_user_was_pulled_in_by_rollout(self, mock_uniform: Mock) -> None:
         settings_text = """
         experiments:
             lf:

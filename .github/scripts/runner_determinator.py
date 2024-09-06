@@ -76,7 +76,7 @@ CANARY_FLEET_SUFFIX = ".c"
 
 
 class Experiment(NamedTuple):
-    rollout_perc: int = (
+    rollout_perc: float = (
         0  # Percentage of workflows to experiment on when user is not opted-in.
     )
 
@@ -360,10 +360,9 @@ def get_runner_prefix(
                 f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
             )
             enabled = True
-        else:
+        elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
-            r = random.randint(1, 100)
-            if r <= experiment_settings.rollout_perc:
+            if random.uniform(0,100) <= experiment_settings.rollout_perc:
                 log.info(
                     f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."
                 )
