@@ -5864,7 +5864,11 @@ class FallbackKernel(ExternKernelAlloc):
                 elif isinstance(keypath[0], CallMethodKey):
                     return go(f"{expr}.{keypath[0].name}()", keypath[1:])
                 elif isinstance(keypath[0], pytree.SequenceKey):
-                    return go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                    return (
+                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
+                        if V.graph.cpp_wrapper
+                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                    )
                 elif isinstance(keypath[0], DivideByKey):
                     # TODO: need to assert divisibility
                     # TODO: this is invalid C++ codegen
@@ -6520,7 +6524,7 @@ class Conditional(ExternKernel):
                     subgraph.graph.run(*fake_operands)
 
         true_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
-        false_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
+        false_outputs = false_fn.graph.graph_outputs  # type: ignore[union-attr]
 
         for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
             if _has_aliased_buffers(true_outputs):
