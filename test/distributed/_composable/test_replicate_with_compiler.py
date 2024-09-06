@@ -57,11 +57,9 @@ class Net(nn.Module):
         return self.fc4(self.fc3(self.fc2(_fc1)))
 
 
-def compiler_fn(no_inductor=False, used_in_compiled_autograd=False):
+def compiler_fn(no_inductor=False):
     def _compiler_fn(gm):
         def inner_compiler(gm_, example_inputs_):
-            if used_in_compiled_autograd:
-                counters["compiled_autograd"]["compiles"] += 1
             if no_inductor:
                 return gm_
             else:
@@ -427,7 +425,7 @@ class DDP_TP_Test(InductorTestCase):
         )
         compiled_replicate_model = torch.compile(compiled_replicate_model)
         data = torch.randn([1, DIM])
-        with compiled_autograd.enable(compiler_fn(used_in_compiled_autograd=True)):
+        with compiled_autograd.enable(compiler_fn()):
             out = compiled_replicate_model(data)
             loss = out.sum()
             with self.assertRaisesRegex(
