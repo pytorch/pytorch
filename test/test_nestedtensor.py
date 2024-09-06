@@ -7196,13 +7196,18 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         @torch.compile(fullgraph=True)
         def g(nt):
-            PADDING_VAL = 4.2
-            padded = nt.to_padded_tensor(PADDING_VAL)
-            padded = f(padded)
+            def _g(nt):
+                PADDING_VAL = 4.2
+                padded = nt.to_padded_tensor(PADDING_VAL)
+                padded = f(padded)
+                # NB: sum_S must be specified to use the lowering for dense -> jagged
+                # and get full fusion
+                return nested_from_padded(
+                    padded, nt.offsets(), sum_S=nt.values().shape[0]
+                )
 
-            # NB: sum_S must be specified to use the lowering for dense -> jagged
-            # and get full fusion
-            return nested_from_padded(padded, nt.offsets(), sum_S=nt.values().shape[0])
+            # NB: use checkpointing to force fusion
+            return torch.utils.checkpoint.checkpoint(_g, nt, use_reentrant=False)
 
         expected_output = f(nt)
         if requires_grad:
