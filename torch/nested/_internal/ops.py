@@ -1192,9 +1192,7 @@ def permute_default(func, *args, **kwargs):
             "Permute is not supported on the batch dimension for jagged NT"
         )
     inp_kwargs["_ragged_idx"] = canonicalized_dims.index(inp._ragged_idx)
-    canonicalized_dims = list(canonicalized_dims)
-    canonicalized_dims.remove(0)
-    inner_dims = [_outer_to_inner_dim(inp_dim, dim) for dim in canonicalized_dims]
+    inner_dims = [_outer_to_inner_dim(inp_dim, dim) for dim in canonicalized_dims[1:]]
     new_kwargs["dims"] = inner_dims
     return NestedTensor(func(inp._values, **new_kwargs), **inp_kwargs)
 
