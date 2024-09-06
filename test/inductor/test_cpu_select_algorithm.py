@@ -493,6 +493,40 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384,))
+    @parametrize("bias", (True, False))
+    @parametrize(
+        "binary",
+        ("add",),
+    )
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_with_binary_input_3d(
+        self, batch_size, in_features, out_features, bias, binary, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias, binary, other):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.binary = _get_epilogue(binary, other)
+
+            def forward(self, x):
+                return self.binary(self.linear(x))
+
+        counters.clear()
+        B = (2, batch_size)
+        v = torch.randn(*B, in_features).to(dtype=dtype)
+        u = torch.randn(*B, out_features).to(dtype=dtype)
+        mod = M(bias=bias, binary=binary, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @parametrize("batch_size", (1024,))
     @parametrize("in_features", (1024,))
     @parametrize("out_features", (1024, 1025))
