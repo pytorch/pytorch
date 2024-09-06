@@ -7,10 +7,7 @@ import onnx
 import torch
 from torch.onnx import dynamo_export, ExportOptions, ONNXProgram
 from torch.onnx._internal import _exporter_legacy
-from torch.onnx._internal._exporter_legacy import (
-    ONNXProgramSerializer,
-    ResolvedExportOptions,
-)
+from torch.onnx._internal._exporter_legacy import ResolvedExportOptions
 from torch.testing._internal import common_utils
 
 
@@ -74,40 +71,6 @@ class TestDynamoExportAPI(common_utils.TestCase):
         buffer = io.BytesIO()
         dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(buffer)
         onnx.load(buffer)
-
-    def test_save_to_file_using_specified_serializer(self):
-        expected_buffer = "I am not actually ONNX"
-
-        class CustomSerializer(ONNXProgramSerializer):
-            def serialize(
-                self, onnx_program: ONNXProgram, destination: io.BufferedIOBase
-            ) -> None:
-                destination.write(expected_buffer.encode())
-
-        with common_utils.TemporaryFileName() as path:
-            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(
-                path, serializer=CustomSerializer()
-            )
-            with open(path) as fp:
-                self.assertEqual(fp.read(), expected_buffer)
-
-    def test_save_to_file_using_specified_serializer_without_inheritance(self):
-        expected_buffer = "I am not actually ONNX"
-
-        # NOTE: Inheritance from `ONNXProgramSerializer` is not required.
-        # Because `ONNXProgramSerializer` is a Protocol class.
-        class CustomSerializer:
-            def serialize(
-                self, onnx_program: ONNXProgram, destination: io.BufferedIOBase
-            ) -> None:
-                destination.write(expected_buffer.encode())
-
-        with common_utils.TemporaryFileName() as path:
-            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(
-                path, serializer=CustomSerializer()
-            )
-            with open(path) as fp:
-                self.assertEqual(fp.read(), expected_buffer)
 
     def test_save_sarif_log_to_file_with_successful_export(self):
         with common_utils.TemporaryFileName(suffix=".sarif") as path:
