@@ -295,18 +295,18 @@ class TestFullyShardCompile(FSDPTest):
             .check_not(" = extern_kernels.")
             .check_not(" = triton_")
             .check_not(" = torch.ops.")
+            .check_not(" = inductor_ops.")
             .check_not("    aten.")
             .check_not("    extern_kernels.")
             .check_not("    triton_")
             .check_not("    torch.ops.")
+            .check_not(" inductor_ops.")
         )
 
     def inductor_code_check_fsdp_all_gather(
         self,
         file_check,
         overlapped_compute_op_str,
-        num_resize,
-        num_copy,
         last_all_gather=False,
         is_fwd=True,
     ):
@@ -318,23 +318,10 @@ class TestFullyShardCompile(FSDPTest):
         # Checks that AGWait is delayed, making the AG overlap with some compute op.
         if overlapped_compute_op_str is not None:
             file_check = file_check.check(f"{overlapped_compute_op_str}")
-        # TODO(yf225): we will remove .resize_ usage in the next PR
-        # file_check = file_check.check_count(
-        #     "inductor_ops.resize_storage_bytes_(", num_resize, exactly=True
-        # )
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
         file_check = file_check.check("torch.ops.fsdp.split_with_sizes_copy.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
-        # TODO(yf225): we will remove .copy_ usage in the next PR
-        if is_fwd:
-            file_check = file_check.check_count(
-                "triton_poi_fused_copy__", num_copy, exactly=True
-            )
-        else:
-            file_check = file_check.check_count(
-                "triton_poi_fused_", num_copy, exactly=False
-            )
         if not last_all_gather:
             # Checks that there is no compute op between this AGWait and next AG.
             file_check = self.inductor_code_check_no_compute_op(file_check)
@@ -545,8 +532,7 @@ class TestFullyShardCompile(FSDPTest):
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager(self):
-        # TODO: make fullgraph=False work
-        for fullgraph in [True]:
+        for fullgraph in [True, False]:
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(fullgraph=fullgraph),
                 "aot_eager",
@@ -556,8 +542,7 @@ class TestFullyShardCompile(FSDPTest):
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager_decomp_partition(self):
-        # TODO: make fullgraph=False work
-        for fullgraph in [True]:
+        for fullgraph in [True, False]:
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(fullgraph=fullgraph),
                 "aot_eager_decomp_partition",
@@ -567,8 +552,7 @@ class TestFullyShardCompile(FSDPTest):
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor(self):
-        # TODO: make fullgraph=False work
-        for fullgraph in [True]:
+        for fullgraph in [True, False]:
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(fullgraph), torch._inductor.config.patch(
@@ -592,46 +576,30 @@ class TestFullyShardCompile(FSDPTest):
                 fwd_code = triton_codes[0]
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None, num_resize=0, num_copy=2),
+                    dict(overlapped_compute_op_str=None),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_copy=2,
                         last_all_gather=True,
                     ),
                 ]:
@@ -644,16 +612,12 @@ class TestFullyShardCompile(FSDPTest):
                 bwd_code = triton_codes[1]
                 file_check = FileCheck().check("def call(args):")
                 for bwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None, num_resize=0, num_copy=2),
+                    dict(overlapped_compute_op_str=None),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=0,
-                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=0,
-                        num_copy=2,
                         last_all_gather=True,
                     ),
                 ]:
@@ -803,23 +767,15 @@ class TestFullyShardCompile(FSDPTest):
                         overlapped_compute_op_str="triton_"
                         if all_requires_grad
                         else None,
-                        num_resize=0,
-                        num_copy=4,
                     ),
                     dict(
                         overlapped_compute_op_str="aten.native_dropout.",
-                        num_resize=0,
-                        num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-                        num_resize=12,
-                        num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-                        num_resize=12,
-                        num_copy=12,
                         last_all_gather=True,
                     ),
                 ]:
@@ -834,18 +790,12 @@ class TestFullyShardCompile(FSDPTest):
                 for bwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=0,
-                        num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-                        num_resize=0,
-                        num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-                        num_resize=0,
-                        num_copy=12,
                         last_all_gather=True,
                     ),
                 ]:
