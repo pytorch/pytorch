@@ -120,7 +120,7 @@ jobs:
           fi
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
@@ -253,7 +253,7 @@ jobs:
           docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}" $RELEASE
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         with:
           name: pytorch-triton-conda-${{ matrix.py_vers }}
           if-no-files-found: error
