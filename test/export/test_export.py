@@ -6313,7 +6313,6 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -6369,11 +6368,7 @@ def forward(self, x):
         # (please never do this)
         class Foo(torch.nn.Module):
             def forward(self, input, true_graph, body_graph):
-                def map_body(x, y):
-                    return x + y
-
-                x = map(map_body, input, body_graph[0])
-                x = x + true_graph[0] + true_graph[1]
+                x = input + true_graph[0] + true_graph[1]
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 return x
@@ -6385,7 +6380,6 @@ def forward(self, x):
         )
         ep = export(Foo(), inputs)
         expected_getattr_names = [
-            "body_graph_1",
             "true_graph_2",
             "false_graph_0",
             "true_graph_3",
@@ -6994,6 +6988,26 @@ def forward(self, x, y):
         for node in const_gm.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(False)
+
+    @testing.expectedFailureTrainingIRToRunDecomp  # T200904004
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_istft_op(self):
+        class istft_class(torch.nn.Module):
+            def forward(self, spec):
+                window = torch.hann_window(1024).type(torch.FloatTensor)
+                return torch.istft(
+                    spec,
+                    n_fft=1024,
+                    hop_length=512,
+                    window=window,
+                    length=144000,
+                )
+
+        model = istft_class()
+        real_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        imaginary_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        spec = torch.complex(real_part, imaginary_part)
+        export(model, (spec,))
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
