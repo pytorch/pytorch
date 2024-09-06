@@ -14,6 +14,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
+    Any,
     Callable,
     cast,
     Dict,
@@ -893,28 +894,14 @@ class FakeTensor(Tensor):
             )
         return self.nested_int_memo * coeff
 
-    # We must handle tolist in a special way for FakeTensors here in the case
-    # where tolist is called from torch dispatch for tensor subclasses.
-    # Ordinarily, if a program calls .tolist compiling still works because there is
-    # special handling in dynamo, but for tensor subclasses if .tolist is called
-    # inside torch dispatch, the .tolist call may be directly on a FakeTensor.
-    # This would result in an error since wrapper subclasses don't have storage.
-    # To avoid this, we handle the FakeTensor case by (1) specializing on the size
-    # of the tensor to create the output Python list, and (2) creating unbacked
-    # symints for each element of the list.
-    def tolist(self) -> List[SymInt]:
-        assert self.dim() == 1, "NYI for higher dims"
-        shape_env = self.fake_mode.shape_env
-        assert shape_env is not None
-        out = []
-        # Specialize on the length of the list
-        for _ in range(self.shape[0]):
-            s = shape_env.create_unbacked_symint()
-            # max value?
-            torch._check_is_size(s)
-            torch._check(s >= 2)
-            out.append(s)
-        return out
+    # Similar to FunctionalTensor.tolist
+    def tolist(self) -> Any:
+        if self.dim() == 0:
+            return self.item()
+        elif self.dim() == 1:
+            return [elem.item() for elem in self]
+        else:
+            return [elem.tolist() for elem in self]
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
@@ -1714,11 +1701,28 @@ class FakeTensorMode(TorchDispatchMode):
     ) -> Optional[FakeTensor]:
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
+        # DO NOT PUT LOGIC BEFORE UNRECOGNIZED TYPE CHECKING
+        # We must throw NotImplemented in case of unrecognized types to handle subclasses.
+        # Throwing the exception will pass the control to the next __torch_dispatch__.
+        # See [subclass inputs] below
+        # NB: If you're seeing a mysterious infinite loop involving fake
+        # tensor, it might be related to this line.  Though I'm not sure
+        # how you'll know to read this comment, as this line won't show up
+        # in the stack trace.
+        has_unrecognized_types = _check_for_subclass(flat_args)
+        if has_unrecognized_types:
+            unrecognized_types = [
+                type(x) for x in flat_args if _check_for_subclass_arg(x)
+            ]
+            not_implemented_log.debug(
+                "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
+            )
+            return NotImplemented
+
         flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
         ) or any(isinstance(a, SymInt) for a in flat_args)
-        has_subclasses = any(is_traceable_wrapper_subclass(a) for a in flat_args)
 
         converter = self.fake_tensor_converter
 
@@ -1736,7 +1740,6 @@ class FakeTensorMode(TorchDispatchMode):
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
-            and not has_subclasses
         ):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
@@ -1755,21 +1758,6 @@ class FakeTensorMode(TorchDispatchMode):
                 with no_dispatch():
                     out = out.clone()
                 return converter.from_real_tensor(self, out, make_constant=True)
-
-        # See [subclass inputs] below
-        # NB: If you're seeing a mysterious infinite loop involving fake
-        # tensor, it might be related to this line.  Though I'm not sure
-        # how you'll know to read this comment, as this line won't show up
-        # in the stack trace.
-        has_unrecognized_types = _check_for_subclass(flat_args)
-        if has_unrecognized_types:
-            unrecognized_types = [
-                type(x) for x in flat_args if _check_for_subclass_arg(x)
-            ]
-            not_implemented_log.debug(
-                "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
-            )
-            return NotImplemented
 
         # if we are in the dispatch mode, we will enter this function even if the inputs
         # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
