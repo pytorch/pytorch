@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Set, Union
 import torch
 
 def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
-    # log.warn("remove_fsdp2_unsharded_param_graph_input_usage is called!")
     # Check condition 1: fullgraph=True  # TODO(yf225): find a way to check this
     # To check full-graph, either check top-level config value or (maybe) check that the two `unsharded_param.resize_`s cancel out so we know it's full graph
 
