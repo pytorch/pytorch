@@ -3923,6 +3923,44 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 in_dims=(2, 1, None),
             )
 
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    @parametrize("randomness", ["error", "same", "different"])
+    def test_randomness(self, device, randomness, backend):
+        if device == "cpu":
+            raise unittest.SkipTest("This test is only for CUDA for now")
+        backend_ctx = sdpa_kernel([backend])
+        with backend_ctx:
+            B = 4
+            query = torch.rand(B, 4, 32, 8, 128, dtype=torch.float16, device=device)
+            key = torch.rand(B, 4, 32, 8, 128, dtype=torch.float16, device=device)
+            value = torch.rand(B, 4, 32, 8, 128, dtype=torch.float16, device=device)
+
+            def f(q, k, v, dropout):
+                return F.scaled_dot_product_attention(q, k, v, dropout_p=dropout)
+
+            # No matter the randomness mode, dropout=0.0 should pass
+            vmap(
+                functools.partial(f, dropout=0.0),
+                in_dims=(0, 0, 0),
+                randomness=randomness,
+            )(query, key, value)
+
+            fail_with_randomness = randomness == "error"
+            if backend != SDPBackend.MATH:
+                fail_with_randomness |= randomness == "same"
+            context = (
+                self.assertRaises(RuntimeError)
+                # We currently don't support randomness == "same", and "error" should always error with randomness
+                if fail_with_randomness
+                else contextlib.nullcontext()
+            )
+            with context:
+                vmap(
+                    functools.partial(f, dropout=0.5),
+                    in_dims=(0, 0, 0),
+                    randomness=randomness,
+                )(query, key, value)
+
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
         leaf = torch.randn(4, 5, requires_grad=True)
