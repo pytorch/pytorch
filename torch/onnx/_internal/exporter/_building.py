@@ -495,6 +495,11 @@ class OpRecorder(evaluator.Evaluator):
             # call because it will filter out the unexpected kwargs for us.
             if function.traceable:
                 # Trace the function call instead of adding the function as a node
+                # Turn the ir.Attr objects into Python constants first
+                named_attrs = {
+                    name: attr.value if isinstance(attr, ir.Attr) else attr
+                    for name, attr in named_attrs.items()
+                }
                 return function.function(**named_inputs, **named_attrs)
 
             outputs = self._call_op(op_signature, named_inputs, named_attrs)
