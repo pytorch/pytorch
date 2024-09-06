@@ -65,8 +65,24 @@ extern "C" {{export_declaration}}
     const auto Kt_blocks = Kr_blocks;
     {%- endif %}
     int64_t Mc_blocks, Nc_blocks, Kc_blocks;
+    uint32_t L1_cache_size = {{L1_cache_size}};
+    uint32_t L2_cache_size = {{L2_cache_size}};
     mm_get_cache_blocking<{{kernel.dtype(X)}}, {{kernel.dtype(W)}}>(
-        num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks
+        num_threads,
+        M,
+        N,
+        K,
+        Mr,
+        Nr,
+        Kr,
+        Mt_blocks,
+        Nt_blocks,
+        Kt_blocks,
+        Mc_blocks,
+        Nc_blocks,
+        Kc_blocks,
+        L1_cache_size,
+        L2_cache_size
     );
     const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
     const int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
@@ -943,6 +959,12 @@ class CppPackedGemmTemplate(CppTemplate):
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
+        L1_cache_size = torch._C._cpu._L1d_cache_size()  # per core cache size in Bytes
+        assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+
+        L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
+        assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+
         options = dict(
             X=X,
             W=W,
@@ -972,6 +994,8 @@ class CppPackedGemmTemplate(CppTemplate):
             w_zp=w_zp,
             acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
             DTYPE_TO_CPP=DTYPE_TO_CPP,
+            L1_cache_size=L1_cache_size,
+            L2_cache_size=L2_cache_size,
             config=config,
         )
         with contextlib.ExitStack() as stack:

@@ -16,7 +16,6 @@
 // in .h files instead of .cpp files, to avoid ABI backward-compatiblity breakage.
 
 #include <ATen/NumericUtils.h>
-#include <ATen/cpu/Utils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 
 #include <c10/util/Float8_e4m3fn.h>
@@ -773,18 +772,14 @@ void mm_get_cache_blocking(
     int64_t Kt_blocks,
     int64_t& Mc_blocks,
     int64_t& Nc_blocks,
-    int64_t& Kc_blocks) {
+    int64_t& Kc_blocks,
+    uint32_t L1_cache_size,
+    uint32_t L2_cache_size) {
   // See NOTE [CPP GEMM Cache Blocking Algorithm] for the cache blocking algorithm.
   // TODO(jgong5): cache cache blocking results
   // TODO: tune the factor here
   float L1_limit_factor = 1.0;
   float L2_limit_factor = 0.5;
-
-  auto L1_cache_size = at::cpu::L1d_cache_size(); // per core cache size in Bytes
-  assert(L1_cache_size > 0 && "Expect L1_cache_size > 0 but got 0");
-
-  auto L2_cache_size = at::cpu::L2_cache_size(); // per core cache size in Bytes
-  assert(L2_cache_size > 0 && "Expect L2_cache_size > 0 but got 0");
 
   auto L1 = L1_cache_size * L1_limit_factor;
   auto L2 = L2_cache_size * L2_limit_factor;
