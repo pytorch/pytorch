@@ -370,7 +370,7 @@ static inline void construct_attr_by_post_op(
     double binary_alpha,
     double input1_scale,
     int64_t input1_zero_point,
-    // input1_desc,
+    c10::optional<at::Tensor> accum,
     const c10::string_view& unary_post_op,
     const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
     const c10::string_view& unary_post_op_algorithm,
@@ -403,6 +403,25 @@ static inline void construct_attr_by_post_op(
         }else {
             TORCH_CHECK(unary_post_op == "none", "onednn qlinear: unspported unary post op", unary_post_op);
         }
+    }else if (binary_post_op == "sum"){
+      if(unary_post_op == "none"){
+        attr = attr.append_post_sum(input1_scale, input1_zero_point);
+      }else if(unary_post_op == "relu"){
+        attr = attr.append_post_sum(input1_scale, input1_zero_point);
+            attr = attr.append_post_eltwise(
+                /* eltwise_scale */ 1.f,
+                /* alpha */ 0.f,
+                /* beta */ 0.f,
+                attr.kind_with_relu);
+      }
+    }else if(binary_post_op == "add"){
+      TORCH_CHECK(accum.has_value())
+      attr = attr.append_post_binary(attr.kind_with_binary_add, accum.value());
+      if(unary_post_op == "relu"){
+        attr = attr.append_post_eltwise(
+          1.f, 0.f, 0.f, attr.kind_with_relu
+        );
+      }
     }
 }
 
