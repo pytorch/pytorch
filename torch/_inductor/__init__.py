@@ -59,9 +59,10 @@ def aoti_compile_and_package(
         )
     inductor_configs["aot_inductor.package"] = True
 
-    aoti_files = aot_compile(
-        exported_program.module(), args, kwargs, options=inductor_configs
-    )  # type: ignore[arg-type]
+    m = exported_program.module()
+    assert isinstance(m, torch.fx.GraphModule)
+
+    aoti_files = aot_compile(m, args, kwargs, options=inductor_configs)  # type: ignore[arg-type]
     res = package_aoti(package_path, aoti_files)
     assert res == package_path
 

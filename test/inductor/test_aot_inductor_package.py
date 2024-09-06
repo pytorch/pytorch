@@ -14,17 +14,6 @@ from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.triton_utils import HAS_CUDA
 
 
-try:
-    try:
-        from .test_torchinductor import copy_tests
-    except ImportError:
-        from test_torchinductor import copy_tests
-except (unittest.SkipTest, ImportError) as e:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
-
-
 def compile(
     model, example_inputs, dynamic_shapes, inductor_configs, device
 ) -> AOTICompiledModel:

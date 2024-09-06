@@ -31,12 +31,12 @@ std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_with_cuda_stream(
 }
 
 namespace {
-std::shared_ptr<AOTIModelContainerRunner> create_aoti_runner_cuda(
+std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cuda(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
     const std::string& cubin_dir) {
-  return std::make_shared<AOTIModelContainerRunnerCuda>(
+  return std::make_unique<AOTIModelContainerRunnerCuda>(
       model_so_path, num_models, device_str, cubin_dir);
 }
 } // namespace
