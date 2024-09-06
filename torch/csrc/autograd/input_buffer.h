@@ -9,8 +9,8 @@
 #include <vector>
 
 #include <c10/core/Stream.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
+#include <optional>
 
 namespace torch::autograd {
 

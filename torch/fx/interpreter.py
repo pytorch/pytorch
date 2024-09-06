@@ -353,7 +353,7 @@ class Interpreter:
         attr_itr = self.module
         for i, atom in enumerate(target_atoms):
             if not hasattr(attr_itr, atom):
-                raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
+                raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i+1])}")
             attr_itr = getattr(attr_itr, atom)
         return attr_itr
 
@@ -509,5 +509,12 @@ class Transformer(Interpreter):
         if result is not None:
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:
                 return a.node if isinstance(a, Proxy) else a
-            self.new_graph.output(map_aggregate(result, strip_proxy))
+            new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))
+            # also preserve the metadata from the old output node, if it exists
+            old_output_node = list(self.graph.nodes)[-1]
+            assert old_output_node.op == "output"
+            for k, v in old_output_node.meta.items():
+                new_output_node.meta[k] = v
+
+
         return _make_graph_module(self.module, self.new_graph)

@@ -16,7 +16,6 @@ from typing import Any, Dict, List
 from unittest.mock import call, patch
 
 import torch.distributed as dist
-
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic.agent.server.api import (
     _get_fq_hostname,

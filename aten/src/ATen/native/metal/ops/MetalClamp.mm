@@ -52,8 +52,8 @@ static Tensor hardtanh(
 
 static at::Tensor clamp(
     const at::Tensor& input,
-    const c10::optional<at::Scalar>& min,
-    const c10::optional<at::Scalar>& max) {
+    const std::optional<at::Scalar>& min,
+    const std::optional<at::Scalar>& max) {
   TORCH_CHECK(min.has_value() && max.has_value());
   return hardtanh(input, min.value(), max.value());
 }

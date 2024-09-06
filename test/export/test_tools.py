@@ -3,8 +3,8 @@
 import torch
 from torch._dynamo.test_case import TestCase
 from torch._export.tools import report_exportability
-
 from torch.testing._internal.common_utils import run_tests
+
 
 torch.library.define(
     "testlib::op_missing_meta",
@@ -44,7 +44,7 @@ class TestExportTools(TestCase):
                 return x.sin()
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.unsupported = Unsupported()
                 self.supported = Supported()

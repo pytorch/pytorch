@@ -176,7 +176,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
-  export USE_XPU=1
+  # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
+  export USE_KINETO=0
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -230,6 +231,10 @@ if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+  export CMAKE_BUILD_TYPE=RelWithAssert
+fi
+
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -280,9 +285,8 @@ else
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0 release candidate for builds
-        # Which should be backward compatible with Numpy-1.X
-        python -mpip install --pre numpy==2.0.0rc1
+        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+        python -mpip install --pre numpy==2.0.2
       fi
 
       WERROR=1 python setup.py clean

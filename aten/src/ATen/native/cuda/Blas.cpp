@@ -180,12 +180,6 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 static bool getDisableAddmmCudaLt() {
     static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
 #ifdef USE_ROCM
-    // if we enable tunable op, it'll take priority over just hipblaslt (heuristics)
-    // note the current tunable op is not the hipblaslt path (gemm_and_bias)
-    auto tuning_ctx = at::cuda::tunable::getTuningContext();
-    if (tuning_ctx->IsTunableOpEnabled()) {
-      return true;
-    }
     // allow both CUDA and HIP env var names for ROCm builds
     // also, current default for ROCm builds is disable by default
     if (env_value == nullptr) {
@@ -218,6 +212,46 @@ static bool isSupportedHipLtROCmArch(int index) {
     return false;
 }
 #endif
+
+template <typename scalar_t>
+static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+  bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
+  bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
+  at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
+  params.transa = args.transa;
+  params.transb = args.transb;
+  params.m = args.m;
+  params.n = args.n;
+  params.k = args.k;
+  params.alpha = alpha.to<at::opmath_type<scalar_t>>();
+  params.a = args.mata->const_data_ptr<scalar_t>();
+  params.lda = args.lda;
+  params.b = args.matb->const_data_ptr<scalar_t>();
+  params.ldb = args.ldb;
+  params.c = args.result->data_ptr<scalar_t>();
+  params.ldc = args.result_ld;
+  params.bias = bias;
+  params.activation = activation;
+  if (transa_ && transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
+    gemm(&params);
+  }
+  else if (transa_ && !transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
+    gemm(&params);
+  }
+  else if (!transa_ && transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
+    gemm(&params);
+  }
+  else if (!transa_ && !transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
+    gemm(&params);
+  }
+  else {
+    TORCH_CHECK(false, "unreachable");
+  }
+}
 
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
@@ -331,9 +365,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         at::native::scalar_tensor(
             beta,
             self.scalar_type(),
-            c10::nullopt /* layout */,
+            std::nullopt /* layout */,
             at::kCPU,
-            c10::nullopt /* pin_memory */));
+            std::nullopt /* pin_memory */));
   }
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
@@ -346,6 +380,15 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
+        auto tuning_ctx = at::cuda::tunable::getTuningContext();
+        if (tuning_ctx->IsTunableOpEnabled()) {
+          launchTunableGemmAndBias<scalar_t>(
+              args,
+              alpha,
+              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
+              activation_to_gemm_and_blas_arg(activation));
+        }
+        else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
@@ -364,7 +407,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.result_ld,
               activation_to_gemm_and_blas_arg(activation)
           );
-        });
+        }});
 #else
     auto activation_epilogue = activation_to_gemm_and_blas_arg(activation);
 #if (defined(CUDA_VERSION) && (CUDA_VERSION < 11080))
@@ -382,6 +425,15 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
+        auto tuning_ctx = at::cuda::tunable::getTuningContext();
+        if (tuning_ctx->IsTunableOpEnabled()) {
+          launchTunableGemmAndBias<scalar_t>(
+              args,
+              alpha,
+              self.const_data_ptr<scalar_t>(),
+              activation_epilogue);
+        }
+        else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
@@ -398,7 +450,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.result_ld,
               activation_epilogue
           );
-        });
+        }});
 #endif
   } else
   {
@@ -716,7 +768,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
           const_cast<Tensor&>(result),
           self,
           at::native::scalar_tensor(
-              beta_, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
+              beta_, self.scalar_type(), std::nullopt /* layout */, at::kCPU, std::nullopt /* pin_memory */));
     }
   } else {
     if (!result.is_same(*self_) && betaval != 0.0) { //if beta is 0, result contents will be zeroed later
@@ -858,49 +910,55 @@ ScalingType get_scaling_type(
       scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
       "Both scale_a and scale_b must be float (fp32) tensors.");
 
-
   // Check the singluar scale case for per-tensor scaling
   if (scale_a.numel() == 1 && scale_b.numel() == 1) {
     return ScalingType::TensorWise;
-  } else if (scale_a.dim() == 1 && scale_a.size(0) == dim_m) {
-// Check the per-row scaling case
+  }
+
+  // For non-TensorWise scaling, enforce 2D input tensors
+  TORCH_CHECK(
+      scale_a.dim() == 2 && scale_b.dim() == 2,
+      "For non-TensorWise scaling, scale tensors must be 2-dimensional, "
+      "but got scale_a.dim()=",
+      scale_a.dim(),
+      " and scale_b.dim()=",
+      scale_b.dim());
+
+  // Check for RowWise scaling
+  if (scale_a.size(0) == dim_m && scale_a.size(1) == 1 &&
+      scale_b.size(0) == 1 && scale_b.size(1) == dim_n) {
 #if !defined(USE_ROCM) && !defined(_MSC_VER) || \
     (defined(USE_ROCM) && ROCM_VERSION >= 60000)
     TORCH_CHECK(
-        scale_a.dim() == 1 && scale_b.dim() == 1,
-        "Both scale_a and scale_b must be 1-dimensional tensors");
-    TORCH_CHECK(
-        scale_b.size(0) == dim_n,
-        "For row-wise scaling, scale_b must have size ",
-        dim_n,
-        " but got ",
-        scale_b.size(0),
-        ".");
-    TORCH_CHECK(
         scale_a.is_contiguous() && scale_b.is_contiguous(),
-        "Both scale_a and scale_b must be contiguous.");
+        "Both scale_a and scale_b must be contiguous for RowWise scaling.");
     return ScalingType::RowWise;
 #else
     TORCH_CHECK(false, "Per-row scaling is not supported for this platform!");
     return ScalingType::Error;
-#endif // !defined(USE_ROCM) && !defined(_MSC_VER) || (defined(USE_ROCM) &&
-       // ROCM_VERSION >= 60000)
-  } else {
-    // Prettier Error Case messaging
-    TORCH_CHECK(
-        false,
-        "For row-wise scaling, scale_a must be size ",
-        dim_m,
-        " but got ",
-        scale_a.numel(),
-        " and scale_b must be size ",
-        dim_n,
-        " but got ",
-        scale_b.numel(),
-        ".");
-    // Unreachable
-    return ScalingType::RowWise;
+#endif
   }
+
+  // If we reach here, the input doesn't match any valid scaling type
+  TORCH_CHECK(
+      false,
+      "Invalid scaling configuration. For TensorWise scaling, both scales should be scalar. "
+      "For RowWise scaling, scale_a should be (",
+      dim_m,
+      ", 1) and scale_b should be (1, ",
+      dim_n,
+      "). "
+      "Got scale_a.size()=(",
+      scale_a.size(0),
+      ", ",
+      scale_a.size(1),
+      ") and ",
+      "scale_b.size()=(",
+      scale_b.size(0),
+      ", ",
+      scale_b.size(1),
+      ")");
+
   return ScalingType::Error;
 }
 

@@ -75,7 +75,7 @@ def reverse_dict(d):
     result = OrderedDict()  # type: ignore[var-annotated]
     for key in d:
         for val in d[key]:
-            result[val] = result.get(val, tuple()) + (key, )
+            result[val] = result.get(val, ()) + (key,)
     return result
 
 
@@ -97,7 +97,7 @@ def groupby(func, seq):
     for item in seq:
         key = func(item)
         if key not in d:
-            d[key] = list()
+            d[key] = []
         d[key].append(item)
     return d
 

@@ -154,6 +154,7 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           TEST_CONFIG: ${{ matrix.config }}
@@ -205,6 +206,7 @@ jobs:
             -e REENABLED_ISSUES \
             -e CONTINUE_THROUGH_ERROR \
             -e VERBOSE_TEST_LOGS \
+            -e TEST_SHOWLOCALS \
             -e NO_TEST_TIMEOUT \
             -e NO_TD \
             -e MAX_JOBS="$(nproc --ignore=2)" \

@@ -397,3 +397,5 @@ The following utility functions are related to serialization:
 .. autofunction:: add_safe_globals
 .. autofunction:: clear_safe_globals
 .. autofunction:: get_safe_globals
+.. autoclass:: safe_globals
+.. autoclass:: skip_data
