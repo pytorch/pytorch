@@ -843,7 +843,7 @@ class Source:
     def make_guard(self, fn) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError
-        return Guard(self, fn)
+        return Guard(originating_source=self, create_fn=fn)
 
     def is_specialized_nn_module(self) -> bool:
         return self.guard_source().is_specialized_nn_module()
