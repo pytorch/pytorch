@@ -664,7 +664,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx_program.save(tmp_onnx_file.name)
             onnx.checker.check_model(tmp_onnx_file.name, full_check=True)
 
-    @pytorch_test_common.skip_if_fake_model_and_inititalizer("segfault")
     @common_utils.parametrize(
         "include_initializer",
         [
@@ -746,6 +745,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         onnx_program = torch.onnx.dynamo_export(
             model, tensor_x, export_options=export_options
         )
+        onnx_program.apply_weights(state_dict)
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
             onnx_program.save(
                 tmp_onnx_file.name,
