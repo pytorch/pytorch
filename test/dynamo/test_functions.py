@@ -156,6 +156,64 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if a is not None and b is not None:
             return a + b
 
+    def test_foreach_lerp_(self):
+        def fn(x, y, s):
+            return torch._foreach_lerp_(x, y, s)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
+        expected = fn(
+            [torch.ones(2, 2) * 4.26, torch.ones(2, 2) * 3.14],
+            [torch.ones(2, 2), torch.ones(2, 2)],
+            torch.tensor(0.5),
+        )
+
+        actual = fn_opt(
+            [torch.ones(2, 2) * 4.26, torch.ones(2, 2) * 3.14],
+            [torch.ones(2, 2), torch.ones(2, 2)],
+            torch.tensor(0.5),
+        )
+        self.assertTrue(same(expected, actual))
+
+    def test_broadcast_foreach_pow(self):
+        from torch._dynamo.utils import same
+
+        def fn(x, y):
+            return torch._foreach_pow(x, y)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
+        inps = (torch.tensor(0.80), [torch.tensor(3.4), torch.tensor(7.8)])
+
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertTrue(same(actual, expected))
+        self.assertTrue(cnt.frame_count, 1)
+
+    def test_addcmul_(self):
+        from copy import deepcopy
+
+        from torch._dynamo.utils import same
+
+        def fn(x, y, z, s):
+            return x.addcmul_(y, z, value=s)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
+        inps = (
+            torch.ones(2, 2),
+            torch.ones(2, 2) + 1,
+            torch.rand(2, 2),
+            torch.tensor(0.3),
+        )
+        inps_2 = deepcopy(inps)
+        actual = fn_opt(*inps)
+        expected = fn(*inps_2)
+        self.assertTrue(same(actual, expected))
+        self.assertEqual(cnt.frame_count, 1)
+
     @make_test
     def test_functools_partial(a, b):
         return clip01(a + b)
@@ -1683,6 +1741,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp = {1: "D", 10: "B", 3: "E", 0: "F"}
         return x + 1, sorted(tmp), sorted(tmp, reverse=True)
 
+    def test_dict_hasattr(self):
+        def fn(x):
+            if hasattr(x, "to"):
+                return x.to("cpu")
+            if hasattr(x, "items"):
+                return torch.cos(x["a"])
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = dict(a=torch.randn(3))
+        self.assertEqual(fn(x), opt_fn(x))
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     @make_test
     def test_list_clear(a, b):
         tmp = [a + 1, a + 2]
@@ -2071,6 +2145,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         assert 3 in mylist
         assert 6 not in myotherlist
         return sum(mylist)
+
+    @make_test
+    def test_are_functorch_transforms_active(x):
+        if torch._C._are_functorch_transforms_active():
+            return x + 1
+        else:
+            return x - 1
 
     @make_test
     def test_partials_udf_kwarg(x):
@@ -3313,6 +3394,71 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_frozenset_construction(self):
+        def fn(x):
+            s = frozenset({x})
+            t = frozenset(s)
+            return len(t)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_frozenset_reconstruction(self):
+        d = {}
+        f = frozenset()
+        d[f] = torch.randn(4)
+
+        def fn(x):
+            k = frozenset()
+            torch._dynamo.graph_break()
+            return d[k] * x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_frozenset_illegal_call_method(self):
+        def fn_add():
+            s = frozenset((1, 2, 3))
+            s.add({2})
+            return len(s)
+
+        def fn_pop():
+            s = frozenset((1, 2, 3))
+            s.pop()
+            return len(s)
+
+        def fn_update():
+            s = frozenset((1, 2, 3))
+            s.update({4, 5, 6})
+            return len(s)
+
+        def fn_remove():
+            s = frozenset((1, 2, 3))
+            s.remove(2)
+            return len(s)
+
+        def fn_discard():
+            s = frozenset((1, 2, 3))
+            s.discard(2)
+            return len(s)
+
+        def fn_clear():
+            s = frozenset((1, 2, 3))
+            s.clear()
+            return len(s)
+
+        for fn in [fn_add, fn_pop, fn_update, fn_remove, fn_discard, fn_clear]:
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
+                opt_fn()
+
     def test_is_tensor_tensor(self):
         def fn(x, y):
             if x is y:
@@ -3585,6 +3731,22 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         eager_class_name = eager_default_str[1].split(" object at")[0]
         dynamo_class_name = dynamo_default_str[1].split(" object at")[0]
         self.assertEqual(eager_class_name, dynamo_class_name)
+
+    def test_pybind_object(self):
+        def fn(x, pybind_obj):
+            if pybind_obj.result:
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        pybind_obj = torch._C._dynamo.guards.GuardDebugInfo(True, ["a==1"], 0)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x, pybind_obj), fn(x, pybind_obj))
+
+        pybind_obj = torch._C._dynamo.guards.GuardDebugInfo(False, ["a==1"], 1)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x, pybind_obj), fn(x, pybind_obj))
 
 
 instantiate_parametrized_tests(FunctionTests)
