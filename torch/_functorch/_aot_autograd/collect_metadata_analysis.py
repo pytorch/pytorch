@@ -108,10 +108,16 @@ def coerce_tangent(x, memory_format=torch.contiguous_format):
     # but has noncontiguous inner tensors.
     # Force these to be conntiguous too
     if is_traceable_wrapper_subclass(out):
-        assert isinstance(memory_format, list)
-        for i, attr in enumerate(out.__tensor_flatten__()[0]):  # type: ignore[attr-defined]
-            elem = getattr(out, attr)
-            setattr(out, attr, coerce_tangent(elem, memory_format[i]))
+        attrs = out.__tensor_flatten__()[0]
+
+        if isinstance(memory_format, list):
+            for attr, memory_format_i in zip(attrs, memory_format):
+                setattr(out, attr, coerce_tangent(getattr(out, attr), memory_format_i))
+        else:
+            # Allow specify single memory_format for all subclass tensors,
+            # To avoid redundant recursive traverse of non-output tangent subclass.
+            for attr in attrs:
+                setattr(out, attr, coerce_tangent(getattr(out, attr), memory_format))
 
     return out
 
@@ -694,10 +700,17 @@ from a multi-output view call"
         output_tangents_start_idx = len(f_input_tangents)
         output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
 
+        def _subclass_structure(t):
+            if is_traceable_wrapper_subclass(t):
+                return list(t.__tensor_flatten__()[0])
+            return None
+
         traced_tangent_memory_formats = [
             recursive_suggest_memory_format(tt)
             if (output_tangents_start_idx <= i and i < output_tangents_end_idx)
-            else torch.contiguous_format
+            else torch.utils._pytree.tree_map(
+                lambda _: torch.contiguous_format, _subclass_structure(tt)
+            )
             for i, tt in enumerate(traced_tangents)
         ]
 

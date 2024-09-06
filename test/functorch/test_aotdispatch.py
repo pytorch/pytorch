@@ -6127,47 +6127,39 @@ class TestAOTModuleSimplified(AOTTestCase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 
-            def forward(self, x, y):
+            def forward(self, x):
                 r = self.conv(x)
-                return r, y + 1
+                return r
 
         m = M()
         m.to(memory_format=torch.channels_last)
         m.train()
 
-        def inps_fn():
+        def inps_fn(x):
             return (
                 TwoTensor(
-                    TwoTensor(
-                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                            memory_format=torch.channels_last
-                        ),
-                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                            memory_format=torch.channels_last
-                        ),
-                    ),
-                    TwoTensor(
-                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                            memory_format=torch.channels_last
-                        ),
-                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                            memory_format=torch.channels_last
-                        ),
-                    ),
+                    TwoTensor(x.clone(), x.clone()), TwoTensor(x.clone(), x.clone())
                 ),
-                torch.randn(3, 2, requires_grad=True).clone(),
             )
 
-        ref_inps = inps_fn()
+        x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+            memory_format=torch.channels_last
+        )
+        ref_inps = inps_fn(x)
         ref_outs = m(*ref_inps)
         ref_outs[0].sum().backward()
 
         mc = M()
         mc.to(memory_format=torch.channels_last)
         mc.train()
-        inps = inps_fn()
+
+        x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+            memory_format=torch.channels_last
+        )
+        inps = inps_fn(x)
         outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
         s = outs[0].sum()
+
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
         ) as prof:
@@ -6177,6 +6169,66 @@ class TestAOTModuleSimplified(AOTTestCase):
             event for event in prof.events() if event.name == "aten::contiguous"
         ]
         self.assertTrue(len(contiguous_events) == 0)
+
+        # Benchmark Subclasses handling overhead
+        # import time
+
+        # benchmark_inps = [
+        #     inps_fn(
+        #         torch.randn(2, 3, 5, 5, requires_grad=True).to(
+        #             memory_format=torch.channels_last
+        #         )
+        #     )
+        #     for _ in range(100)
+        # ]
+
+        # bwd_total_duration = 0
+        # for inps in benchmark_inps:
+        #     outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
+        #     s = outs[0].sum()
+        #     time_start = time.time()
+        #     s.backward()
+        #     bwd_duration = time.time() - time_start
+        #     bwd_total_duration += bwd_duration
+
+        # avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
+        # print(f"Benchmark subclass avg_bwd_duration:{avg_bwd_duration*1000} ms")
+
+        # class M2(torch.nn.Module):
+        #     def __init__(self) -> None:
+        #         super().__init__()
+        #         self.conv = torch.nn.Conv2d(3, 3, 3)
+
+        #     def forward(self, x0, x1, x2, x3):
+        #         return self.conv(x0), self.conv(x1), self.conv(x2), self.conv(x3)
+
+        # m2 = M2()
+        # m2.to(memory_format=torch.channels_last)
+        # m2.train()
+
+        # def inps_fn2(x):
+        #     return (x.clone(), x.clone(), x.clone(), x.clone())
+
+        # benchmark_inps2 = [
+        #     inps_fn2(
+        #         torch.randn(2, 3, 5, 5, requires_grad=True).to(
+        #             memory_format=torch.channels_last
+        #         )
+        #     )
+        #     for _ in range(100)
+        # ]
+
+        # bwd_total_duration = 0
+        # for inps in benchmark_inps2:
+        #     outs = torch.compile(m2, backend="aot_eager", fullgraph=True)(*inps)
+        #     s = outs[0].sum()
+        #     time_start = time.time()
+        #     s.backward()
+        #     bwd_duration = time.time() - time_start
+        #     bwd_total_duration += bwd_duration
+
+        # avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
+        # print(f"Benchmark no_subclass avg_bwd_duration:{avg_bwd_duration * 1000} ms")
 
 
 # entries in here don't work and need to be fixed.
