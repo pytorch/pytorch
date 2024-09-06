@@ -239,7 +239,12 @@ pointwise_ops = [
     aten.igammac.default,
     aten.igammac.out,
     aten.igammac_.default,
+    aten.isinf.default,
     aten.isnan.default,
+    aten.isneginf.default,
+    aten.isneginf.out,
+    aten.isposinf.default,
+    aten.isposinf.out,
     aten.ldexp.default,
     aten.ldexp.out,
     aten.ldexp_.default,
@@ -580,6 +585,7 @@ for_each_ops = [
     aten._foreach_cos_.default,
     aten._foreach_log.default,
     aten._foreach_log_.default,
+    aten._amp_foreach_non_finite_check_and_unscale_.default,
 ]
 
 for_each_linearity_ops = [

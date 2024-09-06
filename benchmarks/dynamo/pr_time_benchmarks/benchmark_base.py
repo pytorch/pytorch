@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from fbscribelogger import make_scribe_logger
 
 import torch._C._instruction_counter as i_counter
+import torch._dynamo.config as config
+from torch._dynamo.utils import CompileTimeInstructionCounter
 
 
 scribe_log_torch_benchmark_compile_time = make_scribe_logger(
@@ -51,10 +53,19 @@ struct TorchBenchmarkCompileTimeLogEntry {
 
 
 class BenchmarkBase(ABC):
-    _instruction_count = False
+    # measure total number of instruction spent in _work.
+    _enable_instruction_count = False
+
+    # measure total number of instruction spent in convert_frame.compile_inner
+    # TODO is there other parts we need to add ?
+    _enable_compile_time_instruction_count = False
 
     def enable_instruction_count(self):
-        self._instruction_count = True
+        self._enable_instruction_count = True
+        return self
+
+    def enable_compile_time_instruction_count(self):
+        self._enable_compile_time_instruction_count = True
         return self
 
     def name(self):
@@ -64,29 +75,48 @@ class BenchmarkBase(ABC):
         return ""
 
     @abstractmethod
-    def prepare(self):
+    def _prepare(self):
         pass
 
     @abstractmethod
-    def work(self):
+    def _work(self):
         pass
 
-    def prepare_once(self):  # noqa: B027
+    def _prepare_once(self):  # noqa: B027
         pass
 
-    def count_instructions(self):
+    def _count_instructions(self):
         print(f"collecting instruction count for {self.name()}")
-        self.prepare_once()
+        results = []
+        for i in range(10):
+            self._prepare()
+            id = i_counter.start()
+            self._work()
+            count = i_counter.end(id)
+            print(f"instruction count for iteration {i} is {count}")
+            results.append(count)
+        return min(results)
+
+    def _count_compile_time_instructions(self):
+        print(f"collecting compile time instruction count for {self.name()}")
+        config.record_compile_time_instruction_count = True
 
         results = []
         for i in range(10):
-            self.prepare()
-            id = i_counter.start()
-            self.work()
-            count = i_counter.end(id)
-            print(f"instruction count for iteration {i} is {count}")
-            if i != 0:
-                results.append(count)
+            self._prepare()
+            # CompileTimeInstructionCounter.record is only called on convert_frame._compile_inner
+            # hence this will only count instruction count spent in compile_inner.
+            CompileTimeInstructionCounter.clear()
+            self._work()
+            count = CompileTimeInstructionCounter.value()
+            if count == 0:
+                raise RuntimeError(
+                    "compile time instruction count is 0, please check your benchmarks"
+                )
+            print(f"compile time instruction count for iteration {i} is {count}")
+            results.append(count)
+
+        config.record_compile_time_instruction_count = False
         return min(results)
 
     def append_results(self, path):
@@ -102,10 +132,34 @@ class BenchmarkBase(ABC):
             print(f"{entry[0]},{entry[1]},{entry[2]}")
 
     def collect_all(self):
+        self._prepare_once()
         self.results = []
-        if self._instruction_count:
-            r = self.count_instructions()
+        if (
+            self._enable_instruction_count
+            and self._enable_compile_time_instruction_count
+        ):
+            raise RuntimeError(
+                "not supported until we update the logger, both logs to the same field now"
+            )
+
+        if self._enable_instruction_count:
+            r = self._count_instructions()
             self.results.append((self.name(), "instruction_count", r))
+            scribe_log_torch_benchmark_compile_time(
+                name=self.name(),
+                instruction_count=r,
+            )
+        if self._enable_compile_time_instruction_count:
+            r = self._count_compile_time_instructions()
+
+            self.results.append(
+                (
+                    self.name(),
+                    "compile_time_instruction_count",
+                    r,
+                )
+            )
+            # TODO add a new field compile_time_instruction_count to the logger.
             scribe_log_torch_benchmark_compile_time(
                 name=self.name(),
                 instruction_count=r,
