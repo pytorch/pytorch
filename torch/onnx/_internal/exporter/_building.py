@@ -565,10 +565,10 @@ class OpRecorder(evaluator.Evaluator):
                     # dtypes are available
                     if src_input.dtype == target_type.dtype:
                         # Same type. No cast needed
-                        return src_input  # type: ignore[union-attr,return-value]
+                        return src_input  # type: ignore[return-value]
                     else:
                         # Create a Cast node
-                        return self.opset.Cast(src_input, to=target_type.dtype)  # type: ignore[return-value]
+                        return self.opset.Cast(src_input, to=target_type.dtype)  # type: ignore[union-attr,return-value]
 
             outputs = self._call_op(op_signature, named_inputs, named_attrs)
             if len(outputs) == 1:
