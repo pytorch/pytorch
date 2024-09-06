@@ -19,9 +19,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
+from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -29,13 +31,18 @@ from torch.testing._internal.logging_utils import logs_to_string
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
-def make_compiler_fn(fullgraph=True, dynamic=True):
+def make_compiler_fn(fullgraph=True, dynamic=True, backend="inductor"):
+    assert backend in ["inductor", "aot_eager"]
+
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
 
         def _inner_compiler(gm_, example_inputs_):
             counters["compiled_autograd"]["compiles"] += 1
-            return inductor.compile(gm_, example_inputs_)
+            if backend == "inductor":
+                return inductor.compile(gm_, example_inputs_)
+            elif backend == "aot_eager":
+                return aot_eager(gm_, example_inputs_)
 
         return torch.compile(
             gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
@@ -170,6 +177,26 @@ main()
                 yield model[2].bias.grad
 
         self.check_output_and_recompiles(fn)
+
+    def test_graph_break_custom_op(self):
+        @torch.library.custom_op("mylib::sin", mutates_args={})
+        def sin(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * x.cos()
+
+        sin.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        y = sin(x.clone()).sum()
+        with compiled_autograd.enable(compiler_fn):
+            y.backward()
 
     def test_tensor_grad_hook1(self):
         def fn():
@@ -1410,6 +1437,178 @@ main()
                 f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
             )
 
+    def test_trace_auto_functionalized(self):
+        torch.library.define(
+            "testlib::foo",
+            "(Tensor(a!) x) -> (Tensor)",
+            tags=torch.Tag.pt2_compliant_tag,
+        )
+        torch.library.define(
+            "testlib::foo_mutated",
+            "(Tensor(a!) x) -> (Tensor)",
+            tags=torch.Tag.pt2_compliant_tag,
+        )
+
+        @torch.library.impl("testlib::foo", "cpu")
+        def foo(x):
+            x.add_(5)
+            return x
+
+        @torch.library.impl("testlib::foo", "Meta")
+        def foo_meta(x):
+            return x
+
+        @torch.library.impl("testlib::foo_mutated", "CompositeImplicitAutograd")
+        def foo_mutated(x):
+            return torch.ops.testlib.foo(x)
+
+        def _get_custom_policy(must_recompute_list=None):
+            def _custom_policy(ctx, func, *args, **kwargs):
+                if must_recompute_list is not None and func in must_recompute_list:
+                    return torch.utils.checkpoint.CheckpointPolicy.MUST_RECOMPUTE
+                else:
+                    return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+
+            return _custom_policy
+
+        def context_fn():
+            must_recompute_list = [
+                torch.ops.higher_order.auto_functionalized,
+            ]
+            return torch.utils.checkpoint.create_selective_checkpoint_contexts(
+                _get_custom_policy(
+                    must_recompute_list=must_recompute_list,
+                ),
+            )
+
+        def g(x):
+            x = torch.matmul(x, x)
+            torch.ops.testlib.foo_mutated(x)
+            return torch.matmul(x, x)
+
+        def g_cp(x):
+            return torch.utils.checkpoint.checkpoint(
+                g, x, use_reentrant=False, context_fn=context_fn
+            )
+
+        def f():
+            inps = (torch.randn(4, 4, requires_grad=True),)
+            output = torch.compile(g_cp, backend="aot_eager", fullgraph=True)(*inps)
+            output.sum().backward()
+            return output, inps[0].grad
+
+        """
+        Walkthrough of what happens with `auto_functionalized`:
+        1. `auto_functionalized` op is inserted into the graph during AOTAutograd functionalization.
+           We force the op to be recomputed (by using SAC), so it appears in the backward graph.
+        2. The AOT backward graph looks like:
+        ```
+        ===== Backward graph 0 =====
+        def forward(self, primals_1: "f32[4, 4][4, 1]cpu", tangents_1: "f32[4, 4][4, 1]cpu"):
+            ...
+            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
+            ...
+            return (add_1,)
+        ```
+        3. The Compiled Autograd graph looks like:
+        ```
+        ===== Compiled autograd graph =====
+        def forward(self, inputs, sizes, scalars, hooks):
+            ...
+            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
+            ...
+            return []
+        ```
+        4. The Dynamo graph captured by Compiled Autograd looks like:
+        ```
+        ===== __compiled_fn_3 =====
+        def forward(self, L_inputs_ : list):
+            ...
+            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
+            ...
+            return (new_grad,)
+        ```
+        5. The Compiled Autograd's AOT "forward-only" graph looks like:
+        ```
+        ===== Forward graph 1 =====
+        def forward(self, arg0_1: "f32[][]cpu", arg1_1: "f32[4, 4][4, 1]cpu"):
+            ...
+            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
+            ...
+            return (clone_1,)
+        ```
+        6. The `auto_functionalized` op should then be lowered using the normal lowering path in Inductor.
+        """
+
+        compiler_fn = make_compiler_fn(fullgraph=True, backend="aot_eager")
+
+        def make_compiler_fn_with_op_check():
+            def _compiler_fn(gm):
+                # Checks that `auto_functionalized` op exists in Compiled Autograd's Dynamo graph.
+                self.assertTrue(
+                    any(
+                        node.target is torch.ops.higher_order.auto_functionalized
+                        for node in gm.graph.nodes
+                    ),
+                    f"`torch.ops.higher_order.auto_functionalized` op not found in {gm.graph}",
+                )
+                return compiler_fn(gm)
+
+            return _compiler_fn
+
+        compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+        self.check_output_and_recompiles(
+            f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+        )
+
+    def test_non_traceable_autograd_cpp_node(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = false;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    return grad_output;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_non_traceable_autograd_cpp_node",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            x = torch.ones(10, 10, requires_grad=True)
+            out = torch.ops.test_non_traceable_autograd_cpp_node.custom_op_backed_by_autograd_fn(
+                x
+            )
+            loss = out.sum()
+            loss.backward()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/",
+        ), compiled_autograd.enable(compiler_fn):
+            fn()
+
     def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2341,6 +2540,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
 
+    @skipIfWindows(msg="AssertionError: Scalars are not equal!")
     def test_verbose_logs_cpp(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
@@ -2467,6 +2667,20 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             loss.backward()
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 1)
+
+    def test_reentrant_checkpointing(self):
+        def fn(x):
+            y = x.sin()
+            z = y.cos()
+            return (y * z).sum()
+
+        inp = torch.rand(10, 10, requires_grad=True)
+        out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"\(e.g. reentrant checkpointing\), this is not supported yet\.",
+        ), torch._dynamo.compiled_autograd.enable(torch.compile):
+            out.backward()
 
 
 def load_test_module(name):
