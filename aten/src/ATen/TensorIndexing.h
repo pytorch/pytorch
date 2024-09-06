@@ -6,7 +6,6 @@
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/irange.h>
-#include <iostream> // Include for std::cout
 #include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -486,14 +485,11 @@ inline Tensor handleDimInMultiDimIndexing(
         at::isIntegralType(scalar_type, /*includeBool=*/true)) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
         if (isBatchedTensorCheck(tensor)) {
-          result = result.index_select(*dim_ptr, tensor);
-          auto ss = result.sizes();
-          std::cout << "tensor is batched" << *dim_ptr << real_dim << ss
-                    << std::endl;
-          result = result.squeeze(*dim_ptr);
-          return result;
+          TORCH_CHECK(
+              false,
+              "Cannot use a 0-dim batched tensor within __getitem__: this would return a copy when a view is expected. ",
+              "See https://github.com/pytorch/pytorch/issues/124423 for proposed solutions.");
         }
-        std::cout << "tensor is not batched" << *dim_ptr << std::endl;
         result = impl::applySelect(
             result,
             *dim_ptr,
