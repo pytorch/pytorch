@@ -516,7 +516,13 @@ def check_model(
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
         all_none_grads = all(x is None for x in correct_grad)
-        if all_none_grads:
+        tensor_args = [
+            x
+            for x in pytree.tree_flatten(example_inputs)[0]
+            if isinstance(x, torch.Tensor)
+        ]
+        any_non_leaves = any(x.grad_fn is not None for x in tensor_args)
+        if all_none_grads and any_non_leaves:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
             # If all inputs to an AOTAutograd graph are supposed to get None gradients,

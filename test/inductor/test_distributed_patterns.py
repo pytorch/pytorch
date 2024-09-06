@@ -42,7 +42,7 @@ def init_fake_distributed(device="cpu"):
                 torch.ops.fsdp.set_(
                     mod.unsharded_weight, all_gather(mod.sharded_weight)
                 )
-        mod.weight = mod.unsharded_weight
+        mod._parameters["weight"] = mod.unsharded_weight
 
     # Forward:
     #   mod.sharded_weight = local_shard (always)
@@ -54,7 +54,7 @@ def init_fake_distributed(device="cpu"):
     #     mod.unsharded_weight = zero-sized allgather
 
     def fw_post_hook(mod, inp, out):
-        mod.weight = mod.sharded_weight
+        mod._parameters["weight"] = mod.sharded_weight
         mod.unsharded_weight.untyped_storage().resize_(0)
 
     def bw_pre_hook(mod, gO):
@@ -74,7 +74,7 @@ def init_fake_distributed(device="cpu"):
                 torch.ops.fsdp.set_(
                     mod.unsharded_weight, all_gather(mod.sharded_weight)
                 )
-        mod.weight = mod.unsharded_weight
+        mod._parameters["weight"] = mod.unsharded_weight
 
     # Backward:
     #   mod.sharded_weight = local_shard (always)
@@ -88,7 +88,7 @@ def init_fake_distributed(device="cpu"):
     def bw_post_hook(mod, gI, gO):
         grad = mod.weight.grad
         new_grad = reduce_scatter(grad)
-        mod.weight = mod.sharded_weight
+        mod._parameters["weight"] = mod.sharded_weight
         mod.weight.grad = new_grad
         mod.unsharded_weight.untyped_storage().resize_(0)
 
@@ -99,7 +99,6 @@ def init_fake_distributed(device="cpu"):
     m.sharded_weight = nn.Parameter(reduce_scatter(m.weight))
     m.unsharded_weight = nn.Parameter(all_gather(m.sharded_weight))
     m.unsharded_weight.untyped_storage().resize_(0)
-    del m.weight
 
     m.register_full_backward_pre_hook(bw_pre_hook)
     m.register_full_backward_hook(bw_post_hook)
