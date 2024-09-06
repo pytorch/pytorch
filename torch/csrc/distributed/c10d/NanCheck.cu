@@ -29,19 +29,26 @@ union BytePack16 {
 };
 
 typedef union BytePack16 BytePack;
+#define UNROLL 8
 
 template <typename T>
 __global__ void checkForNaN(T* data, size_t size) {
   BytePack* ptr = (BytePack*)data;
   size_t sizeInBP = size *  sizeof(T) / sizeof(BytePack);
-  size_t loopSize = blockDim.x * gridDim.x;
+  size_t loopSize = blockDim.x * gridDim.x * UNROLL;
   size_t gridOffset = blockIdx.x * blockDim.x + threadIdx.x;
-  bool hasNan = false;
+
   for (size_t i = gridOffset; i < sizeInBP; i += loopSize) {
-    BytePack tmp = ptr[i];
-    hasNan |= isnan(tmp.f64[0]) || isnan(tmp.f64[1]);
+    BytePack tmp[UNROLL];
+    #pragma unroll 8
+    for (int j = 0; j < UNROLL; j++) {
+      tmp[j] = ptr[i + blockDim.x * gridDim.x * j];
+    }
+    #pragma unroll 8
+    for (int j = 0; j < UNROLL; j++) {
+      if (isnan(tmp[j].f64[0]) || isnan(tmp[j].f64[1])) __trap();
+    }
   }
-  CUDA_KERNEL_ASSERT(!hasNan);
 }
 
 // CHECK if a Tensor contains NAN in any of its element
@@ -50,7 +57,7 @@ void checkForNan(const at::Tensor& tensor, at::cuda::CUDAStream& stream) {
   if (!torch::is_floating_point(tensor)) {
     return;
   }
-  const size_t maxNumThreadsPerBlock = 256;
+  const size_t maxNumThreadsPerBlock = 512;
   const size_t maxNumBlocks = 24;
   const size_t numThreadsPerBlock =
       std::min<size_t>(maxNumThreadsPerBlock, tensor.numel());
