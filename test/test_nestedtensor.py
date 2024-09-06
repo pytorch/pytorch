@@ -5956,22 +5956,20 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         )
         nt_shape = nt.shape
         nt_inner_shape = nt.values().shape
-        self.assertRaisesRegex(
+        with self.assertRaisesRegex(
             ValueError,
             r"permute\(\): number of dimensions in the tensor input \(4\) "
             + r"does not match the length of the desired ordering of dimensions \(3\).",
-            lambda: nt.permute(0, 2, 1),
-        )
-        self.assertRaisesRegex(
-            ValueError,
-            r"permute\(\): duplicate dims are not allowed.",
-            lambda: nt.permute(0, 2, -2, 3),
-        )
-        self.assertRaisesRegex(
-            ValueError,
-            "Permute is not supported on the batch dimension for jagged NT",
-            lambda: nt.permute(1, 0, 2, 3),
-        )
+        ):
+            nt.permute(0, 2, 1)
+        with self.assertRaisesRegex(
+            ValueError, r"permute\(\): duplicate dims are not allowed."
+        ):
+            nt.permute(0, 2, -2, 3)
+        with self.assertRaisesRegex(
+            ValueError, "Permute is not supported on the batch dimension for jagged NT"
+        ):
+            nt.permute(1, 0, 2, 3)
         nt_permute = nt.permute(0, 2, 1, -1)
         self.assertEqual(
             nt_permute.shape, (nt_shape[0], nt_shape[2], nt_shape[1], nt_shape[3])
