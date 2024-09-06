@@ -14,17 +14,6 @@ from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.triton_utils import HAS_CUDA
 
 
-try:
-    try:
-        from .test_torchinductor import copy_tests
-    except ImportError:
-        from test_torchinductor import copy_tests
-except (unittest.SkipTest, ImportError) as e:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
-
-
 def compile(
     model, example_inputs, dynamic_shapes, inductor_configs, device
 ) -> AOTICompiledModel:
@@ -35,10 +24,10 @@ def compile(
         strict=False,
     )
     with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
-        torch._inductor.aoti_compile_and_package(
-            f.name, ep, example_inputs, inductor_configs=inductor_configs
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep, example_inputs, inductor_configs=inductor_configs
         )  # type: ignore[arg-type]
-        loaded = load_package(f.name)
+        loaded = load_package(package_path)
     return loaded
 
 

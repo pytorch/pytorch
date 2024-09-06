@@ -23,20 +23,9 @@ namespace fs = std::experimental::filesystem;
 #include <sys/stat.h>
 #endif
 
-namespace {
-bool file_exists(std::string& path) {
-#ifdef _WIN32
-  return fs::exists(path);
-#else
-  struct stat rc;
-  return lstat(path.c_str(), &rc) == 0;
-#endif
-}
-} // namespace
-
 // TODO: C++17 has the filesystem header, which may replace these
 #ifdef _WIN32
-  // On Windows, the POSIX implementations are considered deprecated. We simply
+// On Windows, the POSIX implementations are considered deprecated. We simply
 // map to the newer variant.
 #include <direct.h>
 #include <io.h>
@@ -47,6 +36,31 @@ bool file_exists(std::string& path) {
 #include <sys/types.h>
 #include <unistd.h>
 #endif
+
+namespace {
+bool file_exists(std::string& path) {
+#ifdef _WIN32
+  return fs::exists(path);
+#else
+  struct stat rc;
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
+
+std::string create_temp_dir() {
+#ifdef _WIN32
+  throw std::runtime_error("Not implemented");
+#else
+  std::string temp_dir = "/tmp/XXXXXX";
+  if (mkdtemp(temp_dir.data()) == nullptr) {
+    throw std::runtime_error(
+        std::string("Failed to create temporary directory: ") +
+        strerror(errno));
+  }
+  return temp_dir;
+#endif
+}
+} // namespace
 
 namespace torch::inductor {
 
@@ -273,9 +287,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
   }
 
-  std::string temp_dir = "/tmp/XXXXXX";
-  mkdtemp(temp_dir.data());
-
+  std::string temp_dir = create_temp_dir();
   std::string so_filename = "";
   std::string cpp_filename = "";
   std::string consts_filename = "";
@@ -377,8 +389,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::remove(temp_dir.c_str());
 }
 
-std::shared_ptr<AOTIModelContainerRunner> AOTIModelPackageLoader::get_runner() {
-  return runner_;
+AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
+  return runner_.get();
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::run(

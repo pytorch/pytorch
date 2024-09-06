@@ -18,7 +18,7 @@ std::vector<at::Tensor> AOTIModelContainerRunnerCpu::run(
 }
 
 namespace {
-std::shared_ptr<AOTIModelContainerRunner> create_aoti_runner_cpu(
+std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cpu(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
@@ -26,7 +26,7 @@ std::shared_ptr<AOTIModelContainerRunner> create_aoti_runner_cpu(
   if (device_str != "cpu") {
     throw std::runtime_error("Incorrect device passed to aoti_runner_cpu");
   }
-  return std::make_shared<AOTIModelContainerRunnerCpu>(
+  return std::make_unique<AOTIModelContainerRunnerCpu>(
       model_so_path, num_models);
 }
 } // namespace
