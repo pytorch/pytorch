@@ -208,12 +208,6 @@ def init_backend_registration():
             "halide": HalideScheduling,
             "triton": TritonScheduling,
         }
-        if config.cpu_backend == "triton":
-            import os
-
-            assert (
-                os.environ.get("TRITON_CPU_BACKEND", "0") == "1"
-            ), "TRITON_CPU_BACKEND=1 must be set if you are using Triton on the CPU"
         register_backend_for_device(
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
@@ -282,8 +276,8 @@ def get_device_op_overrides(device: str):
 @functools.lru_cache(None)
 def boolean_ops():
     return (
-        "is_inf",
-        "is_nan",
+        "isinf",
+        "isnan",
         "logical_not",
         "signbit",
         "le",
