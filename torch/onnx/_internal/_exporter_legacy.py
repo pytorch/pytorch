@@ -821,10 +821,6 @@ class ONNXProgram:
                         )
             else:
                 try:
-                    if not isinstance(self.model_proto, onnx.ModelProto):  # type: ignore[attr-defined]
-                        raise ValueError(
-                            "onnx_program.ModelProto is not an onnx.ModelProto"
-                        )
                     destination.write(self.model_proto.SerializeToString())
                 except ValueError as exc:
                     raise ValueError(
