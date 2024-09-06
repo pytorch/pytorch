@@ -388,20 +388,6 @@ class DDP_TP_Test(InductorTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     def test_ddp_tp(self):
-        def make_compiler_fn(fullgraph=True, dynamic=True):
-            def _compiler_fn(gm):
-                """Same as torch.compile() but counts number of compiles"""
-
-                def _inner_compiler(gm_, example_inputs_):
-                    counters["compiled_autograd"]["compiles"] += 1
-                    return inductor.compile(gm_, example_inputs_)
-
-                return torch.compile(
-                    gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
-                )
-
-            return _compiler_fn
-
         ref_model = Net()
         compiled_replicate_model = deepcopy(ref_model)
         mesh_2d = init_device_mesh(
