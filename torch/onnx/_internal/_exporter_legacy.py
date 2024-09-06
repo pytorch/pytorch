@@ -11,22 +11,11 @@ import os
 import tempfile
 import warnings
 from collections import defaultdict
-from typing import (
-    Any,
-    Callable,
-    Final,
-    Mapping,
-    Protocol,
-    runtime_checkable,
-    Sequence,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, Callable, Final, Mapping, Sequence, TYPE_CHECKING, TypeVar
 from typing_extensions import Self
 
 import torch
 import torch._ops
-import torch.export as torch_export
 import torch.utils._pytree as pytree
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal.diagnostics import infra
@@ -314,27 +303,17 @@ class ResolvedExportOptions(ExportOptions):
     def __init__(
         self,
         options: ExportOptions | ResolvedExportOptions,
-        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,  # type: ignore[name-defined]
+        model: torch.nn.Module | Callable | None = None,  # type: ignore[name-defined]
     ):
         from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
             diagnostics,
             dynamo_graph_extractor,
-            torch_export_graph_extractor,
         )
 
         if isinstance(options, ResolvedExportOptions):
             self.dynamic_shapes = options.dynamic_shapes
             self.diagnostic_options = options.diagnostic_options
             self.fake_context = options.fake_context
-            # private
-            if isinstance(model, torch_export.ExportedProgram) and not isinstance(
-                options.fx_tracer, torch_export_graph_extractor.TorchExport
-            ):
-                message = "'model' of type 'ExportedProgram' is only supported with 'TorchExport' FX Tracer"
-                e = InvalidExportOptionsError(message)
-                raise InvalidExportOptionsError(
-                    ONNXProgram._from_failure(e, options.diagnostic_context), message
-                )
             self.fx_tracer = options.fx_tracer
             self.onnx_registry = options.onnx_registry
             self.onnxfunction_dispatcher = options.onnxfunction_dispatcher
@@ -355,10 +334,8 @@ class ResolvedExportOptions(ExportOptions):
             self.diagnostic_options = resolve(
                 options.diagnostic_options, DiagnosticOptions()
             )
-            if isinstance(model, torch_export.ExportedProgram):
-                self.fx_tracer = torch_export_graph_extractor.TorchExport()
-            else:
-                self.fx_tracer = dynamo_graph_extractor.DynamoExport()
+
+            self.fx_tracer = dynamo_graph_extractor.DynamoExport()
 
             self.fake_context = resolve(options.fake_context, None)  # type: ignore[arg-type]
             self.diagnostic_context = diagnostics.DiagnosticContext(
@@ -462,97 +439,6 @@ def enable_fake_mode():
     )  # type: ignore[assignment]
 
 
-@runtime_checkable
-class ONNXProgramSerializer(Protocol):
-    """Protocol for serializing an ONNX graph into a specific format (e.g. Protobuf).
-    Note that this is an advanced usage scenario."""
-
-    def serialize(
-        self, onnx_program: ONNXProgram, destination: io.BufferedIOBase
-    ) -> None:
-        """Protocol method that must be implemented for serialization.
-
-        Args:
-            onnx_program: Represents the in-memory exported ONNX model
-            destination: A binary IO stream or pre-allocated buffer into which
-                the serialized model should be written.
-
-        Example:
-
-            A simple serializer that writes the exported :py:obj:`onnx.ModelProto` in Protobuf
-            format to ``destination``:
-
-            ::
-
-                # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
-                >>> import io
-                >>> import torch
-                >>> import torch.onnx
-                >>> class MyModel(torch.nn.Module):  # Dummy model
-                ...     def __init__(self) -> None:
-                ...         super().__init__()
-                ...         self.linear = torch.nn.Linear(2, 2)
-                ...     def forward(self, x):
-                ...         out = self.linear(x)
-                ...         return out
-                >>> class ProtobufONNXProgramSerializer:
-                ...     def serialize(
-                ...         self, onnx_program: torch.onnx.ONNXProgram, destination: io.BufferedIOBase
-                ...     ) -> None:
-                ...         destination.write(onnx_program.model_proto.SerializeToString())
-                >>> model = MyModel()
-                >>> arg1 = torch.randn(2, 2, 2)  # positional input 1
-                >>> torch.onnx.dynamo_export(model, arg1).save(
-                ...     destination="exported_model.onnx",
-                ...     serializer=ProtobufONNXProgramSerializer(),
-                ... )
-        """
-        ...
-
-
-class ProtobufONNXProgramSerializer:
-    """Serializes ONNX graph as Protobuf."""
-
-    def serialize(
-        self, onnx_program: ONNXProgram, destination: io.BufferedIOBase
-    ) -> None:
-        import onnx
-
-        if not isinstance(onnx_program.model_proto, onnx.ModelProto):  # type: ignore[attr-defined]
-            raise ValueError("onnx_program.ModelProto is not an onnx.ModelProto")
-        destination.write(onnx_program.model_proto.SerializeToString())
-
-
-class LargeProtobufONNXProgramSerializer:
-    """Serializes ONNX graph as Protobuf.
-
-    Fallback to serializing as Protobuf with external data for models larger than 2GB.
-    """
-
-    _destination_path: Final[str]  # type: ignore[misc]
-
-    def __init__(self, destination_path: str):
-        self._destination_path = destination_path
-
-    def serialize(
-        self, onnx_program: ONNXProgram, destination: io.BufferedIOBase
-    ) -> None:
-        """`destination` is ignored. The model is saved to `self._destination_path` instead."""
-        import onnx
-
-        if onnx_program.model_proto.ByteSize() < _PROTOBUF_SIZE_MAX_LIMIT:
-            onnx.save_model(onnx_program.model_proto, self._destination_path)  # type: ignore[attr-defined]
-        else:
-            # ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB
-            # Fallback to serializing the model with external data.
-            onnx.save_model(  # type: ignore[attr-defined]
-                onnx_program.model_proto,
-                self._destination_path,
-                save_as_external_data=True,
-                all_tensors_to_one_file=True,
-            )
-
-
 class ONNXRuntimeOptions:
     """Options to influence the execution of the ONNX model through ONNX Runtime.
 
@@ -593,7 +479,6 @@ class ONNXProgram:
         diagnostic_context: Context object for the SARIF diagnostic system responsible for logging errors and metadata.
         fake_context: The fake context used for symbolic tracing.
         export_exception: The exception that occurred during export, if any.
-        model_signature: The model signature for the exported ONNX graph.
     """
 
     _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined, misc]
@@ -602,9 +487,8 @@ class ONNXProgram:
     _diagnostic_context: Final[diagnostics.DiagnosticContext]  # type: ignore[misc]
     _fake_context: Final[ONNXFakeContext | None]  # type: ignore[misc]
     _export_exception: Final[Exception | None]  # type: ignore[misc]
-    _model_signature: Final[torch.export.ExportGraphSignature | None]  # type: ignore[misc]
     _model_torch: Final[  # type: ignore[misc]
-        torch.nn.Module | Callable | torch_export.ExportedProgram | None
+        torch.nn.Module | Callable | None
     ]
 
     def __init__(
@@ -616,14 +500,9 @@ class ONNXProgram:
         *,
         fake_context: ONNXFakeContext | None = None,
         export_exception: Exception | None = None,
-        model_signature: torch.export.ExportGraphSignature | None = None,
-        model_torch: torch.nn.Module
-        | Callable
-        | torch_export.ExportedProgram
-        | None = None,
+        model_torch: torch.nn.Module | Callable | None = None,
     ):
         self._model_proto = model_proto
-        self._model_signature = model_signature
         self._model_torch = model_torch
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
@@ -634,10 +513,7 @@ class ONNXProgram:
     def __call__(
         self,
         *args: Any,
-        model_with_state_dict: torch.nn.Module
-        | Callable
-        | torch_export.ExportedProgram
-        | None = None,
+        model_with_state_dict: torch.nn.Module | Callable | None = None,
         options: ONNXRuntimeOptions | None = None,
         **kwargs: Any,
     ) -> Any:
@@ -672,8 +548,6 @@ class ONNXProgram:
                 onnx_model = os.path.join(tmpdir_path, "model.onnx")
                 if isinstance(model_with_state_dict, torch.nn.Module):
                     model_state = model_with_state_dict.state_dict()
-                elif isinstance(model_with_state_dict, torch_export.ExportedProgram):
-                    model_state = model_with_state_dict.state_dict
                 else:
                     model_state = None
                 self.save(
@@ -710,104 +584,6 @@ class ONNXProgram:
         return self._model_proto
 
     @property
-    def model_signature(self) -> torch.export.ExportGraphSignature | None:
-        """The model signature for the exported ONNX graph.
-
-        This information is relevant because ONNX specification often differs from PyTorch's, resulting
-        in a ONNX graph with input and output schema different from the actual PyTorch model implementation.
-        By using the model signature, the users can understand the inputs and outputs differences
-        and properly execute the model in ONNX Runtime.
-
-        NOTE: Model signature is only available when the ONNX graph was exported from a
-        :class:`torch.export.ExportedProgram` object.
-
-        NOTE: Any transformation done to the model that changes the model signature must be accompanied
-        by updates to this model signature as well through :class:`InputAdaptStep` and/or :class:`OutputAdaptStep`.
-
-        Example:
-
-            The following model produces different sets of inputs and outputs.
-            The first 4 inputs are model parameters (namely conv1.weight, conv2.weight, fc1.weight, fc2.weight),
-            and the next 2 inputs are registered buffers (namely my_buffer2, my_buffer1) and finally
-            the last 2 inputs are user inputs (namely x and b).
-            The first output is a buffer mutation (namely my_buffer2) and the last output is the actual model output.
-
-            >>> import pprint
-            >>> class CustomModule(torch.nn.Module):
-            ...     def __init__(self) -> None:
-            ...         super().__init__()
-            ...         self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
-            ...         self.register_buffer("my_buffer1", torch.tensor(3.0))
-            ...         self.register_buffer("my_buffer2", torch.tensor(4.0))
-            ...         self.conv1 = torch.nn.Conv2d(1, 32, 3, 1, bias=False)
-            ...         self.conv2 = torch.nn.Conv2d(32, 64, 3, 1, bias=False)
-            ...         self.fc1 = torch.nn.Linear(9216, 128, bias=False)
-            ...         self.fc2 = torch.nn.Linear(128, 10, bias=False)
-            ...
-            ...     def forward(self, x, b):
-            ...         tensor_x = self.conv1(x)
-            ...         tensor_x = torch.nn.functional.sigmoid(tensor_x)
-            ...         tensor_x = self.conv2(tensor_x)
-            ...         tensor_x = torch.nn.functional.sigmoid(tensor_x)
-            ...         tensor_x = torch.nn.functional.max_pool2d(tensor_x, 2)
-            ...         tensor_x = torch.flatten(tensor_x, 1)
-            ...         tensor_x = self.fc1(tensor_x)
-            ...         tensor_x = torch.nn.functional.sigmoid(tensor_x)
-            ...         tensor_x = self.fc2(tensor_x)
-            ...         output = torch.nn.functional.log_softmax(tensor_x, dim=1)
-            ...         (
-            ...             self.my_buffer2.add_(1.0) + self.my_buffer1
-            ...         )  # Mutate buffer through in-place addition
-            ...         return output
-            >>> inputs = (torch.rand((64, 1, 28, 28), dtype=torch.float32), torch.randn(3))
-            >>> exported_program = torch.export.export(
-            ...     CustomModule(), args=inputs
-            ... ).run_decompositions({})
-            >>> onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
-            >>> pprint.pprint(onnx_program.model_signature)
-            ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.PARAMETER: 2>,
-                                                  arg=TensorArgument(name='p_conv1_weight'),
-                                                  target='conv1.weight',
-                                                  persistent=None),
-                                        InputSpec(kind=<InputKind.PARAMETER: 2>,
-                                                  arg=TensorArgument(name='p_conv2_weight'),
-                                                  target='conv2.weight',
-                                                  persistent=None),
-                                        InputSpec(kind=<InputKind.PARAMETER: 2>,
-                                                  arg=TensorArgument(name='p_fc1_weight'),
-                                                  target='fc1.weight',
-                                                  persistent=None),
-                                        InputSpec(kind=<InputKind.PARAMETER: 2>,
-                                                  arg=TensorArgument(name='p_fc2_weight'),
-                                                  target='fc2.weight',
-                                                  persistent=None),
-                                        InputSpec(kind=<InputKind.BUFFER: 3>,
-                                                  arg=TensorArgument(name='b_my_buffer2'),
-                                                  target='my_buffer2',
-                                                  persistent=True),
-                                        InputSpec(kind=<InputKind.BUFFER: 3>,
-                                                  arg=TensorArgument(name='b_my_buffer1'),
-                                                  target='my_buffer1',
-                                                  persistent=True),
-                                        InputSpec(kind=<InputKind.USER_INPUT: 1>,
-                                                  arg=TensorArgument(name='x'),
-                                                  target=None,
-                                                  persistent=None),
-                                        InputSpec(kind=<InputKind.USER_INPUT: 1>,
-                                                  arg=TensorArgument(name='b'),
-                                                  target=None,
-                                                  persistent=None)],
-                           output_specs=[OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>,
-                                                    arg=TensorArgument(name='add'),
-                                                    target='my_buffer2'),
-                                         OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>,
-                                                    arg=TensorArgument(name='_log_softmax'),
-                                                    target=None)])
-        """
-
-        return self._model_signature
-
-    @property
     def diagnostic_context(self) -> diagnostics.DiagnosticContext:
         """The diagnostic context associated with the export."""
 
@@ -822,10 +598,7 @@ class ONNXProgram:
     def adapt_torch_inputs_to_onnx(
         self,
         *model_args,
-        model_with_state_dict: torch.nn.Module
-        | Callable
-        | torch_export.ExportedProgram
-        | None = None,
+        model_with_state_dict: torch.nn.Module | Callable | None = None,
         **model_kwargs,
     ) -> Sequence[torch.Tensor | int | float | bool | torch.dtype]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
@@ -895,10 +668,7 @@ class ONNXProgram:
     def adapt_torch_outputs_to_onnx(
         self,
         model_outputs: Any,
-        model_with_state_dict: torch.nn.Module
-        | Callable
-        | torch_export.ExportedProgram
-        | None = None,
+        model_with_state_dict: torch.nn.Module | Callable | None = None,
     ) -> Sequence[torch.Tensor | int | float | bool]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
@@ -959,7 +729,6 @@ class ONNXProgram:
         *,
         include_initializers: bool = True,
         model_state: dict[str, Any] | str | None = None,
-        serializer: ONNXProgramSerializer | None = None,
     ) -> None:
         """Saves the in-memory ONNX model to ``destination`` using specified ``serializer``.
 
@@ -975,17 +744,12 @@ class ONNXProgram:
                 It can be either a string with the path to a checkpoint or a dictionary with the actual model state.
                 The supported file formats are the same as those supported by `torch.load` and `safetensors.safe_open`.
                 Required when :func:`enable_fake_mode` is used but real initializers are needed on the ONNX graph.
-            serializer: The serializer to use. If not specified, the model will be serialized as Protobuf.
         """
+        import onnx
 
         assert (
             include_initializers is True or model_state is None
         ), "Cannot specify both `include_initializers=False` and `model_state`."
-        if serializer is None:
-            if isinstance(destination, str):
-                serializer = LargeProtobufONNXProgramSerializer(destination)
-            else:
-                serializer = ProtobufONNXProgramSerializer()
 
         # Add initializers when symbolic tracing is enabled
         _model_state_files: list[str | io.BytesIO | dict[str, Any]] = []
@@ -1031,10 +795,24 @@ class ONNXProgram:
         else:
             if isinstance(destination, str):
                 with open(destination, "wb") as f:
-                    serializer.serialize(self, f)
+                    if self.model_proto.ByteSize() < _PROTOBUF_SIZE_MAX_LIMIT:
+                        onnx.save_model(self.model_proto, destination)  # type: ignore[attr-defined]
+                    else:
+                        # ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB
+                        # Fallback to serializing the model with external data.
+                        onnx.save_model(  # type: ignore[attr-defined]
+                            self.model_proto,
+                            destination,
+                            save_as_external_data=True,
+                            all_tensors_to_one_file=True,
+                        )
             else:
                 try:
-                    serializer.serialize(self, destination)
+                    if not isinstance(self.model_proto, onnx.ModelProto):  # type: ignore[attr-defined]
+                        raise ValueError(
+                            "onnx_program.ModelProto is not an onnx.ModelProto"
+                        )
+                    destination.write(self.model_proto.SerializeToString())
                 except ValueError as exc:
                     raise ValueError(
                         "'destination' should be provided as a path-like string when saving a model larger than 2GB. "
@@ -1143,7 +921,7 @@ class Exporter:
     def __init__(
         self,
         options: ResolvedExportOptions,
-        model: torch.nn.Module | Callable | torch_export.ExportedProgram,
+        model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
@@ -1231,9 +1009,6 @@ class Exporter:
                 self.options.fx_tracer.output_adapter,
                 self.options.diagnostic_context,
                 fake_context=self.options.fake_context,
-                model_signature=getattr(
-                    self.model, "graph_signature", None
-                ),  # Available for isinstance(self.model, ExportedProgram) only
                 model_torch=self.model,
             )
 
@@ -1354,12 +1129,12 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
 
 
 def dynamo_export(
-    model: torch.nn.Module | Callable | torch_export.ExportedProgram,  # type: ignore[name-defined]
+    model: torch.nn.Module | Callable,
     /,
     *model_args,
     export_options: ExportOptions | None = None,
     **model_kwargs,
-) -> ONNXProgram:
+) -> ONNXProgram | Any:
     """Export a torch.nn.Module to an ONNX graph.
 
     Args:
@@ -1544,7 +1319,6 @@ __all__ = [
     "DiagnosticOptions",
     "ExportOptions",
     "ONNXProgram",
-    "ONNXProgramSerializer",
     "ONNXRuntimeOptions",
     "InvalidExportOptionsError",
     "OnnxExporterError",
