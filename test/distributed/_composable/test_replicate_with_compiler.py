@@ -32,6 +32,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm,
 )
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 
@@ -56,9 +57,11 @@ class Net(nn.Module):
         return self.fc4(self.fc3(self.fc2(_fc1)))
 
 
-def compiler_fn(no_inductor=False):
+def compiler_fn(no_inductor=False, used_in_compiled_autograd=False):
     def _compiler_fn(gm):
         def inner_compiler(gm_, example_inputs_):
+            if used_in_compiled_autograd:
+                counters["compiled_autograd"]["compiles"] += 1
             if no_inductor:
                 return gm_
             else:
@@ -367,35 +370,42 @@ class ReplicateTest(MultiProcessInductorTestCase):
         fc.run(code)
 
 
-class DDP_TP_Test(MultiProcessInductorTestCase):
-    @property
-    def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+class DDP_TP_Test(InductorTestCase):
+    def setUp(self):
+        self.rank = 0
+        self.world_size = 4
+        torch.cuda.set_device("cuda:0")
 
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
 
     def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
+        dist.destroy_process_group()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
-    @skip_if_lt_x_gpu(4)
     def test_ddp_tp(self):
-        torch.cuda.set_device(f"cuda:{self.rank}")
-        dist.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
-        model = Net().cuda()
-        compiled_replicate_model = deepcopy(model)
+        def make_compiler_fn(fullgraph=True, dynamic=True):
+            def _compiler_fn(gm):
+                """Same as torch.compile() but counts number of compiles"""
+
+                def _inner_compiler(gm_, example_inputs_):
+                    counters["compiled_autograd"]["compiles"] += 1
+                    return inductor.compile(gm_, example_inputs_)
+
+                return torch.compile(
+                    gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
+                )
+
+            return _compiler_fn
+
+        ref_model = Net()
+        compiled_replicate_model = deepcopy(ref_model)
         mesh_2d = init_device_mesh(
             "cuda", (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
@@ -407,8 +417,8 @@ class DDP_TP_Test(MultiProcessInductorTestCase):
             "fc3": ColwiseParallel(),
             "fc4": RowwiseParallel(),
         }
-        model = parallelize_module(model, tp_mesh, parallelize_plan)
-        model = replicate(model, device_mesh=dp_mesh)
+        ref_model = parallelize_module(ref_model, tp_mesh, parallelize_plan)
+        ref_model = replicate(ref_model, device_mesh=dp_mesh)
         compiled_replicate_model = parallelize_module(
             compiled_replicate_model, tp_mesh, parallelize_plan
         )
@@ -416,15 +426,22 @@ class DDP_TP_Test(MultiProcessInductorTestCase):
             compiled_replicate_model, device_mesh=dp_mesh
         )
         compiled_replicate_model = torch.compile(compiled_replicate_model)
-        data = torch.randn([1, DIM]).cuda()
-        with compiled_autograd.enable(compiler_fn()):
-            loss = compiled_replicate_model(data).sum()
-            loss.backward()
+        data = torch.randn([1, DIM])
+        with compiled_autograd.enable(compiler_fn(used_in_compiled_autograd=True)):
+            out = compiled_replicate_model(data)
+            loss = out.sum()
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Expected ProxyTensor, got <class 'torch.distributed._tensor.api.DTensor'>",
+            ):
+                loss.backward()
 
-        loss = model(data).sum()
-        loss.backward()
-        for p1, p2 in zip(model.parameters(), compiled_replicate_model.parameters()):
-            self.assertEqual(p1.grad, p2.grad)
+                ref_loss = ref_model(data).sum()
+                ref_loss.backward()
+                for p1, p2 in zip(
+                    ref_model.parameters(), compiled_replicate_model.parameters()
+                ):
+                    self.assertEqual(p1.grad, p2.grad)
 
 
 if __name__ == "__main__":
