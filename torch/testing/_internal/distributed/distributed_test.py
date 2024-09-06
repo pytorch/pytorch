@@ -1010,8 +1010,8 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_new_subgroups_by_enumeration_input_rank_exceeds_world_size(self):
-            _, group_id, rank = self._init_global_test()
-            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            _, group_id, _ = self._init_global_test()
+            init_multigpu_helper(dist.get_world_size(), BACKEND)
             world_size = get_world_size(group_id)
 
             with self.assertRaisesRegex(
@@ -1028,7 +1028,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_new_subgroups_by_enumeration_negative_input_rank(self):
-            _, _, rank = self._init_global_test()
+            self._init_global_test()
 
             with self.assertRaisesRegex(
                 ValueError,
@@ -1575,7 +1575,7 @@ class DistributedTest:
         def test_batch_isend_irecv_mixed_backend_err(self):
             self._barrier()
             rank = dist.get_rank()
-            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            init_multigpu_helper(dist.get_world_size(), BACKEND)
             group_gloo = dist.new_group(ranks=[0, 1], backend="gloo")
             group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
             if rank == 0:
@@ -4644,7 +4644,7 @@ class DistributedTest:
                     dist.barrier()
 
                     # Run regular model.
-                    for i in range(6):
+                    for _ in range(6):
                         ddp_model_with_no_hook.zero_grad()
                         out = ddp_model_with_no_hook(inp)
                         loss = out.sum()
@@ -6214,7 +6214,7 @@ class DistributedTest:
                 return os.environ[var] if var in os.environ else "N/A"
 
             dist.set_debug_level(dist.DebugLevel.INFO)
-            _, group_id, rank = self._init_global_test()
+            _, group_id, _ = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=False)
 
             ddp_logging_data = model_DDP._get_ddp_logging_data()
@@ -6929,7 +6929,7 @@ class DistributedTest:
                 device_ids=[self.rank],
                 find_unused_parameters=True,
             )
-            for i in range(3):
+            for _ in range(3):
                 loss = net(inp).sum()
                 loss.backward()
             # Now enable the profiler.
@@ -7819,7 +7819,6 @@ class DistributedTest:
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_device(self):
-            m = nn.Linear(10, 10).to(self.rank)
             expected_len = 2
 
             class TensorWrapper:
@@ -7957,7 +7956,7 @@ class DistributedTest:
 
         @require_backend_is_available({"gloo"})
         def test_grads_same_across_ranks_with_no_sync(self):
-            group, group_id, rank = self._init_global_test()
+            _, _, rank = self._init_global_test()
             world_size = dist.get_world_size()
             if world_size < 2:
                 self.skipTest("This test requires at least two ranks.")
@@ -8116,7 +8115,6 @@ class DistributedTest:
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_invalid_static_graph(self):
-            world_size = dist.get_world_size()
             torch.cuda.set_device(self.rank)
             model = torch.nn.parallel.DistributedDataParallel(
                 ControlFlowToyModel().cuda(self.rank),
@@ -8336,11 +8334,11 @@ class DistributedTest:
                     self._generate_sparse_tensors_for_bucket_assignment_test()
                 )
                 if use_logger:
-                    result = dist._compute_bucket_assignment_by_size(
+                    dist._compute_bucket_assignment_by_size(
                         tensors_sparse, [400], logger=net.logger
                     )
                 else:
-                    result = dist._compute_bucket_assignment_by_size(
+                    dist._compute_bucket_assignment_by_size(
                         tensors_sparse, [400]
                     )
             if use_logger:
@@ -8490,7 +8488,7 @@ class DistributedTest:
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
             torch.cuda.set_device(self.rank)
-            ctx, expected_err = self._determine_expected_error_verify_model_across_rank(
+            ctx, _ = self._determine_expected_error_verify_model_across_rank(
                 group_to_use
             )
             # Creates network with different sized embedding table on different
@@ -8516,7 +8514,7 @@ class DistributedTest:
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
             torch.cuda.set_device(self.rank)
-            ctx, expected_err = self._determine_expected_error_verify_model_across_rank(
+            ctx, _ = self._determine_expected_error_verify_model_across_rank(
                 group_to_use, diff_num_params=True
             )
 
@@ -8700,7 +8698,6 @@ class DistributedTest:
                         return F.relu(self.lin1(x))
 
             torch.manual_seed(31415)
-            world_size = dist.get_world_size()
             torch.cuda.set_device(self.rank)
             model = ToyModel(self.rank).cuda(self.rank)
             ddp_model = torch.nn.parallel.DistributedDataParallel(
@@ -8711,7 +8708,7 @@ class DistributedTest:
                 static_graph=static_graph,
             )
             random_input = torch.randn(20, 10, device=self.rank)
-            for i in range(10):
+            for _ in range(10):
                 out = ddp_model(random_input)
                 loss = out.sum()
                 loss.backward()
@@ -9040,9 +9037,7 @@ class DistributedTest:
             if ignore_sparse:
                 for module_name, module in model.named_modules():
                     if module == model.sub_module.embedding_net.embedding:
-                        for parameter_name, param in module.named_parameters(
-                            recurse=False
-                        ):
+                        for parameter_name, _ in module.named_parameters(recurse=False):
                             fqn = f"{module_name}.{parameter_name}"
                             sparse_embedding_fqns.append(fqn)
 
@@ -9198,7 +9193,7 @@ class DistributedTest:
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
             # Test sync occurs in training mode.
             with torch.autograd.profiler.profile() as prof:
-                for i in range(6):
+                for _ in range(6):
                     inp = torch.randn(10, 2, 4, 4).cuda(rank)
                     out = model(inp)
                     loss = out.sum()
@@ -9325,7 +9320,7 @@ class DistributedTest:
                 "dict": dict,
             }
             for output_type in type_mapping.keys():
-                for i in range(6):
+                for _ in range(6):
                     out = model(inp, output_type=output_type)
                     loss = get_loss(out)
                     loss.backward()
@@ -9374,7 +9369,7 @@ class DistributedTest:
                     find_unused_parameters=find_unused,
                     static_graph=static_graph,
                 )
-                for i in range(6):
+                for _ in range(6):
                     out = ddp(inp)
                     self.assertFalse(out[0].requires_grad)
                     o = (out[0] + out[1]).sum()
@@ -9540,7 +9535,7 @@ class DistributedTest:
                     broadcast_buffers=False,
                 )
                 inp = torch.randn(2, 10, device=rank)
-                for i in range(2):
+                for _ in range(2):
                     loss_hook = model_ddp(inp).sum()
                     # Since buffer reduction is done pre-forward, simulate it for
                     # no hook case here.
@@ -9620,7 +9615,7 @@ class DistributedTest:
                 device_ids=[self.rank],
             )
             inp = torch.randn(2, 10, device=rank)
-            for i in range(2):
+            for _ in range(2):
                 loss_hook = model_ddp(inp).sum()
                 loss_no_hook = model_ddp_no_hook(inp).sum()
                 self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
@@ -9983,7 +9978,7 @@ class DistributedTest:
                 device_ids=[self.rank],
             )
             inp = torch.randn(2, 10, device=rank)
-            for i in range(2):
+            for _ in range(2):
                 if rank == 0:
                     model_ddp.module.buffer = model_ddp.module.buffer + 1
                 loss = model_ddp(inp).sum()
@@ -10037,7 +10032,6 @@ class DistributedTest:
                         loss = a.sum() + b.sum()
                         loss.backward()
 
-                    ws = dist.get_world_size()
                     for p in local_model.parameters():
                         p.grad.data = p.grad / dist.get_world_size()
 
@@ -10409,7 +10403,7 @@ class DistributedTest:
             ddp._set_ddp_sink_clone(False)
             input = torch.rand(10, 10).cuda(self.rank)
 
-            with OpPatcher() as patcher:
+            with OpPatcher():
                 ddp(input).sum().backward()
 
 
