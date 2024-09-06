@@ -289,6 +289,30 @@ runner_types:
         ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
       am2:
         ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
+  lf.c.linux.arm64.2xlarge.ephemeral:
+    disk_size: 256
+    instance_type: t4g.2xlarge
+    is_ephemeral: true
+    max_available: 200
+    os: linux
+    ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
+    variants:
+      amz2023:
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
+      am2:
+        ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
+  lf.c.linux.arm64.m7g.4xlarge.ephemeral:
+    disk_size: 256
+    instance_type: m7g.4xlarge
+    is_ephemeral: true
+    max_available: 200
+    os: linux
+    ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
+    variants:
+      amz2023:
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
+      am2:
+        ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
   lf.c.linux.arm64.m7g.metal:
     disk_size: 256
     instance_type: m7g.metal

@@ -107,4 +107,3 @@ def reset_code_caches() -> None:
             if code:
                 reset_code(code)
         code_context.clear()
-        convert_frame.disabled_codes.clear()
