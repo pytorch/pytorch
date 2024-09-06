@@ -300,7 +300,7 @@ class TestFullyShardCompile(FSDPTest):
             .check_not("    extern_kernels.")
             .check_not("    triton_")
             .check_not("    torch.ops.")
-            .check_not(" inductor_ops.")
+            .check_not("    inductor_ops.")
         )
 
     def inductor_code_check_fsdp_all_gather(
@@ -308,7 +308,6 @@ class TestFullyShardCompile(FSDPTest):
         file_check,
         overlapped_compute_op_str,
         last_all_gather=False,
-        is_fwd=True,
     ):
         file_check = file_check.check("torch.ops.fsdp.all_gather_copy_in.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
@@ -604,7 +603,6 @@ class TestFullyShardCompile(FSDPTest):
                         last_all_gather=True,
                     ),
                 ]:
-                    fwd_ag_block_info["is_fwd"] = True
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **fwd_ag_block_info
                     )
@@ -622,7 +620,6 @@ class TestFullyShardCompile(FSDPTest):
                         last_all_gather=True,
                     ),
                 ]:
-                    bwd_ag_block_info["is_fwd"] = False
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **bwd_ag_block_info
                     )
@@ -791,7 +788,6 @@ class TestFullyShardCompile(FSDPTest):
                         last_all_gather=True,
                     ),
                 ]:
-                    fwd_ag_block_info["is_fwd"] = True
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **fwd_ag_block_info
                     )
@@ -811,7 +807,6 @@ class TestFullyShardCompile(FSDPTest):
                         last_all_gather=True,
                     ),
                 ]:
-                    bwd_ag_block_info["is_fwd"] = False
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **bwd_ag_block_info
                     )
