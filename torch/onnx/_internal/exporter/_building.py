@@ -261,9 +261,9 @@ def _get_or_create_constant(
     dtype: ir.DataType,
     opset: onnxscript.values.Opset,
 ) -> ir.Value:
-    if isinstance(arg, (tuple, list)):
+    if isinstance(arg, list):
         # Make the arg hashable
-        arg = tuple(arg)
+        arg = tuple(arg)  # type: ignore[assignment]
     constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
     if constant_value is None:
         constant_tensor = ir.tensor(value=arg, dtype=dtype)  # type: ignore[arg-type]
@@ -340,7 +340,7 @@ def _process_python_constants(
             constant_value = opset.Constant(value=arg)
         else:
             # Deduplicate the constants
-            constant_value = _get_or_create_constant(constant_farm, arg, dtype, opset)
+            constant_value = _get_or_create_constant(constant_farm, arg, dtype, opset)  # type: ignore[arg-type]
 
         named_inputs[param.name] = constant_value
     return named_inputs  # type: ignore[return-value]
@@ -431,7 +431,7 @@ def _process_python_sequences(
                         val, (bool, int, float)
                     ), f"Expected int or float, got {type(val)}"
                     new_args.append(
-                        _get_or_create_constant(constant_farm, [arg], dtype, opset)
+                        _get_or_create_constant(constant_farm, [arg], dtype, opset)  # type: ignore[arg-type]
                     )
             named_inputs[name] = opset.Concat(*new_args)
             continue
@@ -512,7 +512,7 @@ class OpRecorder(evaluator.Evaluator):
             )
             converted_named_inputs = _process_python_sequences(
                 op_signature,
-                converted_named_inputs,
+                converted_named_inputs,  # type: ignore[arg-type]
                 type_binding,
                 self.constant_farm,
                 self.opset,
