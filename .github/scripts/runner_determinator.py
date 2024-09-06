@@ -302,7 +302,7 @@ def parse_settings_from_text(settings_text: str) -> Settings:
                 experiments[exp_name] = Experiment(**valid_settings)
             return Settings(experiments)
 
-    except Exception as e:
+    except Exception:
         log.exception("Failed to parse settings")
 
     return Settings()
