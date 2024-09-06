@@ -37,6 +37,7 @@ def aoti_compile_and_package(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     inductor_configs: Optional[Dict[str, Any]] = None,
+    additional_sources: Optional[List[str]] = None,
 ) -> None:
     """
     Compiles the exported program with AOTInductor, and packages it into a .pt2
@@ -62,7 +63,7 @@ def aoti_compile_and_package(
     aoti_files = aot_compile(
         exported_program.module(), args, kwargs, options=inductor_configs
     )  # type: ignore[arg-type]
-    res = package_aoti(package_path, aoti_files)
+    res = package_aoti(package_path, aoti_files, additional_sources=additional_sources)
     assert res == package_path
 
 

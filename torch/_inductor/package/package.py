@@ -14,7 +14,7 @@ from torch._inductor import exc
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
 
-from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
+from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION, EXTRA_DIR
 
 
 log = logging.getLogger(__name__)
@@ -155,7 +155,12 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
     return output_so
 
 
-def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> str:
+def package_aoti(
+    archive_file: str,
+    aoti_files: Union[str, Dict[str, str]],
+    *,
+    additional_sources: Optional[List[str]] = None,
+) -> str:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
 
@@ -164,6 +169,7 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
         aoti_files: This can either be a singular path to a directory containing
         the AOTInductor files, or a dictionary mapping the model name to the
         path to its AOTInductor generated files.
+        additional_sources: Additional source files to include in the package.
     """
     if isinstance(aoti_files, str):
         aoti_files = {"model": aoti_files}
@@ -184,7 +190,7 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
             for root, dirs, files in os.walk(aoti_output_dir):
                 for file in files:
                     log.debug(
-                        "Saving file %s to archive in %s%s/%s",
+                        "Saving AOTI generated file %s to archive in %s%s/%s",
                         os.path.join(root, file),
                         AOTINDUCTOR_DIR,
                         model_name,
@@ -194,6 +200,21 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
                         f"{AOTINDUCTOR_DIR}{model_name}/{file}",
                         os.path.join(root, file),
                     )
+
+            for file in additional_sources:
+                assert os.path.exists(file), f"File {file} does not exist"
+                log.debug(
+                    "Saving additional source %s to archive in %s%s/%s",
+                    file,
+                    EXTRA_DIR,
+                    model_name,
+                    file,
+                )
+                archive_writer.write_file(
+                    f"{EXTRA_DIR}{model_name}/{file}",
+                    file,
+                )
+
     return archive_file
 
 
