@@ -63,7 +63,7 @@ from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
-    FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
+    Application, FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
 )
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.numbers import int_oo
@@ -1267,13 +1267,14 @@ def _is_supported_equivalence(expr):
         )
     return isinstance(expr, sympy.Symbol)
 
-def _has_unsupported_sympy_function(expr) -> bool:
+def _has_uninterpretable_sympy_function(expr) -> bool:
+    """
+    Add functions that our sympy interpreter can't reify into FX nodes
+    """
     return expr.has(
         torch.utils._sympy.functions.ToFloat,
         torch.utils._sympy.functions.TruncToInt,
         torch.utils._sympy.functions.CeilToInt,
-        # add more sympy functions that involve float<->int conversion here
-        # since our solver does not know what to do with them
     )
 
 @dataclass(frozen=True)
@@ -1675,6 +1676,15 @@ class DimConstraints:
         # symbols that are marked dynamic
         self._marked_dynamic = marked_dynamic
 
+        # track supported sympy functions and subtract from list of all sympy functions
+        self._supported_sympy_functions: Set[sympy.Function] = {
+            Application,
+            Mod,
+            PythonMod,
+            FloorDiv,
+        }
+        self._enumerate_sympy_functions()
+
     def rewrite_with_congruences(self, s, expr):
         """
         Eliminate expressions of the form b // d and b % d while adding congruences of the form b % d == k.
@@ -1741,6 +1751,20 @@ class DimConstraints:
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
+    def _enumerate_sympy_functions(self):
+        module = torch.utils._sympy.functions
+        all_functions = set()
+        for attr in dir(module):
+            if isinstance(func := getattr(module, attr), sympy.FunctionClass):
+                all_functions.add(func)
+        self._unsupported_sympy_functions = all_functions.difference(self._supported_sympy_functions)
+
+    def _has_unsupported_sympy_function(self, expr) -> bool:
+        """
+        Tracks list of sympy.Functions the export solver doesn't know how to handle.
+        """
+        return expr.has(*self._unsupported_sympy_functions)
+
     def add(self, expr) -> bool:
         """Add an expression to the set of constraints.
 
@@ -1757,7 +1781,7 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne) or _has_unsupported_sympy_function(expr):
+        if isinstance(expr, sympy.Ne) or self._has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
@@ -4404,7 +4428,7 @@ class ShapeEnv:
     @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
-        expect_rational=True, size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None,
+        size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None,
         var_to_range: Optional[Tuple[Tuple[sympy.Symbol, ValueRanges]]] = None
     ) -> "Optional[sympy.Expr]":
         """
@@ -5097,18 +5121,18 @@ class ShapeEnv:
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
-                      expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
+                      size_oblivious: bool = False, *, forcing_spec: bool = False):
         try:
-            return self._evaluate_expr(orig_expr, hint, fx_node, expect_rational, size_oblivious, forcing_spec=forcing_spec)
+            return self._evaluate_expr(orig_expr, hint, fx_node, size_oblivious, forcing_spec=forcing_spec)
         except Exception:
             self.log.warning(
-                "failed during evaluate_expr(%s, hint=%s, expect_rational=%s, size_oblivious=%s, forcing_spec=%s",
-                orig_expr, hint, expect_rational, size_oblivious, forcing_spec
+                "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
+                orig_expr, hint, size_oblivious, forcing_spec
             )
             raise
 
     def _evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
-                       expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
+                       size_oblivious: bool = False, *, forcing_spec: bool = False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
@@ -5176,7 +5200,6 @@ class ShapeEnv:
             expr = orig_expr
 
             static_expr = self._maybe_evaluate_static(expr,
-                                                      expect_rational=expect_rational,
                                                       size_oblivious=size_oblivious)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
@@ -5196,7 +5219,6 @@ class ShapeEnv:
                     if not size_oblivious:
                         size_oblivious_result = self._maybe_evaluate_static(
                             expr,
-                            expect_rational=expect_rational,
                             size_oblivious=True
                         )
 
