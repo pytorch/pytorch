@@ -223,7 +223,7 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: |
-          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.2.* numpy==1.24.*
+          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.2.* fbscribelogger==0.1.* numpy==1.24.*
           pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
       - name: Run run_test.py (nonretryable)
         run: |
