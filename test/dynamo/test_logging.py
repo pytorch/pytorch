@@ -9,7 +9,8 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
-from torch._dynamo.testing import skipIfNotPy311
+from torch._dynamo.testing import empty_line_normalizer, skipIfNotPy311
+from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import (
     find_free_port,
@@ -668,10 +669,18 @@ print("arf")
     def test_logs_out(self):
         import tempfile
 
-        with tempfile.NamedTemporaryFile() as tmp:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            file_path = _as_posix_path(tmp.name)
+            """
+            NamedTemporaryFile will include a file open operation.
+            On Windowsm the file is opened by NamedTemporaryFile, the
+            following run_process_no_exception can't access a opened file.
+            And then, raise a PermissionError: [Errno 13] Permission denied: [file_path]
+            """
+            tmp.close()
             env = dict(os.environ)
             env["TORCH_LOGS"] = "dynamo"
-            env["TORCH_LOGS_OUT"] = tmp.name
+            env["TORCH_LOGS_OUT"] = file_path
             stdout, stderr = self.run_process_no_exception(
                 """\
 import torch
@@ -683,9 +692,18 @@ fn(torch.randn(5))
                 """,
                 env=env,
             )
-            with open(tmp.name) as fd:
+            with open(
+                file_path, encoding="utf-8"
+            ) as fd:  # encoding file to UTF-8 for Windows.
                 lines = fd.read()
-                self.assertEqual(lines, stderr.decode("utf-8"))
+                fd.close()
+                os.remove(
+                    file_path
+                )  # Delete temp file manually, due to setup NamedTemporaryFile as delete=False.
+                self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
+                    empty_line_normalizer(lines),
+                    empty_line_normalizer(stderr.decode("utf-8")),
+                )
 
 
 # single record tests
@@ -723,6 +741,7 @@ exclusions = {
     "trace_shape_events",
     "cudagraph_static_inputs",
     "benchmarking",
+    "loop_ordering",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

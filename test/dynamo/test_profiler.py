@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
+import logging
 from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+import torch._logging
 from torch._dynamo.utils import dynamo_timed
 from torch.testing._internal.common_utils import TemporaryFileName
 
@@ -163,20 +165,41 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_profiler_dynamo_compiled_region(self):
-        def fn(x, y, z):
-            return x @ y + z
+        torch._logging.set_logs(dynamo=logging.INFO)
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        def fn(x, y):
+            r = y.sum(dim=1)
+            print(r.shape)
+            return x * r
 
-        inputs = [torch.rand(4, 4) for _ in range(3)]
+        fn_c = torch.compile(fn)
 
-        for _ in range(2):
-            opt_fn(*inputs)
+        with torch.profiler.profile(record_shapes=True) as prof:
+            fn_c(
+                torch.randn(10),
+                torch.randn(10, 10),
+            )
 
-        with torch.profiler.profile() as prof:
-            opt_fn(*inputs)
+            fn_c(
+                torch.randn(10),
+                torch.randn(10, 15),
+            )
 
-        self.assertTrue(any(e.name == "Torch-Compiled Region" for e in prof.events()))
+        for e in prof.events():
+            if e.name == "Torch-Compiled Region":
+                print(e.kwinputs)
+        self.assertTrue(
+            any(
+                e.name == "Torch-Compiled Region" and e.kwinputs["context"] == "0/0_1"
+                for e in prof.events()
+            )
+        )
+        self.assertTrue(
+            any(
+                e.name == "Torch-Compiled Region" and e.kwinputs["context"] == "1/0"
+                for e in prof.events()
+            )
+        )
 
 
 if __name__ == "__main__":

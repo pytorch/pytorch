@@ -707,15 +707,24 @@ class PreGradBatchLinearFusion(BatchFusion):
                     torch.baddbmm,
                     args=(unsqueeze_biases, stack_inputs, transpose_weight),
                 )
-                bmm.meta["example_value"] = torch.baddbmm(
-                    unsqueeze_biases.meta["example_value"],
-                    stack_inputs.meta["example_value"],
-                    transpose_weight.meta["example_value"],
-                )
-                bmm_meta = bmm.meta["example_value"]
+                try:
+                    # it will have runtime error to broadcast when it has dynamic shape included
+                    # in the meta data, so we need to skip the update meta data
+                    bmm.meta["example_value"] = torch.baddbmm(
+                        unsqueeze_biases.meta["example_value"],
+                        stack_inputs.meta["example_value"],
+                        transpose_weight.meta["example_value"],
+                    )
+                    bmm_meta = bmm.meta["example_value"]
+                except Exception as e:
+                    log.debug(
+                        f" exception when update bmm meta data with stack error tracekey {e}"  # noqa: G004
+                    )
+                    bmm_meta = None
 
             bmm = graph.call_function(torch.unbind, args=(bmm,), kwargs={"dim": 0})
-            bmm.meta["example_value"] = torch.unbind(bmm_meta, dim=0)
+            if bmm_meta is not None:
+                bmm.meta["example_value"] = torch.unbind(bmm_meta, dim=0)
             for i, linear in enumerate(batch_nodes):
                 with graph.inserting_after(bmm):
                     getitem = graph.call_function(operator.getitem, args=(bmm, i))

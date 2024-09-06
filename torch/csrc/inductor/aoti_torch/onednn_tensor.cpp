@@ -6,8 +6,7 @@
 #include <ideep.hpp>
 #endif
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
 
 #if AT_ONEDNN_ENABLED()
 
@@ -45,5 +44,4 @@ at::Tensor onednn_tensor_from_data_ptr(
 
 #endif
 
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor
