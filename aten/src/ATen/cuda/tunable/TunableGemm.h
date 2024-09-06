@@ -253,7 +253,15 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
   }
 
   std::string Signature() override {
-    return c10::str("GemmAndBiasTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    const int buf_len = 64;
+    char buf[buf_len];
+    int ret;
+
+    ret = snprintf(buf, buf_len, "GemmAndBiasTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
+
+    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
+
+    return std::string(buf, ret);
   }
 };
 
@@ -286,7 +294,15 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
   }
 
   std::string Signature() override {
-    return c10::str("GemmStridedBatchedTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    const int buf_len = 64;
+    char buf[buf_len];
+    int ret;
+
+    ret = snprintf(buf, buf_len, "GemmStridedBatchedTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
+
+    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
+
+    return std::string(buf, ret);
   }
 };
 
@@ -304,11 +320,19 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
   }
 
   std::string Signature() override {
-    return c10::str("ScaledGemmTunableOp",
-            "_", TypeName<AT>(AT{}),
-            "_", TypeName<BT>(BT{}),
-            "_", TypeName<CT>(CT{}),
-            "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    const int buf_len = 128;
+    char buf[buf_len];
+    int ret;
+
+    ret = snprintf(buf, buf_len, "ScaledGemmTunableOp_%s_%s_%s_%c%c",
+            TypeName<AT>(AT{}),
+            TypeName<BT>(BT{}),
+            TypeName<CT>(CT{}),
+            BlasOpToString(ALayout), BlasOpToString(BLayout));
+
+    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
+
+    return std::string(buf, ret);
   }
 };
 
