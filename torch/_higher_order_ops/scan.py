@@ -49,7 +49,7 @@ def scan(
     ],
     init: pytree.PyTree,
     input: pytree.PyTree,
-    dim: int,
+    dim: int = 0,
     reverse: bool = False,
 ) -> Tuple[pytree.PyTree, pytree.PyTree]:
     r"""
@@ -70,11 +70,11 @@ def scan(
             and the second output  of ``combine_fn`` represents a slice of the output.
             This function must be pure, i.e., no lifted arguments are supported at the moment
             and may not have any side effects.
-        init (torch.Tensor): The inital scan carry, a tensor, or nested pytree of tensors.
-            The ``init`` is expected to have the same pytree structure as the first output element
+        init (torch.Tensor or pytree with tensor leaves): The inital scan carry, a tensor, or nested pytree of tensors.
+            The ``init`` is expected to have the same pytree structure as the first output element (i.e. carry)
             of ``combine_fn``.
-        input (torch.Tensor): The input tensor, or nested pytree of tensors.
-        dim (int): the dimension to scan over
+        input (torch.Tensor or pytree with tensor leaves): The input tensor, or nested pytree of tensors.
+        dim (int): the dimension to scan over, default 0.
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
 
     Returns:
@@ -84,13 +84,13 @@ def scan(
     Example::
 
         def add(x: torch.Tensor, y: torch.Tensor):
-            return x + y, x + y
+            next_carry = y = x + y
+            return next_carry, y
 
-        i0 = 0.
-        x = [1., 2., 3., 4.]
-        cumsum = scan(add, init=i0, input=x, dim)
-        # This produces the output
-        carry, cumsum = 10., torch.stack([1., 3., 7., 10.], dim)
+        i0 = torch.zeros(1)
+        xs = torch.arange(1, 5)
+        # returns torch.tensor([10]), torch.tensor([1., 3., 6., 10.])
+        last_carry, cumsum = scan(add, init=i0, input=xs)
 
 
     """
@@ -118,16 +118,14 @@ def scan(
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_input, spec_input = pytree.tree_flatten(input)
 
-    def check_arg(arg):
-        if any(not isinstance(x, torch.Tensor) for x in arg):
-            raise RuntimeError("All leaves must be a Tensor")
-        if any(x.shape[dim] == 0 for x in arg):
-            raise RuntimeError("All leaves must have a scan dimension > 0")
-
-    check_arg(leaves_init)
     if len(leaves_init) == 0:
         raise RuntimeError("Init tensors must be provided")
-    check_arg(leaves_input)
+    if any(not isinstance(x, torch.Tensor) for x in leaves_init):
+            raise RuntimeError("All init leaves must be a Tensor")
+    if any(not isinstance(x, torch.Tensor) for x in leaves_input):
+            raise RuntimeError("All input leaves must be a Tensor")
+    if any(x.shape[dim] == 0 for x in leaves_input):
+            raise RuntimeError("All input leaves must have a scan dimension > 0")
 
     if len(leaves_input) > 0:
         if reverse:
@@ -270,6 +268,9 @@ def generic_scan(operator, init, input, dim=0, reverse=False):
     scans = _scan(init, input)
     return scans
 
+def make_expanded_output_shape(dim, scan_length, shapes, use_sh=False):
+    expanded_shapes = [tuple((s if use_sh else -1) if i != dim else scan_length for i, s in enumerate(sh)) for sh in shapes]
+    return expanded_shapes
 
 def trace_scan(
     proxy_mode,
@@ -278,6 +279,7 @@ def trace_scan(
     init: List[torch.Tensor],
     input: List[torch.Tensor],
     dim: int,
+    reverse: bool
 ):
     with disable_proxy_modes_tracing():
         sample_inits = [
@@ -291,7 +293,7 @@ def trace_scan(
         ]
         sample_inputs = [
             torch.empty_like(
-                aten.slice(x, 0, 1, 1),
+                aten.slice(x, dim, 0, 1, 1),
                 dtype=x.dtype,
                 device=x.device,
                 requires_grad=x.requires_grad,
@@ -308,40 +310,81 @@ def trace_scan(
             outputs = node.args[0]
 
     assert outputs is not None
-    assert len(outputs) == len(
-        input
-    ), f"expected combine_fn to return {len(input)} results but got {len(outputs)}"
-
-    for i, si, o in zip(input, sample_inputs, outputs):
-        o_meta = o.meta["tensor_meta"]
-        assert o_meta.dtype == i.dtype, (
-            f"combine_fn output type mismatch, expected {i.dtype} "
-            + f"but got {o_meta.dtype}"
+    if len(outputs) != 2:
+        raise RuntimeError(
+            f"Expected to return 2 outputs: carry, out_matrix, but got:"
+            f"\n  {len(outputs)} elements"
         )
-        assert (
-            si.shape == o_meta.shape
-        ), "The pytree of the out of the operator needs to match the input pytree"
+
+    for ini, carry in zip(init, outputs[0]):
+        ini_meta = ini
+        carry_meta = carry.meta["tensor_meta"]
+        carry_val = carry.meta["val"]
+        if carry_meta.dtype != ini_meta.dtype:
+            raise RuntimeError(
+                f"Expected the init and the new carry produced by the operator to be a tensor of {carry_meta.dtype} but "
+                + f"got {ini_meta.dtype} and {carry_meta.dtype}"
+            )
+        if (
+            carry_val.device != ini_meta.device
+            or carry_meta.dtype != ini_meta.dtype
+            or carry_meta.shape != ini_meta.shape
+        ):
+            raise RuntimeError(
+                f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
+                + f"the metadata of init with {ini_meta}"
+            )
+
+    # for ini, inp, carry, out, si in zip(init, input, outputs[0], outputs[1], sample_inputs):
+    #     ini_meta = ini
+    #     inp_meta = inp
+    #     carry_meta = carry.meta["tensor_meta"]
+    #     carry_val = carry.meta["val"]
+    #     out_val = out.meta["val"]
+    #     if (
+    #         carry_val.device != inp_meta.device
+    #         or out_val.device != inp_meta.device
+    #         or ini_meta.device != inp_meta.device
+    #     ):
+    #         raise RuntimeError(
+    #             f"Expected the init, the input and the outputs of combine_fn to be a tensor on device {inp_meta.device} but "
+    #             + f"got {ini_meta.device}, {inp_meta.device}, {carry_val.device}, {out_val.device}"
+    #         )
+    #     if carry_meta.dtype != ini_meta.dtype:
+    #         raise RuntimeError(
+    #             f"Expected the init and the new carry produced by the operator to be a tensor of {carry_meta.dtype} but "
+    #             + f"got {ini_meta.dtype} and {carry_meta.dtype}"
+    #         )
+    #     if (
+    #         carry_val.device != ini_meta.device
+    #         or carry_meta.dtype != ini_meta.dtype
+    #         or carry_meta.shape != ini_meta.shape
+    #     ):
+    #         raise RuntimeError(
+    #             f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
+    #             + f"the metadata of init with {ini_meta}"
+    #         )
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, input, dim)
+    args = (combine_graph, init, input, dim, reverse)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="scan"
     )
 
     with disable_proxy_modes_tracing():
-        dim_len = input[0].shape[dim]
-        fake_out_shapes = [
-            tuple(-1 if i != dim else dim_len for i, sh in enumerate(o.size()))
-            for o in outputs
-        ]
-        out = (
-            init,
-            tuple(t.expand(*sh).clone() for t, sh in zip(outputs, fake_out_shapes)),
-        )
+        scan_length = input[0].shape[dim]
+        fake_out_shapes = make_expanded_output_shape(dim, scan_length, [o.meta["val"].size() for o in outputs[1]])
+        def expand_tensor(t, sh):
+            if isinstance(t, torch.Tensor):
+                return t.expand(*sh)
+            return t
+
+        expanded_outs = [pytree.tree_map(expand_tensor, t.meta["val"], sh) for t, sh in zip(outputs[1], fake_out_shapes)]
+        out = (init, expanded_outs)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -360,7 +403,7 @@ scan_op.py_impl(DispatchKey.Autograd)(
 
 @scan_op.py_impl(ProxyTorchDispatchMode)
 def scan_proxy_mode(mode, combine_fn, init, input, dim, reverse):
-    return trace_scan(mode, scan_op, combine_fn, init, input, dim)
+    return trace_scan(mode, scan_op, combine_fn, init, input, dim, reverse)
 
 
 @scan_op.py_impl(FakeTensorMode)

@@ -151,7 +151,40 @@ def _fake_scan(combine_fn, init, input=None, dim=0, reverse=False):
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(results, dummy_out_spec),
     )
+    
+def compile_mode_helper(fct, compile_mode):
+    if compile_mode == "compile":
+        return torch.compile(fct, fullgraph=True, dynamic=False)
+    elif compile_mode == "compile_dynamic_shape":
+        return torch.compile(fct, fullgraph=True, dynamic=True)
+    elif compile_mode == "eager":
+        return torch.compile(fct, fullgraph=True, backend="eager")
+    else:
+        return fct
+    
+def get_scan_combine_fn(name, associative=True):
+    def add(x: torch.Tensor, y: torch.Tensor):
+        return x + y
 
+    def mul(x: torch.Tensor, y: torch.Tensor):
+        return x * y
+
+    def div(x: torch.Tensor, y: torch.Tensor):
+        return x / y
+    
+    if name == 'add':
+        fct = add
+    elif name == 'mul':
+        fct = mul
+    elif name == 'div':
+        fct = div
+    else:
+        raise ValueError("Combine_fn name unknown!")
+    
+    if not associative:
+        return lambda x, y: (fct(x, y), fct(x, y))
+    else:
+        return fct
 
 def _while_loop_tests():
     def simple(x):
@@ -1249,10 +1282,11 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
@@ -1260,11 +1294,8 @@ def forward(self, pred_1, x_1):
     @decorateIf(
         unittest.skip,
         lambda params: (
-            (
-                params["combine_mode"] == "pointwise"
-                and params["device"] == torch.device("cpu")
-            )
-            or params["compile_mode"] == "eager"
+            params["combine_mode"] == "pointwise"
+            and params["device"] == torch.device("cpu")
         ),
     )
     def test_associative_scan_compile(
@@ -1277,15 +1308,8 @@ def forward(self, pred_1, x_1):
             return x * y
 
         x = torch.randn(3, 10, 2, device=device)
-        torch.compiler.reset()
-        if compile_mode == "compile":
-            scan_fct = torch.compile(associative_scan, fullgraph=True, dynamic=False)
-        elif compile_mode == "compile_dynamic_shape":
-            scan_fct = torch.compile(associative_scan, fullgraph=True, dynamic=True)
-        elif compile_mode == "eager":
-            scan_fct = torch.compile(associative_scan, fullgraph=True, backend="eager")
-        else:
-            scan_fct = associative_scan
+        
+        scan_fct = compile_mode_helper(associative_scan, compile_mode)
 
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
             result = scan_fct(op, x, 0, reverse=reverse, combine_mode=combine_mode)
@@ -1309,16 +1333,11 @@ def forward(self, pred_1, x_1):
             )
         self.assertEqual(cumsum1, cumsum_exp)
 
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the scan tests, as scan currently does not support inductor
-    @decorateIf(
-        unittest.skip,
-        lambda params: params["compile_mode"] != "eager"
-        and params["compile_mode"] != "none",
-    )
     def test_scan_compile(self, reverse, compile_mode, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y, x + y
@@ -1333,15 +1352,8 @@ def forward(self, pred_1, x_1):
             return x / y, x / y
 
         x = torch.randn(3, 10, 2, device=device)
-        torch.compiler.reset()
-        if compile_mode == "compile":
-            scan_fct = torch.compile(scan, fullgraph=True, dynamic=False)
-        elif compile_mode == "compile_dynamic_shape":
-            scan_fct = torch.compile(scan, fullgraph=True, dynamic=True)
-        elif compile_mode == "eager":
-            scan_fct = torch.compile(scan, fullgraph=True, backend="eager")
-        else:
-            scan_fct = scan
+        
+        scan_fct = compile_mode_helper(scan, compile_mode)
 
         for op, op_pt, init in [
             (add, torch.cumsum, torch.zeros(1, 10, 2, device=device)),
@@ -1395,33 +1407,23 @@ def forward(self, pred_1, x_1):
         result_exp = _fake_scan(div, init=init, input=x, dim=0, reverse=reverse)
         self.assertEqual(result, result_exp)
 
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the scan tests, as scan currently does not support inductor
-    @decorateIf(
-        unittest.skip,
-        lambda params: params["compile_mode"] != "eager"
-        and params["compile_mode"] != "none",
-    )
-    def test_scan_device_dtype(self, reverse, compile_mode, device):
+    @parametrize("dtype", [torch.float16, torch.float32, torch.float64, 
+                           torch.int8, torch.int16, torch.int32, 
+                           torch.int64, torch.complex64, torch.complex128])
+    def test_scan_dtype(self, reverse, compile_mode, device, dtype):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + x, y + y
 
-        torch.compiler.reset()
-        if compile_mode == "compile":
-            scan_fct = torch.compile(scan, fullgraph=True, dynamic=False)
-        elif compile_mode == "compile_dynamic_shape":
-            scan_fct = torch.compile(scan, fullgraph=True, dynamic=True)
-        elif compile_mode == "eager":
-            scan_fct = torch.compile(scan, fullgraph=True, backend="eager")
-        else:
-            scan_fct = scan
+        scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Check all outputs and carries on the correct device and with torch.float32
-        x = torch.randn(3, 10, 2, device=device)
-        op, init = (add, torch.zeros(1, 10, 2, device=device))
+        x = torch.randn(3, 10, 2, device=device).to(dtype=dtype)
+        op, init = (add, torch.zeros(1, 10, 2, device=device, dtype=dtype))
         result = scan_fct(op, init=init, input=x, dim=0, reverse=reverse)
         result_exp = _fake_scan(op, init=init, input=x, dim=0, reverse=reverse)
         self.assertEqual(result, result_exp)
@@ -1431,12 +1433,12 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(
             [[r.dtype for r in res] for res in result],
-            [[torch.float32 for _ in res] for res in result],
+            [[dtype for _ in res] for res in result],
         )
 
         # Check all outputs and carries on the correct device and
         # carry.dtype torch.float32 and output.dtype torch.float16
-        x = torch.randn(3, 10, 2, device=device, dtype=torch.float16)
+        x = torch.randn(3, 10, 2, device=device).to(dtype=dtype)
         op, init = (add, torch.zeros(1, 10, 2, device=device, dtype=torch.float32))
         result = scan_fct(op, init=init, input=x, dim=0, reverse=reverse)
         result_exp = _fake_scan(op, init=init, input=x, dim=0, reverse=reverse)
@@ -1445,21 +1447,21 @@ def forward(self, pred_1, x_1):
             [[r.dtype for r in res] for res in result],
             [
                 [torch.float32 for _ in range(len(result[0]))],
-                [torch.float16 for _ in range(len(result[1]))],
+                [dtype for _ in range(len(result[1]))],
             ],
         )
 
         # Check all outputs and carries on the correct device and
         # carry.dtype torch.int64 and output.dtype torch.float32
-        x = torch.randn(3, 10, 2, device=device, dtype=torch.float32)
-        op, init = (add, torch.zeros(1, 10, 2, device=device, dtype=torch.float16))
+        x = torch.randn(3, 10, 2, device=device)
+        op, init = (add, torch.zeros(1, 10, 2, device=device, dtype=dtype))
         result = scan_fct(op, init=init, input=x, dim=0, reverse=reverse)
         result_exp = _fake_scan(op, init=init, input=x, dim=0, reverse=reverse)
         self.assertEqual(result, result_exp)
         self.assertEqual(
             [[r.dtype for r in res] for res in result],
             [
-                [torch.float16 for _ in range(len(result[0]))],
+                [dtype for _ in range(len(result[0]))],
                 [torch.float32 for _ in range(len(result[1]))],
             ],
         )
@@ -1682,7 +1684,10 @@ def forward(self, pred_1, x_1):
             and params["device"] == torch.device("cpu")
         ),
     )
-    def test_associative_scan_complex_pytree(self, combine_mode, reverse, device):
+    
+    @requires_cuda
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_wrong_pytree(self, device):
         def fct_wrong_pytree(x, y):
             return {
                 "i": x["i"] * y["j"][0][0],
@@ -1690,18 +1695,9 @@ def forward(self, pred_1, x_1):
                 "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
             }
 
-        def fct_pointwise(x, y):
-            return {
-                "i": x["i"] * y["i"],
-                "j": (
-                    [x["j"][0][0] * y["j"][0][0]],
-                    [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
-                ),
-            }
-
-        x = torch.randn(3, 2, 2, device=device, requires_grad=True)
-        y = torch.randn(3, 2, 2, device=device, requires_grad=True)
-        z = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        z = torch.randn(3, 2, 2, device=device)
         inp = {"i": x, "j": ([y], [{"o": z}])}
 
         with self.assertRaisesRegex(
@@ -1712,17 +1708,45 @@ def forward(self, pred_1, x_1):
             "Observed exception.*",
         ):
             result = associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
+    
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and params["device"] == torch.device("cpu")
+        ),
+    )
+    def test_associative_scan_complex_pytree(self, combine_mode, reverse, device):
+        def fct_pointwise(x, y):
+            return {
+                "i": x["i"] * y["i"],
+                "j": (
+                    [x["j"][0][0] * y["j"][0][0]],
+                    [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
+                ),
+            }
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        z = torch.randn(3, 2, 2, device=device)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
 
         result = associative_scan(
             fct_pointwise, inp, 0, combine_mode=combine_mode, reverse=reverse
         )
         expected_result = _fake_associative_scan(fct_pointwise, inp, 0, reverse=reverse)
         self.assertEqual(result, expected_result)
-
+        
     @requires_cuda
-    @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_complex_pytree(self, reverse, device):
+    def test_scan_wrong_pytree(self, device):
         # Init and input have same pytree
         def fct_wrong_pytree(x, y):
             return (
@@ -1738,6 +1762,28 @@ def forward(self, pred_1, x_1):
                 },
             )
 
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        z = torch.randn(3, 2, 2, device=device)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+        inp_flat, inp_spec = pytree.tree_flatten(inp)
+        init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
+        init = pytree.tree_unflatten(init_flat, inp_spec)
+
+        with self.assertRaisesRegex(
+            # Should be: RuntimeError,
+            # r"The number of leaves of the pytree of the new carry produced by
+            # the operator needs to match the length of the pytree of the init",
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            result = scan(fct_wrong_pytree, init=init, input=inp, dim=0)
+
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_complex_pytree(self, reverse, device):
+        # Init and input have same pytree
         def fct_pointwise(x, y):
             return (
                 {
@@ -1756,22 +1802,13 @@ def forward(self, pred_1, x_1):
                 },
             )
 
-        x = torch.randn(3, 2, 2, device=device, requires_grad=True)
-        y = torch.randn(3, 2, 2, device=device, requires_grad=True)
-        z = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        z = torch.randn(3, 2, 2, device=device)
         inp = {"i": x, "j": ([y], [{"o": z}])}
         inp_flat, inp_spec = pytree.tree_flatten(inp)
         init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
         init = pytree.tree_unflatten(init_flat, inp_spec)
-
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError,
-            # r"The number of leaves of the pytree of the new carry produced by
-            # the operator needs to match the length of the pytree of the init",
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result = scan(fct_wrong_pytree, init=init, input=inp, dim=0)
 
         result = scan(fct_pointwise, init=init, input=inp, dim=0, reverse=reverse)
         expected_result = _fake_scan(
@@ -1779,10 +1816,11 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result, expected_result)
 
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
@@ -1790,11 +1828,8 @@ def forward(self, pred_1, x_1):
     @decorateIf(
         unittest.skip,
         lambda params: (
-            (
-                params["combine_mode"] == "pointwise"
-                and params["device"] == torch.device("cpu")
-            )
-            or params["compile_mode"] == "eager"
+            params["combine_mode"] == "pointwise"
+            and params["device"] == torch.device("cpu")
         ),
     )
     def test_associative_scan_downstream_op(
@@ -1811,15 +1846,7 @@ def forward(self, pred_1, x_1):
             )
             return o @ W
 
-        torch.compiler.reset()
-        if compile_mode == "compile":
-            fct_cmp = torch.compile(chain_fct, fullgraph=True, dynamic=False)
-        elif compile_mode == "compile_dynamic_shape":
-            fct_cmp = torch.compile(chain_fct, fullgraph=True, dynamic=True)
-        elif compile_mode == "eager":
-            fct_cmp = torch.compile(chain_fct, fullgraph=True, backend="eager")
-        else:
-            fct_cmp = chain_fct
+        fct_cmp = compile_mode_helper(chain_fct, compile_mode)
 
         inp = torch.randn(3, 10, 2, device=device)
         expected_result = _fake_associative_scan(
@@ -1838,15 +1865,7 @@ def forward(self, pred_1, x_1):
             )
             return o2
 
-        torch.compiler.reset()
-        if compile_mode == "compile":
-            fct_cmp = torch.compile(chain_fct_same_dim, fullgraph=True, dynamic=False)
-        elif compile_mode == "compile_dynamic_shape":
-            fct_cmp = torch.compile(chain_fct_same_dim, fullgraph=True, dynamic=True)
-        elif compile_mode == "eager":
-            fct_cmp = torch.compile(chain_fct_same_dim, fullgraph=True, backend="eager")
-        else:
-            fct_cmp = chain_fct_same_dim
+        fct_cmp = compile_mode_helper(chain_fct_same_dim, compile_mode)
 
         expected_result = _fake_associative_scan(
             add,
@@ -1867,21 +1886,7 @@ def forward(self, pred_1, x_1):
             )
             return o2
 
-        torch.compiler.reset()
-        if compile_mode == "compile":
-            fct_cmp = torch.compile(
-                chain_fct_different_dim, fullgraph=True, dynamic=False
-            )
-        elif compile_mode == "compile_dynamic_shape":
-            fct_cmp = torch.compile(
-                chain_fct_different_dim, fullgraph=True, dynamic=True
-            )
-        elif compile_mode == "eager":
-            fct_cmp = torch.compile(
-                chain_fct_different_dim, fullgraph=True, backend="eager"
-            )
-        else:
-            fct_cmp = chain_fct_different_dim
+        fct_cmp = compile_mode_helper(chain_fct_different_dim, compile_mode)
 
         expected_result = _fake_associative_scan(
             add,
@@ -1892,17 +1897,11 @@ def forward(self, pred_1, x_1):
         result1 = fct_cmp(inp)
         self.assertEqual(result1, expected_result)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
+    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the scan tests, as scan currently does not support inductor
-    @decorateIf(
-        unittest.skip,
-        lambda params: params["compile_mode"] != "eager"
-        and params["compile_mode"] != "none",
-    )
     def test_scan_downstream_op(self, compile_mode, reverse, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y, x + y
@@ -1917,15 +1916,7 @@ def forward(self, pred_1, x_1):
                 o = scan(add, init=init, input=inp, dim=1, reverse=reverse)
                 return o[ind] @ W
 
-            torch.compiler.reset()
-            if compile_mode == "compile":
-                fct_cmp = torch.compile(chain_fct, fullgraph=True, dynamic=False)
-            elif compile_mode == "compile_dynamic_shape":
-                fct_cmp = torch.compile(chain_fct, fullgraph=True, dynamic=True)
-            elif compile_mode == "eager":
-                fct_cmp = torch.compile(chain_fct, fullgraph=True, backend="eager")
-            else:
-                fct_cmp = chain_fct
+            fct_cmp = compile_mode_helper(chain_fct, compile_mode)
 
             expected_result = _fake_scan(
                 add, init=init, input=inp, dim=1, reverse=reverse
@@ -1939,15 +1930,7 @@ def forward(self, pred_1, x_1):
             o2 = scan(add, init=init, input=o1[1], dim=1, reverse=reverse)
             return o2
 
-        torch.compiler.reset()
-        if compile_mode == "compile":
-            fct_cmp = torch.compile(chain_fct_same_dim, fullgraph=True, dynamic=False)
-        elif compile_mode == "compile_dynamic_shape":
-            fct_cmp = torch.compile(chain_fct_same_dim, fullgraph=True, dynamic=True)
-        elif compile_mode == "eager":
-            fct_cmp = torch.compile(chain_fct_same_dim, fullgraph=True, backend="eager")
-        else:
-            fct_cmp = chain_fct_same_dim
+        fct_cmp = compile_mode_helper(chain_fct_same_dim, compile_mode)
 
         expected_result = _fake_scan(
             add,
@@ -1967,21 +1950,7 @@ def forward(self, pred_1, x_1):
             o2 = scan(add, init=init2, input=o1[1], dim=0, reverse=reverse)
             return o2
 
-        torch.compiler.reset()
-        if compile_mode == "compile":
-            fct_cmp = torch.compile(
-                chain_fct_different_dim, fullgraph=True, dynamic=False
-            )
-        elif compile_mode == "compile_dynamic_shape":
-            fct_cmp = torch.compile(
-                chain_fct_different_dim, fullgraph=True, dynamic=True
-            )
-        elif compile_mode == "eager":
-            fct_cmp = torch.compile(
-                chain_fct_different_dim, fullgraph=True, backend="eager"
-            )
-        else:
-            fct_cmp = chain_fct_different_dim
+        fct_cmp = compile_mode_helper(chain_fct_different_dim, compile_mode)
 
         expected_result = _fake_scan(
             add,
@@ -2003,13 +1972,12 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (params["device"] == torch.device("cpu")),
     )
-    def test_generic_scan_non_pointwise(self, reverse, device):
+    def test_associative_scan_non_pointwise(self, reverse, device):
         def non_pointwise(x: torch.Tensor, y: torch.Tensor):
             W = torch.diag(torch.ones(2, device=device))
             return x @ W + y @ W
 
         x = torch.randn(3, 10, 2, device=device)
-        result_expected = _fake_associative_scan(non_pointwise, x, 0, reverse=reverse)
         # Expected to fail, as the pointwise combine_mode does not allow non-pointwise operations
         with self.assertRaisesRegex(
             Exception,
@@ -2018,7 +1986,24 @@ def forward(self, pred_1, x_1):
             out = associative_scan(
                 non_pointwise, x, 0, reverse=reverse, combine_mode="pointwise"
             )
+        
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of associative_scan and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["device"] == torch.device("cpu")),
+    )
+    def test_associative_scan_non_pointwise_generic(self, reverse, device):
+        def non_pointwise(x: torch.Tensor, y: torch.Tensor):
+            W = torch.diag(torch.ones(2, device=device))
+            return x @ W + y @ W
 
+        x = torch.randn(3, 10, 2, device=device)
+        result_expected = _fake_associative_scan(non_pointwise, x, 0, reverse=reverse)
         result1 = associative_scan(
             non_pointwise, x, 0, reverse=reverse, combine_mode="generic"
         )
@@ -2050,7 +2035,6 @@ def forward(self, pred_1, x_1):
 
         dim = 1
 
-        torch.compiler.reset()
         from torch._dynamo.testing import CompileCounter
 
         # Tests rely on automatic_dynamic = True
@@ -2138,33 +2122,18 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # Skipping the scan tests, as scan currently does not support inductor
-    @decorateIf(
-        unittest.skip,
-        lambda params: params["compile_mode"] != "eager"
-        and params["compile_mode"] != "none",
-    )
-    def test_scan_init2(self, reverse, compile_mode, device):
+    def test_scan_init_scanned_0(self, reverse, compile_mode, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y, x + y
 
-        torch.compiler.reset()
-        if compile_mode == "compile":
-            scan_fct = torch.compile(scan, fullgraph=True, dynamic=False)
-        elif compile_mode == "compile_dynamic_shape":
-            scan_fct = torch.compile(scan, fullgraph=True, dynamic=True)
-        elif compile_mode == "eager":
-            scan_fct = torch.compile(scan, fullgraph=True, backend="eager")
-        else:
-            scan_fct = scan
+        scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Only init and no input
         x = torch.randn(3, 1, 2, device=device)
         init = torch.randn(3, 1, 2, device=device)
         dim = 1
-        op, op_pt = (add, torch.cumsum)
 
         # Scan dimension is 0
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
@@ -2174,7 +2143,105 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
+            result_init = scan_fct(add, input=inp, dim=dim, reverse=reverse, init=init)
+            
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_init_non_tensor(self, reverse, compile_mode, device):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y, x + y
+
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        # Only init and no input
+        x = torch.randn(3, 1, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
+        dim = 1
+
+        # Init is a float and not a tensor
+        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        init = 1.0
+        with self.assertRaisesRegex(
+            # Should be: RuntimeError, "Init leaves must be a Tensor"
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            result_init = scan_fct(add, input=inp, dim=dim, reverse=reverse, init=init)
+            
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_init_wrong_shape(self, reverse, compile_mode, device):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y, x + y
+
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        # Only init and no input
+        x = torch.randn(3, 1, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
+        dim = 1
+
+        # Init wrong shape (Other dim different)
+        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
+        init = torch.tile(init, (1, 2, 1))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "The size of tensor a.*",
+        ):
+            result_init = scan_fct(add, input=inp, dim=dim, reverse=reverse, init=init)
+            
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_init_wrong_pytree(self, reverse, compile_mode, device):
+        def add_one_carry(x: torch.Tensor, y: torch.Tensor):
+            return x[0], x
+        
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        # Only init and no input
+        x = torch.randn(3, 1, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
+        dim = 1
+
+        # Init wrong pytree
+        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        init = (
+            torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
+            torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
+        )
+
+        with self.assertRaisesRegex(
+            # Should be: RuntimeError: The number of leaves of the pytree of the new carry produced
+            # by the operator needs to match the length of the pytree of the init
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            result_init = scan_fct(
+                add_one_carry, input=inp, dim=dim, reverse=reverse, init=init
+            )
+            
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_init(self, reverse, compile_mode, device):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y, x + y
+
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        # Only init and no input
+        x = torch.randn(3, 1, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
+        dim = 1
+        op, op_pt = (add, torch.cumsum)
 
         # Only init given
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
@@ -2191,18 +2258,9 @@ def forward(self, pred_1, x_1):
 
         op, op_pt = (add, torch.cumsum)
         inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
-        # Init scalar
-        init = 1.0
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError, "Init leaves must be a Tensor"
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
 
         # Init tensor scalar
         init = torch.ones(1, device=device)
-
         def add_scalar_carry(x: torch.Tensor, y: torch.Tensor):
             return x + 1.0, x + y
 
@@ -2214,6 +2272,19 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result_init, result_exp)
         self.assertEqual(result_init[0], torch.tensor([3.0], device=device))
+        
+        # Init tensor entirely different shape than inp
+        init = torch.randn(7, 8, device=device)
+        def add_scalar_carry2(x: torch.Tensor, y: torch.Tensor):
+            return x + 1.0, x[:y.shape[1], :y.shape[2]] + y
+
+        result_init = scan_fct(
+            add_scalar_carry2, input=inp, dim=dim, reverse=reverse, init=init
+        )
+        result_exp = _fake_scan(
+            add_scalar_carry2, init=init, input=inp, dim=dim, reverse=reverse
+        )
+        self.assertEqual(result_init, result_exp)
 
         # Init with two timestep on dim axis. Should work as y has always 1 on dim axis and
         # hence automatic broadcasting should work
@@ -2222,15 +2293,6 @@ def forward(self, pred_1, x_1):
         result_exp = _fake_scan(op, init=init, input=inp, dim=dim, reverse=reverse)
         self.assertEqual(result_init, result_exp)
         self.assertEqual(result_init[0].shape, torch.Size([2, 5, 2]))
-
-        # Init wrong shape (Other dim different)
-        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
-        init = torch.tile(init, (1, 2, 1))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "The size of tensor a.*",
-        ):
-            result_init = scan_fct(op, input=inp, dim=dim, reverse=reverse, init=init)
 
         def add_scalar_carry_sliced_out(x: torch.Tensor, y: torch.Tensor):
             return x + 1.0, x[:, :1, :] + y
@@ -2244,25 +2306,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result_init, result_exp)
         self.assertEqual(result_init[0].shape, torch.Size([1, 10, 2]))
         self.assertEqual(result_init[1].shape, inp.shape)
-
-        # Init wrong pytree
-        init = (
-            torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
-            torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
-        )
-
-        def add_one_carry(x: torch.Tensor, y: torch.Tensor):
-            return x[0], x
-
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError: The number of leaves of the pytree of the new carry produced
-            # by the operator needs to match the length of the pytree of the init
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result_init = scan_fct(
-                add_one_carry, input=inp, dim=dim, reverse=reverse, init=init
-            )
 
         # Correct case
         op, op_pt = (add, torch.cumsum)
@@ -2287,7 +2330,7 @@ def forward(self, pred_1, x_1):
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_complex_pytree(self, reverse, device):
+    def test_scan_carry_wrong_pytree(self, reverse, device):
         def fct_pointwise_carry_wrong_pytree(x, y):
             return (
                 (
@@ -2309,6 +2352,81 @@ def forward(self, pred_1, x_1):
                 },
             )
 
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        z = torch.randn(3, 2, 2, device=device)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+        inp_flat, inp_spec = pytree.tree_flatten(inp)
+        init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
+        init = pytree.tree_unflatten(init_flat, inp_spec)
+
+        # Wrong pytree of the carry produced by the operation
+        with self.assertRaisesRegex(
+            # Should be: RuntimeError: The number of leaves of the pytree of the new carry
+            # produced by the operator needs to match the length of the pytree of the init
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            result = scan(
+                fct_pointwise_carry_wrong_pytree,
+                init=init,
+                input=inp,
+                dim=0,
+                reverse=reverse,
+            )
+        
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_init_wrong_pytree(self, reverse, device):
+        def fct_pointwise(x, y):
+            return (
+                {
+                    "i": x["i"] * y["i"],
+                    "j": (
+                        [x["j"][0][0] * y["j"][0][0]],
+                        [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
+                    ),
+                },
+                {
+                    "i": x["i"] * y["i"],
+                    "j": (
+                        [x["j"][0][0] * y["j"][0][0]],
+                        [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
+                    ),
+                },
+            )
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        z = torch.randn(3, 2, 2, device=device)
+
+        # Wrong pytree fed to the function
+        init = {
+            "i": torch._ops.ops.aten.slice(x, 0, 0, 1, 1),
+            "j": (
+                {"a": torch._ops.ops.aten.slice(x, 0, 0, 1, 1)},
+                [torch._ops.ops.aten.slice(y, 0, 0, 1, 1)],
+                [{"o": torch._ops.ops.aten.slice(z, 0, 0, 1, 1)}],
+            ),
+        }
+        inp = {
+            "i": torch._ops.ops.aten.slice(x, 0, 0, None, 1),
+            "j": (
+                [torch._ops.ops.aten.slice(y, 0, 0, None, 1)],
+                [{"o": torch._ops.ops.aten.slice(z, 0, 0, None, 1)}],
+            ),
+        }
+        with self.assertRaisesRegex(
+            Exception,
+            ".*",
+        ):
+            result = scan(fct_pointwise, init=init, input=inp, dim=0, reverse=reverse)
+        
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_init_pytree_complex(self, reverse, device):
         def fct_pointwise(x, y):
             return (
                 {
@@ -2370,28 +2488,9 @@ def forward(self, pred_1, x_1):
                 ),
             )
 
-        x = torch.randn(3, 2, 2, device=device, requires_grad=True)
-        y = torch.randn(3, 2, 2, device=device, requires_grad=True)
-        z = torch.randn(3, 2, 2, device=device, requires_grad=True)
-        inp = {"i": x, "j": ([y], [{"o": z}])}
-        inp_flat, inp_spec = pytree.tree_flatten(inp)
-        init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
-        init = pytree.tree_unflatten(init_flat, inp_spec)
-
-        # Wrong pytree of the carry produced by the operation
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError: The number of leaves of the pytree of the new carry
-            # produced by the operator needs to match the length of the pytree of the init
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result = scan(
-                fct_pointwise_carry_wrong_pytree,
-                init=init,
-                input=inp,
-                dim=0,
-                reverse=reverse,
-            )
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        z = torch.randn(3, 2, 2, device=device)
 
         if reverse:
             init_start, init_end = -1, None
@@ -2399,28 +2498,6 @@ def forward(self, pred_1, x_1):
         else:
             init_start, init_end = 0, 1
             inp_start, inp_end = 1, None
-
-        # Wrong pytree fed to the function
-        init = {
-            "i": torch._ops.ops.aten.slice(x, 0, init_start, init_end, 1),
-            "j": (
-                {"a": torch._ops.ops.aten.slice(x, 0, init_start, init_end, 1)},
-                [torch._ops.ops.aten.slice(y, 0, init_start, init_end, 1)],
-                [{"o": torch._ops.ops.aten.slice(z, 0, init_start, init_end, 1)}],
-            ),
-        }
-        inp = {
-            "i": torch._ops.ops.aten.slice(x, 0, 0, None, 1),
-            "j": (
-                [torch._ops.ops.aten.slice(y, 0, 0, None, 1)],
-                [{"o": torch._ops.ops.aten.slice(z, 0, 0, None, 1)}],
-            ),
-        }
-        with self.assertRaisesRegex(
-            Exception,
-            ".*",
-        ):
-            result = scan(fct_pointwise, init=init, input=inp, dim=0, reverse=reverse)
 
         # Regular case
         init = {
@@ -2505,7 +2582,6 @@ def forward(self, pred_1, x_1):
             h_new = torch.tanh(c_new + x @ W_hh + b_hh)
             return h_new, h_new
 
-        # With init
         expected_result = rnn(
             torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
         )
@@ -2515,30 +2591,115 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result[0], expected_result_state)
         self.assertEqual(result[1], expected_result_out)
 
+    def test_scan_simple_graph_no_carry(self):
+        def add_no_carry(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+        
+        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
+        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
+
+        def f(fct, init, input):
+            return scan(fct, init=init, input=input, dim=0, reverse=True)
+
+        # Wrong number of returns from function
+        with self.assertRaisesRegex(
+            # Should be: RuntimeError: The pytree of the new carry produced 
+            # by the operator needs to match the pytree of the init
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            gm = make_fx(f, tracing_mode="symbolic")(add_no_carry, init, x)
+            
+    def test_scan_simple_graph_wrong_carry(self):
+        
+        def add_wrong_carry(x: torch.Tensor, y: torch.Tensor):
+            return (x + y)[0, :], x + y
+
+        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
+        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
+
+        def f(fct, init, input):
+            return scan(fct, init=init, input=input, dim=0, reverse=True)
+
+        # Wrong carry shape
+        with self.assertRaisesRegex(
+            # Should be: RuntimeError: The pytree of the new carry produced by 
+            # the operator needs to match the pytree of the init
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            gm = make_fx(f, tracing_mode="symbolic")(add_wrong_carry, init, x)
+            
+    def test_scan_simple_graph_wrong_dtype(self):
+        
+        def add_wrong_dtype(x: torch.Tensor, y: torch.Tensor):
+            return torch.ones_like(x + y, dtype=torch.int64), x + y
+
+        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
+        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
+
+        def f(fct, init, input):
+            return scan(fct, init=init, input=input, dim=0, reverse=True)
+
+        # Wrong dtype
+        with self.assertRaisesRegex(
+            # Should be: RuntimeError: Expected the init and 
+            # the new carry produced by the operator to be a tensor of 
+            # torch.int64 but got torch.float32 and torch.int64
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            ".*",
+        ):
+            gm = make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
+            
+    @requires_cuda
     def test_scan_simple_graph(self):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+        
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y, x + y
 
         x = torch.randn(3, 10, 2, device=torch.device("cpu"))
         init = torch.randn(1, 10, 2, device=torch.device("cpu"))
 
+        def f(fct, init, input):
+            return scan(fct, init=init, input=input, dim=0, reverse=True)
+
+        # Correct case
+        gm = make_fx(f, tracing_mode="symbolic")(add, init, x)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, fct_1, init_1, input_1):
+    flip = torch.ops.aten.flip.default(input_1, [0]);  input_1 = None
+    slice_1 = torch.ops.aten.slice.Tensor(flip, 0, 0, 1)
+    add = torch.ops.aten.add.Tensor(init_1, slice_1);  add = None
+    add_1 = torch.ops.aten.add.Tensor(init_1, slice_1);  slice_1 = add_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(init_1, 1)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 2)
+    new_empty = torch.ops.aten.new_empty.default(init_1, [1, sym_size_int, sym_size_int_1], dtype = torch.float32, device = device(type='cpu'), pin_memory = False);  new_empty = None
+    new_empty_1 = torch.ops.aten.new_empty.default(flip, [1, sym_size_int, sym_size_int_1], dtype = torch.float32, device = device(type='cpu'), pin_memory = False);  sym_size_int = sym_size_int_1 = new_empty_1 = None
+    scan_combine_graph_0 = self.scan_combine_graph_0
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], 0, True);  scan_combine_graph_0 = init_1 = flip = None
+    getitem = scan[0]
+    getitem_1 = getitem[0];  getitem = None
+    getitem_2 = scan[1];  scan = None
+    getitem_3 = getitem_2[0];  getitem_2 = None
+    flip_1 = torch.ops.aten.flip.default(getitem_3, [0]);  getitem_3 = None
+    return (getitem_1, flip_1)""",
+        )
+
         # Check graph
-        from torch._dynamo.testing import EagerAndRecordGraphs
-
-        def f():
-            return scan(add, init=init, input=x, dim=0, reverse=True)
-
         backend = EagerAndRecordGraphs()
-        torch.compile(f, backend=backend)()
+        torch.compile(f, backend=backend)(add, init, x)
         gm = backend.graphs[0]
 
         self.assertExpectedInline(
             gm.code.strip(),
             """\
-def forward(self, L_init_ : torch.Tensor, L_x_ : torch.Tensor):
+def forward(self, L_init_ : torch.Tensor, L_input_ : torch.Tensor):
     l_init_ = L_init_
-    l_x_ = L_x_
-    elem = torch.flip(l_x_, [0]);  l_x_ = None
+    l_input_ = L_input_
+    elem = torch.flip(l_input_, [0]);  l_input_ = None
     slice_1 = torch.ops.aten.slice(elem, 0, 0, 1, 1)
     out_l = l_init_ + slice_1;  out_l = None
     add_1 = l_init_ + slice_1;  slice_1 = add_1 = None
