@@ -340,8 +340,8 @@ def generate_wheels_matrix(
         arches = ["cpu"]
         if os == "linux":
             arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
-        elif os == "windows" or XPU_ARCHES:
-            arches += CUDA_ARCHES
+        elif os == "windows":
+            arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Only want the one arch as the CPU type is different and
             # uses different build/test scripts
