@@ -184,6 +184,13 @@ class CppWrapperGpu(CppWrapperCpu):
         self.header.splice(self.device_codegen.kernel_driver())
 
     def write_get_raw_stream(self, index, graph=None):
+        if self.device == "xpu":
+            name = f"stream{index}"
+            self.writeline(
+                f"at::xpu::XPUStream {name} = at::xpu::getCurrentXPUStream({index});"
+            )
+            return name
+
         name = f"stream{index}"
         self.writeline(f"{self.device_codegen.cpp_stream_type()} {name};")
         self.writeline(
@@ -247,7 +254,17 @@ class CppWrapperGpu(CppWrapperCpu):
         self,
         kernel_name: str,
         graph: "GraphLowering",  # for per-graph caching
+        device_index=None,
     ):
+        extra_args = ""
+        if self.device == "xpu":
+            stream = (
+                "stream"
+                if V.graph.aot_mode
+                else self.write_get_raw_stream(device_index, V.graph)
+            )
+            extra_args = f"{stream}.queue(), "
+
         keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(f"if ({kernel_var_name} == nullptr) {{")
@@ -256,11 +273,11 @@ class CppWrapperGpu(CppWrapperCpu):
                 kernel_name,
                 """    """
                 + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
+                + f""" = loadKernel({extra_args}"%s", "%s", %s, this->cubin_dir_);"""
                 if V.graph.aot_mode
                 else """    """
                 + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s);""",
+                + f""" = loadKernel({extra_args}"%s", "%s", %s);""",
                 keys,
             )
         )
@@ -378,7 +395,7 @@ class CppWrapperGpu(CppWrapperCpu):
             device_index, call_args
         )
         kernel_var_name = self.generate_load_kernel_once(
-            kernel_name, V.graph
+            kernel_name, V.graph, device_index
         )
 
         # args with value 1 are added into equal_to_1 and constants
@@ -395,12 +412,18 @@ class CppWrapperGpu(CppWrapperCpu):
 
         call_args_str = self.generate_args_decl(call_args, arg_types)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-        self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
+        if self.device == "xpu":
+            self.writeline(f"std::vector<void*> {kernel_args_var} = {{{call_args_str}}};")
+        else:
+            self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
         stream = (
             "stream"
             if V.graph.aot_mode
             else self.write_get_raw_stream(device_index, V.graph)
         )
+        if self.device == "xpu":
+            stream = f"{stream}.queue()"
+
         grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
         self.writeline(
             DeferredGpuGridLine(kernel_name, grid_var, grid, autotune_configs)
