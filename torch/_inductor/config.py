@@ -979,9 +979,11 @@ class aot_inductor:
     )
 
     # Serialized tree spec for flattening inputs
+    # TODO: Move this into metadata
     serialized_in_spec = ""
 
     # Serialized tree spec for flattening outputs
+    # TODO: Move this into metadata
     serialized_out_spec = ""
 
     # flag to decide whether to create a submodule for constant graph.
@@ -992,6 +994,11 @@ class aot_inductor:
     force_mmap_weights: bool = False
 
     package: bool = False
+    package_cpp_only: bool = False
+
+    # Dictionary of metadata users might want to save to pass to the runtime.
+    # TODO: Move this somewhere else, since it's no longer really a config
+    metadata: Dict[str, str] = {}
 
 
 class cuda:

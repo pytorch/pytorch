@@ -1129,6 +1129,7 @@ def compile_fx_aot(
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
     )
+
     if (
         "aot_inductor.output_path" not in config_patches
         and not config.aot_inductor.output_path

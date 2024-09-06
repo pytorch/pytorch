@@ -30,6 +30,42 @@ def compile(
     return compile_fx(gm, example_inputs, config_patches=options)
 
 
+def aoti_compile_and_package(
+    package_path: str,
+    exported_program,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    inductor_configs: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    Compiles the exported program with AOTInductor, and packages it into a .pt2
+    file specified by the input package_path.
+    """
+    from torch._inductor.package import package_aoti
+    from torch.export import ExportedProgram
+
+    if not isinstance(exported_program, ExportedProgram):
+        raise ValueError("Only ExportedProgram is supported")
+
+    assert package_path.endswith(".pt2")
+
+    inductor_configs = inductor_configs or {}
+
+    if inductor_configs.get("aot_inductor.output_path"):
+        raise RuntimeError(
+            "Please pass in a package path to aot_inductor_compile() instead "
+            "of setting the aot_inductor.output_path config."
+        )
+    inductor_configs["aot_inductor.package"] = True
+
+    aoti_files = aot_compile(
+        exported_program.module(), args, kwargs, options=inductor_configs
+    )  # type: ignore[arg-type]
+    res = package_aoti(package_path, aoti_files)
+    assert res == package_path
+
+
 def aot_compile(
     gm: torch.fx.GraphModule,
     args: Tuple[Any],
