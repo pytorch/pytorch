@@ -623,7 +623,7 @@ class TestFullyShardCompile(FSDPTest):
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
-    def _create_transformer_factory_fns(self, dynamic_shapes=False):
+    def _create_transformer_factory_fns(self):
         seq_len = 16
         vocab_size = 8
 
@@ -646,12 +646,9 @@ class TestFullyShardCompile(FSDPTest):
 
         def input_creation_fn():
             torch.manual_seed(self.rank)
-            if dynamic_shapes:
-                seq_len = torch.randint(1, 16, (1,)).item()
             inp = torch.randint(
                 0, vocab_size, (2, seq_len), device="cuda", requires_grad=False
             )
-            torch._dynamo.mark_dynamic(inp, 1)
             return inp
 
         return model_init_fn, input_creation_fn
@@ -704,7 +701,6 @@ class TestFullyShardCompile(FSDPTest):
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
         for fullgraph in [True, False]:
-            dynamic_shapes = True
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
@@ -714,9 +710,7 @@ class TestFullyShardCompile(FSDPTest):
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
-                        *self._create_transformer_factory_fns(
-                            dynamic_shapes=dynamic_shapes
-                        ),
+                        *self._create_transformer_factory_fns(),
                         "inductor",
                         fullgraph=fullgraph,
                     )
