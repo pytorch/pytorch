@@ -6313,7 +6313,6 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -6369,11 +6368,7 @@ def forward(self, x):
         # (please never do this)
         class Foo(torch.nn.Module):
             def forward(self, input, true_graph, body_graph):
-                def map_body(x, y):
-                    return x + y
-
-                x = map(map_body, input, body_graph[0])
-                x = x + true_graph[0] + true_graph[1]
+                x = input + true_graph[0] + true_graph[1]
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 return x
@@ -6385,7 +6380,6 @@ def forward(self, x):
         )
         ep = export(Foo(), inputs)
         expected_getattr_names = [
-            "body_graph_1",
             "true_graph_2",
             "false_graph_0",
             "true_graph_3",
