@@ -628,6 +628,21 @@ atomic_add(volatile T *addr, T offset) {
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T, int NI, int NV>
+void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::VectorizedN<T, NV> offset) {
+  constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
+  static_assert(len <= at::vec::VectorizedN<T, NV>::size());
+  __at_align__ std::array<T, len> tmpbuf;
+  __at_align__ std::array<int64_t, len> tmpidx;
+  offset.store(tmpbuf.data());
+  index.store(tmpidx.data());
+  for (int i = 0; i < len; i++){
+    atomic_add(addr + tmpidx[i], tmpbuf[i]);
+  }
+}
+#endif
+
 void mm_get_thread_blocking(
     int num_threads,
     int64_t M,

@@ -767,7 +767,7 @@ if(NOT MSVC)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
 endif()
 
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
@@ -927,7 +927,6 @@ elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
-  target_link_libraries(torch_cuda PRIVATE fmt::fmt-header-only)
 
   if(USE_CUFILE)
     target_link_libraries(torch_cuda PRIVATE torch::cufile)
@@ -1327,7 +1326,6 @@ if(USE_ROCM)
     ${ROCM_SOURCE_DIR}/rocblas/include
     ${ROCM_SOURCE_DIR}/hipsparse/include
     )
-  target_link_libraries(torch_hip PRIVATE fmt::fmt-header-only)
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
   endif()
@@ -1550,20 +1548,24 @@ if(USE_XPU)
   target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
-  include(CheckLinkerFlag)
-
-  # Check whether the compiler supports '--no-as-needed' and '--as-needed'
-  check_linker_flag(CXX "-Wl,--no-as-needed" HAVE_NO_AS_NEEDED)
-  check_linker_flag(CXX "-Wl,--as-needed" HAVE_AS_NEEDED)
-
   # Ensure that torch_cpu is ready before being linked by torch_xpu.
   add_dependencies(torch_xpu torch_cpu)
 
-  if(HAVE_NO_AS_NEEDED AND HAVE_AS_NEEDED)
-    target_link_libraries(torch_xpu PRIVATE
-        "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+  if(MSVC)
+    target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
   else()
-    target_link_libraries(torch_xpu PRIVATE "$<TARGET_FILE:torch_cpu>")
+    include(CheckLinkerFlag)
+
+    # Check whether the compiler supports '--no-as-needed' and '--as-needed'
+    check_linker_flag(CXX "-Wl,--no-as-needed" HAVE_NO_AS_NEEDED)
+    check_linker_flag(CXX "-Wl,--as-needed" HAVE_AS_NEEDED)
+
+    if(HAVE_NO_AS_NEEDED AND HAVE_AS_NEEDED)
+      target_link_libraries(torch_xpu PRIVATE
+          "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+    else()
+      target_link_libraries(torch_xpu PRIVATE "$<TARGET_FILE:torch_cpu>")
+    endif()
   endif()
 endif()
 

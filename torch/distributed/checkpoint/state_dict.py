@@ -552,6 +552,7 @@ def _load_model_state_dict(
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
             local_state_dict[fqn_with_prefix] = value
 
+    assign = False
     if info.broadcast_from_rank0 or info.full_state_dict:
         device = None
         for key, value in local_state_dict.items():
@@ -563,7 +564,7 @@ def _load_model_state_dict(
         assert device is not None
         if device == torch.device("meta"):
             device = dist.distributed_c10d._get_pg_default_device()
-            model.to_empty(device=device)
+            assign = True
         if info.broadcast_from_rank0:
             _broadcast_state_dict(
                 state_dict, local_state_dict, device=device, strict=info.strict
@@ -577,7 +578,7 @@ def _load_model_state_dict(
         return cast(
             _IncompatibleKeys,
             _state_dict_fn(model, "load_state_dict")(
-                state_dict=state_dict, strict=info.strict
+                state_dict=state_dict, strict=info.strict, assign=assign
             ),
         )
 
