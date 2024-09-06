@@ -295,6 +295,18 @@ class LoopBody:
         )
         return "\n".join(lines)
 
+    def is_memory_copy(self) -> bool:
+        """
+        True of this contains only a single loads and store.
+        Note, this could involve a layout change.
+        """
+        return (
+            len(self.memory_usage[MemoryUsageType.LOAD]) == 1
+            and len(self.memory_usage[MemoryUsageType.STORE]) == 1
+            and len(self.submodules) == 1  # get_index
+            and self.root_block.contains_only_ops(("load", "store"))
+        )
+
     __repr__ = debug_str
 
     def add_index_expr(
@@ -450,7 +462,9 @@ class LoopBodyBlock:
                 indexing_dtype: torch.dtype,
                 right: bool,
             ):
-                offsets_size = add_index(offsets_size, MemoryUsageType.BUCKETIZE, buffer_name=offsets_name)
+                offsets_size = add_index(
+                    offsets_size, MemoryUsageType.BUCKETIZE, buffer_name=offsets_name
+                )
                 return self._inner.bucketize(
                     values, offsets_name, offsets_size, indexing_dtype, right
                 )
@@ -553,6 +567,12 @@ class LoopBodyBlock:
             r";[^\n]*",
             "",
             code.strip().replace("def forward(", f"def {name}("),
+        )
+
+    def contains_only_ops(self, allowed_ops) -> bool:
+        return all(
+            node.target in allowed_ops
+            for node in self.graph.find_nodes(op="call_method")
         )
 
     def clone(self, body: LoopBody):
