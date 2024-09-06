@@ -2,9 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
-
-
 // This api will be used by serialization/export.cpp to extract function
 // information. It should do conversion on graph to
 //    1. Extract subgraph pattern of functions and define as local function
@@ -65,6 +62,3 @@ TORCH_API void ONNXTrackScopeAttributes(
     std::map<std::string, IValue>& attributes);
 
 } // namespace torch::jit::onnx
-
-
-

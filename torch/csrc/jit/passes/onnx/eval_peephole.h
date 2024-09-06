@@ -4,7 +4,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 void EvalPeepholeONNX(
@@ -12,5 +11,3 @@ void EvalPeepholeONNX(
     std::map<std::string, IValue>& paramDict);
 
 } // namespace torch::jit
-
-

@@ -206,9 +206,9 @@ void ReplaceBlockOutputWithOptional(
     const OptionalTypePtr& opt_type,
     Block* block,
     size_t i) {
-  const Node* opt_node& = ONNXOptionalNode(opt_type, block->owningGraph());
-  opt_node->insertBefore(blo_node()) Value* block_output =
-      block->outputs().at(i);
+  Node* opt_node = ONNXOptionalNode(opt_type, block->owningGraph());
+  opt_node->insertBefore(block->return_node());
+  Value* block_output = block->outputs().at(i);
   // replace only the last value as Optional type only affects
   // the value right before output
   block_output->replaceAllUsesAfterNodeWith(opt_node, opt_node->output());

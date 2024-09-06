@@ -4,8 +4,6 @@
 #include <ostream>
 #include <string>
 
-
-
 namespace torch::jit::onnx {
 
 TORCH_API bool is_log_enabled();
@@ -23,5 +21,3 @@ TORCH_API std::ostream& _get_log_output_stream();
   }
 
 } // namespace torch::jit::onnx
-
-

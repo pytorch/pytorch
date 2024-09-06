@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 TORCH_API void ScalarTypeAnalysisForONNX(
@@ -12,4 +11,3 @@ TORCH_API void ScalarTypeAnalysisForONNX(
 void ScalarTypeAnalysisNodeForONNX(Node* n);
 
 } // namespace torch::jit
-

@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // EliminateUnusedItemsONNX pass is removing unused
@@ -13,5 +12,3 @@ void EliminateUnusedItemsONNX(
     std::map<std::string, IValue>& paramDict);
 
 } // namespace torch::jit
-
-

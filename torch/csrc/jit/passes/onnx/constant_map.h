@@ -13,7 +13,6 @@ C10_DIAGNOSTIC_POP()
 #include <mutex>
 #include <unordered_map>
 
-
 namespace torch::jit {
 
 using ShapeDataMap =
@@ -116,4 +115,3 @@ class ConstantValueMap {
 };
 
 } // namespace torch::jit
-

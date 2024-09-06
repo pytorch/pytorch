@@ -4,7 +4,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 void DeduplicateInitializers(
@@ -13,5 +12,3 @@ void DeduplicateInitializers(
     bool is_train);
 
 } // namespace torch::jit
-
-

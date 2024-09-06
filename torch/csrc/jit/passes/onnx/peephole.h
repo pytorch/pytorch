@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 void PeepholeOptimizeONNX(
@@ -11,4 +10,3 @@ void PeepholeOptimizeONNX(
     bool fixed_batch_size);
 
 } // namespace torch::jit
-

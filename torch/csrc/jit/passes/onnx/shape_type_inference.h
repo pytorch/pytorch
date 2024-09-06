@@ -6,7 +6,6 @@
 
 #include <utility>
 
-
 namespace torch::jit {
 
 // Merges existing_type and inferred_type.
@@ -97,4 +96,3 @@ void UpdateReliable(torch::jit::Node* n);
 void UpdateShapeConstantIfReliable(torch::jit::Value* output);
 
 } // namespace torch::jit
-

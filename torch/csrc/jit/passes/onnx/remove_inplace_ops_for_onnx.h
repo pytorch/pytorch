@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 TORCH_API void RemoveInplaceOpsForONNX(
@@ -10,4 +9,3 @@ TORCH_API void RemoveInplaceOpsForONNX(
     Module* model);
 
 } // namespace torch::jit
-
