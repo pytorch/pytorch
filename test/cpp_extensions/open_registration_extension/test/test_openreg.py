@@ -67,6 +67,11 @@ class TestOpenReg(TestCase):
 
         self.assertEqual(out, cpu_a.masked_select(cpu_a.gt(0)))
 
+    def test_pin_memory(self):
+        cpu_a = torch.randn(10)
+        self.assertFalse(cpu_a.is_pinned())
+        a = cpu_a.pin_memory()
+        self.assertTrue(a.is_pinned())
 
 if __name__ == "__main__":
     run_tests()
