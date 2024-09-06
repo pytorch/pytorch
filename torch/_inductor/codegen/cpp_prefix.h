@@ -866,18 +866,20 @@ void mm_get_cache_blocking(
     int64_t Kt_blocks,
     int64_t& Mc_blocks,
     int64_t& Nc_blocks,
-    int64_t& Kc_blocks) {
+    int64_t& Kc_blocks,
+    uint32_t L1_cache_size,
+    uint32_t L2_cache_size) {
   thread_local std::map<
-    std::tuple<int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
+    std::tuple<int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
     std::tuple<int64_t, int64_t, int64_t>> cache;
-  auto key = std::make_tuple(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
+  auto key = std::make_tuple(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, L1_cache_size, L2_cache_size);
   auto it = cache.find(key);
   if (it != cache.end()) {
     std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
     return;
   } else {
     _mm_get_cache_blocking<X_t, W_t>(
-        num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks);
+        num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks, L1_cache_size, L2_cache_size);
     cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
   }
 }
