@@ -675,32 +675,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     for k, v in kwargs.items()
                     if k not in ["shape", "stride"]
                 }
-                # kwargs_as_value = {
-                #     k: v.as_proxy()
-                #     if k in ["shape", "stride"]
-                #     else v.as_python_constant()
-                #     for k, v in kwargs.items()
-                # }
-                print(f"kwargs: {kwargs}")
-                print(f"kwargs_as_value: {kwargs_as_value}")
 
                 def fn_with_prim_types(x, shape, stride):
                     return self.value(
                         x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
                     )
-
-                # if has_symints(kwargs['shape']) and has_symints(kwargs['stride']):
-                #     def fn_with_prim_type(x, shape, stride):
-                #         return self.value(x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride)
-                # elif has_symints(kwargs['shape']):
-                #     def fn_with_prim_type(x, shape):
-                #         ...
-                # elif has_symints(kwargs['stride']):
-                #     def fn_with_prim_type(x, stride):
-                #         ....
-                # else:
-                #     def fn_with_prim_types(x):
-                #         ....
 
                 # attach the same function name for better debugging
                 fn_with_prim_types.__name__ = "prim " + self.value.__name__
