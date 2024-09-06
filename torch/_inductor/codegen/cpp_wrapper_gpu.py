@@ -413,7 +413,9 @@ class CppWrapperGpu(CppWrapperCpu):
         call_args_str = self.generate_args_decl(call_args, arg_types)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         if self.device == "xpu":
-            self.writeline(f"std::vector<void*> {kernel_args_var} = {{{call_args_str}}};")
+            self.writeline(
+                f"std::vector<void*> {kernel_args_var} = {{{call_args_str}}};"
+            )
         else:
             self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
         stream = (
