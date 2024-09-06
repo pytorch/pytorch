@@ -1617,21 +1617,18 @@ class CppVecOverrides(CppOverrides):
             code.writeline("[&]()")
             assert isinstance(args[0], CppCSEVariable)
             vec_dtype = args[0].dtype
-            size = kernel.tail_size if kernel.tail_size else kernel.tiling_factor
-            scalar_args = []
-            cdtype = DTYPE_TO_CPP[vec_dtype]
             output_mask = scalar_func.__name__ in (
                 "isinf",
                 "isnan",
                 "signbit",
             )
-            octype = "bool" if output_mask else cdtype
-            octype = (
-                DTYPE_TO_CPP[args[-2]]
-                if (scalar_func.__name__ == "to_dtype_bitcast")
-                else octype
-            )
-            n_vec = kernel._get_num_vectors(vec_dtype if output_mask else octype)
+            odtype = torch.bool if output_mask else vec_dtype
+            odtype = args[-2] if scalar_func.__name__ == "to_dtype_bitcast" else odtype
+            n_vec = kernel._get_num_vectors(vec_dtype if output_mask else odtype)
+            size = kernel.tail_size if kernel.tail_size else kernel.tiling_factor
+            scalar_args = []
+            cdtype = DTYPE_TO_CPP[vec_dtype]
+            ocdtype = DTYPE_TO_CPP[odtype]
             with code.indent():
                 for argidx, arg in enumerate(args):
                     if isinstance(arg, CppCSEVariable):
@@ -1644,7 +1641,9 @@ class CppVecOverrides(CppOverrides):
                         scalar_args.append(f"tmpbuf{argidx}[i]")
                     else:
                         scalar_args.append(arg)
-                code.writeline(f"__at_align__ std::array<{octype}, {size}> tmpbuf_out;")
+                code.writeline(
+                    f"__at_align__ std::array<{ocdtype}, {size}> tmpbuf_out;"
+                )
                 res = scalar_func(*scalar_args)
                 code.writeline(f"for (int i = 0; i < {size}; i++)")
                 with code.indent():
@@ -1656,9 +1655,9 @@ class CppVecOverrides(CppOverrides):
                 else:
                     load_args = f"tmpbuf_out.data(), {size}"
                     if n_vec == 1:
-                        load_fn = f"at::vec::Vectorized<{octype}>::loadu"
+                        load_fn = f"at::vec::Vectorized<{ocdtype}>::loadu"
                     else:
-                        load_fn = f" at::vec::VectorizedN<{octype}, {n_vec}>::loadu"
+                        load_fn = f" at::vec::VectorizedN<{ocdtype}, {n_vec}>::loadu"
                 code.writeline(f"return {load_fn}({load_args});")
             code.writeline("()")
             return code
