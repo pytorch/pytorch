@@ -62,7 +62,7 @@ class DeferredGpuKernelLine(DeferredLineBase):
 
 class DeferredGpuDefaultGrid:
     """
-    A marker to
+    A container for the default grid, which may be used by DeferredCudaGridLine
     """
 
     def __init__(
@@ -378,7 +378,7 @@ class CppWrapperGpu(CppWrapperCpu):
             device_index, call_args
         )
         kernel_var_name = self.generate_load_kernel_once(
-            kernel_name, V.graph, device_index
+            kernel_name, V.graph
         )
 
         # args with value 1 are added into equal_to_1 and constants
@@ -393,9 +393,9 @@ class CppWrapperGpu(CppWrapperCpu):
             call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
             arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
 
-        call_args = self.generate_args_decl(call_args, arg_types)
+        call_args_str = self.generate_args_decl(call_args, arg_types)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-        self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+        self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
         stream = (
             "stream"
             if V.graph.aot_mode
@@ -407,19 +407,23 @@ class CppWrapperGpu(CppWrapperCpu):
         )
 
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
-        self.writeline(f"if ({grid_var}.is_non_zero()) {{")
-        self.writeline(
-            DeferredGpuKernelLine(
-                kernel_name,
-                r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
-                    kernel_var_name,
-                    f"{grid_var}.grid_x",
-                    f"{grid_var}.grid_y",
-                    f"{grid_var}.grid_z",
-                    kernel_args_var,
-                    stream,
+        # add debug printer code for all triton kernel related calls
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
+        with debug_printer_manager:
+            self.writeline(f"if ({grid_var}.is_non_zero()) {{")
+            self.writeline(
+                DeferredGpuKernelLine(
+                    kernel_name,
+                    r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
+                        kernel_var_name,
+                        f"{grid_var}.grid_x",
+                        f"{grid_var}.grid_y",
+                        f"{grid_var}.grid_z",
+                        kernel_args_var,
+                        stream,
+                    ),
+                    ("num_warps", "shared_mem"),
                 ),
-                ("num_warps", "shared_mem"),
-            ),
-        )
-        self.writeline("}")
+            )
+            self.writeline("}")
