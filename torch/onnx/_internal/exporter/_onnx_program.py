@@ -195,6 +195,7 @@ ONNXProgram(
             else:
                 warnings.warn(
                     f"Weight '{name}' not found in the model. Skipped applying.",
+                    category=torch.onnx.errors.OnnxExporterWarning,
                     stacklevel=1,
                 )
 
