@@ -520,6 +520,38 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    def test_masked_select_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                mask = x.ge(0.5)
+                return torch.masked_select(x, mask)
+
+        example_args = (torch.randn(3, 4, 5),)
+        dim0_x_max, dim1_x_max = 100, 7
+        dynamic_shapes = {
+            "x": {
+                0: Dim("dim0_x", max=dim0_x_max),
+                1: Dim("dim1_x_max", max=dim1_x_max),
+            }
+        }
+        m = M()
+        exported_program: torch.export.ExportedProgram = export(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        # Test that the expected upper bound is among the range constraints.
+        expected_upper_bound = dim0_x_max * dim1_x_max * 5
+        vr_upper_bounds = [
+            vr.upper for vr in exported_program.range_constraints.values()
+        ]
+        self.assertTrue(expected_upper_bound in set(vr_upper_bounds))
+        # Test that none of the upper bounds are larger.
+        for vr_upper in vr_upper_bounds:
+            self.assertTrue(vr_upper <= expected_upper_bound)
+
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -967,16 +999,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
     return (getitem, getitem_1, getitem_2)""",
         )
 
-    # TODO(yidi)
-    # Expected failure for test cases that calls run_decomposition().
-    # The top-level cond node has pre-existing metadata,
-    # which overrides the metadata for operators in subgraph due to interpreter.run(),
-    # where cond is a single node in the interpreter.run(). And we preserve metadata
-    # by copying current node's metadata for all nodes created during interpreting.
-    @testing.expectedFailurePreDispatchRunDecomp
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700910
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -2264,8 +2286,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v3
         export(N(), (t,), strict=strict)
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
     @testing.expectedFailureSerDer  # T195866111
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
@@ -2395,6 +2415,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
                 strict=strict,
             )
+
+    def test_tolist(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.tolist()
+
+        ep = export(M(), (torch.ones(3, dtype=torch.int),))
+        self.assertEqual(ep.module()(torch.tensor([1, 2, 3])), [1, 2, 3])
 
     def test_if_functional(self):
         class Module(torch.nn.Module):
@@ -7897,13 +7925,6 @@ class TestExportCustomClass(TorchTestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
-
-    def test_tolist_nonstrict_output(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                x.tolist()
-
-        ep = torch.export.export(M(), (torch.ones(3),), strict=False)
 
     def test_preserve_non_cia_op(self):
         class M(torch.nn.Module):
