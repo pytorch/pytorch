@@ -35,28 +35,28 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.12xlarge.nvidia.gpu" },
-          { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_cpp_wrapper_abi_compatible", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
+          { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_cpp_wrapper_abi_compatible", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -80,11 +80,11 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.12-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3.12-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_1-py3_12-gcc9-inductor-test:
@@ -103,10 +103,10 @@ jobs:
     with:
       build-environment: linux-jammy-py3.12-gcc11
       docker-image-name: pytorch-linux-jammy-py3.12-halide
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-halide", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
+          { config: "inductor-halide", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
         ]}
 
   linux-jammy-cpu-py3_12-inductor-halide-test:
@@ -128,11 +128,11 @@ jobs:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -149,68 +149,68 @@ jobs:
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-jammy-cpu-py3_8-gcc11-inductor-build:
-    name: linux-jammy-cpu-py3.8-gcc11-inductor
+  linux-jammy-cpu-py3_9-gcc11-inductor-build:
+    name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.8-gcc11-build
-      docker-image-name: pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor_avx512", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "inductor_avx512", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_huggingface_freezing", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_timm_freezing", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_timm_freezing", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_torchbench_freezing", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_torchbench_freezing", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_inductor_huggingface_amp_freezing", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.16xlarge.spr" },
-          { config: "cpu_inductor_timm_amp_freezing", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.16xlarge.spr" },
-          { config: "cpu_inductor_timm_amp_freezing", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.16xlarge.spr" },
-          { config: "cpu_inductor_torchbench_amp_freezing", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.16xlarge.spr" },
-          { config: "cpu_inductor_torchbench_amp_freezing", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.16xlarge.spr" },
-          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_aot_inductor_huggingface_freezing", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_aot_inductor_timm_freezing", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_aot_inductor_timm_freezing", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_aot_inductor_torchbench_freezing", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_aot_inductor_torchbench_freezing", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_aot_inductor_torchbench_amp_freezing", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "cpu_aot_inductor_torchbench_amp_freezing", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "dynamic_cpu_aot_inductor_torchbench_freezing", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "dynamic_cpu_aot_inductor_torchbench_freezing", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "dynamic_cpu_aot_inductor_torchbench_amp_freezing", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "dynamic_cpu_aot_inductor_torchbench_amp_freezing", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
-          { config: "inductor_torchbench_cpu_smoketest_perf", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.24xl.spr-metal" },
-          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.10xlarge.avx2" },
-          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.10xlarge.avx2" },
-          { config: "cpu_inductor_huggingface_freezing_avx2", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.10xlarge.avx2" },
-          { config: "cpu_inductor_torchbench_freezing_avx2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.10xlarge.avx2" },
-          { config: "cpu_inductor_torchbench_freezing_avx2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.10xlarge.avx2" },
-          { config: "cpu_inductor_timm_freezing_avx2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.10xlarge.avx2" },
-          { config: "cpu_inductor_timm_freezing_avx2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.10xlarge.avx2" },
+          { config: "inductor_avx512", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "inductor_avx512", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.16xlarge.spr" },
+          { config: "cpu_inductor_amp_freezing_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.16xlarge.spr" },
+          { config: "cpu_inductor_amp_freezing_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.16xlarge.spr" },
+          { config: "cpu_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.16xlarge.spr" },
+          { config: "cpu_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.16xlarge.spr" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_aot_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_aot_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_aot_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "inductor_torchbench_cpu_smoketest_perf", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.24xl.spr-metal" },
+          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
+          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
+          { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
         ]}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-jammy-cpu-py3_8-gcc11-inductor-test:
-    name: linux-jammy-cpu-py3.8-gcc11-inductor
+  linux-jammy-cpu-py3_9-gcc11-inductor-test:
+    name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_8-gcc11-inductor-build
+    needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
     with:
-      build-environment: linux-jammy-py3.8-gcc11-build
-      docker-image: ${{ needs.linux-jammy-cpu-py3_8-gcc11-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_8-gcc11-inductor-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
