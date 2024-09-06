@@ -193,64 +193,6 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
 
 
-# common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
-
-
-# @unittest.skipIf(sys.platform == "darwin" or IS_FBCODE, "No CUDA on MacOS")
-# class AOTInductorTestPackagedABICompatibleCuda(TestCase):
-#     device = "cuda"
-#     package_cpp_only = False
-#     check_model = check_model
-
-
-# copy_tests(
-#     AOTInductorTestsTemplate,
-#     AOTInductorTestPackagedABICompatibleCuda,
-#     "packaged_abi_compatible_cuda",
-# )
-
-
-# @unittest.skipIf(IS_FBCODE, "This is for OSS only")
-# class AOTInductorTestPackagedABICompatibleCpu(TestCase):
-#     device = "cpu"
-#     check_model = check_model
-#     package_cpp_only = False
-
-
-# copy_tests(
-#     AOTInductorTestsTemplate,
-#     AOTInductorTestPackagedABICompatibleCpu,
-#     "packaged_abi_compatible_cpu",
-# )
-
-
-# @unittest.skipIf(sys.platform == "darwin" or IS_FBCODE, "No CUDA on MacOS")
-# class AOTInductorTestPackagedCPPABICompatibleCuda(TestCase):
-#     device = "cuda"
-#     package_cpp_only = True
-#     check_model = check_model
-
-
-# copy_tests(
-#     AOTInductorTestsTemplate,
-#     AOTInductorTestPackagedCPPABICompatibleCuda,
-#     "packaged_cpp_abi_compatible_cuda",
-# )
-
-
-# @unittest.skipIf(IS_FBCODE, "This is for OSS only")
-# class AOTInductorTestPackagedCPPABICompatibleCpu(TestCase):
-#     device = "cpu"
-#     check_model = check_model
-#     package_cpp_only = True
-
-
-# copy_tests(
-#     AOTInductorTestsTemplate,
-#     AOTInductorTestPackagedCPPABICompatibleCpu,
-#     "packaged_cpp_abi_compatible_cpu",
-# )
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
