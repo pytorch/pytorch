@@ -87,6 +87,12 @@ test_failures_gpu_wrapper = {
     "test_unspec_inputs_xpu": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
     ),
+    "test_roi_align_xpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("gpu_wrapper",), is_skip=True
+    ),
+    "test_roi_align_xpu": test_torchinductor.TestFailure(
+        ("gpu_wrapper",), is_skip=True
+    ),
 }
 
 
