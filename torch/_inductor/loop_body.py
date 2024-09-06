@@ -450,7 +450,7 @@ class LoopBodyBlock:
                 indexing_dtype: torch.dtype,
                 right: bool,
             ):
-                offsets_size = add_index(offsets_size, MemoryUsageType.BUCKETIZE)
+                offsets_size = add_index(offsets_size, MemoryUsageType.BUCKETIZE, buffer_name=offsets_name)
                 return self._inner.bucketize(
                     values, offsets_name, offsets_size, indexing_dtype, right
                 )
