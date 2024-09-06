@@ -816,10 +816,10 @@ class _FindNodesLookupTable:
     def find_nodes(self, *, op: str, target: Optional['Target'] = None):
         if op == "call_function":
             assert target is not None
-            return dict(self.table[(op, target)]).keys()
+            return [*self.table[(op, target)].keys()]
 
         if target is None:
-            return dict(self.table[(op, None)]).keys()
+            return [*self.table[(op, None)].keys()]
 
         # op is call_method, get_attr, call_module
         return [node for node in self.table[(op, None)].keys() if node.target == target]
@@ -1551,6 +1551,8 @@ class Graph:
 
         # Check targets are legit
         if self.owning_module:
+            num_warnings = 0
+            MAX_WARNINGS = 5
             for node in self.nodes:
                 if node.op == 'call_function':
                     if not callable(node.target):
@@ -1577,11 +1579,21 @@ class Graph:
                               and not isinstance(new_m_itr, torch.nn.Module)
                               and not isinstance(new_m_itr, torch.nn.Parameter)
                               and atom not in m_itr._buffers):
-                            warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
-                                          'not reference an nn.Module, nn.Parameter, or buffer, which is '
-                                          'what \'get_attr\' Nodes typically target')
+                            if num_warnings < MAX_WARNINGS:
+                                # Don't emit this warning too frequently,
+                                # for very large graphs this can become very expensive
+                                # from a performance perspective.
+                                warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                              'not reference an nn.Module, nn.Parameter, or buffer, which is '
+                                              'what \'get_attr\' Nodes typically target')
+                            num_warnings += 1
                         else:
                             m_itr = new_m_itr
+            if num_warnings > MAX_WARNINGS:
+                warnings.warn(
+                    f'Additional {num_warnings - MAX_WARNINGS} warnings '
+                    'suppressed about get_attr references'
+                )
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(self, is_impure_node: Optional[Callable[[Node], bool]] = None):
