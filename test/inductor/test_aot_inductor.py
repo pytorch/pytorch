@@ -3400,17 +3400,13 @@ class AOTInductorTestsTemplate:
             ("add_kernel_0", 3),
         ]
 
-        # test the default debug printing codegen
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, Model(), example_inputs
             )
-
             # check the c shim print_tensor_handle call is triggered by the config and injected the cpp output code as expected
             self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
-
             # check the codegen for debug printing around the actual kernel call is expected
-
             for kernel_call, count in kernel_calls:
                 FileCheck().check_count(
                     f"before_launch - {kernel_call}",
