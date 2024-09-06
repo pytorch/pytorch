@@ -4098,13 +4098,19 @@ class CPUReproTests(TestCase):
 
         funcs.append(func2)
 
+        # test small shapes
+        funcs.append(func2)
+        small_size = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.bfloat16) // 2
+
         example_shapes = [
             [(10, 32, 20, 20), (10, 32, 20, 20)],
             [(10, 32, 20, 20)],
             [(10, 32, 20, 20), (10, 32, 20, 20)],
+            # test small shapes
+            [(small_size), (small_size)],
         ]
-        mixed_types = [False, False, True]
-        check_vecns = [True, True, True]
+        mixed_types = [False, False, True, False]
+        check_vecns = [True, True, True, False]
 
         for dtype in [torch.bfloat16, torch.float16]:
             for func, shapes, mixed, check_vecn in zip(
