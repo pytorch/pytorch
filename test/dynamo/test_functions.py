@@ -314,6 +314,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             combs.append(torch.ones(size))
         return combs
 
+    @unittest.skipIf(
+        sys.version_info < (3, 10),
+        "itertools.pairwise was added at Python 3.10",
+    )
     @make_test
     def test_itertools_pairwise(a):
         pairs = []

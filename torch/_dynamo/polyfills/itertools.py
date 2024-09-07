@@ -15,8 +15,12 @@ __all__ = [
     "chain_from_iterable",
     "islice",
     "tee",
-    "pairwise",
 ]
+
+if sys.version_info >= (3, 10):
+    # pairwise polyfill
+
+    __all__ += ["pairwise"]
 
 
 _T = TypeVar("_T")
@@ -66,6 +70,16 @@ def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
                 next_i += step
 
 
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
+@substitute_in_graph(itertools.pairwise, is_emebedded_type=True)  # type: ignore[any-type]
+def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
+    iterator = iter(iterable)
+    a = next(iterator, None)
+    for b in iterator:
+        yield a, b
+        a = b
+
+
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
 @substitute_in_graph(itertools.tee)
 def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
@@ -84,13 +98,3 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
             return
 
     return tuple(_tee(shared_link) for _ in range(n))
-
-
-# Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
-@substitute_in_graph(itertools.pairwise, is_emebedded_type=True)  # type: ignore[any-type]
-def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
-    iterator = iter(iterable)
-    a = next(iterator, None)
-    for b in iterator:
-        yield a, b
-        a = b
