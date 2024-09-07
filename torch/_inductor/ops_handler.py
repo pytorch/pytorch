@@ -1005,6 +1005,10 @@ class OpCounterCSE:
             self._nontrivial_read_count += 1
         return self.__getattr__("load")(name, index)
 
+    def load_seed(self, name: str, offset: T):
+        self._read_names.append(name)
+        return self.__getattr__("load_seed")(name, offset)
+
     def bucketize(
         self,
         values,
