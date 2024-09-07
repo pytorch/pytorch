@@ -509,7 +509,7 @@ class ONNXProgram:
         self._diagnostic_context = diagnostic_context
         self._fake_context = fake_context
         self._export_exception = export_exception
-        self._state_dict = {}
+        self._state_dict: dict[str, torch.Tensor] = {}
 
     def __call__(
         self,
