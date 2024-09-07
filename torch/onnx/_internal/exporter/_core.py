@@ -30,6 +30,7 @@ from torch.onnx._internal.exporter import (
     _building,
     _capture_strategies,
     _dispatching,
+    _errors,
     _fx_passes,
     _ir_passes,
     _onnx_program,
@@ -37,7 +38,6 @@ from torch.onnx._internal.exporter import (
     _reporting,
     _tensors,
     _verification,
-    errors,
 )
 
 
@@ -426,7 +426,7 @@ def _handle_call_function_node_with_lowering(
 
     if onnx_function is None:
         # TODO(justinchuby): Fall back to ATen op or do something else?
-        raise errors.DispatchError(
+        raise _errors.DispatchError(
             f"No ONNX function found for {node.target!r}. Failure message: {message}"
         )
 
@@ -453,7 +453,7 @@ def _handle_call_function_node_with_lowering(
         try:
             outputs = onnx_function(*onnx_args, **onnx_kwargs)
         except Exception as e:
-            raise errors.GraphConstructionError(
+            raise _errors.GraphConstructionError(
                 f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
             ) from e
 
@@ -547,7 +547,7 @@ def _add_nodes(
                     # No lowering
                     _handle_call_function_node(model.graph, node, node_name_to_values)
         except Exception as e:
-            raise errors.OnnxConversionError(
+            raise _errors.ConversionError(
                 f"Error when translating node {node.format_node()}. See the stack trace for more information."
             ) from e
     return node_name_to_values
@@ -958,7 +958,7 @@ def export(
 
     Raises:
         TorchExportError: If the export process fails with torch.export.
-        OnnxConversionError: If the ExportedProgram to ONNX translation fails.
+        ConversionError: If the ExportedProgram to ONNX translation fails.
     """
     # Set up the error reporting facilities
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
@@ -1039,7 +1039,7 @@ def export(
             # focus on the torch.export.export error. Errors from other strategies like
             # torch.jit.trace is due to the fallback and can be confusing to users.
             # We save all errors in the error report.
-            raise errors.TorchExportError(
+            raise _errors.TorchExportError(
                 _STEP_ONE_ERROR_MESSAGE
                 + (
                     f"\nError report has been saved to '{report_path}'."
@@ -1099,7 +1099,7 @@ def export(
         else:
             report_path = None
 
-        raise errors.OnnxConversionError(
+        raise _errors.ConversionError(
             _STEP_TWO_ERROR_MESSAGE
             + (f"\nError report has been saved to '{report_path}'." if report else "")
             + _summarize_exception_stack(e)
@@ -1163,7 +1163,7 @@ def export(
         else:
             report_path = None
 
-        raise errors.OnnxConversionError(
+        raise _errors.ConversionError(
             _STEP_TWO_ERROR_MESSAGE
             + (f"\nError report has been saved to '{report_path}'." if report else "")
             + _summarize_exception_stack(e)
