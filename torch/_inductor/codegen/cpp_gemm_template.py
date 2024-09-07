@@ -58,7 +58,7 @@ extern "C" {{export_declaration}}
     const int64_t Mr_blocks = (M + Mr - 1) / Mr;
     {%- if num_threads > 1 %}
     int64_t Mt_blocks, Nt_blocks, Kt_blocks;
-    mm_get_thread_blocking(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
+    mm_get_thread_blocking(num_threads, {{config.cpp.gemm_max_k_slices}}, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
     {%- else %}
     const auto Mt_blocks = Mr_blocks;
     const auto Nt_blocks = Nr_blocks;
@@ -1033,6 +1033,7 @@ class CppPackedGemmTemplate(CppTemplate):
             DTYPE_TO_CPP=DTYPE_TO_CPP,
             L1_cache_size=L1_cache_size,
             L2_cache_size=L2_cache_size,
+            config=config,
         )
         with contextlib.ExitStack() as stack:
             for buf in fake_buffers:
