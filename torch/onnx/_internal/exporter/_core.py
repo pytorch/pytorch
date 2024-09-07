@@ -16,8 +16,6 @@ from typing import Any, Callable, Literal, Sequence
 
 import onnxscript
 import onnxscript.evaluator
-import onnxscript.function_libs
-import onnxscript.function_libs.torch_lib
 from onnxscript import ir
 from onnxscript.ir import convenience as ir_convenience
 
@@ -117,6 +115,14 @@ class TorchTensor(ir.Tensor):
         # Implement tobytes to support native PyTorch types so we can use types like bloat16
         # Reading from memory directly is also more efficient because
         # it avoids copying to a NumPy array
+        import torch._subclasses.fake_tensor
+
+        if isinstance(self.raw, torch._subclasses.fake_tensor.FakeTensor):
+            raise TypeError(
+                f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
+                "with a tensor backed by real data using ONNXProgram.apply_weights() "
+                "or save the model without initializers by setting include_initializers=False."
+            )
         tensor = self.raw.detach().cpu().contiguous()
         return bytes(
             (ctypes.c_ubyte * tensor.element_size() * tensor.numel()).from_address(
