@@ -280,9 +280,6 @@ class FSDPParamGroup:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
-        if ca.compiled_autograd_enabled:
-            self._to_sharded()
-            return
         if self._training_state == TrainingState.FORWARD:
             if not self._reshard_after_forward:
                 return
@@ -531,7 +528,7 @@ class FSDPParamGroup:
     # Properties #
     @property
     def _reshard_after_forward(self) -> bool:
-        return self.post_forward_mesh_info is not None or ca.compiled_autograd_enabled
+        return self.post_forward_mesh_info is not None
 
     @property
     def _use_post_forward_mesh(self) -> bool:
