@@ -71,8 +71,11 @@ RUN yum install -y cmake3 && \
     ln -s /usr/bin/cmake3 /usr/bin/cmake
 
 #install ninja
-RUN yum install -y ninja-build && \
-    ln -s /usr/bin/ninja-build /usr/bin/ninja
+RUN cd ~/ && \
+    wget https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-linux-aarch64.zip && \
+    unzip ninja-linux-aarch64.zip && \
+    mv -f ./ninja /usr/bin/ninja && \
+    rm ninja-linux-aarch64.zip
 
 FROM base as openssl
 # Install openssl (this must precede `build python` step)
