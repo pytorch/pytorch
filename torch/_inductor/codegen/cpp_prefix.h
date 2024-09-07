@@ -754,7 +754,7 @@ void mm_get_cache_blocking(
   // See NOTE [CPP GEMM Cache Blocking Algorithm] for the cache blocking algorithm.
   // TODO(jgong5): cache cache blocking results
   // TODO: tune the factor here
-  float L1_limit_factor = 1.0;
+  float L1_limit_factor = 0.8;
   float L2_limit_factor = 0.5;
 
   auto L1 = L1_cache_size * L1_limit_factor;
