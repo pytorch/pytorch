@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import functools
+import logging
+import os
 import sys
 import unittest
 from typing import Optional
@@ -23,6 +25,9 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
+
+
+log = logging.getLogger(__name__)
 
 
 try:
@@ -264,6 +269,19 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return self.epilogue(self.linear(x))
 
+        # TODO: debug utils, safe to remove in Oct 2024
+        if inductor_config.is_fbcode():
+            log.warning(
+                f"DEBUG: torch.backends.mkl.is_available() is {torch.backends.mkl.is_available()}, "  # noqa: G004
+                f"torch.ops.mkldnn._is_mkldnn_fp16_supported() is {torch.ops.mkldnn._is_mkldnn_fp16_supported()}, "
+                f"torch.ops.mkldnn._is_mkldnn_bf16_supported() is {torch.ops.mkldnn._is_mkldnn_bf16_supported()}, "
+                f"inductor_config.freezing is {inductor_config.freezing}, "
+                f"mkldnn._is_mkldnn_acl_supported() is {torch.ops.mkldnn._is_mkldnn_acl_supported()}, "
+                f"torch._C.has_mkl is {torch._C.has_mkl}, "
+                f"PYTORCH_TEST_FBCODE is {os.getenv('PYTORCH_TEST_FBCODE')}, "
+                f"PYTORCH_TEST_REMOTE_GPU is {os.getenv('PYTORCH_TEST_REMOTE_GPU')}, "
+            )
+
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
@@ -489,6 +507,40 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384,))
+    @parametrize("bias", (True, False))
+    @parametrize(
+        "binary",
+        ("add",),
+    )
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_with_binary_input_3d(
+        self, batch_size, in_features, out_features, bias, binary, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias, binary, other):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.binary = _get_epilogue(binary, other)
+
+            def forward(self, x):
+                return self.binary(self.linear(x))
+
+        counters.clear()
+        B = (2, batch_size)
+        v = torch.randn(*B, in_features).to(dtype=dtype)
+        u = torch.randn(*B, out_features).to(dtype=dtype)
+        mod = M(bias=bias, binary=binary, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
