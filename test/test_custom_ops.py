@@ -3428,6 +3428,26 @@ Please use `add.register_fake` to add an fake impl.""",
             self.assertTrue(called)
             self.assertEqual(result, w * 2 * 3 * 42)
 
+    def test_layout_constraint_tags(self):
+        needs_fixed_stride_order = torch._C.Tag.needs_fixed_stride_order
+        flexible_layout = torch._C.Tag.flexible_layout
+        # (tags, the result of the tag inference)
+        tests = [
+            ({needs_fixed_stride_order}, needs_fixed_stride_order),
+            ({flexible_layout}, flexible_layout),
+            # If no tags are provided, then the following is the default
+            (set(), flexible_layout),
+            # If multiple tags are provided, then we use the most constrained tag.
+            ({flexible_layout, needs_fixed_stride_order}, needs_fixed_stride_order),
+        ]
+        from torch._inductor.lowering import get_layout_constraint_tag
+
+        for tags, expected in tests:
+            with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+                m.define("foobar(Tensor x) -> Tensor", tags=tags)
+                result = get_layout_constraint_tag(torch.ops.mylib.foobar.default)
+                self.assertEqual(result, expected)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap(self):
         for mode in ["function", "qualname", "opoverload", "c_opdef"]:
