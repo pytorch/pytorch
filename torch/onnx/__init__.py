@@ -135,14 +135,29 @@ _CUSTOM_ONNX_DECOMPS = {}
 def register_decomp(
     target: Callable, onnx_decomp: Callable, is_complex: bool = False
 ) -> None:
-    """Register a function to decompose a PyTorch node to ONNX."""
+    """Register a function to decompose a PyTorch node to ONNX.
+
+    Args:
+        target: The PyTorch node callable target. E.g. ``torch.ops.aten.add``.
+        onnx_decomp: The ONNX decomposition function to register.
+        is_complex: Whether the function is a function that handles complex valued inputs.
+    """
     _CUSTOM_ONNX_DECOMPS[target] = (onnx_decomp, is_complex)
 
 
 def unregister_decomp(target: Callable) -> None:
-    """Unregister a function to decompose a PyTorch node to ONNX."""
+    """Unregister a function to decompose a PyTorch node to ONNX.
+
+    Args:
+        target: The PyTorch node callable target. E.g. ``torch.ops.aten.add``.
+    """
     if target in _CUSTOM_ONNX_DECOMPS:
         del _CUSTOM_ONNX_DECOMPS[target]
+
+
+def clear_decomps() -> None:
+    """Clear all registered custom decompositions."""
+    _CUSTOM_ONNX_DECOMPS.clear()
 
 
 def export(
