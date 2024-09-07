@@ -1258,7 +1258,6 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
         if isinstance(x.data, ir.ComputedBuffer):
             return x.data.get_fill_order()[-1] == 0
 
-        # TODO: any other case that we can also check if it's contiguous?
         return False
 
     return (
