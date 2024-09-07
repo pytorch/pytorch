@@ -27,7 +27,6 @@ from ._fsdp_common import (
     _to_dtype_if_needed,
     FSDPMeshInfo,
     HSDPMeshInfo,
-    unsharded_param_storages_to_free,
 )
 
 
@@ -606,8 +605,8 @@ class FSDPParam:
             - `self._unsharded_param` is NOT an alias of `self.all_gather_outputs`.
             Instead, we resize `self._unsharded_param` storage size to full and then
             explicitly *copy* the data from `self.all_gather_outputs` to `self._unsharded_param`
-            in `init_unsharded_param()`. (We will then remove the resize_ and copy_ ops in
-            a compiler graph pass to recover performance.)
+            in `init_unsharded_param()`. (For full-graph FSDP2 case, we will then remove
+            the resize_ and copy_ ops in a compiler graph pass to recover performance.)
             - `self.all_gather_outputs` and `self._unsharded_inner_tensors` are NOT
             graph inputs. They are created within the graph and is guaranteed to be freed
             by the end of the graph. They don't leak outside of the graph.
