@@ -58,7 +58,6 @@ from .runtime_wrappers import (
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import _get_symint_hints, make_boxed_func, strict_zip, unlift_tokens
-from .fx_passes import remove_fsdp2_unsharded_param_graph_input_usage
 
 
 zip = strict_zip
@@ -383,8 +382,6 @@ def aot_dispatch_autograd(
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
-            remove_fsdp2_unsharded_param_graph_input_usage(fw_module.graph)
-            remove_fsdp2_unsharded_param_graph_input_usage(bw_module.graph)
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if config.unlift_effect_tokens and (

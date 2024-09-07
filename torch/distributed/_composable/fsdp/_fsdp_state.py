@@ -167,7 +167,9 @@ class FSDPState(_State):
                 state._is_root = False
             self._state_ctx.all_states.append(state)
             visited_states.add(state)
-        if self._fsdp_param_group:
+        if not torch._dynamo.config.skip_fsdp_hooks:
+            assert self._fsdp_param_group.post_forward_mesh_info is not None
+        elif self._fsdp_param_group:
             # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
             self._fsdp_param_group.post_forward_mesh_info = None
