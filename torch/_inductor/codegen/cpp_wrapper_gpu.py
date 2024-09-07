@@ -377,9 +377,7 @@ class CppWrapperGpu(CppWrapperCpu):
         device_index, call_args = self.prepare_triton_kernel_call(
             device_index, call_args
         )
-        kernel_var_name = self.generate_load_kernel_once(
-            kernel_name, V.graph
-        )
+        kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
 
         # args with value 1 are added into equal_to_1 and constants
         # in triton_meta (in the Python codegen) which makes them
