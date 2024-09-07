@@ -444,6 +444,7 @@ class DistributedPatternTests(TestCase):
 
     @skipIfRocm
     @skipIfXpu
+    @requires_gpu()
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_inductor(self):
         m1, inp1 = init_fake_distributed(GPU_TYPE)
