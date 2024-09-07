@@ -51,7 +51,6 @@ from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
-from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 
 
 if TYPE_CHECKING:
@@ -77,8 +76,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     The IR here has been normalized and functionalized.
     """
-    remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
-
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
