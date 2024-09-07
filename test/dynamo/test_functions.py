@@ -315,6 +315,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return combs
 
     @make_test
+    def test_itertools_pairwise(a):
+        pairs = []
+        for size in itertools.pairwise((1, 2, 3, 4)):
+            pairs.append(torch.ones(size))
+        return pairs
+
+    @make_test
     def test_np_iinfo(a):
         max_dim = np.iinfo(np.int16).max
         return a + max_dim

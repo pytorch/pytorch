@@ -111,6 +111,14 @@ class ItertoolsVariable(VariableTracker):
             for item in itertools.combinations(iterable, r):
                 items.append(variables.TupleVariable(list(item)))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
+        elif self.value is itertools.pairwise:
+            if len(args) != 1 or not args[0].has_unpack_var_sequence(tx):
+                unimplemented("Unsupported arguments for itertools.pairwise")
+            iterable = args[0].unpack_var_sequence(tx)
+            items = []
+            for item in itertools.pairwise(iterable):
+                items.append(variables.TupleVariable(list(item)))
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif self.value is itertools.groupby:
             if any(kw != "key" for kw in kwargs.keys()):
                 unimplemented(
