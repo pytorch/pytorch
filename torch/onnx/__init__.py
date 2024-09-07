@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-
 __all__ = [
     # Modules
     "symbolic_helper",
@@ -50,7 +49,7 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Collection, Mapping, Sequence
 
 import torch
 from torch import _C
@@ -98,17 +97,40 @@ from . import (  # usort: skip. Keep the order instead of sorting lexicographica
     symbolic_opset20,
     utils,
 )
-
-
+from ._exporter_states import ExportTypes
 from ._internal._exporter_legacy import (  # usort: skip. needs to be last to avoid circular import
     DiagnosticOptions,
     ExportOptions,
     ONNXProgram,
     ONNXRuntimeOptions,
     OnnxRegistry,
+    ONNXRuntimeOptions,
     enable_fake_mode,
 )
-
+from ._internal.onnxruntime import (
+    OrtBackend as _OrtBackend,
+)
+from ._internal.onnxruntime import (
+    OrtBackendOptions as _OrtBackendOptions,
+)
+from ._internal.onnxruntime import (
+    OrtExecutionProvider as _OrtExecutionProvider,
+)
+from ._internal.onnxruntime import (
+    is_onnxrt_backend_supported,
+)
+from ._type_utils import JitScalarType
+from .errors import CheckerError  # Backwards compatibility
+from .utils import (
+    _optimize_graph,
+    _run_symbolic_function,
+    _run_symbolic_method,
+    export_to_pretty_string,
+    is_in_onnx_export,
+    register_custom_op_symbolic,
+    select_model_mode_for_export,
+    unregister_custom_op_symbolic,
+)
 
 if TYPE_CHECKING:
     import os
@@ -130,6 +152,21 @@ is_onnxrt_backend_supported.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
+
+_CUSTOM_ONNX_DECOMPS = {}
+
+
+def register_decomp(
+    target: Callable, onnx_decomp: Callable, is_complex: bool = False
+) -> None:
+    """Register a function to decompose a PyTorch node to ONNX."""
+    _CUSTOM_ONNX_DECOMPS[target] = (onnx_decomp, is_complex)
+
+
+def unregister_decomp(target: Callable) -> None:
+    """Unregister a function to decompose a PyTorch node to ONNX."""
+    if target in _CUSTOM_ONNX_DECOMPS:
+        del _CUSTOM_ONNX_DECOMPS[target]
 
 
 def export(
@@ -350,6 +387,7 @@ def export(
             input_names=input_names,
             output_names=output_names,
             opset_version=opset_version,
+            additional_decomp=_CUSTOM_ONNX_DECOMPS,
             dynamic_axes=dynamic_axes,
             keep_initializers_as_inputs=keep_initializers_as_inputs,
             external_data=external_data,

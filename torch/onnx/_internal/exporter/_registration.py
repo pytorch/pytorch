@@ -203,7 +203,7 @@ class ONNXRegistry:
     def register_op(
         self,
         target: TorchOp,
-        function: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
+        function: Callable,
         is_complex: bool = False,
     ) -> None:
         """Registers a custom operator: torch.ops.<namespace>.<op_name>.<overload>.
