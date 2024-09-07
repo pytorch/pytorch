@@ -11,6 +11,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/Size.h>
 
 /*
 [Note: Compiled Autograd]
@@ -349,12 +351,114 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+struct ClosingTHPObjectPtr : public THPObjectPtr {
+  ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
+  ~ClosingTHPObjectPtr() {
+    if (PyErr_Occurred()) {
+      // do nothing, do not attempt to close
+      return;
+    }
+    static PyObject* method_name = PyUnicode_InternFromString("close");
+    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
+      PyErr_WriteUnraisable(get());
+      PyErr_Clear();
+    }
+  }
+};
+
+// figure out clean up policy
+static std::vector<std::function<variable_list(variable_list)>> lambdas;
+static std::vector<std::vector<VariableInfo>> lambda_output_infos;
+static size_t next_lambdas_idx = 0;
+
+static void lambda_collect(Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<VariableInfo>& output_info) {
+  std::cout << "storing lambdas[" << lambdas.size() << "], should output " << output_info.size() << " grads" << std::endl;
+  lambdas.emplace_back(std::move(lambda));
+  lambda_output_infos.emplace_back(output_info);
+  // _compiler.lifted_lambdas.emplace_back(lambda);
+}
+
+PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
+  c10::SymIntArrayRef sym_sizes(size);
+
+  auto ret = THPObjectPtr(THPSizeType.tp_alloc(
+      &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
+  if (!ret)
+    throw python_error();
+
+  for (auto i : c10::irange(sym_sizes.size())) {
+    auto symint = sym_sizes[i];
+    if (auto maybe_int = symint.maybe_as_int(); maybe_int.has_value()) {
+      PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(*maybe_int));
+    } else {
+      auto py_symint = py::cast(symint).release().ptr();
+      PyTuple_SET_ITEM(ret.get(), i, py_symint);
+    }
+  }
+  return ret.release();
+}
+
+static variable_list lambda_lift(PyObject* py_compiler, variable_list&& inputs) {
+  size_t idx = next_lambdas_idx++;
+  static PyObject* method_name = PyUnicode_InternFromString("proxy_call_lambda");
+  THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
+  auto lambda_output_info = lambda_output_infos[idx];
+  std::cout << "lifting lambdas[" << idx << "], expecting " << lambda_output_info.size() << " outputs" << std::endl;
+  THPObjectPtr pyoutputmetas(
+      PyTuple_New(static_cast<Py_ssize_t>(lambda_output_info.size())));
+  for (auto i : c10::irange(lambda_output_info.size())) {
+    THPObjectPtr pyoutputmeta(
+      PyTuple_Pack(
+        4,
+        autograd::utils::wrap(lambda_output_info[i].layout),
+        THPDevice_New(lambda_output_info[i].device),
+        autograd::utils::wrap(lambda_output_info[i].scalar_type),
+        to_py_size(lambda_output_info[i].size)
+      )
+    );
+    if (!pyoutputmeta) throw python_error();
+    PyTuple_SET_ITEM(pyoutputmetas.get(), i, pyoutputmeta.release());
+  }
+  THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
+    py_compiler,
+    method_name,
+    PyLong_FromSsize_t(idx),
+    pyinputs.get(),
+    pyoutputmetas.get(),
+    nullptr)));
+  return THPVariable_UnpackList(pyresult.get());
+}
+
+
+static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  PyObject* inputs = nullptr;
+  PyObject* idx = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &inputs, &idx)) {
+    python_error err;
+    err.persist();
+    // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
+    throw err;
+  }
+  TORCH_INTERNAL_ASSERT(PyList_Check(inputs));
+  // TODO: clear the list
+  variable_list cppinputs = THPVariable_UnpackList(inputs);
+  TORCH_INTERNAL_ASSERT(PyLong_Check(idx));
+  size_t cppidx = PyLong_AsSize_t(idx);
+  variable_list outs = lambdas[cppidx](std::move(cppinputs));
+  // TODO: free properly
+  // lambdas[cppidx] = {};
+  return THPVariable_WrapList(outs);
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
     {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
+    {"call_lambda", call_lambda, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -448,21 +552,6 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
 }
 
-struct ClosingTHPObjectPtr : public THPObjectPtr {
-  ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
-  ~ClosingTHPObjectPtr() {
-    if (PyErr_Occurred()) {
-      // do nothing, do not attempt to close
-      return;
-    }
-    static PyObject* method_name = PyUnicode_InternFromString("close");
-    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
-      PyErr_WriteUnraisable(get());
-      PyErr_Clear();
-    }
-  }
-};
-
 // Only call this function while holding GIL
 CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
@@ -476,6 +565,8 @@ CacheNode* _compiled_autograd_impl(
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
+  compiler_call.collect = lambda_collect;
+  compiler_call.lift = lambda_lift;
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls

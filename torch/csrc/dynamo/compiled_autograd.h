@@ -204,6 +204,10 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+  std::vector<std::function<variable_list(variable_list)>> lifted_lambdas;
+  // still need to get py::cpp_function here, cuz need it alive at runtime
+  std::function<void(Node*, std::function<variable_list(variable_list)>, const std::vector<VariableInfo>&)> collect;
+  std::function<variable_list(PyObject*, variable_list)> lift;
 };
 
 class CompiledNodeArgs {
@@ -292,6 +296,9 @@ class CompiledNodeArgs {
       collect(k);
       collect(m.at(k));
     }
+  }
+  void collect(Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<VariableInfo>& output_metas) {
+    _compiler.collect(fn, std::move(lambda), output_metas);
   }
   void collect(const at::IValue& iv, bool nested = false) {
     // used by AutogradContext::saved_data from CppNode
@@ -619,7 +626,9 @@ class SwapSavedVariables {
   void after(c10::SymInt& t) {
     stashed_symints.restore(&t);
   }
-
+  variable_list lift(variable_list&& inputs) {
+    return compiler.lift(py_compiler, std::move(inputs));
+  }
   void before(at::IValue& iv) {
     if (iv.isTensor()) {
       before(iv.toTensor());

@@ -192,12 +192,15 @@ struct CppNode : public Node {
     static_assert(
         std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
     if (!T::is_traceable) {
-      throw std::runtime_error(
-          std::string(
-              "Attempting to trace a potentially unsafe C++ autograd function: ") +
-          name() +
-          ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
+      // TODO: pass some things by copy
+      std::function<variable_list(variable_list)> lambda = [&](variable_list&& inputs) {
+        return apply(std::move(inputs));
+      };
+      args.collect(this, std::move(lambda), input_info_);
+      // TODO: when guards?
+      return;
     }
+    TORCH_INTERNAL_ASSERT(false, "found node marked as traceable");
 
     // although neither of the 2 methods below have uniqueness guarantees
     // it is unlikely for them to collide at the same time
@@ -220,6 +223,10 @@ struct CppNode : public Node {
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
+    if (!T::is_traceable) {
+      return saved.lift(variable_list(inputs));
+    }
+    
     saved.before(ctx_.saved_data);
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
     TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
@@ -400,6 +407,7 @@ auto Function<T>::apply(Args&&... args)
 template <class T>
 // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 variable_list CppNode<T>::apply(variable_list&& inputs) {
+  std::cout << "CppNode::apply received " << inputs.size() << " inputs" << std::endl;
   at::OptionalDeviceGuard _device_guard;
 
   auto num_inputs = inputs.size();
@@ -424,6 +432,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   const auto num_forward_inputs =
       static_cast<int64_t>(is_variable_input_.size());
   auto num_outputs = static_cast<int64_t>(outputs.size());
+  std::cout << "CppNode::apply outputting " << outputs.size() << " outputs" << std::endl;
   // Returning too many results is ok, but only as long as they're all
   // undefined. Truncate the result vector in that case.
   if (num_outputs > num_forward_inputs) {

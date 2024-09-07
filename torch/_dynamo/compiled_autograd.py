@@ -7,6 +7,7 @@ import torch
 from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
+    call_lambda,
     FakeCompiledAutogradEngine,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
@@ -146,6 +147,38 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(preserve_node_meta())
         return inputs, sizes, scalars
+
+    def proxy_call_lambda(
+        self,
+        idx,
+        inputs,
+        output_metadatas,
+    ):
+        # register a call to that idx
+        proxies = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_lambda,
+            args=(
+                *self.to_proxy(inputs),
+                idx,
+            ),
+            kwargs={},
+        )
+  
+        with disable_proxy_modes_tracing():
+            # create fake Tensors
+            grad_ins: List[Optional[torch.Tensor]] = []
+            for output_metadata in output_metadatas:
+                if output_metadata is None:
+                    grad_ins.append(None)
+                    continue
+
+                layout, device, dtype, size = output_metadata
+                grad_ins.append(
+                    torch.empty(size=size, dtype=dtype, layout=layout, device=device)
+                )
+            self.bind_tensors_to_proxies(grad_ins, proxies)
+        return list(grad_ins)
 
     def proxy_call_backward(
         self,
