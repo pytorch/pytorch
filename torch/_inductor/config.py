@@ -608,6 +608,9 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# Disable comprehensive padding on the CPU
+disable_padding_cpu = True
+
 # The width of comprehensive padding, in bytes.
 # CUDA max memory transaction size is 128 bytes for a warp.
 padding_alignment_bytes = 128

@@ -382,7 +382,7 @@ def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
         is_gpu(t.device.type) for t in example_inputs if isinstance(t, torch.Tensor)
     )
 
-    if config.comprehensive_padding and not has_gpu:
+    if config.disable_padding_cpu and config.comprehensive_padding and not has_gpu:
         perf_hint_log.info("Skip comprehensive padding on CPU")
         return config.patch(comprehensive_padding=False)
     else:
