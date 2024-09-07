@@ -723,18 +723,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
+        def _post_grad_custom_post_pass(graph: torch.fx.Graph, *, fullgraph=True):
+            if fullgraph:
+                if torch._dynamo.compiled_autograd.in_compiled_autograd_region:  
+                    self._check_fsdp_copy_and_resize_count_in_graph(graph, copy_count=0, resize_count=0)  # bwd graph
+                else:
+                    self._check_fsdp_copy_and_resize_count_in_graph(graph, copy_count=0, resize_count=0)  # fwd graph
+
         for fullgraph, all_requires_grad in itertools.product(
             # [True, False], [True, False]
             [True], [True]
         ):
-            def _post_grad_custom_post_pass(graph: torch.fx.Graph, *, fullgraph=True):
-                return
-                # if fullgraph and all_requires_grad:
-                #     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:  
-                #         self._check_fsdp_copy_and_resize_count_in_graph(graph, copy_count=0, resize_count=0)  # bwd graph
-                #     else:
-                #         self._check_fsdp_copy_and_resize_count_in_graph(graph, copy_count=21, resize_count=21)  # fwd graph
-
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
