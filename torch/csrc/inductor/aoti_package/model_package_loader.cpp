@@ -60,6 +60,10 @@ std::string create_temp_dir() {
   return temp_dir;
 #endif
 }
+
+bool is_prefix(const std::string& prefix, const std::string& str) {
+  return str.size() >= prefix.size() && str.substr(0, prefix.size()) == prefix;
+}
 } // namespace
 
 namespace torch::inductor {
@@ -206,7 +210,8 @@ bool AOTIModelPackageLoader::recursive_mkdir(const std::string& dir) {
 
 std::string AOTIModelPackageLoader::compile_so(
     const std::string& cpp_filename,
-    const std::string& consts_filename) {
+    const std::vector<std::string>& cpp_filenames,
+    const std::vector<std::string>& o_filenames) {
   // Compile the cpp file into a .so
 
   size_t lastindex = cpp_filename.find_last_of('.');
@@ -216,7 +221,7 @@ std::string AOTIModelPackageLoader::compile_so(
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
   auto compile_result =
-      get_cpp_compile_command(filename, {cpp_filename}, compile_flags);
+      get_cpp_compile_command(filename, cpp_filenames, compile_flags);
   std::string compile_cmd = std::get<0>(compile_result);
   std::string output_o = std::get<1>(compile_result);
 
@@ -224,8 +229,10 @@ std::string AOTIModelPackageLoader::compile_so(
       cpp_filename.substr(0, lastindex) + "_linker_flags.json";
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
-  auto link_result = get_cpp_compile_command(
-      filename, {output_o, consts_filename}, linker_flags);
+  std::vector<std::string> new_o_filenames(o_filenames);
+  new_o_filenames.push_back(output_o);
+  auto link_result =
+      get_cpp_compile_command(filename, new_o_filenames, linker_flags);
   std::string link_cmd = std::get<0>(link_result);
   std::string output_so = std::get<1>(link_result);
 
@@ -287,10 +294,11 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
   }
 
-  std::string temp_dir = create_temp_dir();
+  std::string temp_dir = create_temp_dir() + "/";
   std::string so_filename = "";
   std::string cpp_filename = "";
-  std::string consts_filename = "";
+  std::vector<std::string> cpp_filenames;
+  std::vector<std::string> o_filenames;
   std::string found_filenames = ""; // Saving for bookkeeping
 
   for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
@@ -308,43 +316,43 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     found_filenames += filename_str;
     found_filenames += " ";
 
-    // Only compile files in the specified model directory
-    std::string model_directory = "data/aotinductor/" + model_name;
-    if (filename_str.length() >= model_directory.length() &&
-        filename_str.substr(0, model_directory.length()) == model_directory) {
-      std::string output_path_str = temp_dir;
-      output_path_str += "/";
-      output_path_str += filename_str;
+    size_t parent_path_idx = filename_str.find_last_of("/\\");
+    std::string parent_path = parent_path_idx != std::string::npos
+        ? filename_str.substr(0, parent_path_idx)
+        : "";
+    size_t extension_idx = filename_str.find_last_of('.');
+    std::string extension = extension_idx != std::string::npos
+        ? filename_str.substr(extension_idx)
+        : "";
 
-      // Create the parent directory if it doesn't exist
-      size_t parent_path_idx = output_path_str.find_last_of("/\\");
-      if (parent_path_idx == std::string::npos) {
-        throw std::runtime_error(
-            "Failed to find parent path in " + output_path_str);
-      }
-      std::string parent_path = output_path_str.substr(0, parent_path_idx);
-      if (!recursive_mkdir(parent_path.c_str())) {
+    // Only extract files in the specified model directory or extra directory
+    if (is_prefix("data/aotinductor/" + model_name, parent_path) ||
+        is_prefix("extra/" + model_name, parent_path)) {
+      if (!recursive_mkdir((temp_dir + parent_path).c_str())) {
         throw std::runtime_error(fmt::format(
-            "Failed to create directory {}: {}", parent_path, strerror(errno)));
+            "Failed to create directory {}/{}: {}",
+            temp_dir,
+            parent_path,
+            strerror(errno)));
       }
 
-      // Extracts file to the temp directory
+      std::string full_filename = temp_dir + filename_str;
       mz_zip_reader_extract_file_to_file(
-          &zip_archive, filename, output_path_str.c_str(), 0);
+          &zip_archive, filename, full_filename.c_str(), 0);
 
-      // Save the file for bookkeeping
-      size_t extension_idx = output_path_str.find_last_of('.');
-      if (extension_idx != std::string::npos) {
-        std::string filename_extension = output_path_str.substr(extension_idx);
-        if (filename_extension == ".cpp") {
-          cpp_filename = output_path_str;
-        }
-        if (filename_extension == ".o") {
-          consts_filename = output_path_str;
-        }
-        if (filename_extension == ".so") {
-          so_filename = output_path_str;
-        }
+      if (is_prefix("data/aotinductor/" + model_name, parent_path) &&
+          extension == ".cpp") {
+        cpp_filenames.push_back(full_filename);
+        cpp_filename = full_filename;
+      } else if (
+          is_prefix("data/aotinductor/" + model_name, parent_path) &&
+          extension == ".so") {
+        so_filename = full_filename;
+      } else if (extension == ".cpp") {
+        // Add any cpp files located in extra/ to the list
+        cpp_filenames.push_back(full_filename);
+      } else if (extension == ".o") {
+        o_filenames.push_back(full_filename);
       }
     }
   }
@@ -365,7 +373,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   // Compile the .so
   std::string so_path = !so_filename.empty()
       ? so_filename
-      : compile_so(cpp_filename, consts_filename);
+      : compile_so(cpp_filename, cpp_filenames, o_filenames);
 
   // Load metadata which can be queried by user
   load_metadata(cpp_filename);

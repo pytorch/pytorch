@@ -1775,12 +1775,13 @@ class AotCodeCompiler:
             output_o = object_builder.get_target_file_path()
 
             log.debug("aot compilation command: %s", compile_cmd)
-            if fbcode_aot_cpu_re:
-                output_o = os.path.splitext(input_path)[0] + ".o"
-                compile_file(input_path, output_o, compile_cmd.split())
-                os.chmod(output_o, 0o644)
-            else:
-                run_command_and_check(compile_cmd)
+            if not config.aot_inductor.package_cpp_only:
+                if fbcode_aot_cpu_re:
+                    output_o = os.path.splitext(input_path)[0] + ".o"
+                    compile_file(input_path, output_o, compile_cmd.split())
+                    os.chmod(output_o, 0o644)
+                else:
+                    run_command_and_check(compile_cmd)
 
             if config.aot_inductor.package:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"

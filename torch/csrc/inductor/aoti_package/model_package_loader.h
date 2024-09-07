@@ -26,7 +26,8 @@ class TORCH_API AOTIModelPackageLoader {
   void load_metadata(const std::string& cpp_filename);
   std::string compile_so(
       const std::string& cpp_filename,
-      const std::string& consts_filename);
+      const std::vector<std::string>& cpp_filenames,
+      const std::vector<std::string>& o_filenames);
   const nlohmann::json& load_json_file(std::string json_path);
   std::tuple<std::string, std::string> get_cpp_compile_command(
       const std::string& filename,

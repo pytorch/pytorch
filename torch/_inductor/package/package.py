@@ -177,6 +177,8 @@ def package_aoti(
     assert isinstance(aoti_files, dict)
     assert archive_file.endswith(".pt2")
 
+    additional_sources = additional_sources or []
+
     # Save using the PT2 packaging format
     # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
 
