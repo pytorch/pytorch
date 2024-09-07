@@ -265,10 +265,6 @@ class FSDPState(_State):
                     functools.partial(_cast_fp_tensor, self._mp_policy.output_dtype),
                     output,
                 )
-        if ca.compiled_autograd_enabled:
-            for storage in unsharded_param_storages_to_free:
-                storage.resize_(0)
-            unsharded_param_storages_to_free.clear()
         return output
 
     def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
@@ -303,10 +299,6 @@ class FSDPState(_State):
                         self._comm_ctx.reduce_scatter_state.event
                     )
                     self._comm_ctx.reduce_scatter_state = None
-                if ca.compiled_autograd_enabled:
-                    for storage in unsharded_param_storages_to_free:
-                        storage.resize_(0)
-                    unsharded_param_storages_to_free.clear()
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:

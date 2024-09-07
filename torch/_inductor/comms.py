@@ -354,8 +354,11 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
 
     Preconditions:
     1. FSDP2 must be traced in full-graph mode.
-    2. All FSDP2 unsharded params must be resharded (i.e. resized to 0) at the end of graph.
+    2. All FSDP2 unsharded params must be resharded at the end of graph.
     """
+    if not torch._dynamo.utils.is_one_graph():
+        return
+
     node_list = list(graph.nodes)
 
     # Find all graph inputs and their resize counts
@@ -374,17 +377,6 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             else:
                 graph_input_to_resized_to_0_count[graph_input] += 1
 
-    # Check whether the graph is FSDP2 full-graph. If not, return.
-    is_fullgraph = True
-    for graph_input, count in graph_input_to_resized_to_full_count.items():
-        # If for any graph input there are more resize-to-full nodes than resize-to-0 nodes,
-        # we know this is not full-graph FSDP2.
-        if count - graph_input_to_resized_to_0_count[graph_input] > 0:
-            is_fullgraph = False
-
-    if not is_fullgraph:
-        return
-
     # Find all eligible unsharded params and their corresponding graph intermediates.
     unsharded_param_to_fsdp_copy_node_idxes = defaultdict(list)
     for idx, node in enumerate(node_list):
@@ -394,15 +386,6 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             assert (
                 unsharded_param.op == "placeholder"
             ), "Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!"
-            assert (
-                unsharded_param in graph_input_to_resized_to_0_count
-            ), f"""
-Assumed all FSDP2 `unsharded_param`s to be resized to 0 at end of graph
-(i.e. `reshard_after_forward` is True for all FSDP states including the root state),
-but it's not true!
-Violating unshared param: {unsharded_param}.
-Graph: {graph}
-"""
             unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
 
     # Check no user mutation on any unsharded_param

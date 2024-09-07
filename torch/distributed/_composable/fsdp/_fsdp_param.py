@@ -471,9 +471,6 @@ class FSDPParam:
                 # a compiler graph pass to recover performance.
                 alloc_storage(self._unsharded_param)
                 torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
-                unsharded_param_storages_to_free.append(
-                    self._unsharded_param.untyped_storage()
-                )
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
