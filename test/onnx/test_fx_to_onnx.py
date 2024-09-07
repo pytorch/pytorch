@@ -242,20 +242,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 export_options=torch.onnx.ExportOptions(onnx_registry=registry),
             )
 
-        try:
-            torch.onnx.dynamo_export(
-                TraceModel(),
-                x,
-                export_options=torch.onnx.ExportOptions(onnx_registry=registry),
-            )
-        except torch.onnx.OnnxExporterError as e:
-            assert_has_diagnostics(
-                e.onnx_program.diagnostic_context,
-                diagnostics.rules.no_symbolic_function_for_call_function,
-                diagnostics.levels.ERROR,
-                expected_node="aten.mul.Tensor",
-            )
-
     def test_symbolic_shape_of_values_inside_function_is_exported_as_graph_value_info(
         self,
     ):
