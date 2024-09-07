@@ -14,6 +14,9 @@ from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 
+unsharded_param_storages_to_free = []
+
+
 @dataclass
 class DataParallelMeshInfo:
     mesh: DeviceMesh
