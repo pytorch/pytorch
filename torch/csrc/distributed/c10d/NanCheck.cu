@@ -11,67 +11,114 @@ namespace c10d {
 
 // CUDA kernel to check if data has NAN, device side assert
 // is raised if NAN is found
-/*
-template <typename T>
-__global__ void checkForNaN(T* data, size_t size) {
-  size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-  size_t stride = blockDim.x * gridDim.x;
 
-  for (size_t i = tid; i < size; i += stride) {
-    CUDA_KERNEL_ASSERT(!isnan(data[i]));
+// Using ulong2 as a "byte pack", with 16 bytes, for efficient data load
+typedef ulong2 BytePack;
+
+//// Start of templated functions for checking NaNs inside a BytePack
+
+// (i) General implementation (aka fallback)
+// We use a for loop to iterate over the elements in a BytePack.
+// EltPerPack would be greater than 8 if falling in this case.
+
+template <typename T, int EltPerPack>
+struct CheckBytePack {
+  static __device__ __forceinline__ void check(BytePack* tmp) {
+    T* data = (T*)tmp;
+    #pragma unroll 8
+    for (int i = 0; i < EltPerPack; i++) {
+      if (isnan(data[i])) __trap();
+    }
   }
-}
-*/
-
-union BytePack16 {
-  ulong2 data;
-  double f64[2];
 };
 
-typedef union BytePack16 BytePack;
-#define UNROLL 8
+// (ii) Template Specialization for 8-byte data types, e.g. double
+// EltPerPack = 16 / 8 = 2
 
 template <typename T>
-__device__ __forceinline__ void checkBytePack(BytePack* tmp) {
-  constexpr int nT = sizeof(BytePack) / sizeof(T);
-  T* data = (T*)tmp;
-  #pragma unroll
-  for (int i = 0; i < nT; i++) {
-    if (isnan(data[i])) __trap();
+struct CheckBytePack<T, /*EltPerPack*/2> {
+  static __device__ __forceinline__ void check(BytePack* tmp) {
+    T* data = (T*)tmp;
+    if (isnan(data[0]) || isnan(data[1])) __trap();
   }
-}
+};
+
+// (iii) Template specialization for 4-byte data types, e.g. float32
+// EltPerPack = 16 / 4 = 4
+
+template <typename T>
+struct CheckBytePack<T, /*EltPerPack*/4> {
+  static __device__ __forceinline__ void check(BytePack* tmp) {
+    T* data = (T*)tmp;
+    if (isnan(data[0]) || isnan(data[1]) || isnan(data[2]) || isnan(data[3])) __trap();
+  }
+};
+
+// (iv) Template specialization for 2-byte data types, e.g. float16, bfloat16, half.
+// EltPerPack = 16 / 2 = 8
+
+template <typename T>
+struct CheckBytePack<T, /*EltPerPack*/8> {
+  static __device__ __forceinline__ void check(BytePack* tmp) {
+    T* data = (T*)tmp;
+    if (isnan(data[0]) || isnan(data[1]) || isnan(data[2]) || isnan(data[3]) ||
+        isnan(data[4]) || isnan(data[5]) || isnan(data[6]) || isnan(data[7])) {
+          __trap();
+    }
+  }
+};
+
+//// End of templated functions for checking NaNs inside a BytePack
+
+
+// Fast-path check routine:
+// each thread will load and check 8 BytePacks in this routine
+
+// Create a tmp buffer of size 8, also unroll for loop by 8
+#define UNROLL 8
 
 template <typename T>
 __device__ __forceinline__ void checkChunk(BytePack* ptr) {
   BytePack tmp[UNROLL];
   int nWorkers = blockDim.x * gridDim.x;
+  // First load values from global memory into tmp buffer
   #pragma unroll 8
   for (int j = 0; j < UNROLL; j++) {
     tmp[j] = ptr[nWorkers * j];
   }
+  // Then check each BytePack in the tmp buffer
   #pragma unroll 8
   for (int j = 0; j < UNROLL; j++) {
-    // if (isnan(tmp[j].f64[0]) || isnan(tmp[j].f64[1])) __trap();
-    checkBytePack<T>(tmp + j);
+    CheckBytePack<T, sizeof(BytePack)/sizeof(T)>::check(tmp + j);
   }
+  // Note: we separate the check from the load for efficient loading
 }
+
+
+// This is the host-facing kernel
 
 template <typename T>
 __global__ void checkForNaN(T* data, size_t size) {
+  // In PyTorch, tensor storage is guaranteed to have 16-byte alignment
   BytePack* ptr = (BytePack*)data;
+  // Size of input data in unit of BytePack
   size_t sizeInBP = size *  sizeof(T) / sizeof(BytePack);
+  // Number of BytePacks processed in one fast-path iteration
   size_t loopSize = blockDim.x * gridDim.x * UNROLL;
+  // Offset of current thread
   size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
 
   // Fast path
+  // The condition below makes sure there is enough data to process (`loopSize`)
   for (; offset + loopSize <= sizeInBP; offset += loopSize) {
     checkChunk<T>(ptr + offset);
   }
-  // Slow path
+
+  // The rest data goes on slow path
+  // We just do regular load and check
   for (; offset < sizeInBP; offset += blockDim.x * gridDim.x) {
     BytePack tmp = ptr[offset];
-    // if (isnan(tmp.f64[0]) || isnan(tmp.f64[1])) __trap();
-    checkBytePack<T>(&tmp);
+    CheckBytePack<T, sizeof(BytePack)/sizeof(T)>::check(&tmp);
   }
 }
 
