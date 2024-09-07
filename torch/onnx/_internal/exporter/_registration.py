@@ -17,7 +17,6 @@ import logging
 import math
 import operator
 import types
-import typing
 from typing import Callable, Literal, Union
 from typing_extensions import TypeAlias
 
@@ -26,9 +25,6 @@ import torch._ops
 from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import _schemas
 
-
-if typing.TYPE_CHECKING:
-    import onnxscript
 
 _DEFAULT_OPSET_VERSION = 18
 

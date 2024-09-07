@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+
 __all__ = [
     # Modules
     "symbolic_helper",
@@ -49,7 +50,7 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-from typing import TYPE_CHECKING, Any, Callable, Collection, Mapping, Sequence
+from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
 
 import torch
 from torch import _C
@@ -97,7 +98,6 @@ from . import (  # usort: skip. Keep the order instead of sorting lexicographica
     symbolic_opset20,
     utils,
 )
-from ._exporter_states import ExportTypes
 from ._internal._exporter_legacy import (  # usort: skip. needs to be last to avoid circular import
     DiagnosticOptions,
     ExportOptions,
@@ -106,30 +106,6 @@ from ._internal._exporter_legacy import (  # usort: skip. needs to be last to av
     OnnxRegistry,
     ONNXRuntimeOptions,
     enable_fake_mode,
-)
-from ._internal.onnxruntime import (
-    OrtBackend as _OrtBackend,
-)
-from ._internal.onnxruntime import (
-    OrtBackendOptions as _OrtBackendOptions,
-)
-from ._internal.onnxruntime import (
-    OrtExecutionProvider as _OrtExecutionProvider,
-)
-from ._internal.onnxruntime import (
-    is_onnxrt_backend_supported,
-)
-from ._type_utils import JitScalarType
-from .errors import CheckerError  # Backwards compatibility
-from .utils import (
-    _optimize_graph,
-    _run_symbolic_function,
-    _run_symbolic_method,
-    export_to_pretty_string,
-    is_in_onnx_export,
-    register_custom_op_symbolic,
-    select_model_mode_for_export,
-    unregister_custom_op_symbolic,
 )
 
 if TYPE_CHECKING:
