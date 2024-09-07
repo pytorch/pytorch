@@ -361,15 +361,30 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     1. FSDP2 must be traced in full-graph mode.
     2. All FSDP2 unsharded params must be resharded (i.e. resized to 0) at the end of graph.
     """
-    # Check condition 1: fullgraph=True  # TODO(yf225): find a way to check this
-    # To check full-graph, either check top-level config value or (maybe) check that the two `unsharded_param.resize_`s cancel out so we know it's full graph
     node_list = list(graph.nodes)
 
-    # Find all resize-to-0 nodes
-    resized_to_0_nodes = set()
+    # Find all graph inputs and their resize counts
+    graph_input_to_resized_to_full_count = defaultdict(int)
+    graph_input_to_resized_to_0_count = defaultdict(int)
     for node in node_list:
-        if node.op == "call_function" and node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[1] == 0:
-            resized_to_0_nodes.add(node.args[0])
+        if node.op == "call_function" and node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[0].op == "placeholder":
+            graph_input = node.args[0]
+            new_size = node.args[1]
+            if new_size > 0:
+                graph_input_to_resized_to_full_count[graph_input] += 1
+            else:
+                graph_input_to_resized_to_0_count[graph_input] += 1
+
+    # Check whether the graph is FSDP2 full-graph. If not, return.
+    is_fullgraph = True
+    for graph_input, count in graph_input_to_resized_to_full_count.items():
+        # If for any graph input there are more resize-to-full nodes than resize-to-0 nodes,
+        # we know this is not full-graph FSDP2.
+        if count - graph_input_to_resized_to_0_count[graph_input] > 0:
+            is_fullgraph = False
+
+    if not is_fullgraph:
+        return
 
     # Find all eligible unsharded params and their corresponding graph intermediates.
     unsharded_param_to_fsdp_copy_node_idxes = defaultdict(list)
@@ -378,7 +393,7 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             fsdp_copy_node = node
             unsharded_param = node.args[0]
             assert unsharded_param.op == "placeholder", "Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!"
-            assert unsharded_param in resized_to_0_nodes, f"Assumed all FSDP2 `unsharded_param`s to be resized to 0 at end of graph (i.e. `reshard_after_forward` is True for all FSDP states including the root state), but it's not true! Violating unshared param: {unsharded_param}. Graph: {graph}"
+            assert unsharded_param in graph_input_to_resized_to_0_count, f"Assumed all FSDP2 `unsharded_param`s to be resized to 0 at end of graph (i.e. `reshard_after_forward` is True for all FSDP states including the root state), but it's not true! Violating unshared param: {unsharded_param}. Graph: {graph}"
             unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
 
     # Check no user mutation on any unsharded_param
