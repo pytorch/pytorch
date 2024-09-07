@@ -359,37 +359,10 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
 
     Preconditions:
     1. FSDP2 must be traced in full-graph mode.
-    2. Only the unsharded params that are resharded (i.e. resized to 0) at the end of graph can be replaced
-       (i.e. only the non-"root" unsharded params can be replaced).
-
-    NOTE: Explanation on Precondition (2):
-    Not all FSDP2 unsharded params are resharded (i.e. resized to 0) at the end of graph.
-    Particularly, the parameters of the "root FSDP state" will be kept in unsharded state
-    and saved for backward use at the end of forward graph, to avoid having to immediately
-    all-gather them at the beginning of backward (this optimization also exists in eager).
-    So from the lens of the backward graph, it expects the "root" unsharded params to be full-size
-    coming into the backward graph.
-
-    However, if we do the "replace with graph intermediate" optimization, the "root" unsharded params
-    saved by forward graph will NOT be full-size, and will instead be 0-size, violating the expectation
-    of the backward graph. Details:
-
-    Life of "root" unsharded param *before* the optimization:
-    1. Start off in the forward graph as 0-size tensors (b/c resharded at end of previous iteration's backward).
-    2. resize_ to full-size, then fsdp.copy_ to get the actual value.
-    3. Be saved as activation (as a full-size tensor) at end of forward graph.
-    4. Backward graph sees that the saved "root" unsharded param is full-size as expected. Backward graph is happy.
-    
-    Life of "root" unsharded param *after* the optimization:
-    1. Start off in the forward graph as 0-size tensors (b/c resharded at end of previous iteration's backward).
-    2. Be saved as activation (as a 0-size tensor!) at end of forward graph.
-    3. Backward graph sees that the saved "root" unsharded param is 0-size, violating expectation. Backward graph is not happy :(
-
-    Hence, we cannot apply this optimization to the "root" unsharded params.
+    2. All FSDP2 unsharded params must be resharded (i.e. resized to 0) at the end of graph.
     """
     # Check condition 1: fullgraph=True  # TODO(yf225): find a way to check this
     # To check full-graph, either check top-level config value or (maybe) check that the two `unsharded_param.resize_`s cancel out so we know it's full graph
-    return
     node_list = list(graph.nodes)
 
     # Find all resize-to-0 nodes
@@ -405,9 +378,8 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             fsdp_copy_node = node
             unsharded_param = node.args[0]
             assert unsharded_param.op == "placeholder", "Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!"
-            # assert unsharded_param in resized_to_0_nodes, f"Assumed all FSDP2 `unsharded_param`s to be resized to 0 at end of graph (i.e. `reshard_after_forward` is True for all FSDP states including the root state), but it's not true! Violating unshared param: {unsharded_param}. Graph: {graph}"
-            if unsharded_param in resized_to_0_nodes:
-                unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
+            assert unsharded_param in resized_to_0_nodes, f"Assumed all FSDP2 `unsharded_param`s to be resized to 0 at end of graph (i.e. `reshard_after_forward` is True for all FSDP states including the root state), but it's not true! Violating unshared param: {unsharded_param}. Graph: {graph}"
+            unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
 
     # Check no user mutation on any unsharded_param
     def is_allowed_mutation(node):

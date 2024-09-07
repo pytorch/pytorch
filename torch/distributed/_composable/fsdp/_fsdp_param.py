@@ -27,6 +27,7 @@ from ._fsdp_common import (
     _to_dtype_if_needed,
     FSDPMeshInfo,
     HSDPMeshInfo,
+    unsharded_param_storages_to_free,
 )
 
 
@@ -468,6 +469,7 @@ class FSDPParam:
                 if (storage := self._unsharded_param.untyped_storage()).size() != size:
                     storage.resize_(size)
                 torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
+                unsharded_param_storages_to_free.append(self._unsharded_param.untyped_storage())
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
