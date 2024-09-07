@@ -477,9 +477,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 )
 
             def forward(self, x):
+                ret = torch.matmul(x, self.param1)
                 if not fullgraph:
                     torch._dynamo.graph_break()
-                ret = torch.matmul(x, self.param1)
                 ret = ret * self.param2
                 ret = torch.relu(ret)
                 return ret
