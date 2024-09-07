@@ -80,7 +80,7 @@ class DeferredCudaDefaultGrid:
 
     def __iter__(self):
         # DeferredCudaDefaultGrid can be passed to the base class, WrapperCodeGen,
-        # to genrete the autotune code block, and thus we need this iterator
+        # to generate the autotune code block, and thus we need this iterator
         return iter(self.grid)
 
     def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
@@ -199,6 +199,19 @@ class CppWrapperCuda(CppWrapperCpu):
         )
         return name
 
+    def define_kernel(
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        cuda=True,
+    ):
+        if cuda:
+            # Call the Python wrapper codegen to create the autotune code block
+            self.define_kernel_python(kernel_name, kernel_body, metadata, cuda)
+        else:
+            super().define_kernel(kernel_name, kernel_body, metadata, cuda)
+
     def generate(self, is_inference):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
@@ -212,19 +225,6 @@ class CppWrapperCuda(CppWrapperCpu):
             self.prefix.writeline("\n")
         return super().generate(is_inference)
 
-    def define_kernel(
-        self,
-        kernel_name: str,
-        kernel_body: str,
-        metadata: Optional[str] = None,
-        cuda=True,
-    ):
-        """
-        Override the default value of argument 'cuda' to True here. define_kernel can still be
-        called with cuda=False because of a mix of cpu kernels and triton kernels.
-        """
-        return super().define_kernel(kernel_name, kernel_body, metadata, cuda)
-
     def generate_user_defined_triton_kernel(
         self,
         kernel_name: str,
@@ -234,7 +234,7 @@ class CppWrapperCuda(CppWrapperCpu):
         triton_meta,
         constexprs,
     ):
-        # Call parent class to create the autotune code block
+        # Call the Python wrapper codegen to create the autotune code block
         super().generate_user_defined_triton_kernel(
             kernel_name,
             raw_args,
@@ -242,7 +242,6 @@ class CppWrapperCuda(CppWrapperCpu):
             configs,
             triton_meta,
             constexprs,
-            codegen_autotune_only=True,
         )
 
         # in C++ wrapper, we don't pass constexpr args, as they don't
@@ -251,6 +250,7 @@ class CppWrapperCuda(CppWrapperCpu):
         raw_args = [
             raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
         ]
+        args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args
@@ -259,7 +259,7 @@ class CppWrapperCuda(CppWrapperCpu):
         # Call self.generate_kernel_call to generate the real kernel call in cpp
         self.generate_kernel_call(
             kernel_name,
-            [self.val_to_arg_str(v) for v in raw_args],
+            args,
             arg_types=arg_types,
             raw_args=raw_args,
             grid=grid,
@@ -361,9 +361,8 @@ class CppWrapperCuda(CppWrapperCpu):
         using DeferredCudaDefaultGrid.
         """
         # Call parent class to create the default grid
-        super().generate_default_grid(
-            kernel_name, grid_args, cuda, grid_callable, **grid_extra_kwargs
-        )
+        if not cuda:
+            return grid_args
         return DeferredCudaDefaultGrid(
             kernel_name, grid_args, grid_callable, **grid_extra_kwargs
         )
@@ -404,7 +403,7 @@ class CppWrapperCuda(CppWrapperCpu):
                 grid_extra_kwargs,
             )
 
-        # Call parent class to create the autotune code block
+        # Call the Python wrapper codegen to create the autotune code block
         self.generate_kernel_call_python(
             kernel_name,
             call_args,

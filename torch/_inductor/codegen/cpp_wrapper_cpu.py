@@ -905,12 +905,7 @@ class CppWrapperCpu(WrapperCodeGen):
         metadata: Optional[str] = None,
         cuda=False,
     ):
-        if cuda:
-            # Call the Python wrapper codegen to create the autotune code block
-            super().define_kernel(kernel_name, kernel_body, metadata, cuda)
-        else:
-            # No autotune for cpu kernels, simply write out the kernel body as a function
-            self.header.splice(f"\n{kernel_body}\n")
+        self.header.splice(f"\n{kernel_body}\n")
 
     def codegen_scalar_to_tensor(self, output: str):
         name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"

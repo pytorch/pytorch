@@ -805,14 +805,14 @@ class WrapperCodeGen(CodeGen):
         configs,
         triton_meta,
         constexprs,
-        codegen_autotune_only: bool = False,
     ):
         grid_fn, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
         )
-        if not codegen_autotune_only:
+        if not (config.triton.autotune_at_compile_time and V.graph.cpp_wrapper):
             # Must happen after free symbols are already codegened
             # Emit the grid wrapper function right before the call
+            # For cpp wrapper, we only need to generate Triton kernel code for the autotune block
             for line in code.split("\n"):
                 self.writeline(line)
 
@@ -821,7 +821,7 @@ class WrapperCodeGen(CodeGen):
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args
         ]
-        self.generate_kernel_call(
+        self.generate_kernel_call_python(
             kernel_name, args, grid_fn=grid_fn, arg_types=arg_types, raw_args=raw_args
         )
 
@@ -1266,7 +1266,7 @@ class WrapperCodeGen(CodeGen):
                 ]
             )
 
-    def define_kernel(
+    def define_kernel_python(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -1282,6 +1282,15 @@ class WrapperCodeGen(CodeGen):
                 # For cpp wrapper, we only need to generate the autotune code block in python
                 return
         self.header.splice(body)
+
+    def define_kernel(
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        cuda=True,
+    ):
+        self.define_kernel_python(kernel_name, kernel_body, metadata, cuda)
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
         from torch.utils._triton import patch_triton_dtype_repr
@@ -1653,7 +1662,6 @@ class WrapperCodeGen(CodeGen):
         elif isinstance(arg, list):
             return f"[{', '.join(self.generate_example_arg_value(a, type(a)) for a in arg)}]"
         else:
-            breakpoint()
             raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def _grid_dim_str(self, grid_per_dim):
