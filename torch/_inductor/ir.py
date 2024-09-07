@@ -5864,7 +5864,11 @@ class FallbackKernel(ExternKernelAlloc):
                 elif isinstance(keypath[0], CallMethodKey):
                     return go(f"{expr}.{keypath[0].name}()", keypath[1:])
                 elif isinstance(keypath[0], pytree.SequenceKey):
-                    return go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                    return (
+                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
+                        if V.graph.cpp_wrapper
+                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                    )
                 elif isinstance(keypath[0], DivideByKey):
                     # TODO: need to assert divisibility
                     # TODO: this is invalid C++ codegen
@@ -6520,7 +6524,7 @@ class Conditional(ExternKernel):
                     subgraph.graph.run(*fake_operands)
 
         true_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
-        false_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
+        false_outputs = false_fn.graph.graph_outputs  # type: ignore[union-attr]
 
         for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
             if _has_aliased_buffers(true_outputs):
@@ -6798,6 +6802,16 @@ class LoopBody:
     indexing simplifications and makes it easier to analyze loop bodies.
     """
 
+    indexing_exprs: Dict[str, sympy.Expr]
+    indexing_exprs_name: Dict[sympy.Expr, str]
+    reads_name2expr: Dict[str, sympy.Expr]
+    writes_name2expr: Dict[str, sympy.Expr]
+    submodules: Dict[str, Any]
+    subblocks: Dict[str, LoopBodyBlock]
+    indirect_vars: List[str]
+    indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr]
+    root_block: LoopBodyBlock
+
     def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
         super().__init__()
 
@@ -6811,19 +6825,58 @@ class LoopBody:
         self.reduce_vars = reduce_vars
         self.var_ranges = var_ranges
 
+        if isinstance(fn, LoopBody):
+            self._init_with_copy(fn, args)
+        else:
+            self._init_with_tracing(fn, args)
+
+        self.indexing = None
+
+    def _init_with_tracing(self, fn, args):
+        """Do an FX trace of an arbitrary callable to construct self"""
         self.indexing_exprs = {}
         self.indexing_exprs_name = {}
-        self.reads = []
-        self.writes = []
         self.reads_name2expr = {}
         self.writes_name2expr = {}
-        self.other = []
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
         self.indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr] = {}
-        self.root_block = LoopBodyBlock(self, fn, args)
-        self.indexing = None
+        self.root_block = LoopBodyBlock(self, fn, args)  # traces
+        del self.indexing_exprs_name  # not used after _init_with_tracing
+
+    def _init_with_copy(self, other: LoopBody, args):
+        """
+        _init_with_tracing() is slow, so this is a fast path in the case
+        where we are just reordering/merging/splitting the args of an
+        existing LoopBody.
+        """
+        indexing_exprs = other.indexing_from_args(args)
+        update_index = {
+            expr: indexing_exprs[name] for name, expr in other.indexing_exprs.items()
+        }
+        assert indexing_exprs.keys() == other.indexing_exprs.keys() and len(
+            update_index
+        ) == len(indexing_exprs)
+
+        self.indexing_exprs = indexing_exprs
+        self.reads_name2expr = {
+            k: update_index[v] for k, v in other.reads_name2expr.items()
+        }
+        self.writes_name2expr = {
+            k: update_index[v] for k, v in other.writes_name2expr.items()
+        }
+        self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
+        self.indirect_vars = [*other.indirect_vars]
+        self.indirect_var_ranges = {**other.indirect_var_ranges}
+        self.root_block = other.root_block.clone(self)
+
+        submodules = {**other.submodules}
+        submodules.pop("get_index")
+        self.submodules = {
+            "get_index": self.get_index,
+            **{k: v.clone(self) for k, v in submodules.items()},  # type: ignore[attr-defined]
+        }
 
     def merge_loops(self) -> LoopBody:
         """
@@ -6962,7 +7015,6 @@ class LoopBody:
     __repr__ = debug_str
 
     def add_index_expr(self, expr: sympy.Expr, category, buf_name):
-        getattr(self, category).append(expr)
         if buf_name is not None:
             getattr(self, f"{category}_name2expr")[buf_name] = expr
         if expr not in self.indexing_exprs_name:
@@ -7015,6 +7067,35 @@ class LoopBody:
         result = self.root_block()
         self.indexing = None
         return result
+
+    def bind_set_indirect_shim(self, var, size, check, wrap_neg):
+        def set_indirect(new_var):
+            self.replace_indirect(
+                var, V.ops.indirect_indexing(new_var, size, check, wrap_neg)
+            )
+
+        set_indirect.clone = functools.partial(  # type: ignore[attr-defined]
+            LoopBody.bind_set_indirect_shim,
+            var=var,
+            size=size,
+            check=check,
+            wrap_neg=wrap_neg,
+        )
+        return set_indirect
+
+    def bind_scan_shim(self, combine_fn):
+        def shim(dtypes, values):
+            return V.ops.scan(dtypes, combine_fn, values)
+
+        shim.clone = functools.partial(LoopBody.bind_scan_shim, combine_fn=combine_fn)  # type: ignore[attr-defined]
+        return shim
+
+    def bind_masked_shim(self, name):
+        def shim(mask, other):
+            return V.ops.masked(mask, self.subblocks[name], other)
+
+        shim.clone = functools.partial(LoopBody.bind_masked_shim, name=name)  # type: ignore[attr-defined]
+        return shim
 
 
 class LoopBodyBlock:
@@ -7086,15 +7167,9 @@ class LoopBodyBlock:
                 """
                 Recursively capture the masked out body in another LoopBodyBlock
                 """
-
-                subblock: LoopBodyBlock
-
-                def shim(mask, other):
-                    return V.ops.masked(mask, subblock, other)
-
-                name = self.body.add_submodule(shim, "masked_subblock")
-                subblock = LoopBodyBlock(self.body, masked_body, [])
-                self.body.subblocks[name] = subblock
+                name = self.body.add_submodule(None, "masked_subblock")
+                self.body.submodules[name] = self.body.bind_masked_shim(name)
+                self.body.subblocks[name] = LoopBodyBlock(self.body, masked_body, [])
                 return tracer.create_proxy(
                     "call_module", name, (mask_proxy, other_proxy), {}
                 )
@@ -7107,9 +7182,7 @@ class LoopBodyBlock:
                 ],
                 value_proxy,
             ):
-                def shim(dtypes, values):
-                    return V.ops.scan(dtypes, combine_fn, values)
-
+                shim = self.body.bind_scan_shim(combine_fn)
                 name = self.body.add_submodule(shim, "scan")
                 result = tracer.create_proxy(
                     "call_module",
@@ -7138,12 +7211,9 @@ class LoopBodyBlock:
                 """
 
                 var = self.body.add_indirect(size)
-
-                def set_indirect(new_var):
-                    self.body.replace_indirect(
-                        var, V.ops.indirect_indexing(new_var, size, check, wrap_neg)
-                    )
-
+                set_indirect = self.body.bind_set_indirect_shim(
+                    var, size, check, wrap_neg
+                )
                 tracer.create_proxy(
                     "call_module",
                     self.body.add_submodule(set_indirect, f"set_{var}"),
@@ -7191,6 +7261,12 @@ class LoopBodyBlock:
             "",
             code.strip().replace("def forward(", f"def {name}("),
         )
+
+    def clone(self, body: LoopBody):
+        """Shallow copy with a new parent LoopBody"""
+        copy = LoopBodyBlock.__new__(LoopBodyBlock)
+        copy.__dict__.update({**self.__dict__, "body": body})
+        return copy
 
 
 class _CollectiveKernel(FallbackKernel):

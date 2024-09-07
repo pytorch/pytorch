@@ -1,7 +1,12 @@
 
-#include <ATen/ops/mkldnn_rnn_layer_cpu_dispatch.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/CPUFunctions.h>
+#else
+#include <ATen/ops/mkldnn_rnn_layer_cpu_dispatch.h>
+#endif
 
 using namespace torch::aot_inductor;
 
