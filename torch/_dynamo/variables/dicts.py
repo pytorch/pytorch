@@ -951,9 +951,15 @@ class HFPretrainedConfigVariable(VariableTracker):
         assert self.is_matching_cls(type(obj))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from . import ConstantVariable
+        from .builder import VariableBuilder
 
-        return ConstantVariable.create(getattr(self.obj, name))
+        try:
+            attr_value = getattr(self.obj, name)
+            attr_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, attr_source)(attr_value)
+
+        except AttributeError:
+            unimplemented(f"getattr({self.value}, {name})")
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         return variables.ConstantVariable.create(hasattr(self.obj, name))
