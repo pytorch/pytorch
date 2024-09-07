@@ -459,11 +459,7 @@ at::Tensor res_out = (transpose_result) ? at::empty({n, m}, res_tensor_options)
         dense_B.data_ptr(),
         &beta,
         res.data_ptr(),
-    #ifdef USE_ROCM
-        res_out.data_ptr(),
-    #else
         res.data_ptr(),
-    #endif
         workspacePtr.get(),
         // jank because of the way we want this to be an array of streams
         &stream,
@@ -483,11 +479,7 @@ at::Tensor res_out = (transpose_result) ? at::empty({n, m}, res_tensor_options)
         dense_B.data_ptr(),
         &beta,
         res.data_ptr(),
-    #ifdef USE_ROCM
-        res_out.data_ptr(),
-    #else
         res.data_ptr(),
-    #endif
         workspacePtr.get(),
         // jank because of the way we want this to be an array of streams
         &stream,
