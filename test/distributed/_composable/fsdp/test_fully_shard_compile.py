@@ -238,7 +238,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             common_ops = {
                 torch.ops.fsdp.all_gather_copy_in.default,
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-                # torch.ops.fsdp.split_with_sizes_copy.default,
+                torch.ops.fsdp.split_with_sizes_copy.default,
             }
             bwd_only_ops = {
                 torch.ops.fsdp.chunk_cat.default,
@@ -250,7 +250,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         snodes,
                         op,
                     ),
-                    msg=f"{op} not in snodes: {snodes}, snodes.node: {[snode.node for snode in snodes]}",
+                    msg=f"{op}",
                 )
             if not is_fwd_graph:
                 for op in bwd_only_ops:
@@ -259,7 +259,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             snodes,
                             op,
                         ),
-                        msg=f"{op} not in snodes: {snodes}, snodes.node: {[snode.node for snode in snodes]}",
+                        msg=f"{op}",
                     )
 
         def _decide_global_ordering_of_comms_with_checks(

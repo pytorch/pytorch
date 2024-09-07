@@ -81,20 +81,20 @@ def copy_(tensor, data):
 
 
 """
-[Note: Avoiding functionalization for fsdp.copy_ and inductor.resize_storage_bytes_(0)]
+[Note: Avoiding functionalization for fsdp.copy_ and inductor.resize_storage_bytes_]
 
-Currently we don't functionalize `fsdp.copy_` op or `inductor.resize_storage_bytes_(0)` op
+Currently we don't functionalize `fsdp.copy_` op or `inductor.resize_storage_bytes_` op
 (i.e. they show up as a mutation op in the middle of the AOT joint graph).
 
 Reason:
 Traceable FSDP2 compiled autograd BWD graph have the following traits:
 (1) Two inputs of the graph were aliased to each other (one from hook closed-over tensors, one from FWD saved tensors).
-(2) One of them is mutated (copy_ and resize_(0) to handle the all-gathered param).
+(2) One of them is mutated (copy_ and resize_ to handle the all-gathered param).
 (3) They are both subclasses.
 The combination of these traits is not supported by AOTAutograd (it's difficult to reason about subclass aliasing).
 So this doesn't work at all for Traceable FSDP2.
 
-The compromise we use is to avoid functionalization for the FSDP2 copy_ and resize_(0) ops.
+The compromise we use is to avoid functionalization for the FSDP2 copy_ and resize_ ops.
 This avoids the problem above, because from AOTAutograd point-of-view there are no mutations
 that functionalization needs to handle. (Although we need to be careful not to DCE those mutable ops.)
 
@@ -104,6 +104,10 @@ so it's safe to call .copy_() in the middle of the graph to update its content a
 (2) We always re-allocate the buffer for nn.Parameter to store the AllGather output and to be used in downstream user ops.
 So calling resize-to-0 in the middle of the graph to free nn.Parameter memory after use should always be okay
 (since we always allocate anew next time we need it, we strictly don't need to keep the old tensor storage around anymore).
+
+Q: Wouldn't the extra resize_ and copy_ ops hurt both memory usage and performance?
+A: Yes it would. As an optimization, we have an Inductor post-grad FX pass to remove those resize_ and copy_ ops
+if the traced FSDP2 graph is full-graph (i.e. no graph breaks).
 """
 
 
@@ -465,9 +469,7 @@ class FSDPParam:
             ):
                 # NOTE: Under compile, we will remove the resize_ and copy_ ops in
                 # a compiler graph pass to recover performance.
-                size = self._unsharded_param.numel() * self._unsharded_param.itemsize
-                if (storage := self._unsharded_param.untyped_storage()).size() != size:
-                    storage.resize_(size)
+                alloc_storage(self._unsharded_param)
                 torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
                 unsharded_param_storages_to_free.append(self._unsharded_param.untyped_storage())
         else:
