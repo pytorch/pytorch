@@ -89,6 +89,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.graph.disable_saved_tensors_hooks,
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
+        torch.nn.attention.sdpa_kernel,
     ]
 )
 
@@ -224,6 +225,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradModeVariable,
             InferenceModeVariable,
             JvpIncrementNestingCtxManagerVariable,
+            SDPAKernelVariable,
             SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
@@ -324,6 +326,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return FSDPParamGroupUseTrainingStateVariable.create(
                 tx, args[0], args[1].as_python_constant()
             )
+        elif self.value is torch.nn.attention.sdpa_kernel:
+            assert len(args) == 1
+            return SDPAKernelVariable.create(tx, args[0].as_python_constant())
 
         return super().call_function(tx, args, kwargs)
 

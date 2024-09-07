@@ -977,6 +977,84 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         return "use_training_state"
 
 
+class SDPAKernelVariable(ContextWrappingVariable):
+    """represents torch.nn.attention.sdpa_kernel"""
+
+    _backend_list = [
+        "cudnn",
+        "flash",
+        "mem_efficient",
+        "math",
+    ]
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", backends, **kwargs):
+        if isinstance(backends, torch.nn.attention.SDPBackend):
+            backends = [backends]
+        var = SDPAKernelVariable(
+            target_values=backends,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    @staticmethod
+    def _backends_to_nodes(tx, backends):
+        nodes = []
+        for backend in backends:
+            for name in torch.nn.attention._backend_names.values():
+                if backend is getattr(torch.nn.attention.SDPBackend, name):
+                    nodes.append(
+                        tx.output.create_node(
+                            "call_function",
+                            torch.nn.attention._backend_from_string,
+                            (name,),
+                            {},
+                        )
+                    )
+                    break
+            else:
+                unimplemented(f"{backend} backend not found")
+        return nodes
+
+    def enter(self, tx):
+        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends()
+        self.set_cleanup_hook(
+            tx, lambda: torch.nn.attention._sdpa_kernel(self.prev_backends)
+        )
+        torch.nn.attention._sdpa_kernel(self.target_values)
+        arg = self._backends_to_nodes(tx, self.target_values)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup_assert()
+        arg = self._backends_to_nodes(tx, self.prev_backends)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "torch.nn.attention"
+
+    def fn_name(self):
+        return "sdpa_kernel"
+
+
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
