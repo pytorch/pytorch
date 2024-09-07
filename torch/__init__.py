@@ -2382,8 +2382,8 @@ def compile(
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
           to debug.
 
-        - "max-autotune" is a mode that leverages CPP template-based matrix multiplications on CPU
-          and Triton based matrix multiplications and convolutions on GPU.
+        - "max-autotune" is a mode that leverages Triton or  template based matrix multiplications 
+          on supported devices and Triton based convolutions on GPU.
           It enables CUDA graphs by default on GPU.
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
