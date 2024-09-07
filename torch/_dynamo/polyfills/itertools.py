@@ -15,6 +15,7 @@ __all__ = [
     "chain_from_iterable",
     "islice",
     "tee",
+    "pairwise",
 ]
 
 
@@ -83,3 +84,13 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
             return
 
     return tuple(_tee(shared_link) for _ in range(n))
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
+@substitute_in_graph(itertools.pairwise, is_emebedded_type=True)  # type: ignore[any-type]
+def pairwise(iterable: Iterable[_T]) -> Iterator[_T]:
+    iterator = iter(iterable)
+    a = next(iterator, None)
+    for b in iterator:
+        yield a, b
+        a = b
