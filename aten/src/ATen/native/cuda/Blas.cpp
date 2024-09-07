@@ -964,9 +964,9 @@ ScalingType get_scaling_type(
 
 } // namespace
 
-// Computes matrix multiply + bias while applying scaling to input and output matrices and computes amax
+// Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
-// If output matrix type is 16 or 32-bit type, neither scale_result is applied nor amax is computed.
+// If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
 //  - Only works if matrices sizes are divisible by 32
@@ -1071,9 +1071,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
 
-  // Some scaled_gemms require an amax to populate lets create one here
-  Tensor amax = at::empty({0}, mat1.options().dtype(ScalarType::Float));
-
 #ifdef USE_ROCM
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
@@ -1129,7 +1126,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.c_scale_ptr = scale_result ? scale_result->data_ptr() : nullptr;
       params.ldc = args.result_ld;
       params.c_dtype = out_dtype_;
-      params.amax_ptr = amax.data_ptr();
       params.use_fast_accum = use_fast_accum;
       params.use_rowwise = scaling_choice == ScalingType::RowWise;
       if (transa_ && transb_) {
@@ -1154,11 +1150,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   else
 #endif
   {
-#if defined(USE_ROCM) && ROCM_VERSION >= 60200
-  // hipBlasLT requires scaleD to be set to something in order to use AMAX
-    auto dummy_options = TensorOptions().dtype(kFloat).device(kCUDA);
-    auto dummy_scale = at::ones(1, dummy_options);
-#endif
     at::cuda::blas::scaled_gemm(
         args.transa,
         args.transb,
@@ -1176,14 +1167,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
-#if defined(USE_ROCM) && ROCM_VERSION >= 60200
-        scale_result ? scale_result->data_ptr() : dummy_scale.data_ptr(),
-#else
         scale_result ? scale_result->data_ptr() : nullptr,
-#endif
         args.result_ld,
         out_dtype_,
-        amax.data_ptr(),
         use_fast_accum,
         scaling_choice == ScalingType::RowWise);
   }
