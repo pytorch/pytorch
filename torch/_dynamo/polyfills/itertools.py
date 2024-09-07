@@ -88,7 +88,7 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
 @substitute_in_graph(itertools.pairwise, is_emebedded_type=True)  # type: ignore[any-type]
-def pairwise(iterable: Iterable[_T]) -> Iterator[_T]:
+def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
     iterator = iter(iterable)
     a = next(iterator, None)
     for b in iterator:
