@@ -342,6 +342,126 @@ def reorder_compute_and_comm_for_overlap(
     return order
 
 
+# mypy: allow-untyped-defs
+import itertools
+import logging
+import typing
+from collections import Counter, defaultdict
+from typing import Any, Dict, List, Set, Union
+
+import torch
+
+
+def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
+    """
+    This FX graph pass replaces uses of FSDP2 unsharded params with their corresponding
+    graph intermediates that were fsdp.copy_ into the unsharded params in the original graph.
+
+    Preconditions:
+    1. FSDP2 must be traced in full-graph mode.
+    2. Only the unsharded params that are resharded (i.e. resized to 0) at the end of graph can be replaced
+       (i.e. only the non-"root" unsharded params can be replaced).
+
+    NOTE: Explanation on Precondition (2):
+    Not all FSDP2 unsharded params are resharded (i.e. resized to 0) at the end of graph.
+    Particularly, the parameters of the "root FSDP state" will be kept in unsharded state
+    and saved for backward use at the end of forward graph, to avoid having to immediately
+    all-gather them at the beginning of backward (this optimization also exists in eager).
+    So from the lens of the backward graph, it expects the "root" unsharded params to be full-size
+    coming into the backward graph.
+
+    However, if we do the "replace with graph intermediate" optimization, the "root" unsharded params
+    saved by forward graph will NOT be full-size, and will instead be 0-size, violating the expectation
+    of the backward graph. Details:
+
+    Life of "root" unsharded param *before* the optimization:
+    1. Start off in the forward graph as 0-size tensors (b/c resharded at end of previous iteration's backward).
+    2. resize_ to full-size, then fsdp.copy_ to get the actual value.
+    3. Be saved as activation (as a full-size tensor) at end of forward graph.
+    4. Backward graph sees that the saved "root" unsharded param is full-size as expected. Backward graph is happy.
+    
+    Life of "root" unsharded param *after* the optimization:
+    1. Start off in the forward graph as 0-size tensors (b/c resharded at end of previous iteration's backward).
+    2. Be saved as activation (as a 0-size tensor!) at end of forward graph.
+    3. Backward graph sees that the saved "root" unsharded param is 0-size, violating expectation. Backward graph is not happy :(
+
+    Hence, we cannot apply this optimization to the "root" unsharded params.
+    """
+    # Check condition 1: fullgraph=True  # TODO(yf225): find a way to check this
+    # To check full-graph, either check top-level config value or (maybe) check that the two `unsharded_param.resize_`s cancel out so we know it's full graph
+    return
+    node_list = list(graph.nodes)
+
+    # Find all resize-to-0 nodes
+    resized_to_0_nodes = set()
+    for node in node_list:
+        if node.op == "call_function" and node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[1] == 0:
+            resized_to_0_nodes.add(node.args[0])
+
+    # Find all eligible unsharded params and their corresponding graph intermediates.
+    unsharded_param_to_fsdp_copy_node_idxes = defaultdict(list)
+    for idx, node in enumerate(node_list):
+        if node.op == "call_function" and node.target == torch.ops.fsdp.copy_.default:
+            fsdp_copy_node = node
+            unsharded_param = node.args[0]
+            assert unsharded_param.op == "placeholder", "Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!"
+            # assert unsharded_param in resized_to_0_nodes, f"Assumed all FSDP2 `unsharded_param`s to be resized to 0 at end of graph (i.e. `reshard_after_forward` is True for all FSDP states including the root state), but it's not true! Violating unshared param: {unsharded_param}. Graph: {graph}"
+            if unsharded_param in resized_to_0_nodes:
+                unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
+
+    # Check no user mutation on any unsharded_param
+    def is_allowed_mutation(node):
+        return (node.target == torch.ops.fsdp.copy_.default or 
+                node.target == torch.ops.inductor.resize_storage_bytes_.default)
+
+    for node in node_list:
+        if node.op == "call_function" and isinstance(node.target, torch._ops.OpOverload) and node.target._schema.is_mutable and not is_allowed_mutation(node) and any(arg in unsharded_param_to_graph_intermediate for arg in node.args):
+            raise RuntimeError("User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is used")
+
+    # For each `fsdp.copy_(unsharded_param, Y)`, replace downstream usage of `unsharded_param` with `Y`.
+    #
+    # NOTE: Because of "layer reuse" use case, there could be multiple `fsdp.copy_` to the same `unsharded_param` graph input.
+    # e.g.
+    # ```
+    #     fsdp_copy_1 = fsdp.copy_(unsharded_param_1, Y1)
+    #     ... (use of unsharded_param_1)                     -> Subgraph 1
+    #     fsdp_copy_2 = fsdp.copy_(unsharded_param_1, Y2)
+    #     ... (use of unsharded_param_1)                     -> Subgraph 2
+    #     fsdp_copy_3 = fsdp.copy_(unsharded_param_1, Y3)
+    #     ... (use of unsharded_param_1)                     -> Subgraph 3
+    # ```
+    # We must do the replacement only within each subgraph.
+    replacement_nodes = set()
+    for unsharded_param, fsdp_copy_node_idxes in unsharded_param_to_fsdp_copy_node_idxes.items():
+        for i, fsdp_copy_node_idx in enumerate(fsdp_copy_node_idxes):
+            fsdp_copy_node = node_list[fsdp_copy_node_idx]
+            assert fsdp_copy_node.args[0] is unsharded_param
+            _, replacement = fsdp_copy_node.args
+            replacement_nodes.add(replacement)
+            # subgraph_start_idx is inclusive
+            subgraph_start_idx = fsdp_copy_node_idx
+            # subgraph_end_idx is exclusive (also intentionally don't replace args in return op)
+            subgraph_end_idx = fsdp_copy_node_idxes[i+1] if i < len(fsdp_copy_node_idxes) - 1 else len(node_list) - 1
+            subgraph = node_list[subgraph_start_idx:subgraph_end_idx]
+            for node in subgraph:
+                if node.op == "call_function" and unsharded_param in node.args:  # TODO(yf225): implement replacement in kwargs
+                    new_args = tuple(replacement if arg is unsharded_param else arg for arg in node.args)
+                    node.args = new_args
+
+    # Delete `fsdp.copy_(unsharded_param, Y)` nodes
+    for unsharded_param, fsdp_copy_node_idxes in unsharded_param_to_fsdp_copy_node_idxes.items():
+        for i, fsdp_copy_node_idx in enumerate(fsdp_copy_node_idxes):
+            fsdp_copy_node = node_list[fsdp_copy_node_idx]
+            graph.erase_node(fsdp_copy_node)
+
+    # Delete resize nodes, including:
+    # 1. `resize_storage_bytes_(unsharded_param, ...)` nodes
+    # 2. `resize_storage_bytes_(Y, 0)` nodes
+    for node in node_list:
+        if node.op == "call_function" and node.target == torch.ops.inductor.resize_storage_bytes_.default and (node.args[0] in unsharded_param_to_fsdp_copy_node_idxes or node.args[0] in replacement_nodes):
+            graph.erase_node(node)
+
+
 def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     try:
         import torch.distributed._composable.fsdp._fsdp_collectives
