@@ -134,6 +134,12 @@ class BaseTestSelectAlgorithm(TestCase):
         else:
             self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
 
+    def _check_brgemm_counter(self, vec_amx):
+        if vec_amx and torch.cpu._is_amx_fp16_supported():
+            self.assertTrue(counters["inductor"]["cpp_micro_brgemm_counter"] > 0)
+        else:
+            self.assertEqual(counters["inductor"]["cpp_micro_brgemm_counter"], 0)
+
 
 class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     common = check_model
@@ -800,7 +806,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("in_features", (1024,))
     @parametrize("out_features", (1024, 1025))
     @parametrize("bias", (True, False))
-    @dtypes(torch.bfloat16)
+    @dtypes(torch.bfloat16, torch.half)
     def test_linear_amx(self, batch_size, in_features, out_features, bias, dtype):
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -817,7 +823,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
-        self._check_amx_counter(vec_amx)
+        if dtype == torch.half:
+            self._check_brgemm_counter(vec_amx)
+        else:
+            self._check_amx_counter(vec_amx)
 
     @inductor_config.patch({"freezing": True})
     @patches
