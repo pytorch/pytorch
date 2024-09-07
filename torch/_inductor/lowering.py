@@ -101,11 +101,30 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
         _maybe_layout_constraints[fn] = None
         return None
     # We lazily register tag-based layout constraints.
-    if torch._C.Tag.needs_fixed_stride_order in fn.tags:
-        _maybe_layout_constraints[fn] = constrain_to_fx_strides
-        return _maybe_layout_constraints[fn]
-    _maybe_layout_constraints[fn] = None
-    return None
+
+    def handle_layout_constraint_tag(tag):
+        if tag is torch._C.Tag.needs_fixed_stride_order:
+            _maybe_layout_constraints[fn] = constrain_to_fx_strides
+            return _maybe_layout_constraints[fn]
+        elif tag is torch._C.Tag.flexible_layout:
+            _maybe_layout_constraints[fn] = None
+            return None
+        else:
+            raise AssertionError(f"Unknown layout constraint tag: {tag}")
+
+    tag = get_layout_constraint_tag(fn)
+    return handle_layout_constraint_tag(tag)
+
+
+def get_layout_constraint_tag(fn):
+    tags_by_priority = [
+        torch._C.Tag.needs_fixed_stride_order,
+        torch._C.Tag.flexible_layout,
+    ]
+    for tag in tags_by_priority:
+        if tag in fn.tags:
+            return tag
+    return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
 
 
 def assert_nyi(cond, msg):
