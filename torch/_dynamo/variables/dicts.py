@@ -314,6 +314,7 @@ class ConstDictVariable(VariableTracker):
                     ListVariable,
                     TupleVariable,
                     ListIteratorVariable,
+                    variables.IteratorVariable,
                     UserDefinedObjectVariable,
                 ),
             )
