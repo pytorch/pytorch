@@ -581,6 +581,9 @@ class WrapperCodeGen(CodeGen):
             strip=True,
         )
 
+    def include_extra_header(self, header: str):
+        pass
+
     def write_kernel_autotune_defs_header(self) -> None:
         self.kernel_autotune_defs.splice(
             f"""
