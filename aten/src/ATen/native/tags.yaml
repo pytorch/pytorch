@@ -46,6 +46,15 @@
   desc: |
           This tag indicates that the operator should be passed Tensors following
           the same stride permutation as observed in eager when compiled in inductor.
+          Only one of {needs_fixed_stride_order, flexible_layout} can apply; if
+          multiple are assigned then we assume the most restrictive one.
+- tag: flexible_layout
+  desc: |
+          This tag indicates that the custom operator can accept inputs with varying
+          strides/storage_offset and that when compiled, Inductor is allowed to change
+          the strides/storage_offset of inputs to the custom operator.
+          Only one of {needs_fixed_stride_order, flexible_layout} can apply; if
+          multiple are assigned then we assume the most restrictive one.
 
 # NOTE [Core ATen Ops]
 - tag: core
