@@ -10,6 +10,7 @@ from torch.utils._sympy.symbol import SymT
 
 from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
+from ..loop_body import LoopBody
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
@@ -239,7 +240,7 @@ class CppTemplateKernel(CppKernel):
                     node.make_loader()(new_args).value,
                 )
 
-            body = ir.LoopBody(
+            body = LoopBody(
                 fn,
                 (list(var_ranges.keys()), ()),
                 var_ranges,

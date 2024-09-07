@@ -46,6 +46,7 @@ from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
+from .loop_body import LoopBody
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -922,7 +923,7 @@ class SchedulerNode(BaseSchedulerNode):
                 buf_name = dep.name
                 buf = V.graph.get_buffer(buf_name)
                 lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
-        if isinstance(self._body, ir.LoopBody):
+        if isinstance(self._body, LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
 
@@ -1011,7 +1012,7 @@ class SchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def _get_atomic_add_buffers(self) -> OrderedSet[str]:
         buffers_store_as_atomic_add: OrderedSet[str] = OrderedSet()
-        if isinstance(self._body, ir.LoopBody):
+        if isinstance(self._body, LoopBody):
             for node in self._body.get_nodes():
                 if (
                     node.op == "call_method"
