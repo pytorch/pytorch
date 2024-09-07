@@ -55,7 +55,13 @@ class TestUtils(TestCase):
             return t
 
         @dataclass
-        class SomeDataClass:
+        class NonFrozenDataClass:
+            some_key: str
+            some_float: float
+            some_tensor: List[torch.Tensor]
+
+        @dataclass(frozen=True)
+        class FrozenDataClass:
             some_key: str
             some_float: float
             some_tensor: List[torch.Tensor]
@@ -65,7 +71,10 @@ class TestUtils(TestCase):
         data.append({"key1": get_a_tensor(), "key2": {1: get_a_tensor()}, "key3": 3})
         data.insert(0, {"x", get_a_tensor(), get_a_tensor()})
         data.append(([1], get_a_tensor(), (1), [get_a_tensor()], {1, 2}))
-        data.append({"abc": SomeDataClass("some_key", 1.0, [get_a_tensor()])})
+        data.append(
+            {"non_frozen_ds": NonFrozenDataClass("some_key", 1.0, [get_a_tensor()])}
+        )
+        data.append({"frozen_ds": FrozenDataClass("some_key", 1.0, [get_a_tensor()])})
         od = OrderedDict()
         od["k"] = "value"
         data.append(od)
