@@ -343,11 +343,6 @@ def reorder_compute_and_comm_for_overlap(
 
 
 # mypy: allow-untyped-defs
-import itertools
-import logging
-import typing
-from collections import Counter, defaultdict
-from typing import Any, Dict, List, Set, Union
 
 import torch
 
@@ -364,10 +359,14 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     node_list = list(graph.nodes)
 
     # Find all graph inputs and their resize counts
-    graph_input_to_resized_to_full_count = defaultdict(int)
-    graph_input_to_resized_to_0_count = defaultdict(int)
+    graph_input_to_resized_to_full_count: Dict[torch.fx.Node, int] = defaultdict(int)
+    graph_input_to_resized_to_0_count: Dict[torch.fx.Node, int] = defaultdict(int)
     for node in node_list:
-        if node.op == "call_function" and node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[0].op == "placeholder":
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.inductor.resize_storage_bytes_.default
+            and node.args[0].op == "placeholder"
+        ):
             graph_input = node.args[0]
             new_size = node.args[1]
             if new_size > 0:
@@ -392,18 +391,38 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
         if node.op == "call_function" and node.target == torch.ops.fsdp.copy_.default:
             fsdp_copy_node = node
             unsharded_param = node.args[0]
-            assert unsharded_param.op == "placeholder", "Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!"
-            assert unsharded_param in graph_input_to_resized_to_0_count, f"Assumed all FSDP2 `unsharded_param`s to be resized to 0 at end of graph (i.e. `reshard_after_forward` is True for all FSDP states including the root state), but it's not true! Violating unshared param: {unsharded_param}. Graph: {graph}"
+            assert (
+                unsharded_param.op == "placeholder"
+            ), "Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!"
+            assert (
+                unsharded_param in graph_input_to_resized_to_0_count
+            ), f"""
+Assumed all FSDP2 `unsharded_param`s to be resized to 0 at end of graph
+(i.e. `reshard_after_forward` is True for all FSDP states including the root state),
+but it's not true!
+Violating unshared param: {unsharded_param}.
+Graph: {graph}
+"""
             unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
 
     # Check no user mutation on any unsharded_param
     def is_allowed_mutation(node):
-        return (node.target == torch.ops.fsdp.copy_.default or 
-                node.target == torch.ops.inductor.resize_storage_bytes_.default)
+        return (
+            node.target == torch.ops.fsdp.copy_.default
+            or node.target == torch.ops.inductor.resize_storage_bytes_.default
+        )
 
     for node in node_list:
-        if node.op == "call_function" and isinstance(node.target, torch._ops.OpOverload) and node.target._schema.is_mutable and not is_allowed_mutation(node) and any(arg in unsharded_param_to_graph_intermediate for arg in node.args):
-            raise RuntimeError("User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is used")
+        if (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+            and node.target._schema.is_mutable
+            and not is_allowed_mutation(node)
+            and any(arg in unsharded_param_to_fsdp_copy_node_idxes for arg in node.args)
+        ):
+            raise RuntimeError(
+                "User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is used"
+            )
 
     # For each `fsdp.copy_(unsharded_param, Y)`, replace downstream usage of `unsharded_param` with `Y`.
     #
@@ -419,7 +438,10 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     # ```
     # We must do the replacement only within each subgraph.
     replacement_nodes = set()
-    for unsharded_param, fsdp_copy_node_idxes in unsharded_param_to_fsdp_copy_node_idxes.items():
+    for (
+        unsharded_param,
+        fsdp_copy_node_idxes,
+    ) in unsharded_param_to_fsdp_copy_node_idxes.items():
         for i, fsdp_copy_node_idx in enumerate(fsdp_copy_node_idxes):
             fsdp_copy_node = node_list[fsdp_copy_node_idx]
             assert fsdp_copy_node.args[0] is unsharded_param
@@ -428,15 +450,27 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             # subgraph_start_idx is inclusive
             subgraph_start_idx = fsdp_copy_node_idx
             # subgraph_end_idx is exclusive (also intentionally don't replace args in return op)
-            subgraph_end_idx = fsdp_copy_node_idxes[i+1] if i < len(fsdp_copy_node_idxes) - 1 else len(node_list) - 1
+            subgraph_end_idx = (
+                fsdp_copy_node_idxes[i + 1]
+                if i < len(fsdp_copy_node_idxes) - 1
+                else len(node_list) - 1
+            )
             subgraph = node_list[subgraph_start_idx:subgraph_end_idx]
             for node in subgraph:
-                if node.op == "call_function" and unsharded_param in node.args:  # TODO(yf225): implement replacement in kwargs
-                    new_args = tuple(replacement if arg is unsharded_param else arg for arg in node.args)
+                if (
+                    node.op == "call_function" and unsharded_param in node.args
+                ):  # TODO(yf225): implement replacement in kwargs
+                    new_args = tuple(
+                        replacement if arg is unsharded_param else arg
+                        for arg in node.args
+                    )
                     node.args = new_args
 
     # Delete `fsdp.copy_(unsharded_param, Y)` nodes
-    for unsharded_param, fsdp_copy_node_idxes in unsharded_param_to_fsdp_copy_node_idxes.items():
+    for (
+        unsharded_param,
+        fsdp_copy_node_idxes,
+    ) in unsharded_param_to_fsdp_copy_node_idxes.items():
         for i, fsdp_copy_node_idx in enumerate(fsdp_copy_node_idxes):
             fsdp_copy_node = node_list[fsdp_copy_node_idx]
             graph.erase_node(fsdp_copy_node)
@@ -445,7 +479,14 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     # 1. `resize_storage_bytes_(unsharded_param, ...)` nodes
     # 2. `resize_storage_bytes_(Y, 0)` nodes
     for node in node_list:
-        if node.op == "call_function" and node.target == torch.ops.inductor.resize_storage_bytes_.default and (node.args[0] in unsharded_param_to_fsdp_copy_node_idxes or node.args[0] in replacement_nodes):
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.inductor.resize_storage_bytes_.default
+            and (
+                node.args[0] in unsharded_param_to_fsdp_copy_node_idxes
+                or node.args[0] in replacement_nodes
+            )
+        ):
             graph.erase_node(node)
 
 

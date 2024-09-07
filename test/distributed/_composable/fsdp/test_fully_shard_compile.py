@@ -5,6 +5,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import logging
 import unittest
 from collections import defaultdict
 from unittest import mock
@@ -30,7 +31,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.utils._triton import has_triton
-import logging
+
 
 log = logging.getLogger(__name__)
 
@@ -159,9 +160,9 @@ class TestFullyShardCompile(FSDPTest):
             if node.op == "placeholder" and isinstance(
                 node.meta.get("val", None), torch.Tensor
             ):
-                storage_id_to_graph_inputs[id(node.meta["val"].untyped_storage())].append(
-                    node
-                )
+                storage_id_to_graph_inputs[
+                    id(node.meta["val"].untyped_storage())
+                ].append(node)
         no_aliased_graph_inputs = True
         err_msg = ""
         for aliased_graph_inputs in storage_id_to_graph_inputs.values():
@@ -721,10 +722,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
         # TODO: enable fullgraph=False case
-        for fullgraph, all_requires_grad in itertools.product(
-            [True], [True, False]
-        ):
-            log.warn(f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}")
+        for fullgraph, all_requires_grad in itertools.product([True], [True, False]):
+            log.warning(
+                f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}"  # noqa: G004, G001
+            )
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
@@ -732,7 +733,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
                 fullgraph
             ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=self._check_no_fsdp_copy_and_resize_ops_in_graph if fullgraph else None
+                post_grad_custom_post_pass=self._check_no_fsdp_copy_and_resize_ops_in_graph
+                if fullgraph
+                else None
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
