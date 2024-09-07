@@ -78,8 +78,10 @@ def scan(
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
 
     Returns:
-        final_carry (torch.Tensor): The final carry of the scan operation
-        out (torch.Tensor): The output matrix for which each scan iteration produced a slice along dim
+        final_carry (torch.Tensor or pytree with tensor leaves),
+            the final carry of the scan operation with same pytree structure as init.
+        out (torch.Tensor or pytree with tensor leaves),
+            each tensor leaf is a stacked output along dim, where each slice is the output of a scan iteration.
 
     Example::
 
