@@ -1400,6 +1400,13 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_quantized_linear_amx_dynamic_shapes = (
         TestSelectAlgorithm.test_quantized_linear_amx
     )
+    test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
+    test_linear_cache_blocking_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_cache_blocking
+    )
+    test_linear_thread_factors_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_thread_factors
+    )
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
