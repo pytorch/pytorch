@@ -437,7 +437,7 @@ class DataTypePropagation:
 
     @classmethod
     def propagate_scheduler_node(cls, node):
-        from ..ir import LoopBody
+        from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
         assert isinstance(node, SchedulerNode)
