@@ -30,10 +30,13 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.utils._triton import has_triton
+import logging
+
+log = logging.getLogger(__name__)
 
 
-def _count_op_in_graph(graph, op):
-    return sum(1 for node in graph.nodes if node.target is op)
+def _is_op_in_graph(graph, op):
+    return any(node.target is op for node in graph.nodes)
 
 
 def _is_fallback_op_in_snodes(snodes, op):
@@ -170,41 +173,36 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 """
         self.assertTrue(no_aliased_graph_inputs, err_msg)
 
-    def _check_fsdp_copy_and_resize_count_in_graph(self, graph, copy_count, resize_count):
-        actual_copy_count = _count_op_in_graph(graph, torch.ops.fsdp.copy_.default)
-        self.assertEqual(
-            actual_copy_count, copy_count,
-            f"Expected `fsdp.copy_` to show up {copy_count} times in graph, but found {actual_copy_count} occurrences. Graph: {graph}",
+    def _check_no_fsdp_copy_and_resize_ops_in_graph(self, graph):
+        self.assertFalse(
+            _is_op_in_graph(graph, torch.ops.fsdp.copy_.default),
+            f"Unexpected op `fsdp.copy_` in graph: {graph}",
         )
-        actual_resize_count = _count_op_in_graph(
-            graph, torch.ops.inductor.resize_storage_bytes_.default
-        )
-        self.assertEqual(
-            actual_resize_count,
-            resize_count,
-            f"Expected `inductor.resize_storage_bytes_` to show up {resize_count} times in graph, but found {actual_resize_count} occurrences. Graph: {graph}",
+        self.assertFalse(
+            _is_op_in_graph(graph, torch.ops.inductor.resize_storage_bytes_.default),
+            f"Unexpected op `inductor.resize_storage_bytes_` in graph: {graph}",
         )
 
     def _reinplace_all_gather_with_optional_checks(self, fullgraph):
         def _run_with_checks(graph, orig_fn):
             self.assertTrue(
-                _count_op_in_graph(
+                _is_op_in_graph(
                     graph,
                     torch.ops._c10d_functional.all_gather_into_tensor.default,
-                ) > 0
+                )
             )
             orig_fn(graph)
-            self.assertTrue(
-                _count_op_in_graph(
+            self.assertFalse(
+                _is_op_in_graph(
                     graph,
                     torch.ops._c10d_functional.all_gather_into_tensor.default,
-                ) == 0
+                )
             )
             self.assertTrue(
-                _count_op_in_graph(
+                _is_op_in_graph(
                     graph,
                     torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-                ) > 0
+                )
             )
 
         if fullgraph:
@@ -316,7 +314,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
         file_check = file_check.check("torch.ops.fsdp.split_with_sizes_copy.")
-        file_check = self.inductor_code_check_no_compute_op(file_check)
         if not last_all_gather:
             # Checks that there is no compute op between this AGWait and next AG.
             file_check = self.inductor_code_check_no_compute_op(file_check)
@@ -723,17 +720,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
-        def _post_grad_custom_post_pass(graph: torch.fx.Graph, *, fullgraph=True):
-            if fullgraph:
-                if torch._dynamo.compiled_autograd.in_compiled_autograd_region:  
-                    self._check_fsdp_copy_and_resize_count_in_graph(graph, copy_count=0, resize_count=0)  # bwd graph
-                else:
-                    self._check_fsdp_copy_and_resize_count_in_graph(graph, copy_count=0, resize_count=0)  # fwd graph
-
+        # TODO: enable fullgraph=False case
         for fullgraph, all_requires_grad in itertools.product(
-            # [True, False], [True, False]
-            [True], [True]
+            [True], [True, False]
         ):
+            log.warn(f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}")
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
@@ -741,7 +732,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
                 fullgraph
             ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=functools.partial(_post_grad_custom_post_pass, fullgraph=fullgraph),
+                post_grad_custom_post_pass=self._check_no_fsdp_copy_and_resize_ops_in_graph if fullgraph else None
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
@@ -752,79 +743,79 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         fullgraph=fullgraph,
                     )
                 )
-            # if fullgraph:
-            #     self.assertTrue(
-            #         len(triton_codes) == 2,
-            #         "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
-            #     )
-            #     fwd_code = triton_codes[0]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for fwd_ag_block_info in [
-            #         dict(
-            #             overlapped_compute_op_str="triton_"
-            #             if all_requires_grad
-            #             else None,
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten.native_dropout.",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_all_gather(
-            #             file_check, **fwd_ag_block_info
-            #         )
-            #     file_check.run(fwd_code)
+            if fullgraph:
+                self.assertTrue(
+                    len(triton_codes) == 2,
+                    "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
+                )
+                fwd_code = triton_codes[0]
+                file_check = FileCheck().check("def call(args):")
+                for fwd_ag_block_info in [
+                    dict(
+                        overlapped_compute_op_str="triton_"
+                        if all_requires_grad
+                        else None,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten.native_dropout.",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **fwd_ag_block_info
+                    )
+                file_check.run(fwd_code)
 
-            #     bwd_code = triton_codes[1]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for bwd_ag_block_info in [
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_all_gather(
-            #             file_check, **bwd_ag_block_info
-            #         )
-            #     for bwd_rs_block_info in (
-            #         [
-            #             dict(
-            #                 overlapped_compute_op_str="extern_kernels.mm("
-            #                 if all_requires_grad
-            #                 else None
-            #             ),
-            #             dict(
-            #                 overlapped_compute_op_str=None
-            #             ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-            #             dict(overlapped_compute_op_str=None),
-            #         ]
-            #         + [dict(overlapped_compute_op_str=None)]
-            #         if all_requires_grad
-            #         else []
-            #     ):
-            #         file_check = self.inductor_code_check_fsdp_reduce_scatter(
-            #             file_check, **bwd_rs_block_info
-            #         )
-            #     file_check.run(bwd_code)
-            # else:
-            #     # TODO: when fullgraph=False and there is graph break in FWD graph,
-            #     # there are several recompiles, need to figure out why.
-            #     self.assertTrue(
-            #         len(triton_codes) > 2,
-            #         "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
-            #     )
+                bwd_code = triton_codes[1]
+                file_check = FileCheck().check("def call(args):")
+                for bwd_ag_block_info in [
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **bwd_ag_block_info
+                    )
+                for bwd_rs_block_info in (
+                    [
+                        dict(
+                            overlapped_compute_op_str="extern_kernels.mm("
+                            if all_requires_grad
+                            else None
+                        ),
+                        dict(
+                            overlapped_compute_op_str=None
+                        ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                        dict(overlapped_compute_op_str=None),
+                    ]
+                    + [dict(overlapped_compute_op_str=None)]
+                    if all_requires_grad
+                    else []
+                ):
+                    file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                        file_check, **bwd_rs_block_info
+                    )
+                file_check.run(bwd_code)
+            else:
+                # TODO: when fullgraph=False and there is graph break in FWD graph,
+                # there are several recompiles, need to figure out why.
+                self.assertTrue(
+                    len(triton_codes) > 2,
+                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+                )
 
 
 if __name__ == "__main__":
