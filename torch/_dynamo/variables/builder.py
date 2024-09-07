@@ -549,7 +549,8 @@ class VariableBuilder:
 
         # Note - There are some nested values where types mismatch!
         # We want to get those out and wrap those.
-        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
+        if is_function_or_wrapper(value):
+            value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
@@ -2521,9 +2522,11 @@ def _automatic_dynamic(
     else:
         # Apply the updates
         for sub_state in st.all_states:
-            update_frame_state(
-                sub_state.input_sizes[name], sub_state.input_strides[name]
-            )
+            # Not all inputs are necessarily present on all ranks
+            if name in sub_state.input_sizes and name in sub_state.input_strides:
+                update_frame_state(
+                    sub_state.input_sizes[name], sub_state.input_strides[name]
+                )
         frame_state_entry = tx.output.frame_state[name]
 
     # TODO: index export_constraints ahead of time so we don't have to
