@@ -76,10 +76,13 @@ if sys.version_info >= (3, 10):
     # itertools.pairwise was added at Python 3.10
     @substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
     def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
-        iterator = iter(iterable)
-        a = next(iterator, None)
-        for b in iterator:
-            yield a, b
+        a = None
+        first = True
+        for b in iterable:
+            if first:
+                first = False
+            else:
+                yield a, b
             a = b
 
 
