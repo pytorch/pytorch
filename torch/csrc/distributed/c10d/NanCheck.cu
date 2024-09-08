@@ -15,6 +15,11 @@ namespace c10d {
 // Using ulong2 as a "byte pack", with 16 bytes, for efficient data load
 typedef ulong2 BytePack;
 
+// AMD HIP doesn't define `__trap()`, using `assert` instead
+#ifdef USE_ROCM
+#define __trap() assert(0)
+#endif
+
 //// Start of templated functions for checking NaNs inside a BytePack
 
 // (i) General implementation (aka fallback)
