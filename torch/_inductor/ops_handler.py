@@ -987,27 +987,32 @@ class OpCounterCSE:
         return inner
 
     def _update_count(self, val):
-        if val not in self.var_names:
+        varname = self.var_names.get(val)
+        if not varname:
             varname = f"tmp{self.op_count}"
             self.op_count += 1
             self.var_names[val] = varname
-            return varname
-        else:
-            return self.var_names[val]
+        return varname
 
     def indirect_indexing(self, *args, **kwargs):
         self._used_ops.add("indirect_indexing")
         return self.parent_handler.indirect_indexing(*args, **kwargs)
 
     def load(self, name: str, index: sympy.Expr) -> str:
-        self._read_names.append(name)
-        if not isinstance(index, (sympy.Integer, int)):
-            self._nontrivial_read_count += 1
-        return self.__getattr__("load")(name, index)
+        val = self.parent_handler.load(name, index)
+        if val not in self.var_names:
+            self._used_ops.add("load")
+            self._read_names.append(name)
+            if not isinstance(index, (sympy.Integer, int)):
+                self._nontrivial_read_count += 1
+        return self._update_count(val)
 
     def load_seed(self, name: str, offset: T):
-        self._read_names.append(name)
-        return self.__getattr__("load_seed")(name, offset)
+        val = self.parent_handler.load_seed(name, offset)
+        if val not in self.var_names:
+            self._used_ops.add("load_seed")
+            self._read_names.append(name)
+        return self._update_count(val)
 
     def bucketize(
         self,
@@ -1017,10 +1022,13 @@ class OpCounterCSE:
         indexing_dtype: torch.dtype,
         right: bool,
     ):
-        self._read_names.append(offsets_name)
-        return self.__getattr__("bucketize")(
+        val = self.parent_handler.bucketize(
             values, offsets_name, offsets_size, indexing_dtype, right
         )
+        if val not in self.var_names:
+            self._used_ops.add("bucketize")
+            self._read_names.append(offsets_name)
+        return self._update_count(val)
 
     def getvalue(self):
         return OpCountResult(
