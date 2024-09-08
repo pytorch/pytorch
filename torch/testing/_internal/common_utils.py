@@ -3815,6 +3815,7 @@ class TestCase(expecttest.TestCase):
             exact_is_coalesced=False
     ):
         # Hide this function from `pytest`'s traceback
+        # pylint: disable-next=unused-variable
         __tracebackhide__ = True
 
         # numpy's dtypes are a superset of what PyTorch supports. In case we encounter an unsupported dtype, we fall

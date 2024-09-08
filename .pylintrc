@@ -1,0 +1,3 @@
+[MESSAGES CONTROL]
+disable=R,C,W,E
+enable=W0612

@@ -1300,7 +1300,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             with self.assertRaisesRegex(
                 RuntimeError, "Already have an autograd context id for this thread"
             ):
-                with dist_autograd.context() as context_id:
+                with dist_autograd.context():
                     pass
 
     @dist_init
@@ -2414,7 +2414,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             self.assertFalse(p_b == p_g)
 
             # Run backwards multiple times to verify accumulation.
-            for i in range(10):
+            for _ in range(10):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
 
     @dist_init

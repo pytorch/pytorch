@@ -201,7 +201,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        _, acc5 = accuracy(output, target, topk=(1, 5))
+        accuracy(output, target, topk=(1, 5))
         if cnt >= ntrain_batches:
             return
     return

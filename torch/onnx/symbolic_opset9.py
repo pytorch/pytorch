@@ -3677,7 +3677,7 @@ def eye(g: jit_utils.GraphContext, *args):
         return g.op("EyeLike", tensor)
     if len(args) == 6:
         # aten::eye(n, m, dtype, layout, device, pin_memory)
-        n, m, dtype, layout, device, pin_memory = args
+        n, m, dtype, layout, device, _ = args
         shape = g.op(
             "Concat",
             symbolic_helper._unsqueeze_helper(g, n, [0]),
@@ -5570,7 +5570,7 @@ def linalg_matrix_norm(
                 keepdim=keepdim,
             )
         else:
-            result, indices = min(
+            result, _ = min(
                 g,
                 sum,
                 dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])),

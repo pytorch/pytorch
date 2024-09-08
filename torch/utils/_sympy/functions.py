@@ -760,7 +760,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             return True
         t, f = Max, Min
         for op in "><":
-            for j in range(2):
+            for _ in range(2):
                 try:
                     if op == ">":
                         v = x >= y
