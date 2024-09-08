@@ -2300,7 +2300,6 @@ class InstructionTranslatorBase(
             isinstance(ctx, GenericContextWrappingVariable)
             and not ctx.supports_graph_breaks()
         ):
-            breakpoint()
             self.generic_context_manager_depth += 1
 
         # Need this redundant check for mypy
