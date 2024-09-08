@@ -1168,7 +1168,7 @@ def _transform_cuda_paths(lpaths: List[str]) -> None:
 
 
 def get_cpp_torch_device_options(
-    device_type: str = "cpu",
+    device_type: str,
     aot_mode: bool = False,
     compile_only: bool = False,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
@@ -1258,7 +1258,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         self,
         vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
-        device_type: str = "cpu",
+        device_type: str = "cuda",
         aot_mode: bool = False,
         compile_only: bool = False,
         use_absolute_path: bool = False,
