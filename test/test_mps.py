@@ -2732,6 +2732,7 @@ class TestMPS(TestCaseMPS):
         # Expecting the inverted to yield the original signal
         self.assertEqual(ifft_result, signal)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/135223
     def test_fftfreq(self):
         freq_cpu = torch.fft.fftfreq(10**4, device='cpu')
         freq_mps = torch.fft.fftfreq(10**4, device='mps')
