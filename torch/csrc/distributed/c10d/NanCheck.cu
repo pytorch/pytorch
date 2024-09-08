@@ -94,19 +94,34 @@ __device__ __forceinline__ void checkChunk(BytePack* ptr) {
   // Note: we separate the check from the load for efficient loading
 }
 
+// Align address of `ptr` up, to the alignment of `T`
+#define ALIGN_UP(ptr, T) (((uintptr_t)ptr + sizeof(T) - 1) / sizeof(T) * sizeof(T))
 
 // This is the host-facing kernel
 
 template <typename T>
 __global__ void checkForNaN(T* data, size_t size) {
-  // In PyTorch, tensor storage is guaranteed to have 16-byte alignment
-  BytePack* ptr = (BytePack*)data;
-  // Size of input data in unit of BytePack
-  size_t sizeInBP = size *  sizeof(T) / sizeof(BytePack);
-  // Number of BytePacks processed in one fast-path iteration
-  size_t loopSize = blockDim.x * gridDim.x * UNROLL;
   // Offset of current thread
   size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
+
+  // Align input address up to BytePack in case it is not
+  T* ptrAlign = (T*)ALIGN_UP(data, BytePack);
+  // Pre-process the data before alignment
+  size_t preProcElts = min(ptrAlign - data, size);
+  // Read memory by T (slow). One iter is enough bc the number of threads would
+  // be bigger than `preProcElts`
+  if (offset < preProcElts) {
+    if (isnan(data[offset])) __trap();
+  }
+  // We have processes this amount of data
+  size -= preProcElts;
+
+  // Start BytePack processing
+  BytePack* ptr = (BytePack*)ptrAlign;
+  // Size of input data in unit of BytePack
+  size_t sizeInBP = size * sizeof(T) / sizeof(BytePack);
+  // Number of BytePacks processed in one fast-path iteration
+  size_t loopSize = blockDim.x * gridDim.x * UNROLL;
 
   // Fast path
   // The condition below makes sure there is enough data to process (`loopSize`)
