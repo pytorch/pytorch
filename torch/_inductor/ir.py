@@ -598,7 +598,7 @@ class Loops(IRNode):
         return OrderedSet(self.inner_fn_opcount().read_buffers)
 
     def num_reads(self):
-        return len(self.inner_fn_opcount().read_buffers)
+        return self.inner_fn_opcount().nontrivial_read_count
 
     def get_reduction_size(self):
         raise NotImplementedError(
@@ -6382,10 +6382,7 @@ class StorageBox(MutableBox):
         """
         Called on buffers we expect to be forced to realize later.
         """
-        if (
-            isinstance(self.data, (Pointwise, Reduction))
-            and self.data.inner_fn_opcount().nontrivial_read_count > 1
-        ):
+        if isinstance(self.data, (Pointwise, Reduction)) and self.num_reads() > 1:
             self.realize()
 
     def has_exceeded_max_reads(self):
