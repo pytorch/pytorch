@@ -186,6 +186,19 @@ class WeakRefCallSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class CallFunctionNoArgsSource(ChainedSource):
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: self.base.reconstruct(codegen))
+        codegen.extend_output(create_call_function(0, False))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}()"
+
+
+@dataclasses.dataclass(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 

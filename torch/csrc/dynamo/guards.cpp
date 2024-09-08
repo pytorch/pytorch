@@ -3439,6 +3439,52 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Implements function call no args - e.g, torch.cuda.current_device()
+ */
+class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
+ public:
+  CallFunctionNoArgsGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    if (!PyCallable_Check(obj)) {
+      return false;
+    }
+
+    PyObject* x = PyObject_CallNoArgs(obj); // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    if (!PyCallable_Check(obj)) {
+      return GuardDebugInfo(
+          false, std::string("Not a callable obj ") + get_source(), 0);
+    }
+
+    PyObject* x = PyObject_CallNoArgs(obj); // borrowed ref
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "CallFunctionNoArgsGuardAccessor()";
+  }
+};
+
+/**
  * Similar to PythonLambdaLeafGuard, this class is a way to allow developers to
  * supply accessor as a python function. This is useful for from_numpy source.
  */
@@ -3783,6 +3829,12 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "WeakRefCallGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
+      CallFunctionNoArgsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<CallFunctionNoArgsGuardAccessor>>(
+      py_m, "CallFunctionNoArgsGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
       TupleIteratorGetItemAccessor,
       GuardAccessor,
       std::unique_ptr<TupleIteratorGetItemAccessor>>(
@@ -4090,6 +4142,26 @@ PyObject* torch_c_dynamo_guards_init() {
             // A unique key is used to save as the accessor key.
             py::str unique_key("__weakref_call_accessor__");
             return self.get_child_manager<WeakRefCallGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "call_function_no_args_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__call_function_no_args_accessor__");
+            return self.get_child_manager<CallFunctionNoArgsGuardAccessor>(
                 std::move(unique_key),
                 std::move(source),
                 example_value,
