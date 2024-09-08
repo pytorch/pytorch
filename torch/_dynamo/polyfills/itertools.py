@@ -18,12 +18,6 @@ __all__ = [
     "tee",
 ]
 
-if sys.version_info >= (3, 10):
-    # pairwise polyfill
-
-    __all__ += ["pairwise"]
-
-
 _T = TypeVar("_T")
 
 
@@ -84,6 +78,8 @@ if sys.version_info >= (3, 10):
             else:
                 yield a, b
             a = b
+
+    __all__ += ["pairwise"]
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
