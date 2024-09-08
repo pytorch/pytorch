@@ -3773,9 +3773,9 @@ class ComputedBuffer(OperationBuffer):
             ]
             index_formulas += extra_indexing_expr
 
-        memory_addrs = [*body.writes_name2expr.values()]
+        memory_addrs = [*body.get_write_exprs()]
         if not V.graph.has_feature(self, BackendFeature.PREFER_STORE_LOOP_ORDER):
-            memory_addrs.extend(body.reads_name2expr.values())
+            memory_addrs.extend(body.get_read_exprs())
 
         def simplify_and_reorder(x_vars, support_vars, sizes, simplify_loops):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
