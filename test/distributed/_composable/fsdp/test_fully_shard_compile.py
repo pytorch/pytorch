@@ -21,7 +21,7 @@ from torch._inductor.utils import is_fallback_op, run_and_get_code
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
-from torch.distributed._tensor import init_device_mesh
+from torch.distributed._tensor import DTensor, init_device_mesh, Shard
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import at_least_x_gpu, skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
@@ -347,7 +347,18 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
             return _fn
 
-        def run_iters(model, optim, n_iter=10, compiled_autograd_backend=None):
+        def _check_all_params_sharded(model):
+            for param in model.parameters():
+                self.assertTrue(isinstance(param, DTensor))
+                self.assertEqual(param.placements, (Shard(0),))
+
+        def run_iters(
+            model,
+            optim,
+            n_iter=10,
+            compiled_autograd_backend=None,
+            check_reshard_after_forward=False,
+        ):
             torch.manual_seed(42)
             losses = []
             for i in range(n_iter):
@@ -360,9 +371,12 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     maybe_compiled_autograd_ctx = contextlib.nullcontext()
                 with maybe_compiled_autograd_ctx:
                     out = model(inp)
+                    if check_reshard_after_forward:
+                        _check_all_params_sharded(model)
                     loss = out.sum()
                     losses.append(loss.item())
                     loss.backward()
+                _check_all_params_sharded(model)
                 optim.step()
                 optim.zero_grad(set_to_none=True)
             return losses
@@ -373,7 +387,12 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             run_iters(model, optim, n_iter=1)
 
             model_compiled = torch.compile(model, backend=backend, fullgraph=fullgraph)
-            res = run_iters(model_compiled, optim, compiled_autograd_backend=backend)
+            res = run_iters(
+                model_compiled,
+                optim,
+                compiled_autograd_backend=backend,
+                check_reshard_after_forward=True,
+            )
             return res
 
         def test_eager():
@@ -700,12 +719,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
-        for fullgraph in [True, False]:
+        for fullgraph, all_requires_grad in itertools.product(
+            [True, False], [True, False]
+        ):
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(fullgraph):
                 self._test_traceable_fsdp(
-                    *self._create_transformer_factory_fns(),
+                    *self._create_transformer_factory_fns(
+                        all_requires_grad=all_requires_grad
+                    ),
                     "aot_eager",
                     fullgraph=fullgraph,
                 )
@@ -715,10 +738,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
-        for fullgraph in [True, False]:
+        for fullgraph, all_requires_grad in itertools.product(
+            [True, False], [True, False]
+        ):
             with self._maybe_add_graph_break_to_sdpa(fullgraph):
                 self._test_traceable_fsdp(
-                    *self._create_transformer_factory_fns(),
+                    *self._create_transformer_factory_fns(
+                        all_requires_grad=all_requires_grad
+                    ),
                     "aot_eager_decomp_partition",
                     fullgraph=fullgraph,
                 )
@@ -788,6 +815,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 for bwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                    )
+                    if all_requires_grad
+                    else None,
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
@@ -797,28 +829,24 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         last_all_gather=True,
                     ),
                 ]:
-                    file_check = self.inductor_code_check_fsdp_all_gather(
-                        file_check, **bwd_ag_block_info
-                    )
-                for bwd_rs_block_info in (
-                    [
-                        dict(
-                            overlapped_compute_op_str="extern_kernels.mm("
-                            if all_requires_grad
-                            else None
-                        ),
-                        dict(
-                            overlapped_compute_op_str=None
-                        ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-                        dict(overlapped_compute_op_str=None),
-                    ]
-                    + [dict(overlapped_compute_op_str=None)]
+                    if bwd_ag_block_info is not None:
+                        file_check = self.inductor_code_check_fsdp_all_gather(
+                            file_check, **bwd_ag_block_info
+                        )
+                for bwd_rs_block_info in [
+                    dict(overlapped_compute_op_str="extern_kernels.mm(")
                     if all_requires_grad
-                    else []
-                ):
-                    file_check = self.inductor_code_check_fsdp_reduce_scatter(
-                        file_check, **bwd_rs_block_info
-                    )
+                    else None,
+                    dict(
+                        overlapped_compute_op_str=None
+                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                    dict(overlapped_compute_op_str=None),
+                    dict(overlapped_compute_op_str=None) if all_requires_grad else None,
+                ]:
+                    if bwd_rs_block_info is not None:
+                        file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                            file_check, **bwd_rs_block_info
+                        )
                 file_check.run(bwd_code)
             elif fullgraph and not activation_checkpoint:
                 # TODO(yf225): fix the graph check above
