@@ -9,7 +9,12 @@ from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.while_loop import while_loop
-from torch._subclasses.functional_tensor import FunctionalTensor
+from torch._subclasses.functional_tensor import (
+    CppFunctionalizeAPI,
+    FunctionalTensor,
+    FunctionalTensorMode,
+    PythonFunctionalizeAPI,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
@@ -1661,6 +1666,132 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     """,  # noqa: B950
         )
 
+    def _wrap_with_functionalize(self, fn, func_type):
+        mode = None
+        if func_type == "cpp":
+            fn = CppFunctionalizeAPI().functionalize(fn)
+        elif func_type == "python":
+            fn = PythonFunctionalizeAPI().functionalize(fn)
+            mode = FunctionalTensorMode()
+        elif func_type == "functorch":
+            fn = torch.func.functionalize(fn)
+        else:
+            assert func_type == "no"
+        return fn, mode
+
+    @parametrize("func_type", ["no", "cpp", "python", "functorch"])
+    def test_while_loop_simple_functionalize_check_graph(self, func_type):
+        fn, inp = WHILE_LOOP_TESTS["simple_with_mutation"]
+        fn, mode = self._wrap_with_functionalize(fn, func_type)
+        mode = mode if mode is not None else contextlib.nullcontext()
+        with mode:
+            graphs = self._check_tracing(fn, inp)
+        if func_type == "no":
+            self.assertExpectedInline(
+                graphs["symbolic"].code.strip("\n"),
+                """\
+def forward(self, x_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
+    getitem = while_loop[0];  while_loop = None
+    return (getitem,)
+    """,  # noqa: B950
+            )
+            self.assertExpectedInline(
+                graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
+                """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
+    add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
+    sum_1 = torch.ops.aten.sum.default(add__1);  add__1 = None
+    lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
+    return lt
+    """,
+            )
+            self.assertExpectedInline(
+                graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"),
+                """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
+    add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
+    add = torch.ops.aten.add.Tensor(add__1, 1);  add__1 = None
+    return (add,)
+    """,
+            )
+        elif func_type == "python":
+            self.assertExpectedInline(
+                graphs["symbolic"].code.strip("\n"),
+                """\
+def forward(self, arg0_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1,), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = None
+    getitem = while_loop[0];  while_loop = None
+    return (getitem,)
+    """,  # noqa: B950
+            )
+            self.assertExpectedInline(
+                graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
+                """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    sum_1 = torch.ops.aten.sum.default(add_1);  add_1 = None
+    lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
+    return lt
+    """,
+            )
+            self.assertExpectedInline(
+                graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"),
+                """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, 1);  add_1 = None
+    return (add_2,)
+    """,
+            )
+        else:
+            self.assertExpectedInline(
+                graphs["symbolic"].code.strip("\n"),
+                """\
+def forward(self, x_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
+    getitem = while_loop[0];  while_loop = None
+    return (getitem,)
+    """,  # noqa: B950
+            )
+            self.assertExpectedInline(
+                graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
+                """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    sum_1 = torch.ops.aten.sum.default(add_1);  add_1 = None
+    lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
+    return lt
+    """,
+            )
+            self.assertExpectedInline(
+                graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"),
+                """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, 1);  add_1 = None
+    return (add_2,)
+    """,
+            )
+
     @parametrize("func_type", ["no", "cpp", "python", "functorch"])
     @parametrize("while_loop_test", list(WHILE_LOOP_TESTS.keys()))
     def test_while_loop_functionalize(self, func_type, while_loop_test):
@@ -1765,6 +1896,84 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
     child_1 = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
     return (child, child_1)""",  # noqa: B950
             )
+
+    def test_while_loop_nested2_traced(self):
+        fn, inp = WHILE_LOOP_TESTS["nested2"]
+        graphs = self._check_tracing(fn, inp)
+        gm = graphs["symbolic"]
+        outer_body = gm.while_loop_body_graph_0
+        outer_cond = gm.while_loop_cond_graph_0
+        inner_body = outer_body.while_loop_body_graph_0
+        inner_cond = outer_body.while_loop_cond_graph_0
+        self.assertExpectedInline(
+            gm.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2]
+    getitem_3 = while_loop[3];  while_loop = None
+    return (getitem, getitem_1, getitem_2, getitem_3)
+    """,  # noqa: B950
+        )
+        self.assertExpectedInline(
+            outer_body.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2]
+    getitem_3 = while_loop[3];  while_loop = None
+    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
+    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
+    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
+    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
+    return (sub, clone, mul, div)
+    """,  # noqa: B950
+        )
+        self.assertExpectedInline(
+            outer_body.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2]
+    getitem_3 = while_loop[3];  while_loop = None
+    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
+    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
+    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
+    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
+    return (sub, clone, mul, div)
+    """,  # noqa: B950
+        )
+        self.assertExpectedInline(
+            inner_body.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(arg2_1, 3.14);  arg2_1 = None
+    sub_1 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  arg3_1 = None
+    return (clone, sub, add, sub_1)
+    """,
+        )
+        self.assertExpectedInline(
+            inner_cond.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    gt = torch.ops.aten.gt.Scalar(arg1_1, 0);  arg1_1 = None
+    return gt
+    """,
+        )
 
     def test_cond_nested_traced(self):
         def true_nested(y):
