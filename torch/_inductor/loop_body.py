@@ -4,7 +4,8 @@ from __future__ import annotations
 import functools
 import itertools
 import re
-from typing import Any, Callable, Dict, List, Sequence, Tuple
+from enum import auto, Enum
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import sympy
 
@@ -44,6 +45,23 @@ class InterpreterShim(torch.fx.Interpreter):
             return super().run(*args, **kwargs)
 
 
+class MemoryEntry(NamedTuple):
+    index_name: str  # LoopBody.indexing_exprs[index_name]
+    buffer_name: Optional[str]
+    mode: Optional[str]  # V.ops.store(..., mode=mode)
+
+
+class MemoryUsageType(Enum):
+    # These are 1:1 with the opcode generating the usage
+    LOAD = auto()
+    LOAD_SEED = auto()
+    STORE = auto()
+    STORE_REDUCTION = auto()
+    INDEX_EXPR = auto()
+    CHECK_BOUNDS = auto()
+    BUCKETIZE = auto()
+
+
 class LoopBody:
     """
     Captures the body of a Loops subclass into an FX graph.  Persists any
@@ -52,13 +70,12 @@ class LoopBody:
 
     indexing_exprs: Dict[str, sympy.Expr]
     indexing_exprs_name: Dict[sympy.Expr, str]
-    reads_name2expr: Dict[str, sympy.Expr]
-    writes_name2expr: Dict[str, sympy.Expr]
     submodules: Dict[str, Any]
     subblocks: Dict[str, LoopBodyBlock]
     indirect_vars: List[str]
     indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr]
     root_block: LoopBodyBlock
+    memory_usage: Dict[MemoryUsageType, List[MemoryEntry]]
 
     def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
         super().__init__()
@@ -84,12 +101,11 @@ class LoopBody:
         """Do an FX trace of an arbitrary callable to construct self"""
         self.indexing_exprs = {}
         self.indexing_exprs_name = {}
-        self.reads_name2expr = {}
-        self.writes_name2expr = {}
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
         self.indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr] = {}
+        self.memory_usage = {t: [] for t in MemoryUsageType}
         self.root_block = LoopBodyBlock(self, fn, args)  # traces
         del self.indexing_exprs_name  # not used after _init_with_tracing
 
@@ -99,24 +115,11 @@ class LoopBody:
         where we are just reordering/merging/splitting the args of an
         existing LoopBody.
         """
-        indexing_exprs = other.indexing_from_args(args)
-        update_index = {
-            expr: indexing_exprs[name] for name, expr in other.indexing_exprs.items()
-        }
-        assert indexing_exprs.keys() == other.indexing_exprs.keys() and len(
-            update_index
-        ) == len(indexing_exprs)
-
-        self.indexing_exprs = indexing_exprs
-        self.reads_name2expr = {
-            k: update_index[v] for k, v in other.reads_name2expr.items()
-        }
-        self.writes_name2expr = {
-            k: update_index[v] for k, v in other.writes_name2expr.items()
-        }
+        self.indexing_exprs = other.indexing_from_args(args)
         self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
-        self.indirect_vars = [*other.indirect_vars]
-        self.indirect_var_ranges = {**other.indirect_var_ranges}
+        self.indirect_vars = other.indirect_vars
+        self.indirect_var_ranges = other.indirect_var_ranges
+        self.memory_usage = other.memory_usage
         self.root_block = other.root_block.clone(self)
 
         submodules = {**other.submodules}
@@ -249,6 +252,37 @@ class LoopBody:
 
         return BoundVars(self)
 
+    def get_read_expr(self, buffer_name):
+        # reversed to match old behavior
+        for entry in reversed(self.memory_usage[MemoryUsageType.LOAD]):
+            if entry.buffer_name == buffer_name:
+                return self.indexing_exprs[entry.index_name]
+        raise KeyError(buffer_name)
+
+    def get_write_expr(self, buffer_name):
+        for entry in itertools.chain(
+            self.memory_usage[MemoryUsageType.STORE],
+            self.memory_usage[MemoryUsageType.STORE_REDUCTION],
+        ):
+            if entry.buffer_name == buffer_name:
+                return self.indexing_exprs[entry.index_name]
+        raise KeyError(buffer_name)
+
+    def get_read_exprs(self):
+        return [
+            self.indexing_exprs[entry.index_name]
+            for entry in self.memory_usage[MemoryUsageType.LOAD]
+        ]
+
+    def get_write_exprs(self):
+        return [
+            self.indexing_exprs[entry.index_name]
+            for entry in itertools.chain(
+                self.memory_usage[MemoryUsageType.STORE],
+                self.memory_usage[MemoryUsageType.STORE_REDUCTION],
+            )
+        ]
+
     def debug_str(self):
         lines = [f"var_ranges = {dict(self.var_ranges)}"]
         lines.extend([f"{name} = {val}" for name, val in self.indexing_exprs.items()])
@@ -264,14 +298,20 @@ class LoopBody:
 
     __repr__ = debug_str
 
-    def add_index_expr(self, expr: sympy.Expr, category, buf_name):
-        if buf_name is not None:
-            getattr(self, f"{category}_name2expr")[buf_name] = expr
-        if expr not in self.indexing_exprs_name:
+    def add_index_expr(
+        self,
+        expr: sympy.Expr,
+        mtype: MemoryUsageType,
+        buffer_name: Optional[str] = None,
+        mode: Optional[str] = None,
+    ):
+        name = self.indexing_exprs_name.get(expr)
+        if not name:
             name = f"index{len(self.indexing_exprs)}"
             self.indexing_exprs_name[expr] = name
             self.indexing_exprs[name] = expr
-        return self.indexing_exprs_name[expr]
+        self.memory_usage[mtype].append(MemoryEntry(name, buffer_name, mode))
+        return name
 
     def add_submodule(self, block, prefix):
         """Not actually for nn.Modules, but subblocks in generated code are mapped to FX call_module opcodes"""
@@ -359,11 +399,11 @@ class LoopBodyBlock:
     def __init__(self, body: LoopBody, fn: Callable[..., Any], args: List[Any]):
         self.body = body
 
-        def add_index(expr, category, buf_name=None):
+        def add_index(expr: sympy.Expr, mtype: MemoryUsageType, **kwargs):
             return tracer.create_proxy(
                 "call_module",
                 "get_index",
-                (self.body.add_index_expr(expr, category, buf_name),),
+                (body.add_index_expr(expr, mtype, **kwargs),),
                 {},
             )
 
@@ -371,15 +411,26 @@ class LoopBodyBlock:
             self.name = "CaptureIndexing"
 
             def load(self, name: str, index: sympy.Expr):
-                index = add_index(index, "reads", name)
+                index = add_index(index, MemoryUsageType.LOAD, buffer_name=name)
                 return self._inner.load(name, index)
 
+            def load_seed(self, name: str, index: int):
+                assert isinstance(index, int)
+                body.add_index_expr(
+                    sympy.Integer(index), MemoryUsageType.LOAD_SEED, buffer_name=name
+                )
+                return self._inner.load_seed(name, index)
+
             def store(self, name, index, value, mode=None):
-                index = add_index(index, "writes", name)
+                index = add_index(
+                    index, MemoryUsageType.STORE, buffer_name=name, mode=mode
+                )
                 return self._inner.store(name, index, value, mode)
 
             def store_reduction(self, name, index, value):
-                index = add_index(index, "writes", name)
+                index = add_index(
+                    index, MemoryUsageType.STORE_REDUCTION, buffer_name=name
+                )
                 return self._inner.store_reduction(name, index, value)
 
             def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -391,12 +442,12 @@ class LoopBodyBlock:
             def index_expr(self, index, dtype):
                 if isinstance(index, (int, sympy.Integer)):
                     return self._inner.constant(int(index), dtype)
-                index = add_index(index, "other")
+                index = add_index(index, MemoryUsageType.INDEX_EXPR)
                 return self._inner.index_expr(index, dtype)
 
             def check_bounds(self, index, size, lower, upper):
-                index = add_index(index, "other")
-                size = add_index(size, "other")
+                index = add_index(index, MemoryUsageType.CHECK_BOUNDS)
+                size = add_index(size, MemoryUsageType.CHECK_BOUNDS)
                 return self._inner.check_bounds(index, size, lower, upper)
 
             def bucketize(
@@ -407,7 +458,9 @@ class LoopBodyBlock:
                 indexing_dtype: torch.dtype,
                 right: bool,
             ):
-                offsets_size = add_index(offsets_size, "other")
+                offsets_size = add_index(
+                    offsets_size, MemoryUsageType.BUCKETIZE, buffer_name=offsets_name
+                )
                 return self._inner.bucketize(
                     values, offsets_name, offsets_size, indexing_dtype, right
                 )

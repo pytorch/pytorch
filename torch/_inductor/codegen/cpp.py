@@ -4346,9 +4346,9 @@ class CppScheduling(BaseScheduling):
                             ):
                                 contiguous_index_expr += stride * var
                                 stride *= range
-                            write_index_expr = scheduler_node._body.writes_name2expr[
+                            write_index_expr = scheduler_node._body.get_write_expr(
                                 scheduler_buffer.get_name()
-                            ]
+                            )
 
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
@@ -4356,9 +4356,9 @@ class CppScheduling(BaseScheduling):
                             return is_contiguous_index(write_index_expr) and all(
                                 isinstance(user.node, SchedulerNode)
                                 and is_contiguous_index(
-                                    user.node._body.reads_name2expr[
+                                    user.node._body.get_read_expr(
                                         scheduler_buffer.get_name()
-                                    ],
+                                    ),
                                 )
                                 for user in scheduler_buffer.users
                             )
