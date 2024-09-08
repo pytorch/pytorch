@@ -28,11 +28,11 @@ from torch._dynamo.utils import ifdynstaticdefault, same
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
-    TEST_MULTIGPU,
 )
 
 # Defines all the kernels for tests
@@ -3691,9 +3691,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(2, 3)
             self.assertEqual(opt_fn(x), fn(x))
             self.assertEqual(counter.frame_count, 1)
-            torch.cuda.set_device(1)
-            self.assertEqual(opt_fn(x), fn(x))
-            self.assertEqual(counter.frame_count, 2)
+            with torch.cuda.device(1):
+                self.assertEqual(opt_fn(x), fn(x))
+                self.assertEqual(counter.frame_count, 2)
 
     def test_fn_with_attr(self):
         def fn(x):
