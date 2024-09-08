@@ -4592,10 +4592,14 @@ class ShapeEnv:
         if axioms is None:
             subst = self.axioms
         else:
-            subst = {}
-            for e in axioms:
-                if e.free_symbols.issubset(expr.free_symbols):
-                    subst.update(dict(self.get_implications(e)))
+            def compute_explicit_subst():
+                subst = {}
+                for e in axioms:
+                    if e.free_symbols.issubset(expr.free_symbols):
+                        subst.update(dict(self.get_implications(e)))
+                return subst
+
+            subst = compute_explicit_subst()
 
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here
@@ -4626,22 +4630,29 @@ class ShapeEnv:
                 upper = max(lower, 2 ** 48)
             return ValueRanges(lower, upper)
 
-        if var_to_range is None:
-            if size_oblivious:  # micro-optimization
-                var_ranges = {k: adjust_vr(k, v) for k, v in self.var_to_range.items()}
+        def compute_var_ranges():
+            if var_to_range is None:
+                if size_oblivious:  # micro-optimization
+                    #var_ranges = {k: adjust_vr(k, v) for k, v in self.var_to_range.items()}
+                    return {k: adjust_vr(k, self.var_to_range[k]) for k in fs if k in self.var_to_range}
+                else:
+                    return self.var_to_range
             else:
-                var_ranges = self.var_to_range
-        else:
-            var_ranges = {k: adjust_vr(k, v) for k, v in var_to_range}
+                return {k: adjust_vr(k, v) for k, v in var_to_range}
+
+        var_ranges = compute_var_ranges()
 
         out = bound_sympy(expr, var_ranges)
         if out.is_singleton():
             return out.lower
 
-        symbol_info = tuple(
-            (s, var_ranges.get(s), self.var_to_val.get(s))
-            for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
-        )
+        def compute_symbol_info():
+            return tuple(
+                (s, var_ranges.get(s), self.var_to_val.get(s))
+                for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
+            )
+
+        symbol_info = compute_symbol_info()
 
         return _maybe_evaluate_static_worker(expr, symbol_info, unbacked_only)
 
