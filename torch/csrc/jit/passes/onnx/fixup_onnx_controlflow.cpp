@@ -15,7 +15,7 @@ const int ONNX_OPSET_13 = 13;
 const int ONNX_TYPE_BOOL = 9;
 
 Node* CreateCastToBoolNode(Value* val, Graph* graph) {
-  Node* cast_node = graph->create(onnx::Cast);
+  Node* cast_node = graph->create(c10::onnx::Cast);
   cast_node->addInput(val);
   cast_node->i_(attr::to, ONNX_TYPE_BOOL);
   cast_node->output()->setType(BoolType::get());
@@ -144,7 +144,7 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
       // Split the added scan_output back to expected tensor sequence.
       auto loop_output = loop_node->output(i - 2);
       Node* split_node =
-          loop_node->owningGraph()->create(onnx::SplitToSequence);
+          loop_node->owningGraph()->create(c10::onnx::SplitToSequence);
       loop_output->replaceAllUsesWith(split_node->output());
       split_node->i_(attr::keepdims, 0);
       split_node->addInput(loop_output);
@@ -230,9 +230,9 @@ void FixupONNXSubblockOutputs(Node* n) {
         // Identity(None). Also enables shape inference later on, since
         // ONNX shape inference doesn't handle None.
         if (output->type()->cast<NoneType>()) {
-          id_node = block->owningGraph()->create(onnx::Optional);
+          id_node = block->owningGraph()->create(c10::onnx::Optional);
         } else {
-          id_node = block->owningGraph()->create(onnx::Identity);
+          id_node = block->owningGraph()->create(c10::onnx::Identity);
           id_node->addInput(output);
         }
         id_node->insertBefore(block->return_node());
