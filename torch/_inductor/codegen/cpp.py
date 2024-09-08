@@ -22,6 +22,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
+from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -3186,7 +3187,7 @@ class CppTile2DKernel(CppVecKernel):
         )
 
 
-def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Tuple[Optional[torch.dtype], bool]:
+def get_loop_body_lowp_fp(_body: LoopBody) -> Tuple[Optional[torch.dtype], bool]:
     """
     Returns the low precision data type (torch.float16/torch.bfloat16) contained in the nodes
     and if all the nodes can codegen with this data type without converting to float.
@@ -3471,7 +3472,7 @@ class CppKernelProxy(CppKernel):
 
     # Check if all the nodes of a given fx graph can support BF16/FP16
     def is_lowp_fp_scheduler(self, scheduler_node: SchedulerNode):
-        if not isinstance(scheduler_node._body, ir.LoopBody):
+        if not isinstance(scheduler_node._body, LoopBody):
             return True
         # Propagate the dtype to check if all the fx node is bf16/fp16
         DataTypePropagation.propagate_scheduler_node(scheduler_node)
@@ -3480,7 +3481,7 @@ class CppKernelProxy(CppKernel):
             and not get_loop_body_lowp_fp(scheduler_node._body)[1]
         )
 
-    def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
+    def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def is_lowp_fp_load(node: torch.fx.Node):
                 if node.target not in ["load"]:
@@ -3647,7 +3648,7 @@ class CppKernelProxy(CppKernel):
 
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
-            assert isinstance(_node._body, ir.LoopBody)
+            assert isinstance(_node._body, LoopBody)
             node: SchedulerNode = _node
 
             def is_memory_copy_scheduler_node(node: SchedulerNode):
@@ -3658,7 +3659,7 @@ class CppKernelProxy(CppKernel):
 
             should_legalize = not is_memory_copy_scheduler_node(node)
             if should_legalize:
-                body: ir.LoopBody = node._body
+                body: LoopBody = node._body
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list):
