@@ -64,6 +64,7 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 
 from .._dynamo.backends.common import aot_autograd
+from .._dynamo.debug_utils import profile_to_file
 from ..fx._lazy_graph_module import _use_lazy_graph_module  # type: ignore[attr-defined]
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics
@@ -693,6 +694,7 @@ def _compile_fx_inner(
     return compiled_graph
 
 
+@profile_to_file("~/pytorch/baseline3.prof")
 def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],

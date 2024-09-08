@@ -1481,7 +1481,7 @@ def cat(inputs, dim=0):
         if not isinstance(x, ir.Pointwise):
             return 0
 
-        count = x.inner_fn_opcount()
+        count = x.inner_fn_opcount().num_ops
         for read in x.get_read_names():
             count += op_count(V.graph.get_buffer(read))
 
