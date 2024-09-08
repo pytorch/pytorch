@@ -27,7 +27,7 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
-    from torch.distributed._tensor import distribute_tensor, DTensor, Replicate
+    from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
 
 
 def _identity_func(

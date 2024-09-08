@@ -8,15 +8,10 @@ from torch.distributed._tensor._utils import (
     compute_local_shape,
     compute_local_shape_and_global_offset,
 )
-from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import (
-    _StridedShard,
-    DTensorSpec,
-    Replicate,
-    Shard,
-    TensorMeta,
-)
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
