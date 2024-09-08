@@ -107,7 +107,7 @@ due to:
 Traceback (most recent call last):
   File "test_exc.py", line N, in f
     raise NotImplementedError
-torch._dynamo.exc.InternalTorchDynamoError:
+torch._dynamo.exc.InternalTorchDynamoError: NotImplementedError:
 
 from user code:
    File "test_exc.py", line N, in fn001
