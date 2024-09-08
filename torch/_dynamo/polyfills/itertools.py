@@ -72,13 +72,15 @@ def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
-@substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
-def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
-    iterator = iter(iterable)
-    a = next(iterator, None)
-    for b in iterator:
-        yield a, b
-        a = b
+if sys.version_info >= (3, 10):
+    # itertools.pairwise was added at Python 3.10
+    @substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
+    def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
+        iterator = iter(iterable)
+        a = next(iterator, None)
+        for b in iterator:
+            yield a, b
+            a = b
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
