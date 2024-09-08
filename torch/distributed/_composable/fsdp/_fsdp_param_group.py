@@ -282,7 +282,7 @@ class FSDPParamGroup:
     def reshard(self):
         if self._training_state == TrainingState.FORWARD:
             if ca.compiled_autograd_enabled:
-                # Under compile, we always reshard all unsharded parameters after forward.
+                # With Traceable FSDP2, we always reshard all unsharded parameters after forward.
                 self._to_sharded()
                 return
             if not self._reshard_after_forward:
