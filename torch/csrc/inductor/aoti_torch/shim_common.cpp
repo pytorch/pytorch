@@ -26,6 +26,8 @@
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
+#include <ATen/ops/_wrapped_linear_prepack.h>
+#include <ATen/ops/_wrapped_quantized_linear_prepacked.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
@@ -42,8 +44,6 @@
 #include <ATen/ops/scatter_reduce.h>
 #include <ATen/ops/view_as_real_ops.h>
 #include <ATen/ops/view_ops.h>
-#include <ATen/ops/wrapped_linear_prepack.h>
-#include <ATen/ops/wrapped_quantized_linear_prepacked.h>
 
 #endif
 
@@ -814,7 +814,7 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
   });
 }
 
-AOTITorchError aoti_torch_cpu_wrapped_linear_prepack(
+AOTITorchError aoti_torch_cpu__wrapped_linear_prepack(
     AtenTensorHandle weight,
     AtenTensorHandle weight_scale,
     AtenTensorHandle weight_zero_point,
@@ -828,7 +828,7 @@ AOTITorchError aoti_torch_cpu_wrapped_linear_prepack(
         tensor_handle_to_tensor_pointer(weight_zero_point);
     at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
 
-    *out = new_tensor_handle(at::wrapped_linear_prepack(
+    *out = new_tensor_handle(at::_wrapped_linear_prepack(
         *weight_tensor,
         *weight_scale_tensor,
         *weight_zero_point_tensor,
@@ -852,7 +852,7 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
   });
 }
 
-AOTITorchError aoti_torch_cpu_wrapped_quantized_linear_prepacked(
+AOTITorchError aoti_torch_cpu__wrapped_quantized_linear_prepacked(
     AtenTensorHandle input,
     AtenTensorHandle input_scale,
     AtenTensorHandle input_zero_point,
@@ -871,7 +871,7 @@ AOTITorchError aoti_torch_cpu_wrapped_quantized_linear_prepacked(
     at::Tensor* out_scale_tensor = tensor_handle_to_tensor_pointer(out_scale);
     at::Tensor* out_zeropoint_tensor =
         tensor_handle_to_tensor_pointer(out_zeropoint);
-    *out = new_tensor_handle(at::wrapped_quantized_linear_prepacked(
+    *out = new_tensor_handle(at::_wrapped_quantized_linear_prepacked(
         *input_tensor,
         *input_scale_tensor,
         *input_zero_point_tensor,
