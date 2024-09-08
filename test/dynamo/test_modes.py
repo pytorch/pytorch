@@ -68,9 +68,11 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
     def setUp(self):
         torch.set_default_device(None)
+        torch._dynamo.reset()
 
     def tearDown(self):
         torch.set_default_device(None)
+        torch._dynamo.reset()
 
     def _run_torch_function_mode_guard_test(self):
         class TestMode1(BaseTorchFunctionMode):
