@@ -7,14 +7,14 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.experimental.attention import (
+from torch.distributed._tensor.experimental._attention import (
     _AttentionContextParallel,
     _CausalBehavior,
     _context_parallel_buffers,
     _is_causal_behavior,
     context_parallel,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import (
