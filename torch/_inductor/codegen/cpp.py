@@ -3649,17 +3649,8 @@ class CppKernelProxy(CppKernel):
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
             assert isinstance(_node._body, LoopBody)
-            node: SchedulerNode = _node
-
-            def is_memory_copy_scheduler_node(node: SchedulerNode):
-                op_counts = node.read_writes.op_counts
-                return (
-                    len(op_counts) == 2 and "load" in op_counts and "store" in op_counts
-                )
-
-            should_legalize = not is_memory_copy_scheduler_node(node)
-            if should_legalize:
-                body: LoopBody = node._body
+            body: LoopBody = _node._body
+            if not body.is_memory_copy():
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list):
