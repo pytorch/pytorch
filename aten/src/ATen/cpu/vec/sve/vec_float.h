@@ -3,11 +3,9 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
-#if defined(CPU_CAPABILITY_SVE)
-#include <sleef.h>
-#endif
 #include <cmath>
-#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#include <sleef.h>
 #define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
@@ -261,7 +259,21 @@ public:
     return loadu(tmp);
   }
   Vectorized<float> nextafter(const Vectorized<float> &b) const {
-    return Vectorized<float>(Sleef_nextafterfx_sve(values, b));
+    USE_SLEEF(
+      {
+        return Vectorized<float>(Sleef_nextafterfx_sve(values, b));
+      },
+      {
+        __at_align__ float tmp[size()];
+        __at_align__ float tmp_b[size()];
+        store(tmp);
+        b.store(tmp_b);
+        for (int64_t i = 0; i < size(); ++i) {
+          tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
+        }
+        return loadu(tmp);
+      }
+    )
   }
   Vectorized<float> log() const {
     return USE_SLEEF(Vectorized<float>(Sleef_logfx_u10sve(values)),map(std::log));
