@@ -715,6 +715,61 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_unbacked_to_cond(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return (x + 1).sum()
+
+                def false_fn(x):
+                    return (x + 3).sum()
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
+    def test_unbacked_to_cond_passthrough(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return x + 1
+
+                def false_fn(x):
+                    return x + 3
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cond_contains_unbacked_no_escape(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b1, b2, c):
+                def true_fn(x):
+                    return x * b1.item()
+
+                def false_fn(x):
+                    return x * b2.item()
+
+                r = torch.cond(a, true_fn, false_fn, (c,))
+                return r * 2
+
+        args = (
+            torch.tensor(True),
+            torch.tensor([4]),
+            torch.tensor([4]),
+            torch.randn(10, requires_grad=True),
+        )
+        torch.export.export(M(), args)
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
@@ -836,6 +891,25 @@ graph():
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
+
+    def test_export_script_module(self):
+        class Foo(torch.nn.Module):
+            def forward(self, rv: torch.Tensor, t: torch.Tensor):
+                i = t.item()
+                return rv + i
+
+        foo = Foo()
+        foo_script = torch.jit.script(foo)
+        inp = (torch.zeros(3, 4), torch.tensor(7))
+
+        with self.assertRaisesRegex(
+            ValueError, "Exporting a ScriptModule is not supported"
+        ):
+            export(foo_script, inp)
+
+        from torch._export.converter import TS2EPConverter
+
+        TS2EPConverter(foo_script, inp).convert()
 
     def test_torch_fn(self):
         class M1(torch.nn.Module):
@@ -2286,8 +2360,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v3
         export(N(), (t,), strict=strict)
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
     @testing.expectedFailureSerDer  # T195866111
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
@@ -2417,6 +2489,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
                 strict=strict,
             )
+
+    def test_tolist(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.tolist()
+
+        ep = export(M(), (torch.ones(3, dtype=torch.int),))
+        self.assertEqual(ep.module()(torch.tensor([1, 2, 3])), [1, 2, 3])
 
     def test_if_functional(self):
         class Module(torch.nn.Module):
@@ -6233,7 +6313,6 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -6289,11 +6368,7 @@ def forward(self, x):
         # (please never do this)
         class Foo(torch.nn.Module):
             def forward(self, input, true_graph, body_graph):
-                def map_body(x, y):
-                    return x + y
-
-                x = map(map_body, input, body_graph[0])
-                x = x + true_graph[0] + true_graph[1]
+                x = input + true_graph[0] + true_graph[1]
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 return x
@@ -6305,7 +6380,6 @@ def forward(self, x):
         )
         ep = export(Foo(), inputs)
         expected_getattr_names = [
-            "body_graph_1",
             "true_graph_2",
             "false_graph_0",
             "true_graph_3",
@@ -6914,6 +6988,26 @@ def forward(self, x, y):
         for node in const_gm.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(False)
+
+    @testing.expectedFailureTrainingIRToRunDecomp  # T200904004
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_istft_op(self):
+        class istft_class(torch.nn.Module):
+            def forward(self, spec):
+                window = torch.hann_window(1024).type(torch.FloatTensor)
+                return torch.istft(
+                    spec,
+                    n_fft=1024,
+                    hop_length=512,
+                    window=window,
+                    length=144000,
+                )
+
+        model = istft_class()
+        real_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        imaginary_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        spec = torch.complex(real_part, imaginary_part)
+        export(model, (spec,))
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
@@ -7919,13 +8013,6 @@ class TestExportCustomClass(TorchTestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
-
-    def test_tolist_nonstrict_output(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                x.tolist()
-
-        ep = torch.export.export(M(), (torch.ones(3),), strict=False)
 
     def test_preserve_non_cia_op(self):
         class M(torch.nn.Module):

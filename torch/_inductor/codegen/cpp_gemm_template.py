@@ -62,17 +62,34 @@ extern "C" {{export_declaration}}
     const int64_t Mr_blocks = (M + Mr - 1) / Mr;
     {%- if num_threads > 1 %}
     int64_t Mt_blocks, Nt_blocks, Kt_blocks;
-    mm_get_thread_blocking(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
+    mm_get_thread_blocking(num_threads, {{config.cpp.gemm_max_k_slices}}, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
     {%- else %}
     const auto Mt_blocks = Mr_blocks;
     const auto Nt_blocks = Nr_blocks;
     const auto Kt_blocks = Kr_blocks;
     {%- endif %}
-    const int64_t Mc_blocks = Mt_blocks;
-    const int64_t Nc_blocks = 1;
-    const int64_t Kc_blocks = Kt_blocks;
+    int64_t Mc_blocks, Nc_blocks, Kc_blocks;
+    uint32_t L1_cache_size = {{L1_cache_size}};
+    uint32_t L2_cache_size = {{L2_cache_size}};
+    mm_get_cache_blocking<{{kernel.dtype(X)}}, {{kernel.dtype(W)}}>(
+        num_threads,
+        M,
+        N,
+        K,
+        Mr,
+        Nr,
+        Kr,
+        Mt_blocks,
+        Nt_blocks,
+        Kt_blocks,
+        Mc_blocks,
+        Nc_blocks,
+        Kc_blocks,
+        L1_cache_size,
+        L2_cache_size
+    );
     const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
-    const int64_t num_Nc_blocks = Nr_blocks;
+    const int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
     const int64_t num_k_slices = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
 {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
@@ -124,14 +141,14 @@ extern "C" {{export_declaration}}
         const int64_t k_block_end = Kr_blocks;
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
+{%- if use_local_acc %}
+    {%- set acc_buf_name = "local_acc_buf" %}
+        {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+{%- endif %}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
             const int64_t m_start = mc * Mr;
             const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
             const int64_t m_size = m_end - m_start;
-{%- if use_local_acc %}
-    {%- set acc_buf_name = "local_acc_buf" %}
-            {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "Nc_blocks*Nr"], acc_buf_dtype) }}
-{%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
                 const int64_t n_start = nc * Nr;
                 const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
@@ -149,7 +166,7 @@ extern "C" {{export_declaration}}
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
 {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
-{%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
 {%- if w_scale_zp is not none %}
                         int64_t zp_end = k_end / q_group_size;
                         int64_t zp_start = k_start / q_group_size;
@@ -208,7 +225,7 @@ extern "C" {{export_declaration}}
 {%- endif %}
                 {
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
+{%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
@@ -424,7 +441,7 @@ class CppPackedGemmTemplate(CppTemplate):
             # The ratios below are empirically determined to decide
             # the effective sizes of L1 and L2.
             # TODO: tune the factor here
-            L1_limit_factor = 1
+            L1_limit_factor = 0.8
             L2_limit_factor = 0.5
 
             L1_cache_size = (
@@ -581,7 +598,7 @@ class CppPackedGemmTemplate(CppTemplate):
             new_inputs = list(inputs)
             X = inputs[0]
             W = inputs[1]
-            B = inputs[2] if len(inputs) > 2 else None
+            B = inputs[2] if has_bias else None
             if isinstance(W, ir.IRNode):
                 if trans_w:
                     if not isinstance(W, ir.TensorBox):
@@ -784,8 +801,45 @@ class CppPackedGemmTemplate(CppTemplate):
                 # non-retraceable. To support retracing, we can add a repack node to the
                 # FX graph. For example:
                 # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
+                W_tensor_users = 0
                 for node in reversed(V.graph.graph.nodes):
-                    if node.name == W_node.get_name() and len(node.users) == 1:
+                    # Case may happen when the wgt tensor is used by more than 1 get_attr node
+                    # https://github.com/pytorch/pytorch/issues/134998
+                    if node.op == "get_attr" and hasattr(
+                        V.graph.module, node.name
+                    ):  # wgt might already be deleted
+                        comp_tensor = getattr(V.graph.module, node.name)
+                        if (
+                            W.is_mkldnn == comp_tensor.is_mkldnn
+                            and W.dtype == comp_tensor.dtype
+                            and W.device == comp_tensor.device
+                            and (
+                                (
+                                    not W.is_mkldnn
+                                    and (
+                                        W.untyped_storage().data_ptr()
+                                        == comp_tensor.untyped_storage().data_ptr()
+                                    )
+                                )
+                                or (
+                                    W.is_mkldnn
+                                    and (
+                                        torch.ops.mkldnn.data_ptr(W)
+                                        == torch.ops.mkldnn.data_ptr(comp_tensor)
+                                    )
+                                )
+                            )
+                        ):
+                            W_tensor_users += 1
+
+                for node in reversed(V.graph.graph.nodes):
+                    # The wgt tensor has been used by only 1 get_attr node
+                    # The get_attr node has only 1 user fx node
+                    if (
+                        node.name == W_node.get_name()
+                        and len(node.users) == 1
+                        and W_tensor_users == 1
+                    ):
                         del V.graph.constants[node.name]
                         delattr(V.graph.module, node.name)
                         delattr(V.graph.graph.owning_module, node.name)
@@ -1063,6 +1117,12 @@ class CppPackedGemmTemplate(CppTemplate):
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
+        L1_cache_size = torch._C._cpu._L1d_cache_size()  # per core cache size in Bytes
+        assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+
+        L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
+        assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+
         options = dict(
             X=X,
             W=W,
@@ -1094,6 +1154,9 @@ class CppPackedGemmTemplate(CppTemplate):
             q_group_size=q_group_size if w_scale_zp else 0,
             acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
             DTYPE_TO_CPP=DTYPE_TO_CPP,
+            L1_cache_size=L1_cache_size,
+            L2_cache_size=L2_cache_size,
+            config=config,
         )
         with contextlib.ExitStack() as stack:
             for buf in fake_buffers:
