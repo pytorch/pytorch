@@ -3645,12 +3645,6 @@ class ComputedBuffer(OperationBuffer):
                 self.data.get_pointwise_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
-            reads_bufs = [
-                V.graph.name_to_buffer[r.name]
-                if r.name in V.graph.name_to_buffer.keys()
-                else None
-                for r in reads
-            ]
             # only consider reads to buffer of same size
             # ignore StarDeps because they don't contribute stride information
             assert all(
@@ -6419,19 +6413,17 @@ class StorageBox(MutableBox):
         if isinstance(data, (InputsKernel, InputBuffer, ReinterpretView)):
             return 1
         if isinstance(data, ComputedBuffer):
-            read_writes = data.get_read_writes()
-        else:
-            assert isinstance(data, (Pointwise, Reduction)), type(data)
-            read_writes = ComputedBuffer(
-                name=None,
-                layout=FlexibleLayout(
-                    device=data.get_device(),
-                    dtype=data.get_dtype(),
-                    size=data.get_size(),
-                ),
-                data=data,
-            ).get_read_writes()
-        return len(read_writes.reads)
+            return data.num_reads()
+        assert isinstance(data, (Pointwise, Reduction)), type(data)
+        return ComputedBuffer(
+            name=None,
+            layout=FlexibleLayout(
+                device=data.get_device(),
+                dtype=data.get_dtype(),
+                size=data.get_size(),
+            ),
+            data=data,
+        ).num_reads()
 
     @cache_on_self
     def is_pointwise_non_scalar_tensor_num_reads_larger_than_one(self):
