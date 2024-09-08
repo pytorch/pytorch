@@ -2672,6 +2672,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 local_scope=f_locals,
                 global_scope=f_globals,
                 f_code=f_code,
+                torch_function_mode_stack=torch_function_mode_stack,
             ),
             instructions=instructions,
             f_locals=f_locals,

@@ -831,7 +831,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
-            return None
+            return ConstantVariable.create(None)
 
         return handlers
 

@@ -210,14 +210,15 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         # that are now affected by executing the funtion across two frames instead of one
         # Today we support the enter/exit of the default TorchFunctionMode as well as
         # DeviceContext (which is used for set_default_device)
-        return issubclass(ty, (DeviceContext, NoEnterTorchFunctionMode)) or (
+        return issubclass(ty, NoEnterTorchFunctionMode) or (
             not class_has_getattribute(ty)
             and inspect.getattr_static(ty, "__enter__") == TorchFunctionMode.__enter__
             and inspect.getattr_static(ty, "__exit__") == TorchFunctionMode.__exit__
         )
 
     def __init__(self, value, source=None, **kwargs):
-        super().__init__(value, **kwargs)
+        if value is not None:
+            super().__init__(value, **kwargs)
         self.value = value
         self.cm_obj = value  # needed for BC with calling enter from CM code
         self.source = source
@@ -250,6 +251,9 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
     def enter(self, tx):
         from .torch import TorchInGraphFunctionVariable
 
+        if isinstance(self.value, NoEnterTorchFunctionMode):
+            return ConstantVariable.create(None)
+
         TorchInGraphFunctionVariable(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
@@ -265,13 +269,6 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
 
     def reconstruct_type(self, codegen):
         ty = NoEnterTorchFunctionMode
-        # NoEnterDeviceTorchFunctionMode
-        # if isinstance(self.value, DeviceContext)
-        # else NoEnterTorchFunctionMode
-        # codegen(
-        #    AttrSource(
-        #        codegen.tx.import_source(torch._dynamo.polyfills.__name__), ty.__name__),
-        #    )
         codegen(
             AttrSource(
                 codegen.tx.import_source(ty.__module__),
