@@ -276,15 +276,6 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 
 } // namespace BCELoss
 
-static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
-  auto* div = [mpsGraph divisionWithPrimaryTensor:divident secondaryTensor:divisor name:@"divisionTensor"];
-  // Replace NaNs with 0 for divident elements equal to 0
-  return [mpsGraph selectWithPredicateTensor:castMPSTensor(mpsGraph, divisor, MPSDataTypeBool)
-                         truePredicateTensor:div
-                        falsePredicateTensor:[mpsGraph constantWithScalar:0.0 dataType:div.dataType]
-                                        name:nil];
-}
-
 // NLLLoss
 static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                      const Tensor& grad_output_arg,
@@ -371,7 +362,9 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                                             name:@"scaleByWeightTensor"];
       }
       if (reduction == Reduction::Mean) {
-        oneHotTensor = divisionNoNaN(mpsGraph, oneHotTensor, totalWeightTensor);
+        oneHotTensor = [mpsGraph divisionWithPrimaryTensor:oneHotTensor
+                                           secondaryTensor:totalWeightTensor
+                                                      name:@"divisionTensor"];
       }
       MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
                                                                   secondaryTensor:gradOutputTensor
@@ -436,6 +429,20 @@ static void nllnd_loss_forward_impl(Tensor& output,
   // Empty output
   if (output.numel() == 0)
     return;
+
+  // https://github.com/pytorch/pytorch/blob/042f2f7746a064f1527d95d1f1d712b4f0b34186/aten/src/ATen/native/cuda/Loss.cu#L335-L346
+  if (target_arg.numel() == 0) {
+    // Here target (and input) have zero elements
+    // Mean reduction on empty tensors produces NaN. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if (reduction == Reduction::Mean) {
+      output.fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      output.zero_();
+    }
+    total_weight.zero_();
+    return;
+  }
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -537,7 +544,9 @@ static void nllnd_loss_forward_impl(Tensor& output,
           mpsGraphBatchSizeTensor = [mpsGraph reductionSumWithTensor:mpsSelectOneTensor
                                                                 axes:nil
                                                                 name:@"batchSizeReductionTensor"];
-          mpsGraphReducedTensor = divisionNoNaN(mpsGraph, mpsGraphReducedTensor, mpsGraphBatchSizeTensor);
+          mpsGraphReducedTensor = [mpsGraph divisionWithPrimaryTensor:mpsGraphReducedTensor
+                                                      secondaryTensor:mpsGraphBatchSizeTensor
+                                                                 name:@"divisionTensor"];
         }
       }
 

@@ -11546,7 +11546,6 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
 
-    @expectedFailureMPS  # RuntimeError: [srcBuf length] > 0 INTERNAL ASSERT FAILED https://github.com/pytorch/pytorch/issues/134431
     def test_nll_loss_empty_tensor_reduction_mean(self, device):
         nan = torch.tensor(float('nan'), device=device)
         self._nll_loss_helper([0, 3], "mean", nan, device)
@@ -11555,7 +11554,6 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device)
 
-    @expectedFailureMPS  # RuntimeError: [srcBuf length] > 0 INTERNAL ASSERT FAILED https://github.com/pytorch/pytorch/issues/134431
     def test_nll_loss_empty_tensor_reduction_sum(self, device):
         zero = torch.tensor(0, device=device)
         self._nll_loss_helper([0, 3], "sum", zero, device)
@@ -11564,7 +11562,6 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
 
-    @expectedFailureMPS  # AssertionError: Expected nan but got 0.0.
     def test_nll_loss_total_weight_is_zero(self, device):
 
         def helper(input_size):
@@ -11581,7 +11578,6 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
 
-    @expectedFailureMPS  # AssertionError: Expected nan but got 0.0.
     def test_nll_loss_all_ignored(self, device):
 
         def helper(input_size):
