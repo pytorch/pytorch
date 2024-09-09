@@ -516,7 +516,13 @@ def check_model(
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
         all_none_grads = all(x is None for x in correct_grad)
-        if all_none_grads:
+        tensor_args = [
+            x
+            for x in pytree.tree_flatten(example_inputs)[0]
+            if isinstance(x, torch.Tensor)
+        ]
+        any_non_leaves = any(x.grad_fn is not None for x in tensor_args)
+        if all_none_grads and any_non_leaves:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
             # If all inputs to an AOTAutograd graph are supposed to get None gradients,
@@ -1906,6 +1912,21 @@ class CommonTemplate:
         a = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float32, device=self.device)
         b = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float64, device=self.device)
         self.common(fn, (a, b), rtol=1e-4, atol=1e-5, check_lowp=False)
+
+    @config.patch(max_autotune_pointwise=True)
+    def test_split_cumsum_index(self):
+        # Split scan uses a workspace that needs to be zeroed before use.
+        # data[index] does indirect indexing that should catch issues if the
+        # workspace is not zeroed.
+        def fn(lengths, data):
+            offsets = torch.cumsum(lengths, 0)
+            return data[offsets]
+
+        lengths = torch.full((2**14,), 2**2, dtype=torch.int64, device=self.device)
+        lengths[-2] = 3
+        lengths[-1] = 3
+        data = make_tensor((2**16,), dtype=torch.float32, device=self.device)
+        self.common(fn, (lengths, data))
 
     def test_split_cumprod(self):
         def fn(a):
@@ -11189,45 +11210,50 @@ class CommonTemplate:
             # <func>_cuda not implemented for Half
             check_lowp = False
 
-        if is_halide_backend(self.device) or is_triton_cpu_backend(self.device) and name in (
-            "erfinv",
-            "airy_ai",
-            "bessel_j0",
-            "bessel_j1",
-            "bessel_y0",
-            "bessel_y1",
-            "chebyshev_polynomial_t",
-            "chebyshev_polynomial_u",
-            "chebyshev_polynomial_v",
-            "chebyshev_polynomial_w",
-            "digamma",
-            "gammainc",
-            "gammaincc",
-            "gammaln",
-            "hermite_polynomial_h",
-            "hermite_polynomial_he",
-            "i0",
-            "i0e",
-            "i1",
-            "i1e",
-            "laguerre_polynomial_l",
-            "legendre_polynomial_p",
-            "modified_bessel_i0",
-            "modified_bessel_i1",
-            "modified_bessel_k0",
-            "modified_bessel_k1",
-            "multigammaln",
-            "ndtri",
-            "polygamma",
-            "psi",
-            "scaled_modified_bessel_k0",
-            "scaled_modified_bessel_k1",
-            "shifted_chebyshev_polynomial_t",
-            "shifted_chebyshev_polynomial_u",
-            "shifted_chebyshev_polynomial_v",
-            "shifted_chebyshev_polynomial_w",
-            "spherical_bessel_j0",
-            "zeta",
+        if (
+            is_halide_backend(self.device)
+            or is_triton_cpu_backend(self.device)
+            and name
+            in (
+                "erfinv",
+                "airy_ai",
+                "bessel_j0",
+                "bessel_j1",
+                "bessel_y0",
+                "bessel_y1",
+                "chebyshev_polynomial_t",
+                "chebyshev_polynomial_u",
+                "chebyshev_polynomial_v",
+                "chebyshev_polynomial_w",
+                "digamma",
+                "gammainc",
+                "gammaincc",
+                "gammaln",
+                "hermite_polynomial_h",
+                "hermite_polynomial_he",
+                "i0",
+                "i0e",
+                "i1",
+                "i1e",
+                "laguerre_polynomial_l",
+                "legendre_polynomial_p",
+                "modified_bessel_i0",
+                "modified_bessel_i1",
+                "modified_bessel_k0",
+                "modified_bessel_k1",
+                "multigammaln",
+                "ndtri",
+                "polygamma",
+                "psi",
+                "scaled_modified_bessel_k0",
+                "scaled_modified_bessel_k1",
+                "shifted_chebyshev_polynomial_t",
+                "shifted_chebyshev_polynomial_u",
+                "shifted_chebyshev_polynomial_v",
+                "shifted_chebyshev_polynomial_w",
+                "spherical_bessel_j0",
+                "zeta",
+            )
         ):
             raise unittest.SkipTest(f"Halide & Triton CPU do not support {name}")
 
