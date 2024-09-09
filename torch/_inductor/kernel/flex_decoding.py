@@ -83,7 +83,6 @@ flex_decoding_template = TritonTemplate(
 
 
     Z = {{size("Q", 0)}}
-    ZKV = {{size("K", 0)}}
     HKV = {{size("Q", 1)}}
     G: tl.constexpr = GQA_SHARED_HEADS
     HQ = HKV * G
@@ -98,12 +97,13 @@ flex_decoding_template = TritonTemplate(
     TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
 
     off_z = tl.program_id(0) // HKV
+    off_zkv = off_z // KV_SHARED_BATCH
     off_hkv = tl.program_id(0) % HKV
     off_t = tl.program_id(1)
 
     q_offset = off_z * stride_qz + off_hkv * stride_qh
-    k_offset = (off_z % ZKV) * stride_kz + off_hkv * stride_kh
-    v_offset = (off_z % ZKV) * stride_vz + off_hkv * stride_vh
+    k_offset = off_zkv * stride_kz + off_hkv * stride_kh
+    v_offset = off_zkv * stride_vz + off_hkv * stride_vh
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
@@ -356,6 +356,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
             "Number of shared query heads sharing the same KV head must be power of 2. "
         )
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
+
+    # Determine KV batch broadcast factor
+    kv_shared_batch = Bq // Bkv
+    kernel_options.setdefault("KV_SHARED_BATCH", kv_shared_batch)
 
     # Determine if there are "full" blocks where we only need to apply score_mod, and can skip mask_mod
     has_full_blocks = full_kv_num_blocks is not None

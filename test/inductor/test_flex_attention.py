@@ -5,7 +5,7 @@ import functools
 import string
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -211,6 +211,16 @@ B = 4
 H = 8
 S = 2048
 D = 64
+
+test_Bq_Bkv = [
+    (5, 1),
+    (8, 1),
+    (8, 2),
+    (16, 1),
+    (16, 2),
+    (16, 4),
+    (16, 16),
+]
 
 
 def query_key_value_clones(
@@ -619,77 +629,26 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("bkv", [1, 2])
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("score_mod", test_score_mods)
-    def test_batch_size_broadcast(
-        self, bkv: int, dtype: torch.dtype, score_mod: Callable
+    def test_kv_batch_broadcast(
+        self, dtype: torch.dtype, batch_dims: Tuple[int, int], score_mod: Callable
     ):
-        Q_B, Q_H, Q_S, Q_D = B, H, S, D
-        KV_B, KV_H, KV_S, V_D = bkv, H, S, D
+        Bq, Bkv = batch_dims
+        assert Bq % Bkv == 0
 
-        q = torch.rand(
-            (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
-        )
-        k = torch.rand(
-            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
-        )
-        v = torch.rand(
-            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
-        )
-
-        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-        # q_broadcasted, k_broadcasted, v_broadcasted = query_key_value_clones(q, k, v)
-        # k_broadcasted = k_broadcasted.expand((Q_B, KV_H, KV_S, Q_D)).clone().detach().requires_grad_(True)
-        # v_braodcasted = v_broadcasted.expand((Q_B, KV_H, KV_S, V_D)).clone().detach().requires_grad_(True)
-
-        sdpa_partial = create_attention(score_mod, None, enable_gqa=(not Q_H == KV_H))
-        compiled_sdpa = torch.compile(sdpa_partial)
-        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
-        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
-        compiled_out = compiled_sdpa(q, k, v)
-        # broadcasted_out = sdpa_partial(q_broadcasted, k_broadcasted, v_braodcasted)
-
-        backward_grad = torch.randn((Q_B, Q_H, Q_S, V_D), dtype=dtype, device="cuda")
-
-        golden_out.backward(backward_grad.to(torch.float64))
-        ref_out.backward(backward_grad)
-        compiled_out.backward(backward_grad)
-        # broadcasted_out.backward(backward_grad)
-
-        # batch_group = Q_B // KV_B
-        # k_broadcasted.grad = torch.sum(k_broadcasted.grad, dim=0, keepdim=False) / batch_group
-        # v_broadcasted.grad = torch.sum(v_broadcasted.grad, dim=0, keepdim=False) / batch_group
-
-        # self._check_out_and_grad(
-        #     golden_out,
-        #     ref_out,
-        #     broadcasted_out,
-        #     q_gold,
-        #     q_ref,
-        #     q_broadcasted,
-        #     k_gold,
-        #     k_ref,
-        #     k_broadcasted,
-        #     v_gold,
-        #     v_ref,
-        #     v_braodcasted,
-        # )
-
-        self._check_out_and_grad(
-            golden_out,
-            ref_out,
-            compiled_out,
-            q_gold,
-            q_ref,
-            q,
-            k_gold,
-            k_ref,
-            k,
-            v_gold,
-            v_ref,
-            v,
+        self.run_test(
+            score_mod,
+            dtype,
+            Bq,
+            H,
+            S,
+            D,
+            Bkv,
+            H,
+            S,
+            D,
         )
 
     @supported_platform

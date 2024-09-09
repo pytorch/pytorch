@@ -180,7 +180,6 @@ compute_flex_attention = r"""
     stride_vz, stride_vh, stride_vn, stride_vk = {{stride("V")}}
 
     ZQ = {{size("Q", 0)}}
-    ZKV = {{size("K", 0)}}
     HQ = {{size("Q", 1)}}
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
@@ -947,7 +946,6 @@ flex_attention_backward_template = TritonTemplate(
     stride_dvz, stride_dvh, stride_dvm, stride_dvd = {{stride("DV")}}
 
     ZQ = {{size("Q", 0)}}
-    ZKV = {{size("K", 0)}}
     HQ = {{size("Q", 1)}}
     HKV = {{size("K", 1)}}
     Q_LEN = {{size("Q", 2)}}
