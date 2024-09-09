@@ -178,7 +178,7 @@ struct DumpPipe {
         getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
       return;
     }
-    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
+    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_PIPE_FILE is empty");
     std::string filename = c10::str(fileStem, rank, ".pipe");
     TORCH_CHECK(
         unlink(filename.c_str()) != -1 || errno == ENOENT,
@@ -902,7 +902,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
       const std::string& futDescription,
-      bool throwException = false);
+      bool throwException = false,
+      bool log = false);
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.

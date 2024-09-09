@@ -4829,6 +4829,28 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         mixed_dtype = False
                     helper(self, nn.BatchNorm3d, shape, dtype, mixed_dtype, torch.channels_last_3d, precisons[dtype])
 
+    def test_batchnorm_half_overflow(self):
+        def helper(self, mod, size, format):
+            channels = size[1]
+            input = torch.randn(size, dtype=torch.half, device='cpu', requires_grad=True)
+            input = input.contiguous(memory_format=format)
+            bn = mod(channels).cpu().to(torch.half)
+            out = bn(input)
+
+            ref_bn = mod(channels).cpu().to(torch.float)
+            ref_bn.load_state_dict(bn.to(torch.float).state_dict())
+            ref_out = ref_bn(input)
+
+            self.assertFalse(out.isinf().any())
+            self.assertFalse(out.isnan().any())
+            self.assertEqual(out, ref_out)
+
+        for format in [torch.contiguous_format, torch.channels_last]:
+            helper(self, nn.BatchNorm2d, (4, 80, 500, 500), format)
+
+        for format in [torch.contiguous_format, torch.channels_last_3d]:
+            helper(self, nn.BatchNorm3d, (4, 80, 20, 100, 100), format)
+
     @parametrize_test(
         'bn_module',
         [
@@ -8583,7 +8605,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
-    @expectedFailureMPS  # TODO(hvaara): Investigate as possible bug.
+    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
@@ -8608,7 +8630,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
-    @expectedFailureMPS  # TODO(hvaara): Investigate as possible bug.
+    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
