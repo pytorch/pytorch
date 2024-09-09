@@ -70,7 +70,7 @@ sleep_sec_TESTING_ONLY: Optional[int] = None
 # (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
 # If the custom op does not have a layout constraint tag already
 # then we assume the following applies.
-custom_op_default_layout_constraint = "flexible_layout"
+custom_op_default_layout_constraint = "needs_fixed_stride_order"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
