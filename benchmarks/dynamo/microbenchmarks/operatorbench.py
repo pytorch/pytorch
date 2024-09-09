@@ -237,7 +237,14 @@ def benchmark(
         print(f"Running {operator}")
         inp_gen = loader.get_inputs_for_operator(operator, dtype=dtype, device=device)
         timings = []
-        inputs_list = [next(inp_gen) for _ in range(min(max_samples, 1000000))]
+        inputs_list = []
+        for _ in range(min(max_samples, 1000000)):
+            try:
+                inps = next(inp_gen)
+                inputs_list.append(inps)
+            except StopIteration:
+                break
+
         profiler_context = (
             torch.profiler.profile(
                 activities=[
@@ -255,20 +262,16 @@ def benchmark(
         )
         with profiler_context as prof:
             for i, inps in enumerate(inputs_list):
-                try:
-                    if inps is None:
-                        break
-                    if i < start_idx:
-                        continue
-                    print(f"Iter {i}")
-                    args, kwargs = inps
-                    if channels_last:
-                        args, kwargs = tree_map_only(
-                            torch.Tensor, to_channels_last, (args, kwargs)
-                        )
-
-                except StopIteration:
+                if inps is None:
                     break
+                if i < start_idx:
+                    continue
+                print(f"Iter {i}")
+                args, kwargs = inps
+                if channels_last:
+                    args, kwargs = tree_map_only(
+                        torch.Tensor, to_channels_last, (args, kwargs)
+                    )
                 try:
                     iter_context = (
                         torch.profiler.record_function(f"iter_{i}")
