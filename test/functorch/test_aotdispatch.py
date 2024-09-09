@@ -6022,6 +6022,91 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
+    def test_benchmark_grads_no_force_contiguous_nested_subclass(self):
+        num_iters = 200
+        warmup_iters = 20
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                r = self.conv(x)
+                return r
+
+        m = M()
+        m.to(memory_format=torch.channels_last)
+        m.train()
+
+        def inps_fn(x):
+            return (
+                TwoTensor(
+                    TwoTensor(x.clone(), x.clone()), TwoTensor(x.clone(), x.clone())
+                ),
+            )
+
+        benchmark_inps = [
+            inps_fn(
+                torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                    memory_format=torch.channels_last
+                )
+            )
+            for _ in range(num_iters)
+        ]
+
+        for i, inps in enumerate(benchmark_inps):
+            if i == warmup_iters:
+                torch._functorch._aot_autograd.profile.reset()
+
+            outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+
+        events = torch._functorch._aot_autograd.profile.get_events()
+
+        bwd_total_duration = sum(e.duration_sec for e in events)
+        avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
+
+        print(f"Benchmark SUBCLASS avg_bwd_duration:{avg_bwd_duration*1000} ms")
+
+        class M2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x0, x1, x2, x3):
+                return self.conv(x0), self.conv(x1), self.conv(x2), self.conv(x3)
+
+        m2 = M2()
+        m2.to(memory_format=torch.channels_last)
+        m2.train()
+
+        def inps_fn2(x):
+            return (x.clone(), x.clone(), x.clone(), x.clone())
+
+        benchmark_inps2 = [
+            inps_fn2(
+                torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                    memory_format=torch.channels_last
+                )
+            )
+            for _ in range(num_iters)
+        ]
+
+        for i, inps in enumerate(benchmark_inps2):
+            if i == warmup_iters:
+                torch._functorch._aot_autograd.profile.reset()
+
+            outs = torch.compile(m2, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+
+        events = torch._functorch._aot_autograd.profile.get_events()
+
+        bwd_total_duration = sum(e.duration_sec for e in events)
+        avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
+
+        print(f"Benchmark NO_SUBCLASS avg_bwd_duration:{avg_bwd_duration * 1000} ms")
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
