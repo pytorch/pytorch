@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import math
 import operator
+from typing import Union
 
 import sympy
 
@@ -281,3 +282,202 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def round_decimal(a, b):
         return round(a, ndigits=b)
+
+
+def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.ops.aten._to_copy(x, dtype=dtype)
+
+
+# Suppose we have some int/float arguments.  This diagram commutes:
+#
+#   int/float  -- PythonReferenceAnalysis.op -->  int/float
+#       |                                           |
+#       |                                           |
+#      torch.tensor(..., dtype=torch.int64/torch.float64)
+#       |                                           |
+#       V                                           V
+#    Tensor    -- TensorReferenceAnalysis.op -->  Tensor
+#
+# NB: int before and after must be representable in int64 (we will
+# insert guards accordingly.)
+#
+# This is guaranteed to be FX traceable with OpOverloads only.
+class TensorReferenceAnalysis:
+    # NB: This is actually dead, because with Proxy tracing the factory
+    # function isn't traced correctly.  Here for completeness.
+    @staticmethod
+    def constant(c, dtype):
+        d: Union[int, float, bool]
+        if dtype is torch.int64:
+            d = int(c)
+        elif dtype is torch.double:
+            d = float(c)
+        elif dtype is torch.bool:
+            d = bool(c)
+        else:
+            raise AssertionError(f"unrecognized dtype {dtype}")
+        return torch.ops.aten.scalar_tensor.default(d, dtype=dtype)
+
+    @staticmethod
+    def or_(a, b):
+        return torch.ops.aten.logical_or.Tensor(a, b)
+
+    @staticmethod
+    def and_(a, b):
+        return torch.ops.aten.logical_and.Tensor(a, b)
+
+    @staticmethod
+    def eq(a, b):
+        return torch.ops.aten.eq.Tensor(a, b)
+
+    @classmethod
+    def ne(cls, a, b):
+        return torch.ops.aten.ne.Tensor(a, b)
+
+    @staticmethod
+    def lt(a, b):
+        return torch.ops.aten.lt.Tensor(a, b)
+
+    @staticmethod
+    def gt(a, b):
+        return torch.ops.aten.gt.Tensor(a, b)
+
+    @staticmethod
+    def le(a, b):
+        return torch.ops.aten.le.Tensor(a, b)
+
+    @staticmethod
+    def ge(a, b):
+        return torch.ops.aten.ge.Tensor(a, b)
+
+    @staticmethod
+    def not_(a):
+        return torch.ops.aten.logical_not.default(a)
+
+    @staticmethod
+    def reciprocal(x):
+        return torch.ops.aten.reciprocal.Tensor(x)
+
+    @staticmethod
+    def square(x):
+        # TODO: maybe composite implicit autograd doesn't work here?
+        return torch.ops.aten.square.Tensor(x)
+
+    @staticmethod
+    def trunc_to_int(x, dtype):
+        return _to_dtype(torch.ops.aten.trunc.default(x), dtype)
+
+    @staticmethod
+    def ceil_to_int(x, dtype):
+        return _to_dtype(torch.ops.aten.ceil.default(x), dtype)
+
+    @staticmethod
+    def floor_to_int(x, dtype):
+        return _to_dtype(torch.ops.aten.floor.default(x), dtype)
+
+    @staticmethod
+    def floor(x):
+        return torch.ops.aten.floor.default(x)
+
+    @staticmethod
+    def ceil(x):
+        return torch.ops.aten.ceil.default(x)
+
+    @staticmethod
+    def to_dtype(x, dtype):
+        return _to_dtype(x, dtype)
+
+    @staticmethod
+    def mod(x, y):
+        # TODO: https://github.com/pytorch/pytorch/pull/133654
+        raise NotImplementedError(
+            "no C-style modulus operation available from frontend atm"
+        )
+
+    @staticmethod
+    def abs(x):
+        return torch.ops.aten.abs.default(x)
+
+    @staticmethod
+    def neg(x):
+        return torch.ops.aten.neg.default(x)
+
+    @staticmethod
+    def truediv(a, b):
+        return torch.ops.aten.true_divide.default(a, b)
+
+    @staticmethod
+    def int_truediv(a, b):
+        raise NotImplementedError(
+            "Python int truediv difficult to implement in PyTorch atm"
+        )
+
+        # TODO: This is wrong, CPython has a custom implementation of true
+        # division that results in higher precision when the floats are
+        # sufficiently large.  Short term fix: add a guard here
+        return torch.ops.aten.true_divide.default(
+            _to_dtype(a, torch.float64), _to_dtype(b, torch.float64)
+        )
+
+    @staticmethod
+    def floordiv(a, b):
+        return torch.ops.aten.floor_divide(a, b)
+
+    @staticmethod
+    def truncdiv(a, b):
+        raise NotImplementedError(
+            "no C-style truncdiv operation available from frontend atm"
+        )
+
+    @staticmethod
+    def add(a, b):
+        return torch.ops.aten.add.Tensor(a, b)
+
+    @staticmethod
+    def mul(a, b):
+        return torch.ops.aten.mul.Tensor(a, b)
+
+    @staticmethod
+    def sub(a, b):
+        return torch.ops.aten.sub.Tensor(a, b)
+
+    @staticmethod
+    def exp(x):
+        return torch.ops.aten.exp.default(x)
+
+    @staticmethod
+    def log(x):
+        return torch.ops.aten.log.default(x)
+
+    @staticmethod
+    def sqrt(x):
+        return torch.ops.aten.sqrt.default(x)
+
+    @staticmethod
+    def pow(a, b):
+        return torch.ops.aten.pow.default(a, b)
+
+    @staticmethod
+    def pow_by_natural(a, b):
+        # NB: pow handles int x int fine
+        return torch.ops.aten.pow.default(a, b)
+
+    @staticmethod
+    def minimum(a, b):
+        return torch.ops.aten.minimum.default(a, b)
+
+    @staticmethod
+    def maximum(a, b):
+        return torch.ops.aten.maximum.default(a, b)
+
+    @staticmethod
+    def round_to_int(a, dtype):
+        return torch.ops.aten.round.default(a)
+
+    @staticmethod
+    def round_decimal(a, b):
+        raise NotImplementedError(
+            "round decimal doesn't support Tensor second argument atm"
+        )
+
+        # return torch.ops.aten.round.decimals(a, b)
