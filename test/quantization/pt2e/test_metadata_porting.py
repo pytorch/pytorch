@@ -139,7 +139,7 @@ class TestMetaDataPorting(QuantizationTestCase):
             self.assertEqual(v, node_tags[k])
         return m
 
-    @skipIfCrossRef # mlazos: retracing FX graph with torch function mode doesn't propagate metadata, because the stack
+    @skipIfCrossRef  # mlazos: retracing FX graph with torch function mode doesn't propagate metadata, because the stack
     # trace of the mode torch function impl doesn't match the traced graph stored lineno.
     def test_simple_metadata_porting(self):
         """
