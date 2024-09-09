@@ -35,6 +35,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import (
     tree_flatten,
+    tree_iter,
     tree_map,
     tree_map_,
     tree_map_only,
@@ -1447,7 +1448,7 @@ def grad_and_value_impl(func, argnums, has_aux, args, kwargs) -> Callable:
 
 
 def grad_impl(func: Callable, argnums: argnums_t, has_aux: bool, args, kwargs):
-    if has_torch_function(args):
+    if has_torch_function(*tree_iter(args)):
         return handle_torch_function(
             grad_impl, args, func, argnums, has_aux, args, kwargs
         )

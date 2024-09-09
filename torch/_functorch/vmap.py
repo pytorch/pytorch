@@ -27,6 +27,7 @@ from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import (
     _broadcast_to_and_flatten,
     tree_flatten,
+    tree_iter,
     tree_map_,
     tree_unflatten,
     TreeSpec,
@@ -308,7 +309,7 @@ def lazy_load_decompositions():
 
 
 def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
-    if has_torch_function(args):
+    if has_torch_function(*tree_iter(args)):
         return handle_torch_function(
             vmap_impl,
             args,
