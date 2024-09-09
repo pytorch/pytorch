@@ -476,6 +476,19 @@ int64_t _cslt_sparse_mm_search(
     TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
 }
 
+int64_t _cslt_sparse_mm_get_attr(
+    c10::string_view attr_name,
+    const Tensor& compressed_A,
+    const Tensor& dense_B,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& alpha_opt,
+    const std::optional<c10::ScalarType> out_dtype_opt,
+    bool transpose_result
+)
+{
+    TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
+}
+
 } // namespace at::native
 
 #endif
