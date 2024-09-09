@@ -750,8 +750,6 @@ class OpOverload(OperatorBase):
     def decompose(self, *args, **kwargs):
         dk = DispatchKey.CompositeImplicitAutograd
         if dk in self.py_kernels:
-            if "torch.ops.aten.linear.default" in str(self):
-                breakpoint()
             # NB: This branch is not too necessary anymore, because we can
             # apply Python CompositeImplicitAutograd *before* tracing
             # using Python dispatcher (also taking advantage of the autograd
