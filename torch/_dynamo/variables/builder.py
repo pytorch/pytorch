@@ -645,7 +645,7 @@ class VariableBuilder:
                 )
             else:
                 result = ConstDictVariable(
-                    result, user_cls=type(value), is_python_arg=True, source=self.source
+                    result, user_cls=type(value), source=self.source
                 )
 
             return self.set_source_and_track_mutable(value, result)

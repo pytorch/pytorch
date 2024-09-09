@@ -104,6 +104,25 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    def test_ConstDict_popitem_reconstruct_graph_break(self):
+        """
+        If something is pop'ed from the dict, we reconstruct everything.
+        Calling dict.popitem will graph break.
+        """
+
+        def f(d, t):
+            d.popitem()
+
+        t = torch.randn(3, 4)
+        d = {1: t, 2: t + 1}
+        d_opt = d.copy()
+
+        f(d, t)
+
+        opt_f = torch.compile(backend="eager")(f)
+        opt_f(d_opt, t)
+        self.assertEqual(d, d_opt)
+
     def test_ConstDict_del_reconstruct(self):
         """
         If something is deleted from the dict, we reconstruct everything

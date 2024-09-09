@@ -586,7 +586,7 @@ class SideEffects:
                 cg.load_method("update")
                 cg(var, allow_cache=False)
 
-                if var.was_any_key_deleted:
+                if var.reconstruct_all:
                     cg(var.mutable_local.source)  # type: ignore[attr-defined]
                     cg.load_method("clear")
 
@@ -597,7 +597,7 @@ class SideEffects:
                     ]
                 )
 
-                if var.was_any_key_deleted:
+                if var.reconstruct_all:
                     suffixes.append(
                         [
                             *create_call_method(0),  # clear

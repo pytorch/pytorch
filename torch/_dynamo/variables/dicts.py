@@ -14,7 +14,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource
+from ..source import AttrSource, GetItemSource, is_from_local_source
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -131,15 +131,14 @@ class ConstDictVariable(VariableTracker):
         self,
         items: Dict[VariableTracker, VariableTracker],
         user_cls=dict,
-        is_python_arg=False,
         **kwargs,
     ) -> None:
         # .clone() pass these arguments in kwargs but they're recreated a few
         # lines below
         if "original_items" in kwargs:
             kwargs.pop("original_items")
-        if "was_any_key_deleted" in kwargs:
-            kwargs.pop("was_any_key_deleted")
+        if "reconstruct_all" in kwargs:
+            kwargs.pop("reconstruct_all")
 
         super().__init__(**kwargs)
 
@@ -157,8 +156,8 @@ class ConstDictVariable(VariableTracker):
 
         self.items = {make_hashable(x): v for x, v in items.items()}
         # Mark where a pop/delitem was executed
-        self.was_any_key_deleted = not is_python_arg or False
-        # self.original_items = {k: v.realize() for k, v in items.items()}
+        # need to reconstruct everything if the dictionary is an intermediate value
+        self.reconstruct_all = not is_from_local_source(self.source)
         self.original_items = items.copy()
         self.user_cls = user_cls
 
@@ -226,7 +225,7 @@ class ConstDictVariable(VariableTracker):
                 self._maybe_realize(self.original_items.get(key.vt)) != value.realize()
             )
 
-            if is_new_item or self.was_any_key_deleted:
+            if is_new_item or self.reconstruct_all:
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
@@ -315,7 +314,7 @@ class ConstDictVariable(VariableTracker):
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
         elif name == "__delitem__" and arg_hashable and self.mutable_local:
-            self.was_any_key_deleted = True
+            self.reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
@@ -326,11 +325,11 @@ class ConstDictVariable(VariableTracker):
             else:
                 return args[1]
         elif name == "pop" and arg_hashable and self.mutable_local:
-            self.was_any_key_deleted = True
+            self.reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "clear":
-            self.was_any_key_deleted = True
+            self.reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
