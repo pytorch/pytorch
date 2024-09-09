@@ -65,8 +65,6 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Build Triton wheel
-        env:
-          IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
@@ -102,19 +100,14 @@ jobs:
             ;;
           esac
 
-          RELEASE=""
-          if [[ "${IS_RELEASE_TAG}" == true ]]; then
-            RELEASE="--release"
-          fi
-
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
           # Triton xpu build use GCC11
           if [[ "${BUILD_DEVICE}" == xpu ]]; then
             docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
-            docker exec -t "${container_name}" bash -c "source /opt/rh/devtoolset-11/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
+            docker exec -t "${container_name}" bash -c "source /opt/rh/devtoolset-11/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE"
           else
-            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
+            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE"
           fi
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
@@ -228,8 +221,6 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Build Triton conda package
-        env:
-          IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
@@ -242,13 +233,8 @@ jobs:
             "${DOCKER_IMAGE}" \
           )
 
-          RELEASE=""
-          if [[ "${IS_RELEASE_TAG}" == true ]]; then
-            RELEASE="--release"
-          fi
-
           docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
-          docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}" $RELEASE
+          docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}"
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v4.4.0
