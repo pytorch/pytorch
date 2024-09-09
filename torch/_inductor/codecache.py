@@ -62,6 +62,8 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._utils_internal import log_cache_bypass
 
+from .utils import _align
+
 
 T = TypeVar("T")
 
@@ -1363,10 +1365,11 @@ class FxGraphCache:
             if remote:
                 log_cache_bypass("bypass_fx_graph", str(e))
             cache_event_time = time_ns()
-            if not compiled_graph:
-                compiled_graph = compile_fx_fn(
-                    gm, example_inputs, inputs_to_check, fx_kwargs
-                )
+
+        if not compiled_graph:
+            compiled_graph = compile_fx_fn(
+                gm, example_inputs, inputs_to_check, fx_kwargs
+            )
         assert compiled_graph is not None
         cache_info["cache_state"] = cache_state
         chromium_log = get_chromium_event_logger()
@@ -1741,10 +1744,23 @@ class AotCodeCompiler:
             )
 
             output_o = os.path.splitext(input_path)[0] + ".o"
+
+            all_cuda = all(
+                graph.get_original_value_of_constant(name).is_cuda
+                for name in graph.constants.keys()
+                if name not in graph.folded_constants
+            )
+
+            def get_nbytes_of_tensor(tensor: torch.Tensor, all_cuda: bool) -> int:
+                n_bytes = (
+                    torch.ops.mkldnn._nbytes(tensor)
+                    if tensor.is_mkldnn
+                    else tensor.untyped_storage().nbytes()
+                )
+                return n_bytes if all_cuda else _align(n_bytes)
+
             consts_size = sum(
-                torch.ops.mkldnn._nbytes(tensor)
-                if tensor.is_mkldnn
-                else tensor.untyped_storage().nbytes()
+                get_nbytes_of_tensor(tensor, all_cuda)
                 for (name, tensor) in graph.constants.items()
                 if name not in graph.folded_constants
             )
@@ -1775,12 +1791,13 @@ class AotCodeCompiler:
             output_o = object_builder.get_target_file_path()
 
             log.debug("aot compilation command: %s", compile_cmd)
-            if fbcode_aot_cpu_re:
-                output_o = os.path.splitext(input_path)[0] + ".o"
-                compile_file(input_path, output_o, compile_cmd.split())
-                os.chmod(output_o, 0o644)
-            else:
-                run_command_and_check(compile_cmd)
+            if not config.aot_inductor.package_cpp_only:
+                if fbcode_aot_cpu_re:
+                    output_o = os.path.splitext(input_path)[0] + ".o"
+                    compile_file(input_path, output_o, compile_cmd.split())
+                    os.chmod(output_o, 0o644)
+                else:
+                    run_command_and_check(compile_cmd)
 
             if config.aot_inductor.package:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
@@ -1816,11 +1833,6 @@ class AotCodeCompiler:
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-            all_cuda = all(
-                graph.get_original_value_of_constant(name).is_cuda
-                for name in graph.constants.keys()
-                if name not in graph.folded_constants
-            )
             serialized_weights = b"".join(
                 _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
                 for name in graph.constants.keys()

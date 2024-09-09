@@ -15,19 +15,25 @@ from torch.testing._internal.triton_utils import HAS_CUDA
 
 
 def compile(
-    model, example_inputs, dynamic_shapes, inductor_configs, device
+    model,
+    args,
+    kwargs=None,
+    *,
+    dynamic_shapes=None,
+    package_path=None,
+    inductor_configs=None,
 ) -> AOTICompiledModel:
     ep = torch.export.export(
         model,
-        example_inputs,
+        args,
+        kwargs,
         dynamic_shapes=dynamic_shapes,
         strict=False,
     )
-    with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
-        package_path = torch._inductor.aoti_compile_and_package(
-            ep, example_inputs, inductor_configs=inductor_configs
-        )  # type: ignore[arg-type]
-        loaded = load_package(package_path)
+    package_path = torch._inductor.aoti_compile_and_package(
+        ep, args, kwargs, package_path=package_path, inductor_configs=inductor_configs
+    )  # type: ignore[arg-type]
+    loaded = load_package(package_path)
     return loaded
 
 
@@ -35,11 +41,17 @@ def compile(
 @unittest.skipIf(IS_FBCODE, "This is for OSS only")
 @parameterized_class(
     [
-        {"device": "cuda", "package_cpp_only": False},
-        {"device": "cuda", "package_cpp_only": True},
         {"device": "cpu", "package_cpp_only": False},
         {"device": "cpu", "package_cpp_only": True},
-    ],
+    ]
+    + (
+        [
+            {"device": "cuda", "package_cpp_only": False},
+            {"device": "cuda", "package_cpp_only": True},
+        ]
+        if sys.platform != "darwin"
+        else []
+    ),
     class_name_func=lambda cls, _, params: f"{cls.__name__}{'Cpp' if params['package_cpp_only'] else ''}_{params['device']}",
 )
 class TestAOTInductorPackage(TestCase):
@@ -64,13 +76,14 @@ class TestAOTInductorPackage(TestCase):
             inductor_configs["aot_inductor.package_cpp_only"] = self.package_cpp_only
 
             torch.manual_seed(0)
-            compiled_model = compile(
-                model,
-                example_inputs,
-                dynamic_shapes,
-                inductor_configs,
-                self.device,
-            )
+            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+                compiled_model = compile(
+                    model,
+                    example_inputs,
+                    dynamic_shapes=dynamic_shapes,
+                    inductor_configs=inductor_configs,
+                    package_path=f.name,
+                )
 
             actual = compiled_model(*example_inputs)
 
