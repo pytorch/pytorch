@@ -289,7 +289,7 @@ def export(
             This is required for models with large weights that exceed the ONNX file size limit (2GB).
             When False, the weights are saved in the ONNX file with the model architecture.
         dynamic_shapes: A dictionary of dynamic shapes for the model inputs. Refer to
-            :func:`torch.export.export` for more details. This is only used when dynamo is True.
+            :func:`torch.export.export` for more details. This is only used (and preferred) when dynamo is True.
             Only one parameter `dynamic_axes` or `dynamic_shapes` should be set
             at the same time.
         report: Whether to generate a markdown report for the export process.
