@@ -24,7 +24,12 @@ from torch.testing._internal.common_quantization import _generate_qdq_quantized_
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
-from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    parametrize,
+    skipIfWindows,
+    TEST_MKL,
+)
 
 
 log = logging.getLogger(__name__)
@@ -1055,6 +1060,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             "gelu",
         ),
     )
+    @skipIfWindows(msg="Windows don't support quantize.")
     def test_quantized_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, input_3d, dtype, epilogue
     ):
@@ -1172,6 +1178,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             "relu",
         ),
     )
+    @skipIfWindows(msg="Windows don't support quantize.")
     def test_quantized_linear_with_pointwise_binary(
         self,
         batch_size,
@@ -1252,6 +1259,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("in_features", (4, 68, 128))  # k should be a multiple of 4
     @parametrize("out_features", (64, 65))
     @parametrize("bias", (True, False))
+    @skipIfWindows(msg="Windows don't support quantize.")
     def test_quantized_linear_amx(self, batch_size, in_features, out_features, bias):
         class M(torch.nn.Module):
             def __init__(self, bias):
