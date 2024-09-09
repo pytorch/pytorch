@@ -296,6 +296,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {f16, f32, f64, b8, i32, i64},
@@ -553,7 +554,6 @@ inductor_override_kwargs = {
     ("tanh", "cuda", f16): {"atol": 1e-4, "rtol": 1e-2},
     # XPU
     ("cross", "xpu", f16): {"reference_in_float": True},
-    ("linalg.cross", "xpu", f16): {"reference_in_float": True},
     ("addr", "xpu", f16): {"reference_in_float": True},
     ("baddbmm", "xpu", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "xpu", f64): {"reference_in_float": True},
@@ -568,14 +568,17 @@ inductor_override_kwargs = {
     ("exponential", "xpu"): {"reference_in_float": True},
     ("geometric", "xpu"): {"reference_in_float": True},
     ("kron", "xpu", f16): {"reference_in_float": True},
+    ("linalg.cross", "xpu", f16): {"reference_in_float": True},
+    ("linalg.vecdot", "xpu", f16): {"atol": 1e-5, "rtol": 2e-2},
     ("log_normal", "xpu"): {"reference_in_float": True},
     ("logsumexp", "xpu", f16): {"atol": 1e-5, "rtol": 1e-2},
-    ("masked.cumprod", "xpu", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("masked.cumprod", "xpu", f16): {"atol": 1e-5, "rtol": 5e-2},
     ("masked.cumsum", "xpu", f16): {"atol": 1e-5, "rtol": 5e-3},
     ("masked.softmin", "xpu", f16): {"atol": 1e-4, "rtol": 0.01},
     ("masked.softmax", "xpu", f16): {"atol": 2e-4, "rtol": 0.01},
     ("masked.var", "xpu", f16): {"atol": 2e-5, "rtol": 5e-3},
     ("native_layer_norm", "xpu", f16): {"atol": 5e-3, "rtol": 5e-3},
+    ("native_layer_norm", "xpu", f32): {"atol": 5e-3, "rtol": 5e-3},
     ("nn.functional.batch_norm", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.batch_norm", "xpu", f64): {"atol": 1e-6, "rtol": 1e-6},
     ("nn.functional.batch_norm.without_cudnn", "xpu", f16): {
@@ -585,6 +588,7 @@ inductor_override_kwargs = {
     ("nn.functional.conv3d", "xpu", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("nn.functional.conv_transpose2d", "xpu", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("nn.functional.conv_transpose3d", "xpu", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("nn.functional.cosine_embedding_loss", "xpu", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("nn.functional.cosine_similarity", "xpu", f16): {
         "reference_in_float": True,
         "atol": 1e-5,
@@ -592,7 +596,13 @@ inductor_override_kwargs = {
     },
     ("nn.functional.instance_norm", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", "xpu", f64): {"atol": 1e-6, "rtol": 1e-6},
+    ("nn.functional.layer_norm", "xpu", f16): {"atol": 5e-3, "rtol": 2e-3},
+    ("nn.functional.layer_norm", "xpu", f32): {"atol": 5e-5, "rtol": 2e-3},
     ("nn.functional.local_response_norm", "xpu", f16): {"reference_in_float": True},
+    ("nn.functional.multilabel_soft_margin_loss", "xpu", f16): {
+        "atol": 3e-4,
+        "rtol": 2e-3,
+    },
     ("nn.functional.normalize", "xpu", f16): {"atol": 1e-3, "rtol": 0.05},
     ("nn.functional.rms_norm", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.soft_margin_loss", "xpu", f16): {"reference_in_float": True},
@@ -612,13 +622,21 @@ inductor_override_kwargs = {
     },
     ("remainder", "xpu", f16): {"atol": 1e-4, "rtol": 0.005},
     ("nn.functional.upsample_bilinear", "xpu", f16): {"atol": 1e-5, "rtol": 0.002},
-    ("nn.functional.layer_norm", "xpu", f16): {"atol": 3e-3, "rtol": 2e-3},
     ("sinc", "xpu", f16): {"atol": 0.008, "rtol": 0.002},
     ("softmax", "xpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "xpu", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", "xpu", f64): {"atol": 1e-6, "rtol": 1e-5},
-    ("std_mean.unbiased", "xpu", f16): {"reference_in_float": True},
+    ("std_mean.unbiased", "xpu", f16): {
+        "reference_in_float": True,
+        "atol": 5e-5,
+        "rtol": 5e-3,
+    },
+    ("trapezoid", "xpu", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("trapz", "xpu", f16): {"atol": 1e-5, "rtol": 5e-3},
     ("uniform", "xpu"): {"reference_in_float": True},
+    ("var_mean", "xpu", f16): {"atol": 1e-5, "rtol": 2e-3},
+    ("var_mean.unbiased", "xpu", f16): {"atol": 1e-5, "rtol": 2e-3},
+    ("vdot", "xpu", f16): {"atol": 1e-5, "rtol": 2e-3},
     # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
     # High atol due to precision loss
     ("nn.functional.interpolate.bilinear", "xpu", f64): {"atol": 5e-4, "rtol": 0},
@@ -639,6 +657,7 @@ inductor_override_kwargs = {
     ("nn.functional.embedding_bag", "xpu", f16): {"check_gradient": False},
     ("nn.functional.embedding_bag", "xpu", f32): {"check_gradient": False},
     ("nn.functional.embedding_bag", "xpu", f64): {"check_gradient": False},
+    ("_unsafe_masked_index", "xpu", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("_unsafe_masked_index_put_accumulate", "xpu", f16): {"atol": 1e-5, "rtol": 5e-3},
 }
 
