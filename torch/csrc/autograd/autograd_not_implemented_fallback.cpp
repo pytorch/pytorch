@@ -17,8 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 
@@ -345,7 +344,7 @@ static void autogradNotImplementedFallbackImpl(
       [&](size_t idx, size_t _, const at::Tensor& t) {
         storage_saved.push_back(
             t.has_storage() ? std::optional<c10::Storage>(t.storage())
-                            : c10::nullopt);
+                            : std::nullopt);
         impl_saved.push_back(t.getIntrusivePtr());
       },
       &stack_args_copy,
@@ -630,5 +629,4 @@ torch::CppFunction autogradNotImplementedInplaceOrViewFallback() {
       &autogradNotImplementedInplaceOrViewFallbackImpl>();
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

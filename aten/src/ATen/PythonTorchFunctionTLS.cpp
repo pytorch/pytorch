@@ -22,7 +22,7 @@ const std::shared_ptr<SafePyObject>& PythonTorchFunctionTLS::get_stack_at(int64_
 }
 
 int64_t PythonTorchFunctionTLS::stack_len() {
-  return pythonTorchFunctionState.stack_.size();
+  return static_cast<int64_t>(pythonTorchFunctionState.stack_.size());
 }
 
 void PythonTorchFunctionTLS::set_disabled_state(TorchFunctionDisabledState disabled_state) {
@@ -44,6 +44,11 @@ const PythonTorchFunctionTLS& PythonTorchFunctionTLS::get_state() {
 bool torch_function_mode_enabled() {
   return PythonTorchFunctionTLS::get_disabled_state() != TorchFunctionDisabledState::ALL_DISABLED &&
          PythonTorchFunctionTLS::stack_len() > 0;
+}
+
+// This is needed to disambiguate the ternary torch function disabled states
+bool torch_function_all_disabled() {
+  return PythonTorchFunctionTLS::get_disabled_state() == TorchFunctionDisabledState::ALL_DISABLED;
 }
 
 } // namespace at::impl

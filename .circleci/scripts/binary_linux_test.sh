@@ -46,13 +46,11 @@ if [[ "\$python_nodot" = *310* ]]; then
   PROTOBUF_PACKAGE="protobuf>=3.19.0"
 fi
 
-if [[ "\$python_nodot" = *39*  ]]; then
+if [[ "\$python_nodot" = *39* ]]; then
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
 fi
-
-
 
 # Move debug wheels out of the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
@@ -83,7 +81,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       "numpy\${NUMPY_PIN}" \
       mkl>=2018 \
       ninja \
-      sympy \
+      sympy>=1.12 \
       typing-extensions \
       ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
@@ -120,6 +118,9 @@ fi
 
 # Test the package
 /builder/check_binary.sh
+
+# Clean temp files
+cd /builder && git clean -ffdx
 
 # =================== The above code will be executed inside Docker container ===================
 EOL

@@ -1142,7 +1142,7 @@ class TestBasicGEMM(TestCase):
             torch.matmul(a, b, out=c)
 
 
-instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu")
+instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

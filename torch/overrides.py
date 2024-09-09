@@ -192,7 +192,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
-        torch.export.dynamic_dim,
         torch.export.export,
         torch.export.load,
         torch.export.register_dataclass,
@@ -1041,18 +1040,18 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
         ),
         torch.quantized_max_pool1d: (
-            lambda input, kernel_size, stride=tuple(), padding=(0,), dilation=(
+            lambda input, kernel_size, stride=(), padding=(0,), dilation=(
                 1,
             ), ceil_mode=False: -1
         ),
         torch.quantized_max_pool2d: (
-            lambda input, kernel_size, stride=tuple(), padding=(0, 0), dilation=(
+            lambda input, kernel_size, stride=(), padding=(0, 0), dilation=(
                 1,
                 1,
             ), ceil_mode=False: -1
         ),
         torch.quantized_max_pool3d: (
-            lambda input, kernel_size, stride=tuple(), padding=(0, 0, 0), dilation=(
+            lambda input, kernel_size, stride=(), padding=(0, 0, 0), dilation=(
                 1,
                 1,
                 1,
@@ -1253,6 +1252,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.vsplit: lambda input, indices_or_sections: -1,
         torch.vstack: lambda tensors, out=None: -1,
         torch.where: lambda condition, x=None, y=None: -1,
+        torch.wrapped_linear_prepack: lambda weight, weight_scale, weight_zero_point, bias : -1,
+        torch.wrapped_quantized_linear_prepacked: (
+            lambda input, input_scale, input_zero_point, prepacked, out_scale, out_zero_point, out_channel : -1  # noqa: B950
+        ),
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch._fw_primal_copy: lambda self, level: -1,
         torch._make_dual_copy: lambda primal, tangent, level: -1,
@@ -1404,6 +1407,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.copy_: lambda self, src, non_blocking=False: -1,
         Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cuda: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.mtia: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.xpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.ipu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.data_ptr: lambda self: -1,
@@ -1502,18 +1506,16 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__dlpack__: lambda self, stream=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
-    }
+    }  # fmt: skip
 
     privateuse1_backend_name = (
         torch.utils.backend_registration._privateuse1_backend_name
     )
     if hasattr(Tensor, privateuse1_backend_name):
-        ret[
-            getattr(Tensor, privateuse1_backend_name)
-        ] = lambda self, device=None, non_blocking=False, **kwargs: -1
-        ret[
-            getattr(Tensor, f"is_{privateuse1_backend_name}").__get__
-        ] = lambda self: -1  # noqa: B009
+        ret[getattr(Tensor, privateuse1_backend_name)] = (
+            lambda self, device=None, non_blocking=False, **kwargs: -1
+        )
+        ret[getattr(Tensor, f"is_{privateuse1_backend_name}").__get__] = lambda self: -1
 
     ret2 = {}
     ignored = get_ignored_functions()
@@ -1562,10 +1564,10 @@ def wrap_torch_function(dispatcher: Callable):
 
     Examples
     --------
-    >>> def dispatcher(a): # Must have the same signature as func
+    >>> def dispatcher(a):  # Must have the same signature as func
     ...     return (a,)
     >>> @torch.overrides.wrap_torch_function(dispatcher)
-    >>> def func(a): # This will make func dispatchable by __torch_function__
+    >>> def func(a):  # This will make func dispatchable by __torch_function__
     ...     return a + 0
     """
 
@@ -2024,7 +2026,7 @@ class TorchFunctionMode:
     inner: "TorchFunctionMode"
 
     # Force metaclass to generate constructor at the base of the hierarchy
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
