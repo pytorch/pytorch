@@ -1443,8 +1443,7 @@ class OutputGraph:
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-            with torch._dynamo.utils.set_one_graph(self.root_tx.one_graph):
-                compiled_fn = compiler_fn(gm, self.example_inputs())
+            compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except exceptions_allowed_to_be_fallback as e:
