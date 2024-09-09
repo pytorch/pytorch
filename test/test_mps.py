@@ -1954,7 +1954,7 @@ class TestMPS(TestCaseMPS):
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_take_along_dim(self, dtype):
-        x = torch.tensor([[-5.], [0.], [5.]])
+        x = torch.tensor([[-5.], [0.], [5.]], dtype=dtype)
         inds = torch.tensor([[0], [1], [2]])
         ref = torch.take_along_dim(x, inds, 0)
         x_mps = x.detach().clone().to('mps')
