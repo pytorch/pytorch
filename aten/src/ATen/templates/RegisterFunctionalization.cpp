@@ -56,6 +56,20 @@ inline bool has_internal_overlap_helper(const at::Tensor t) {
 
 inline Tensor to_meta(const Tensor& t) {
   if (!t.defined()) return t;
+
+  // Fast path: storage offset is 0.
+  if (t.sym_storage_offset().sym_eq(0)) {
+    return at::native::empty_strided_meta_symint(
+        t.sym_sizes(),
+        t.sym_strides(),
+        /*dtype=*/std::make_optional(t.scalar_type()),
+        /*layout=*/std::make_optional(t.layout()),
+        /*device=*/std::make_optional(c10::Device(kMeta)),
+        /*pin_memory=*/std::nullopt);
+  }
+
+  // Otherwise, we need to first create the base tensor, holding
+  // the necessary storage. Then, stride and offset it accordingly.
   auto bytes = at::detail::computeStorageNbytes(
       t.sym_sizes(),
       t.sym_strides(),
