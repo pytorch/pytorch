@@ -1080,7 +1080,7 @@ class f(torch.nn.Module):
         for dt in all_types_and(torch.half, torch.bfloat16):
             res = torch.tensor(sym_args, dtype=dt)
             self.assertEqual(res, expected, exact_dtype=False)
-        
+
         # test legacy tensor factories
         legacy_ctors = [
             torch.Tensor,
