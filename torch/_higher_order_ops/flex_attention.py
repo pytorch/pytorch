@@ -187,14 +187,15 @@ def math_attention(
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
     """
+    # broadcast query & key along batch dim for paged attention
+    batch_group = query.size(0) // key.size(0)
+    key = torch.repeat_interleave(key, batch_group, dim=0)
+    value = torch.repeat_interleave(value, batch_group, dim=0)
+
     # broadcast query & key along head dim for GQA
     G = query.size(1) // key.size(1)
     value = torch.repeat_interleave(value, G, dim=1)
     key = torch.repeat_interleave(key, G, dim=1)
-
-    batch_group = query.size(0) // key.size(0)
-    value = torch.repeat_interleave(value, batch_group, dim=0)
-    key = torch.repeat_interleave(key, batch_group, dim=0)
 
     _, post_mod_scores = _math_attention_inner(
         query,
@@ -695,13 +696,14 @@ def sdpa_dense_backward(
     actual_grad_key = torch.empty_like(key)
     actual_grad_value = torch.empty_like(value)
 
+    # broadcast query & key along batch dim for paged attention
+    batch_group = query.size(0) // key.size(0)
+    key = torch.repeat_interleave(key, batch_group, dim=0)
+    value = torch.repeat_interleave(value, batch_group, dim=0)
+
     G = query.size(1) // key.size(1)
     key = torch.repeat_interleave(key, G, dim=1)
     value = torch.repeat_interleave(value, G, dim=1)
-
-    batch_group = query.size(0) // key.size(0)
-    value = torch.repeat_interleave(value, batch_group, dim=0)
-    key = torch.repeat_interleave(key, batch_group, dim=0)
 
     # We're undoing the log -> log2 change of base in the forwards
     logsumexp = logsumexp * math.log(2)

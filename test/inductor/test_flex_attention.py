@@ -194,13 +194,13 @@ def _trig2(score, b, h, m, n):
 
 test_score_mods = [
     _identity,
-    # _times_two,
-    # _squared,
-    # _causal,
-    # _inverse_causal,
-    # _rel_bias,
-    # _rel_causal,
-    # _generate_alibi_bias(8),
+    _times_two,
+    _squared,
+    _causal,
+    _inverse_causal,
+    _rel_bias,
+    _rel_causal,
+    _generate_alibi_bias(8),
 ]
 
 captured_buffers_map = {
@@ -301,13 +301,13 @@ class TestFlexAttention(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
     ):
-        q = torch.ones(
+        q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
-        k = torch.ones(
+        k = torch.randn(
             (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
-        v = torch.ones(
+        v = torch.randn(
             (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
@@ -619,21 +619,20 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    # @common_utils.parametrize("bkv", [1, 2])
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
-    def test_batch_size_broadcast(
-        self, dtype: torch.dtype, score_mod: Callable
-    ):
+    def test_batch_size_broadcast(self, dtype: torch.dtype, score_mod: Callable):
         Q_B, Q_H, Q_S, Q_D = B, H, S, D
         KV_B, KV_H, KV_S, V_D = 2, H, S, D
 
-        q = torch.ones(
+        q = torch.rand(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
-        k = torch.ones(
+        k = torch.rand(
             (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
-        v = torch.ones(
+        v = torch.rand(
             (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
         )
 
@@ -642,11 +641,8 @@ class TestFlexAttention(InductorTestCase):
         # q_broadcasted, k_broadcasted, v_broadcasted = query_key_value_clones(q, k, v)
         # k_broadcasted = k_broadcasted.expand((Q_B, KV_H, KV_S, Q_D)).clone().detach().requires_grad_(True)
         # v_braodcasted = v_broadcasted.expand((Q_B, KV_H, KV_S, V_D)).clone().detach().requires_grad_(True)
-        
 
-        sdpa_partial = create_attention(
-            score_mod, None, enable_gqa=(not Q_H == KV_H)
-        )
+        sdpa_partial = create_attention(score_mod, None, enable_gqa=(not Q_H == KV_H))
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
@@ -664,8 +660,6 @@ class TestFlexAttention(InductorTestCase):
         # k_broadcasted.grad = torch.sum(k_broadcasted.grad, dim=0, keepdim=False) / batch_group
         # v_broadcasted.grad = torch.sum(v_broadcasted.grad, dim=0, keepdim=False) / batch_group
 
-
-
         # self._check_out_and_grad(
         #     golden_out,
         #     ref_out,
@@ -680,8 +674,7 @@ class TestFlexAttention(InductorTestCase):
         #     v_ref,
         #     v_braodcasted,
         # )
-
-
+        breakpoint()
         self._check_out_and_grad(
             golden_out,
             ref_out,
