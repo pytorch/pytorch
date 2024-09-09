@@ -7,7 +7,6 @@ import torch.fx
 from torch.fx.graph_module import GraphModule
 from torch.fx.graph import Graph
 from torch.fx.node import Node
-from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
 from torch.fx.passes.utils import lift_subgraph_as_module
 from torch.fx._compatibility import compatibility
@@ -93,7 +92,7 @@ def validate_partition(partition: NodeList) -> bool:
 @compatibility(is_backward_compatible=False)
 def fuse_as_graphmodule(gm: GraphModule,
                         nodes: NodeList,
-                        partition: Partition,
+                        partition: Dict[Node, None],
                         module_name: str) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
 
     """
@@ -137,7 +136,7 @@ def fuse_as_graphmodule(gm: GraphModule,
             # do something here
             pass
 
-        if x in partition.nodes:
+        if x in partition:
             # x is inside subgraph, return the copied node
             # the node should have been copied aleady, as we are copying graph in the topological order
             return node_map[x]
@@ -161,7 +160,7 @@ def fuse_as_graphmodule(gm: GraphModule,
 
     for node in nodes:
         for user_node in node.users:
-            if user_node not in partition.nodes:
+            if user_node not in partition:
                 # external user node, need to expose as an output
                 output_mapping[node] = node_map[node]
 
@@ -221,9 +220,9 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
 
 
 @compatibility(is_backward_compatible=False)
-def fuse_by_partitions(gm: GraphModule, partitions: List[Partition], prefix: str = "fused_") -> GraphModule:
+def fuse_by_partitions(gm: GraphModule, partitions: List[Dict[Node, None]], prefix: str = "fused_") -> GraphModule:
     for partition_id, partition in enumerate(partitions):
-        sorted_nodes = topo_sort(list(partition.nodes))
+        sorted_nodes = topo_sort(list(partition))
 
         submodule_name = prefix + str(partition_id)
         sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(gm, sorted_nodes, partition, submodule_name)
