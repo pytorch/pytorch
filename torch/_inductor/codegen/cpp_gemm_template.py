@@ -86,7 +86,9 @@ extern "C" {{export_declaration}}
     );
     const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
     const int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
-    const int64_t num_k_slices = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
+    const int64_t num_Mt_blocks = (Mr_blocks + Mt_blocks - 1) / Mt_blocks;
+    const int64_t num_Nt_blocks = (Nr_blocks + Nt_blocks - 1) / Nt_blocks;
+    const int64_t num_Kt_blocks = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
 {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
     constexpr int64_t Mr_blocks = (M + Mr - 1) / Mr;
@@ -98,7 +100,9 @@ extern "C" {{export_declaration}}
     constexpr int64_t Kc_blocks = {{template.cache_blocking().block_k}};
     constexpr int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
     constexpr int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
-    constexpr int64_t num_k_slices = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
+    constexpr int64_t num_Mt_blocks = (Mr_blocks + Mt_blocks - 1) / Mt_blocks;
+    constexpr int64_t num_Nt_blocks = (Nr_blocks + Nt_blocks - 1) / Nt_blocks;
+    constexpr int64_t num_Kt_blocks = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
 {%- endif %}
 
     // make sure all partitions are assigned
@@ -109,8 +113,8 @@ extern "C" {{export_declaration}}
 
 {%- if maybe_k_slicing %}
     std::unique_ptr<std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[]> local_buf_ptrs;
-    if (num_k_slices > 1) {
-        local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[num_Mc_blocks * num_Nc_blocks * num_k_slices]);
+    if (num_Kt_blocks > 1) {
+        local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[num_Mc_blocks * num_Nc_blocks * num_Kt_blocks]);
     }
 {%- endif %}
 
@@ -118,30 +122,44 @@ extern "C" {{export_declaration}}
     #pragma omp parallel num_threads({{num_threads}})
     {
         const int tid = omp_get_thread_num();
-        int64_t m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end;
-        mm_get_thread_blocks(
-            tid, Mr_blocks, Nr_blocks, Kr_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
-            m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
-    {%- if maybe_k_slicing %}
-        const int64_t k_group_id = tid / num_k_slices;
-        const int64_t k_slice_id = tid % num_k_slices;
-    {%- endif %}
+        const int64_t k_group_id = tid / num_Kt_blocks;
+        const int64_t k_slice_id = tid % num_Kt_blocks;
+        const int64_t n_group_id = k_group_id / num_Nt_blocks;
+        const int64_t n_slice_id = k_group_id % num_Nt_blocks;
+        const int64_t k_block_start = k_slice_id * Kt_blocks;
+        const int64_t k_block_end = std::min(k_block_start + Kt_blocks, Kr_blocks);
+        const int64_t n_block_start = n_slice_id * Nt_blocks;
+        const int64_t n_block_end = std::min(n_block_start + Nt_blocks, Nr_blocks);
+        const int64_t m_block_start = std::min(n_group_id * Mt_blocks, Mr_blocks);
+        const int64_t m_block_end = std::min(m_block_start + Mt_blocks, Mr_blocks);
+        const int64_t num_Mc_blocks_per_thread = (m_block_end - m_block_start + Mc_blocks - 1) / Mc_blocks;
 {%- else %}
     {
-        const int tid = 0;
-        const int64_t m_block_start = 0;
-        const int64_t m_block_end = Mr_blocks;
-        const int64_t n_block_start = 0;
-        const int64_t n_block_end = Nr_blocks;
-        const int64_t k_block_start = 0;
-        const int64_t k_block_end = Kr_blocks;
+        constexpr int tid = 0;
+        constexpr int64_t k_group_id = 0;
+        constexpr int64_t k_slice_id = 0;
+        constexpr int64_t n_group_id = 0;
+        constexpr int64_t n_slice_id = 0;
+        constexpr int64_t m_block_start = 0;
+        constexpr int64_t m_block_end = Mr_blocks;
+        constexpr int64_t n_block_start = 0;
+        constexpr int64_t n_block_end = Nr_blocks;
+        constexpr int64_t k_block_start = 0;
+        constexpr int64_t k_block_end = Kr_blocks;
+    {%- if is_dynamic_M %}
+        const int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
+    {%- else %}
+        constexpr int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
+    {%- endif %}
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
 {%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
         {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
 {%- endif %}
-        for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
+        for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
+            const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
+            const int64_t mc = m_block_start + my_mc_block_id * Mc_blocks;
             const int64_t m_start = mc * Mr;
             const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
             const int64_t m_size = m_end - m_start;
@@ -173,9 +191,10 @@ extern "C" {{export_declaration}}
                     }
                 }
 {%- if maybe_k_slicing %}
-                if (num_k_slices > 1) {
+                if (num_Kt_blocks > 1) {
                     const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
-                    local_buf_ptrs[mxn_cache_block_id * num_k_slices + k_slice_id].reset({{ kernel.release_buffer(acc_buf_name) }});
+                    local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + k_slice_id].reset(
+                        {{ kernel.release_buffer(acc_buf_name) }});
                 } else
 {%- endif %}
                 {
@@ -189,14 +208,14 @@ extern "C" {{export_declaration}}
             }
         }
 {%- if maybe_k_slicing %}
-        if (num_k_slices > 1) {
+        if (num_Kt_blocks > 1) {
             #pragma omp barrier
             for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
                 // We slice M-dim and each thread in the k-slicing group works on a slice
                 const int64_t m_start_unsliced = mc * Mr;
                 const int64_t m_end_unsliced = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
                 const int64_t m_size_unsliced = m_end_unsliced - m_start_unsliced;
-                const int64_t m_slice_size = (m_size_unsliced + num_k_slices - 1) / num_k_slices;
+                const int64_t m_slice_size = (m_size_unsliced + num_Kt_blocks - 1) / num_Kt_blocks;
                 const int64_t m_start = std::min(m_start_unsliced + m_slice_size * k_slice_id, m_end_unsliced);
                 const int64_t m_end = std::min(m_start_unsliced + m_slice_size * (k_slice_id + 1), m_end_unsliced);
                 const int64_t m_size = m_end - m_start;
@@ -206,9 +225,9 @@ extern "C" {{export_declaration}}
                     const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
                     const int64_t n_size = n_end - n_start;
                     const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
-                    auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_k_slices].get();
-                    for (int64_t other_slice = 1; other_slice < num_k_slices; other_slice++) {
-                        auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices + other_slice].get();
+                    auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks].get();
+                    for (int64_t other_slice = 1; other_slice < num_Kt_blocks; other_slice++) {
+                        auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + other_slice].get();
                         for (int64_t m = m_offset; m < m_offset + m_size; m++) {
                             #pragma omp simd
                             for (int64_t n = 0; n < n_size; n++) {

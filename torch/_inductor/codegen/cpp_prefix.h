@@ -884,32 +884,6 @@ void mm_get_cache_blocking(
   }
 }
 
-inline void mm_get_thread_blocks(
-    int thread_id,
-    int64_t M_blocks,
-    int64_t N_blocks,
-    int64_t K_blocks,
-    int64_t Mt_blocks,
-    int64_t Nt_blocks,
-    int64_t Kt_blocks,
-    int64_t& m_block_start,
-    int64_t& m_block_end,
-    int64_t& n_block_start,
-    int64_t& n_block_end,
-    int64_t& k_block_start,
-    int64_t& k_block_end) {
-  int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
-  k_block_start = (thread_id % num_Kt) * Kt_blocks;
-  k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
-  thread_id /= num_Kt;
-  int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
-  n_block_start = (thread_id % num_Nt) * Nt_blocks;
-  n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
-  thread_id /= num_Nt;
-  m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
-  m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
-}
-
 struct amx_tilecfg {
   uint8_t palette_id;
   uint8_t start_row;
