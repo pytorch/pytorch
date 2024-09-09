@@ -71,7 +71,8 @@ class BinaryBuildWorkflow:
         else:
             self.build_environment = f"{self.os}-binary-{self.package_type}"
         if self.use_split_build:
-            self.build_environment += "-split"  # added to distinguish concurrency groups
+            # added to distinguish concurrency groups
+            self.build_environment += "-split"
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = (
