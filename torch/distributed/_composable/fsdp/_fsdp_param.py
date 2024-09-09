@@ -106,7 +106,7 @@ So calling resize-to-0 in the middle of the graph to free nn.Parameter memory af
 
 Q: Wouldn't the extra resize_ and copy_ ops hurt both memory usage and performance?
 A: Yes it would. As an optimization, we have an Inductor post-grad FX pass to remove those resize_ and copy_ ops
-if the traced FSDP2 graph is full-graph (i.e. no graph breaks).
+for unsharded params that have this pattern: resize_(full) -> copy_ -> resize_(0).
 """
 
 
