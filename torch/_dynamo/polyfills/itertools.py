@@ -18,6 +18,7 @@ __all__ = [
     "tee",
 ]
 
+
 _T = TypeVar("_T")
 
 
@@ -68,8 +69,8 @@ def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
 if sys.version_info >= (3, 10):
     # itertools.pairwise was added at Python 3.10
-    @substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore
-    def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
+    @substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
+    def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:  # type: ignore[return-value]
         a = None
         first = True
         for b in iterable:
