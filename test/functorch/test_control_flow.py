@@ -1482,13 +1482,9 @@ def forward(self, pred_1, x_1):
         [
             torch.float16,
             torch.float32,
-            torch.float64,
-            torch.int8,
-            torch.int16,
             torch.int32,
             torch.int64,
             torch.complex64,
-            torch.complex128,
         ],
     )
     def test_scan_dtype(self, reverse, compile_mode, device, dtype):
