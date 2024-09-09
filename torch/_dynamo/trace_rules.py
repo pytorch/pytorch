@@ -178,8 +178,9 @@ manual_torch_name_rule_map = {
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
-    "torch._nested_from_padded": SkipFunctionVariable,
+    "torch.nested._internal.nested_tensor.nested_from_padded": TorchInGraphFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
+    "torch.nested.nested_tensor_from_padded": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -1525,6 +1526,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._neg_view_copy",
         "torch._neg_view",
         "torch._nested_from_padded_and_nested_example",
+        "torch._nested_from_padded_tensor",
         "torch._nested_tensor_from_mask_left_aligned",
         "torch._nested_tensor_from_tensor_list",
         "torch._nested_tensor_softmax_with_shape",
