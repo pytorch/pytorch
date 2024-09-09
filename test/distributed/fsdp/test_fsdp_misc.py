@@ -278,9 +278,9 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         )
         x = torch.randn(10, 10, device="cuda")
         y = torch.randn(10, 10, device="cuda")
-        for i in range(4):
+        for _ in range(4):
             if use_second_layer:
-                a, b = fsdp(x, y)
+                a, _ = fsdp(x, y)
             else:
                 a = fsdp(x, y)
             loss = a.sum()
@@ -509,7 +509,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
     def test_fsdp_cpu_training(self):
         """Tests FSDP training on CPU."""
         gloo_pg = dist.new_group(backend="gloo")
-        for ss in [
+        for ss in [  # pylint: disable=unused-variable
             ShardingStrategy.NO_SHARD,
             ShardingStrategy.FULL_SHARD,
             ShardingStrategy.SHARD_GRAD_OP,
@@ -857,7 +857,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         torch.cuda.set_device(self.rank)
         # Test CPU
         no_params = nn.ReLU()
-        module = FSDP(no_params)
+        module = FSDP(no_params)  # pylint: disable=unused-variable
         # Test CUDA
         no_params = nn.ReLU().cuda()
         module = FSDP(no_params)

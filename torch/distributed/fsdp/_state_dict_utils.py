@@ -25,7 +25,6 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
-from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import _mesh_resources
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
@@ -49,6 +48,7 @@ from torch.distributed.fsdp.api import (
     ShardingStrategy,
     StateDictType,
 )
+from torch.distributed.tensor import DTensor
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (

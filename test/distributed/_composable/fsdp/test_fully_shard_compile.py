@@ -337,7 +337,7 @@ class TestFullyShardCompile(FSDPTest):
         def run_iters(model, optim, n_iter=10, compiled_autograd_backend=None):
             torch.manual_seed(42)
             losses = []
-            for _ in range(n_iter):
+            for i in range(n_iter):
                 inp = input_creation_fn()
                 if compiled_autograd_backend is not None:
                     maybe_compiled_autograd_ctx = compiled_autograd.enable(
@@ -459,7 +459,7 @@ class TestFullyShardCompile(FSDPTest):
             def __init__(self, n_layers):
                 super().__init__()
                 self.layers = torch.nn.ModuleList()
-                for _ in range(n_layers):
+                for layer_id in range(n_layers):
                     self.layers.append(TestSubmodule(hidden_dim))
 
             def forward(self, x):
@@ -478,7 +478,7 @@ class TestFullyShardCompile(FSDPTest):
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
             model = TestModule(n_layers=3)
-            for mod in model.layers:
+            for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
                 model, mesh=mesh, reshard_after_forward=True, **fsdp_config
@@ -636,7 +636,7 @@ class TestFullyShardCompile(FSDPTest):
                 n_layers=3,
             )
             model = Transformer(model_args)
-            for mod in model.layers:
+            for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
                 model, mesh=mesh, reshard_after_forward=True, **fsdp_config

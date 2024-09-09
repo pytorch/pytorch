@@ -32,9 +32,9 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 from torch.distributed._composable.fsdp._fsdp_param import ShardedState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed._tensor.experimental import implicit_replication
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -249,8 +249,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = torch.cuda.Stream()
         (
-            _,
-            _,
+            reduce_scatter_input,
+            reduce_scatter_event,
             post_reduce_event,
             _,
         ) = foreach_reduce(
@@ -403,7 +403,7 @@ class TestFullyShardCommunication(FSDPTest):
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
 
-        for _ in range(10):
+        for iter_idx in range(10):
             ref_loss = ref_model(inp).sum()
             ref_loss.backward()
             for param in ref_model.parameters():
@@ -498,7 +498,7 @@ class TestFullyShardPrefetch(FSDPTest):
         self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
     ):
         n_layers = 3
-        model, _, inp = self._init_transformer(
+        model, optim, inp = self._init_transformer(
             n_layers, reshard_after_forward, checkpoint_impl
         )
         events: List[EventType] = []
@@ -840,7 +840,7 @@ class TestFullyShardPrefetch(FSDPTest):
         with patch_unshard(unshard_with_record), patch_post_backward(
             post_backward_with_record
         ):
-            for _ in range(3):
+            for iter_idx in range(3):
                 loss = model(inp)
                 expected_events = [
                     (
@@ -919,7 +919,7 @@ class TestFullyShardPrefetch(FSDPTest):
         with patch_unshard(unshard_with_record), patch_post_backward(
             post_backward_with_record
         ):
-            for _ in range(3):
+            for iter_idx in range(3):
                 loss = model(inp)
                 expected_events = [
                     ("unshard", "", TrainingState.FORWARD),

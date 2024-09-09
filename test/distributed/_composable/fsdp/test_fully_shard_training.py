@@ -20,12 +20,12 @@ from torch.distributed._composable.fsdp import (
     register_fsdp_forward_method,
 )
 from torch.distributed._tensor import DTensor, init_device_mesh
-from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
     apply_activation_checkpointing,
 )
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -517,7 +517,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 8), device="cuda")
-        for _ in range(10):
+        for iter_idx in range(10):
             losses: List[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad()
@@ -551,12 +551,12 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         # sync point after each iteration
         ref_losses: List[torch.Tensor] = []
         losses: List[torch.Tensor] = []
-        for _ in range(10):
+        for iter_idx in range(10):
             ref_optim.zero_grad()
             ref_losses.append(ref_model(inp).sum())
             ref_losses[-1].backward()
             ref_optim.step()
-        for iter_idx in range(10):
+        for _ in range(10):
             optim.zero_grad()
             losses.append(model(inp).sum())
             losses[-1].backward()
@@ -1010,7 +1010,7 @@ class TestFullyShardNDTraining(FSDPTest):
         foreach: bool,
     ):
         global_mesh = self.init_global_mesh()
-        _, dp_mesh, tp_mesh = (
+        pp_mesh, dp_mesh, tp_mesh = (
             global_mesh["pp"],
             global_mesh["dp"],
             global_mesh["tp"],
@@ -1042,7 +1042,7 @@ class TestFullyShardNDTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-        for _, p in model.named_parameters():
+        for n, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
             self.assertEqual(p.device_mesh.ndim, 2)
             self.assertEqual(len(p.placements), 2)
@@ -1113,7 +1113,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-        for _, p in model.named_parameters():
+        for n, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
             self.assertEqual(p.device_mesh.ndim, 3)
             self.assertEqual(len(p.placements), 3)

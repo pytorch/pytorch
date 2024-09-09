@@ -86,7 +86,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         model, optim, copy_optim, dist_model, dist_optim = init_model_optim()
 
         # Train 10 steps.
-        for _ in range(10):
+        for i in range(10):
             batch = torch.rand(8, 100, device="cuda")
             model(batch).sum().backward()
             optim.step()

@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 def traceable_subclass(c):
@@ -122,6 +123,7 @@ def get_view_test_cases():
     def mk_dense_subclass_dense_subclass():
         values = torch.randn(10, 5)
         offsets = torch.tensor([0, 3, 6, 10])
+        offsets2 = offsets.clone().detach()
         return nested_view_from_values_offsets(
             nested_view_from_values_offsets(values, offsets).values(), offsets
         )
@@ -131,7 +133,7 @@ def get_view_test_cases():
     def mk_subclass_dense_subclass_dense():
         x = get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
         offsets2 = x.offsets().clone().detach()
-        nested_view_from_values_offsets(x.values(), offsets2).values()
+        nt_view = nested_view_from_values_offsets(x.values(), offsets2).values()
 
     yield mk_subclass_dense_subclass_dense, "subclass_dense_subclass_dense"
 
@@ -539,7 +541,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         input = torch.ones(2, 2)
 
-        fn(input)
+        res = fn(input)
 
     def test_torch_function_state_guards(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -551,9 +553,9 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         input = torch.ones(2, 2)
 
         with torch._C.DisableTorchFunctionSubclass():
-            fn(input)
+            res = fn(input)
 
-        fn(input)
+        res = fn(input)
 
         self.assertEqual(cnt.frame_count, 2)
 
@@ -1098,7 +1100,7 @@ class GraphModule(torch.nn.Module):
         )
 
         ff = torch.func.functionalize(f)
-        ff_out = ff(t_clone)  # pylint: disable=unused-variable
+        ff_out = ff(t_clone)
         # frame count and op count are incremented due to re-compilation
         check_count_and_graph(
             2,
@@ -1125,7 +1127,7 @@ class GraphModule(torch.nn.Module):
             x = torch._to_functional_tensor(t_clone2)
             torch._mirror_autograd_meta_to(t_clone2, x)
             torch._enable_functionalization(reapply_views=False)
-            aot_f_out = f(x)  # pylint: disable=unused-variable
+            aot_f_out = f(x)
         finally:
             torch._disable_functionalization()
 
@@ -1272,7 +1274,7 @@ class GraphModule(torch.nn.Module):
 
         x = DoubleSizeMaybeAddGeThreeTensor(inp)
         torch._dynamo.mark_dynamic(x, 0)
-        res = fn(x)  # pylint: disable=unused-variable
+        res = fn(x)
         # During fakeifying, we end up allocating a separate symint
         # for the outer and inner tensor (in this test, s0 is unused).
         expected_var_to_val = {
@@ -1425,6 +1427,99 @@ s1 > 3""",
             "Tensor subclass method __metadata_guard__ must be a classmethod",
             lambda: torch.compile(lambda x: x * x)(x),
         )
+
+    def test_subclass_constructor_proxying(self):
+        import dataclasses
+        from collections import namedtuple
+        from typing import Any
+
+        @dataclasses.dataclass(frozen=True)
+        class SubclassTensorArgs:
+            original_shape: torch.Size
+            device: torch.device
+            inner_meta: Any
+
+        SubclassTensorArgs2 = namedtuple(
+            "SubclassTensorArgs2",
+            [
+                "original_shape",
+                "device",
+                "inner_meta",
+            ],
+        )
+
+        class SubclassTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a, meta):
+                shape = a.shape
+                kwargs = {}
+                kwargs["strides"] = a.stride()
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = a.device
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+                return out
+
+            def __init__(self, a, meta):
+                self.a = a
+                self.meta = meta
+
+            def __repr__(self):
+                a_repr = repr(self.a)
+                return f"SubclassTensor({a_repr})"
+
+            def __tensor_flatten__(self):
+                return ["a"], self.meta
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, _, __):
+                a = inner_tensors["a"]
+                return SubclassTensor(a, meta)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args_a = pytree.tree_map(
+                    lambda x: x.a if isinstance(x, SubclassTensor) else x, args
+                )
+                kwargs_a = pytree.tree_map(
+                    lambda x: x.a if isinstance(x, SubclassTensor) else x, kwargs
+                )
+                out_a = func(*args_a, **kwargs_a)
+                out = pytree.tree_map(
+                    lambda x: SubclassTensor(
+                        x, SubclassTensorArgs2(x.shape, x.device, None)
+                    )
+                    if isinstance(x, torch.Tensor)
+                    else x,
+                    out_a,
+                )
+                return return_and_correct_aliasing(func, args, kwargs, out)
+
+        @torch.compile(fullgraph=True)
+        def f1(x):
+            meta = SubclassTensorArgs(
+                x.shape, x.device, SubclassTensorArgs(x.shape, x.device, None)
+            )
+            out = SubclassTensor(x, meta)
+            return out * out
+
+        x = torch.randn(3, 3)
+        f1(x)
+
+        @torch.compile(fullgraph=True)
+        def f1(x):
+            meta = SubclassTensorArgs2(
+                x.shape, x.device, SubclassTensorArgs2(x.shape, x.device, None)
+            )
+            out = SubclassTensor(x, meta)
+            return out * out
+
+        x = torch.randn(3, 3)
+        f1(x)
 
     def test_torch_function_subclass_survives_into_aot_autograd(self):
         # If you have a tensor subclass that relies on dispatch into the same op
@@ -2374,7 +2469,7 @@ Eq(s12, s10)""",
         x_inner = torch.ones(4)
         x = TwoTensor(x_inner, x_inner)
         x_view = x.view(2, 2)
-        out = f(x_view)  # pylint: disable=unused-variable
+        out = f(x_view)
 
     # NJT1 -> Dense -> NJT2 -> Dense view
     # During view replay, the Dense -> NJT2 part will construct an intermediate,

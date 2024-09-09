@@ -456,7 +456,7 @@ class TestLocalTensor(ShardedTensorTestBase):
         with self.assertRaisesRegex(
             NotImplementedError, "Only single local shard is supported."
         ):
-            local_shard = st.local_tensor()
+            st.local_tensor()
 
 
 class TestShardedTensorChunked(ShardedTensorTestBase):
@@ -981,7 +981,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         # Validate remote shards.
         remote_shards = st.remote_shards()
         self.assertEqual(3, len(remote_shards))
-        owners = {}
         for rpc_rank, shards in remote_shards.items():
             self.assertEqual(2, len(shards))
             for remote_shard in shards:
@@ -1361,20 +1360,20 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank != 0:
             with self.assertRaisesRegex(RuntimeError, "Local rank at save time was"):
                 with load_with_process_group(pg):
-                    state_dict_deser = torch.load(buffer)
+                    torch.load(buffer)
         else:
             with self.assertRaisesRegex(
                 RuntimeError, "Local world size at save time was"
             ):
                 with load_with_process_group(pg):
-                    state_dict_deser = torch.load(buffer)
+                    torch.load(buffer)
 
         dist.destroy_process_group()
         buffer.seek(0)
         with self.assertRaisesRegex(
             RuntimeError, "Need to initialize default process group"
         ):
-            state_dict_deser = torch.load(buffer)
+            torch.load(buffer)
         rpc.shutdown()
 
     @with_comms
@@ -1391,8 +1390,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                     "rank:3/cuda:3",
                 ],
             )
-            st1 = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
-            st2 = sharded_tensor.empty(spec, 10, 20)
+            sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
+            sharded_tensor.empty(spec, 10, 20)
 
         create_tensors()
         self.assertEqual(0, len(sharded_tensor.api._sharded_tensor_map))

@@ -23,7 +23,6 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.placement_types import _StridedShard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
@@ -34,6 +33,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
 from torch.testing._internal.common_utils import run_tests
@@ -882,7 +882,7 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         )
         self.assertEqual(mesh.mesh, ref_mesh.mesh)
         self.assertEqual(mesh._coordinate_on_dim, ref_mesh._coordinate_on_dim)
-        for (_, ranks, _), (_, ref_ranks, _) in zip(
+        for (tag, ranks, group_name), (ref_tag, ref_ranks, ref_group_name) in zip(
             mesh._dim_group_infos, ref_mesh._dim_group_infos
         ):
             # Since we manually constructed new subgroups, the test and ref

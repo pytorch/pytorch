@@ -13,7 +13,7 @@ def fn_creator():
         torch._dynamo.graph_break()
         x = x + var1
 
-        def inner_fn():  # pylint: disable=unused-variable
+        def inner_fn():
             return var2
 
         return x

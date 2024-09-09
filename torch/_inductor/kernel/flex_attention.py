@@ -55,6 +55,13 @@ def maybe_realize(args: List[Optional[IRNode]]):
     return tree_map(lambda x: realize_inputs(x) if x is not None else None, args)
 
 
+def get_float32_precision():
+    if torch.get_float32_matmul_precision() == "highest":
+        return "'ieee'"
+    else:
+        return "'tf32'"
+
+
 def build_subgraph_buffer(
     args: List[TensorBox],
     subgraph: Subgraph,
@@ -231,7 +238,7 @@ compute_flex_attention = r"""
         q = tl.load(Q_block_ptr)
     else:
         # boundary check is not free, so we only do it when necessary.
-        q = tl.load(Q_block_ptr, boundary_check=(0,))
+        q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option = "zero")
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
@@ -427,9 +434,9 @@ def forward_block_mn(
     if IS_DIVISIBLE:
         k = tl.load(K_block_ptr)
     else:
-        k = tl.load(K_block_ptr, boundary_check=(1,))
+        k = tl.load(K_block_ptr, boundary_check=(1,), padding_option = "zero")
     # -- compute qk ---
-    qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
+    qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
@@ -500,8 +507,8 @@ def forward_block_mn(
     if IS_DIVISIBLE:
         v = tl.load(V_block_ptr)
     else:
-        v = tl.load(V_block_ptr, boundary_check=(0,))
-    acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+        v = tl.load(V_block_ptr, boundary_check=(0,), padding_option = "zero")
+    acc = tl.dot(p.to(MATMUL_PRECISION), v, acc, input_precision=FLOAT32_PRECISION)
 
     # -- update m_i
     m_i = m_ij
@@ -689,6 +696,7 @@ def flex_attention(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     kernel_options = dict(kernel_options)
+    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if _use_flex_decoding(query, kernel_options):
         return create_flex_decoding_kernel(
             query,
@@ -1270,7 +1278,7 @@ def bwd_dq_block_mn(
         kT = tl.load(kT_ptrs)
     else:
         kT = tl.load(kT_ptrs, mask=offs_n2[None, :] < KV_LEN)
-    qk = tl.dot(q, kT)
+    qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
@@ -1320,7 +1328,7 @@ def bwd_dq_block_mn(
         vT = tl.load(vT_ptrs)
     else:
         vT = tl.load(vT_ptrs, mask=offs_n2[None, :] < KV_LEN)
-    dp = tl.dot(do, vT)
+    dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
     ds = p * (dp - Di[:, None])
     # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
     {{ modification(
@@ -1346,7 +1354,7 @@ def bwd_dq_block_mn(
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ds = ds.to(MATMUL_PRECISION)
     # Compute dQ.
-    dq += tl.dot(ds, tl.trans(kT))
+    dq += tl.dot(ds, tl.trans(kT), input_precision=FLOAT32_PRECISION)
 
     return dq
 
@@ -1454,7 +1462,7 @@ def bwd_dkdv_block_mn(
         qT = tl.load(qT_ptrs, mask=offs_m1[None, :] < Q_LEN)
         lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
     lse = tl.where(lse == -float("inf"), 0.0, lse)
-    qkT = tl.dot(k, qT)
+    qkT = tl.dot(k, qT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
@@ -1504,13 +1512,13 @@ def bwd_dkdv_block_mn(
         do = tl.load(do_ptrs, mask=offs_m1[:, None] < Q_LEN)
     # Compute dV.
     ppT = pT
-    dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
+    dv += tl.dot(ppT.to(MATMUL_PRECISION), do, input_precision=FLOAT32_PRECISION)
     if IS_DIVISIBLE:
         Di = tl.load(DELTA + offs_m1)
     else:
         Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN)
     # Compute dP and dS.
-    dpT = tl.dot(v, tl.trans(do))
+    dpT = tl.dot(v, tl.trans(do), input_precision=FLOAT32_PRECISION)
     dsT = pT * (dpT - Di[None, :])
     # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
     {{ modification(
@@ -1533,7 +1541,7 @@ def bwd_dkdv_block_mn(
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
+    dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT), input_precision=FLOAT32_PRECISION)
 
     return dk, dv
  """
@@ -1613,6 +1621,7 @@ def flex_attention_backward(*args, **kwargs):
     assert Bq == Bkv, "Batch dimension must match"
 
     kernel_options = dict(kernel_options)
+    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
         kernel_options.setdefault("IS_DIVISIBLE", False)
     else:
