@@ -3808,11 +3808,10 @@ class CppKernelProxy(CppKernel):
         V.graph.inplaced_to_remove |= scalar_kernel.inplaced_to_remove
         self.loop_nest = LoopNest.build(scalar_kernel)
 
-        if not self.picked_vec_isa:
-            return
-
-        if not self.itervars:
-            # not a loop
+        if not self.picked_vec_isa or not self.itervars:
+            self.kernels = [scalar_kernel]
+            self.aggregate_reduction_buffers(False, None)
+            self.loop_nest.set_kernel(self)
             return
 
         # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
@@ -5046,7 +5045,6 @@ class LoopNest:
                 loop.is_reduction = kernel.is_reduction
 
         loop_nest = LoopNest(loops)
-        loop_nest.kernel = kernel
         return loop_nest
 
     def __bool__(self):
