@@ -162,7 +162,7 @@ sycl::event deconvolution(
       GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last_suggested = use_channels_last_for_conv(src, weight, /*is_transposed=*/true);
+  bool is_channels_last_suggested = use_channels_last_for_conv(src, weight);
 
   // create usr_md for tensors, and md for conv primitive
   auto [src_md, weight_md, dst_md] =
@@ -251,7 +251,7 @@ sycl::event deconvolution_backward_data(
   auto stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last_suggested =
-      use_channels_last_for_conv(diff_dst, weight, /*is_transposed=*/true);
+      use_channels_last_for_conv(diff_dst, weight);
   // create memory desc
   auto [src_md, weight_md, dst_md] =
       deconv_get_plain_md(
@@ -344,7 +344,7 @@ sycl::event deconvolution_backward_weights(
   auto stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last_suggested =
-      use_channels_last_for_conv(src, diff_dst, /*is_transposed=*/true);
+      use_channels_last_for_conv(src, diff_dst);
 
   // create memory desc
   auto [src_md, weight_md, dst_md] = deconv_get_plain_md(
