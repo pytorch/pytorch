@@ -2097,8 +2097,8 @@ class CppKernel(Kernel):
                     for _loop_nest in kernel.inner:
                         gen_loop_nest(_loop_nest)
                 else:
+                    assert isinstance(kernel, CppKernelProxy)
                     if _loop_nest.loops is not None and is_parallel_reduction():
-                        assert isinstance(kernel, CppKernelProxy)
                         kernel.update_stores_with_parallel_reduction()
                     with contextlib.ExitStack() as stack:
                         stack.enter_context(code.indent())
