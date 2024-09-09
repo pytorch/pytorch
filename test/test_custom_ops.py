@@ -3436,7 +3436,7 @@ Please use `add.register_fake` to add an fake impl.""",
             ({needs_fixed_stride_order}, needs_fixed_stride_order),
             ({flexible_layout}, flexible_layout),
             # If no tags are provided, then the following is the default
-            (set(), flexible_layout),
+            (set(), needs_fixed_stride_order),
             # If multiple tags are provided, then we use the most constrained tag.
             ({flexible_layout, needs_fixed_stride_order}, needs_fixed_stride_order),
         ]
