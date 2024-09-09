@@ -63,7 +63,6 @@ xfail_not_implemented = {
     "aten::diagflat",
     "aten::divide.out_mode",
     "aten::divide_.Scalar",
-    "aten::dropout",
     "aten::dropout_",
     "aten::embedding_bag",
     "aten::embedding_bag.padding_idx",

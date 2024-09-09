@@ -95,6 +95,7 @@ from ..utils import (
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
+    is_frozen_dataclass,
     is_function_or_wrapper,
     is_lru_cache_wrapped_function,
     is_namedtuple,
@@ -206,6 +207,7 @@ from .torch_function import (
     TorchFunctionModeVariable,
 )
 from .user_defined import (
+    FrozenDataClassVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
     SourcelessGraphModuleVariable,
@@ -547,7 +549,8 @@ class VariableBuilder:
 
         # Note - There are some nested values where types mismatch!
         # We want to get those out and wrap those.
-        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
+        if is_function_or_wrapper(value):
+            value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
@@ -1161,6 +1164,10 @@ class VariableBuilder:
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return MutableMappingVariable(value, source=self.source)
+        elif is_frozen_dataclass(value):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         else:
             return self.wrap_user_defined(value)
 
@@ -2515,9 +2522,11 @@ def _automatic_dynamic(
     else:
         # Apply the updates
         for sub_state in st.all_states:
-            update_frame_state(
-                sub_state.input_sizes[name], sub_state.input_strides[name]
-            )
+            # Not all inputs are necessarily present on all ranks
+            if name in sub_state.input_sizes and name in sub_state.input_strides:
+                update_frame_state(
+                    sub_state.input_sizes[name], sub_state.input_strides[name]
+                )
         frame_state_entry = tx.output.frame_state[name]
 
     # TODO: index export_constraints ahead of time so we don't have to

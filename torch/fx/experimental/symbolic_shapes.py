@@ -4424,7 +4424,7 @@ class ShapeEnv:
     @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
-        expect_rational=True, size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None,
+        size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None,
         var_to_range: Optional[Tuple[Tuple[sympy.Symbol, ValueRanges]]] = None
     ) -> "Optional[sympy.Expr]":
         """
@@ -5117,18 +5117,18 @@ class ShapeEnv:
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
-                      expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
+                      size_oblivious: bool = False, *, forcing_spec: bool = False):
         try:
-            return self._evaluate_expr(orig_expr, hint, fx_node, expect_rational, size_oblivious, forcing_spec=forcing_spec)
+            return self._evaluate_expr(orig_expr, hint, fx_node, size_oblivious, forcing_spec=forcing_spec)
         except Exception:
             self.log.warning(
-                "failed during evaluate_expr(%s, hint=%s, expect_rational=%s, size_oblivious=%s, forcing_spec=%s",
-                orig_expr, hint, expect_rational, size_oblivious, forcing_spec
+                "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
+                orig_expr, hint, size_oblivious, forcing_spec
             )
             raise
 
     def _evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
-                       expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
+                       size_oblivious: bool = False, *, forcing_spec: bool = False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
@@ -5196,7 +5196,6 @@ class ShapeEnv:
             expr = orig_expr
 
             static_expr = self._maybe_evaluate_static(expr,
-                                                      expect_rational=expect_rational,
                                                       size_oblivious=size_oblivious)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
@@ -5216,7 +5215,6 @@ class ShapeEnv:
                     if not size_oblivious:
                         size_oblivious_result = self._maybe_evaluate_static(
                             expr,
-                            expect_rational=expect_rational,
                             size_oblivious=True
                         )
 
