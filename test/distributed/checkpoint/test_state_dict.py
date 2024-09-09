@@ -306,7 +306,11 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.run_subtests(
             {
                 "use_composable": [True, False],
-                "optimizer_class": [torch.optim.SGD],
+                "optimizer_class": [
+                    torch.optim.Adam,
+                    torch.optim.AdamW,
+                    torch.optim.SGD,
+                ],
             },
             self._test_ddp,
         )
