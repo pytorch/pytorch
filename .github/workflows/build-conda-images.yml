@@ -40,12 +40,12 @@ jobs:
       CUDA_VERSION: ${{ matrix.cuda_version }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.5
         with:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.5
         with:
             docker-image-name: conda-builder${{ matrix.cuda_version == 'cpu' && '-' || '-cuda' }}${{matrix.cuda_version}}
             docker-build-dir:  .ci/docker/conda

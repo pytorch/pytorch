@@ -48,7 +48,7 @@ jobs:
           path: llm-target-determinator
 
       - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@release/2.5
         with:
           python-version: "3.9"
 
@@ -117,5 +117,5 @@ jobs:
           AWS_REGION: ""
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.5
         if: always()
