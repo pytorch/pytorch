@@ -19,7 +19,7 @@ jobs:
     if: ${{ github.event.pull_request.number != 26921 && github.repository_owner == 'pytorch' }}
     steps:
     - name: Checkout PyTorch
-      uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.5
     - uses: ethanis/nitpicker@v1
       with:
         nitpicks: '.github/nitpicks.yml'

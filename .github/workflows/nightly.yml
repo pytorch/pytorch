@@ -56,7 +56,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' }}
     steps:
       - name: update-vision-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@release/2.5
         with:
           repo-name: vision
           branch: main
@@ -71,7 +71,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' }}
     steps:
       - name: update-audio-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@release/2.5
         with:
           repo-name: audio
           branch: main
@@ -86,7 +86,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' }}
     steps:
       - name: update-executorch-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@release/2.5
         with:
           repo-name: executorch
           branch: main

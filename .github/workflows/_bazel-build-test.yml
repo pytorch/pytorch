@@ -47,7 +47,7 @@ jobs:
       reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.5
         with:
           fetch-depth: 1
           submodules: false
@@ -69,25 +69,25 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.5
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.5
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.5
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.5
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -97,7 +97,7 @@ jobs:
         run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@release/2.5
         if: ${{ inputs.cuda-version != 'cpu' && steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
 
       - name: Output disk space left
@@ -206,5 +206,5 @@ jobs:
           file-suffix: bazel-${{ github.job }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.5
         if: always()

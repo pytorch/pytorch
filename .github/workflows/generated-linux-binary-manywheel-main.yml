@@ -53,7 +53,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-2.5
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -77,7 +77,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-2.5
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
@@ -100,7 +100,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-2.5
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -124,7 +124,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-2.5
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1
@@ -147,7 +147,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-2.5
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -171,7 +171,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-2.5
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4
