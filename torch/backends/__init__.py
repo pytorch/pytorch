@@ -80,7 +80,7 @@ class _FP32Precision:
             raise AttributeError("Unknown attribute " + name)
 
 
-def set_flags(_fp32_precision=None):
+def set_flags(_fp32_precision="none"):
     orig_flags = (torch._C._get_fp32_precision("generic", "all"),)
     if _fp32_precision is not None:
         torch._C._set_fp32_precision("generic", "all", _fp32_precision)
@@ -88,7 +88,7 @@ def set_flags(_fp32_precision=None):
 
 
 @contextmanager
-def flags(fp32_precision="default"):
+def flags(fp32_precision="none"):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(fp32_precision)
     try:

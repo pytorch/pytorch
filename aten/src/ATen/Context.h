@@ -53,7 +53,7 @@ class TORCH_API Context {
     } else if (device_type == at::kIPU) {
       return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
-      return at::GetPrivateUse1HooksInterface()->getDefaultGenerator(
+      return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
           device.index());
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
@@ -92,7 +92,7 @@ class TORCH_API Context {
     } else if (device_type == at::kXPU) {
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kPrivateUse1) {
-      return at::GetPrivateUse1HooksInterface()->getDeviceFromPtr(data);
+      return at::detail::getPrivateUse1Hooks().getDeviceFromPtr(data);
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
@@ -183,7 +183,7 @@ class TORCH_API Context {
   void lazyInitPrivateUse1() {
     c10::call_once(thp_init, [&] {
       if (isPrivateUse1HooksRegistered()) {
-        at::GetPrivateUse1HooksInterface()->initPrivateUse1();
+        at::detail::getPrivateUse1Hooks().initPrivateUse1();
       }
     });
   }
@@ -435,20 +435,20 @@ class TORCH_API Context {
   bool allow_fp16_reduction_cpu = false;
 
   std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
-      {"generic", {{"all", "default"}}},
+      {"generic", {{"all", "none"}}},
       {"mkldnn",
-       {{"matmul", "default"},
-        {"conv", "default"},
-        {"rnn", "default"},
-        {"all", "default"}}},
+       {{"matmul", "none"},
+        {"conv", "none"},
+        {"rnn", "none"},
+        {"all", "none"}}},
       {"cuda",
        {{"matmul",
          float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
-             ? "default"
+             ? "none"
              : "tf32"},
         {"conv", "tf32"},
         {"rnn", "tf32"},
-        {"all", "default"}}},
+        {"all", "none"}}},
   };
 
   Allocator* prev_allocator_ptr_{nullptr};
