@@ -267,11 +267,11 @@ def transform_kernel_codes_under_inner_loop(
         )
         stack.enter_context(transformed_code.indent())
         for _, line in enumerate(code._lines):
+            assert isinstance(line, (str, DeferredLine, ))
             deferred_name = None
             if isinstance(line, DeferredLine):
                 deferred_name = line.name
                 line = line.line
-            assert isinstance(line, str)
             new_line = re.sub(r"\b" + f"{iter_var}" + r"\b", f"{new_iter_var}", line)
             if deferred_name:
                 new_line = DeferredLine(deferred_name, new_line)  # type: ignore[assignment]
@@ -314,6 +314,7 @@ def reduction_prefix_array(
 
 def replace_acc_name(buffer: IndentedBuffer, name: str, new_name: str):
     for i, line in enumerate(buffer._lines):
+        assert isinstance(line, (str, DeferredLine, ))
         if isinstance(line, DeferredLine):
             line.line = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line.line)
         else:
