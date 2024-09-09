@@ -1720,10 +1720,13 @@ class CppWrapperCpu(WrapperCodeGen):
                     ),
                     offset,
                 ]
-                call_str = (
-                    f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
-                )
-                return tmp_name, call_str
+                call_strs = [
+                    f"AtenTensorHandle {tmp_name}_handle = reinterpret_tensor_wrapper({', '.join(args)});",
+                    f"RAIIAtenTensorHandle {tmp_name}({tmp_name}_handle);",
+                ]
+                nonlocal final_tmp_name_is_RAIIAtenTensorHandle
+                final_tmp_name_is_RAIIAtenTensorHandle = True
+                return tmp_name, call_strs
 
             def create_dtypeview_call(reinterpret_call):
                 tmp_AtenTensorHandle = (
@@ -1744,6 +1747,8 @@ class CppWrapperCpu(WrapperCodeGen):
                 call_strs.append(
                     f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_AtenTensorHandle});"
                 )
+                nonlocal final_tmp_name_is_RAIIAtenTensorHandle
+                final_tmp_name_is_RAIIAtenTensorHandle = True
                 return tmp_RAIIAtenTensorHandle, call_strs
 
             if (
@@ -1758,18 +1763,17 @@ class CppWrapperCpu(WrapperCodeGen):
                     )
                     call_strs.extend(tmp_call_strs)
                     final_tmp_name = tmp_output_name
-                    final_tmp_name_is_RAIIAtenTensorHandle = True
                 else:
                     return f"{data.get_name()}"
             else:
                 # firstly create reinterpretview
-                final_tmp_name, reinterpret_call = create_reinterpret_call()
-                call_strs.append(reinterpret_call)
+                final_tmp_name, tmp_call_strs = create_reinterpret_call()
+                call_strs.extend(tmp_call_strs)
 
                 if dtype is not None and dtype != data.dtype:
                     # wrap it with dtypeview
                     final_tmp_name, tmp_call_strs = create_dtypeview_call(
-                        reinterpret_call
+                        final_tmp_name
                     )
                     call_strs.extend(tmp_call_strs)
             # Because the memory planning is done in two passes (see the implementation
