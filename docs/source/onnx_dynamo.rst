@@ -77,7 +77,7 @@ See below a demonstration of exporter API in action with a simple Multilayer Per
 
   model = MLPModel()
   tensor_x = torch.rand((97, 8), dtype=torch.float32)
-  onnx_program = torch.onnx.export(model, tensor_x, dynamo=True)
+  onnx_program = torch.onnx.export(model, (tensor_x,), dynamo=True)
 
 As the code above shows, all you need is to provide :func:`torch.onnx.export` with an instance of the model and its input.
 The exporter will then return an instance of :class:`torch.onnx.ONNXProgram` that contains the exported ONNX graph along with extra information.
