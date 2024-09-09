@@ -7,6 +7,7 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
     reenter_make_fx,
@@ -238,8 +239,8 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
     with ctx.redispatch_to_next() as m:
-        functional_cond_fn = ctx.functionalize(cond_fn)
-        functional_body_fn = ctx.functionalize(body_fn)
+        functional_cond_fn = ctx.functionalize(_maybe_run_with_interpreter(cond_fn))
+        functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for fn, fn_name in [
             (functional_cond_fn, "cond_fn"),

@@ -1343,7 +1343,7 @@ TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
-TEST_CUDA = torch.cuda.is_available()
+TEST_CUDA = torch.cuda.is_available() or True
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = is_privateuse1_backend_available()
 TEST_PRIVATEUSE1_DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
@@ -5313,7 +5313,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
     return s
 
-def recover_orig_fp32_precision():
+def recover_orig_fp32_precision(fn):
     @contextlib.contextmanager
     def recover():
         old_mkldnn_conv_p = torch.backends.mkldnn.conv.fp32_precision
@@ -5332,12 +5332,9 @@ def recover_orig_fp32_precision():
             torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
 
-    def wrapper(f):
-        @functools.wraps(f)
-        def wrapped(*args, **kwargs):
-            with recover():
-                f(*args, **kwargs)
-
-        return wrapped
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        with recover():
+            fn(*args, **kwargs)
 
     return wrapper
