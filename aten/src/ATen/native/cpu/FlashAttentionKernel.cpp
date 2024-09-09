@@ -388,21 +388,26 @@ void cpu_flash_attention(
   // we need to split headSize with packb_size for packing v
   // TODO Simplify the check when oneDNN supports fused pack with transpose and has better performance
   if (with_pack) {
-    need_pack = num_head >= 4 && headSize % packb_size == 0 && kvSize >= packb_size;
+    need_pack = headSize >= packb_size / 2 && kvSize >= packb_size;
     if (need_pack) {
       float pack_size = batchSize * num_head * kvSize * headSize / 1024;
       float gemm_size_per_thread =
           (batchSize * num_head * qSlice + num_thread - 1) / num_thread *
           qSplitSize * (is_causal ? qSize : kvSize) * headSize / 1024;
-      float gsize = gemm_size_per_thread / pack_size;
       // When the number of gemm is much greater than the number of pack,
       // the pack and padding overhead can be overlaped.
-      if (pack_size < 2688) {
-        need_pack = gsize >= 36 || (gsize >= 24 && headSize > packb_size);
-      } else if (pack_size < 16384) {
-        need_pack = gsize >= (is_causal ? 54 : 52);
+      float gsize = gemm_size_per_thread / pack_size;
+      // BFloat16 requires larger shape as mkl_gemm_bf16bf16f32 is faster than mkl_gemm_f16f16f32
+      if (dtype == at::ScalarType::BFloat16) {
+        need_pack = gsize >= (is_causal ? 192 : 160);
       } else {
-        need_pack = gsize >= (is_causal ? 54 : 40);
+        if (pack_size < 2688) {
+          need_pack = gsize >= 36 || (gsize >= 24 && headSize > packb_size);
+        } else if (pack_size < 16384) {
+          need_pack = gsize >= (is_causal ? 54 : 52);
+        } else {
+          need_pack = gsize >= (is_causal ? 54 : 40);
+        }
       }
     }
   }
@@ -594,7 +599,7 @@ void cpu_flash_attention(
         int64_t rkvBlockSize = kvBlockSize == kvSplitSize ? rkvSplitSize : rkvTail;
         // Calculate scale * q @ k.T
         if (need_pack) {
-          if constexpr (std::is_same_v<scalar_t, at::Half>) {
+          if constexpr (is_reduced_floating_point_v<scalar_t>) {
             for (int64_t b = 0; b < kvBlockSize; b += packb_size) {
               cpublas::brgemm(
                   qBlockSize,
@@ -729,7 +734,7 @@ void cpu_flash_attention(
         // Calculate Softmax(q @ k.T) @ v
         if (need_pack) {
           int64_t psize = n / kvSplitSize * ekvSplitSize;
-          if constexpr (std::is_same_v<scalar_t, at::Half>) {
+          if constexpr (is_reduced_floating_point_v<scalar_t>) {
             for (int64_t b = 0; b < headSize; b += packb_size) {
               cpublas::brgemm(
                   qBlockSize,
@@ -791,10 +796,10 @@ void cpu_flash_attention(
       // Move to the next query
       data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
+    if (need_pack) {
+      cpublas::brgemm_release();
+    }
   });
-  if (need_pack) {
-    cpublas::brgemm_release();
-  }
 }
 
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
@@ -1162,7 +1167,8 @@ void flash_attention_kernel_impl(
 
   // When q_seq_len and k_seq_len are long enough,
   // cpu_flash_attention with pack has better performance.
-  bool could_pack = (query.scalar_type() == kHalf && cpublas::need_pack(kHalf));
+  bool could_pack = ((query.scalar_type() == kHalf && cpublas::need_pack(kHalf)) ||
+                     (query.scalar_type() == kBFloat16 && cpublas::need_pack(kBFloat16)));
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
     if (!attn_mask.has_value()) {
