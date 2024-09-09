@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import functools
+import logging
+import os
 import sys
 import unittest
 from typing import Optional
@@ -22,7 +24,15 @@ from torch.testing._internal.common_quantization import _generate_qdq_quantized_
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
-from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    parametrize,
+    skipIfWindows,
+    TEST_MKL,
+)
+
+
+log = logging.getLogger(__name__)
 
 
 try:
@@ -263,6 +273,19 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
             def forward(self, x):
                 return self.epilogue(self.linear(x))
+
+        # TODO: debug utils, safe to remove in Oct 2024
+        if inductor_config.is_fbcode():
+            log.warning(
+                f"DEBUG: torch.backends.mkl.is_available() is {torch.backends.mkl.is_available()}, "  # noqa: G004
+                f"torch.ops.mkldnn._is_mkldnn_fp16_supported() is {torch.ops.mkldnn._is_mkldnn_fp16_supported()}, "
+                f"torch.ops.mkldnn._is_mkldnn_bf16_supported() is {torch.ops.mkldnn._is_mkldnn_bf16_supported()}, "
+                f"inductor_config.freezing is {inductor_config.freezing}, "
+                f"mkldnn._is_mkldnn_acl_supported() is {torch.ops.mkldnn._is_mkldnn_acl_supported()}, "
+                f"torch._C.has_mkl is {torch._C.has_mkl}, "
+                f"PYTORCH_TEST_FBCODE is {os.getenv('PYTORCH_TEST_FBCODE')}, "
+                f"PYTORCH_TEST_REMOTE_GPU is {os.getenv('PYTORCH_TEST_REMOTE_GPU')}, "
+            )
 
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
@@ -1037,6 +1060,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             "gelu",
         ),
     )
+    @skipIfWindows(msg="Windows don't support quantize.")
     def test_quantized_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, input_3d, dtype, epilogue
     ):
@@ -1154,6 +1178,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             "relu",
         ),
     )
+    @skipIfWindows(msg="Windows don't support quantize.")
     def test_quantized_linear_with_pointwise_binary(
         self,
         batch_size,
@@ -1234,6 +1259,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("in_features", (4, 68, 128))  # k should be a multiple of 4
     @parametrize("out_features", (64, 65))
     @parametrize("bias", (True, False))
+    @skipIfWindows(msg="Windows don't support quantize.")
     def test_quantized_linear_amx(self, batch_size, in_features, out_features, bias):
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -1381,6 +1407,13 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_quantized_linear_amx_dynamic_shapes = (
         TestSelectAlgorithm.test_quantized_linear_amx
+    )
+    test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
+    test_linear_cache_blocking_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_cache_blocking
+    )
+    test_linear_thread_factors_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_thread_factors
     )
 
 

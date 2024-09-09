@@ -103,7 +103,7 @@ static void im2col_out_cuda_template(
   output.resize_({batch_size, n_output_plane, output_length});
 
   // Launch kernel
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kBool,
       input.scalar_type(), "im2col_out_cuda", [&] {
     Tensor input_n;
     Tensor output_n;
