@@ -1363,10 +1363,11 @@ class FxGraphCache:
             if remote:
                 log_cache_bypass("bypass_fx_graph", str(e))
             cache_event_time = time_ns()
-            if not compiled_graph:
-                compiled_graph = compile_fx_fn(
-                    gm, example_inputs, inputs_to_check, fx_kwargs
-                )
+
+        if not compiled_graph:
+            compiled_graph = compile_fx_fn(
+                gm, example_inputs, inputs_to_check, fx_kwargs
+            )
         assert compiled_graph is not None
         cache_info["cache_state"] = cache_state
         chromium_log = get_chromium_event_logger()

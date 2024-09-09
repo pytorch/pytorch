@@ -48,6 +48,9 @@ cache_size_limit = 8
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_cache_size_limit = 256
 
+# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit
+skip_code_recursive_on_cache_limit_hit = True
+
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
 # inputs.  Note that assume_static_by_default will also cause ints to get
