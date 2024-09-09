@@ -820,12 +820,12 @@ coverage_ignore_functions = [
     "gen_tvar",
     # torch.fx.experimental.shape_inference.infer_shape
     "infer_shape",
-    "mksym"
+    "mksym",
     # torch.fx.experimental.shape_inference.infer_symbol_values
-    "calculate_value"
-    "infer_symbol_values"
-    "solve_equation"
-    "update_equation"
+    "calculate_value",
+    "infer_symbol_values",
+    "solve_equation",
+    "update_equation",
     # torch.fx.experimental.optimization
     "extract_subgraph",
     "fuse",
