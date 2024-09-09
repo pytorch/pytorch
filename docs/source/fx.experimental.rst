@@ -54,7 +54,7 @@ torch.fx.experimental.symbolic_shapes
     is_accessor_node
 
 torch.fx.experimental.proxy_tensor
--------------------------------------
+----------------------------------
 
 .. currentmodule:: torch.fx.experimental.proxy_tensor
 .. automodule:: torch.fx.experimental.proxy_tensor
