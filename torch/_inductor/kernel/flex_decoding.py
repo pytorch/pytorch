@@ -56,6 +56,7 @@ flex_decoding_template = TritonTemplate(
     # BLOCK_M: block size that Q is padded along seqlen dim.
     # BLOCK_N: block size of K & V along N dimension.
     # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
+    # KV_SHARED_BATCH: number of query batches sharing one kv batch in KV batch dim broadcast setups.
     #
     # change of base out of the loop
     # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row

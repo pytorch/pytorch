@@ -151,6 +151,7 @@ compute_flex_attention = r"""
     # V_HEAD_DIM: The dimension of the value embeddings
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
     # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
+    # KV_SHARED_BATCH: number of query batches sharing one kv batch in KV batch dim broadcast setups.
     #
     # The following FULL_* and PARTIAL_* is defined in the block sparse mask grid, rather than the thread block grid.
     # KV_NUM_BLKS: The number of KV blocks (that may or may not require masking) for each query.
@@ -915,6 +916,7 @@ flex_attention_backward_template = TritonTemplate(
     # V_HEAD_DIM: The dimension of the value embeddings
     # z: Batch size, h: Number of heads, m: Number of queries or keys/values, d: Head dim
     # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
+    # KV_SHARED_BATCH: number of query batches sharing one kv batch in KV batch dim broadcast setups.
     # (Modifiable) Performance tuning options
     # BLOCK_M1: when calculating DK & DV, iterate over BLOCK_M1 across the seqlen dim of Q in each thread block.
     # BLOCK_N1: when calculating DK & DV, the thread block size across the seqlen dim of K/V.
