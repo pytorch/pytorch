@@ -7,6 +7,7 @@ input/output types, metadata, config, function signatures etc.
 import collections
 import dataclasses
 import functools
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, NewType, Optional, Set, Union
@@ -821,6 +822,7 @@ class AOTConfig:
 
     # Key to use for AOTAutogradCache
     cache_key: Optional[str] = None
+    profile_duration: bool = os.environ.get("PYTORCH_AOTD_DEBUG_PROFILE", "0") == "1"
 
     def __post_init__(self):
         if self.pre_dispatch:
