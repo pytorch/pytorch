@@ -733,7 +733,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
                 self.unary_fn = copy.deepcopy(unary_op)
-                self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(
+                    128, 128, kernel_size=3, stride=1, bias=False
+                )
                 self.unary_fn2 = copy.deepcopy(unary_op)
 
             def forward(self, x):
@@ -889,8 +891,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
                 self.add_fn = add_fn
                 self.relu = torch.nn.ReLU()
-                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1, bias=False)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1, bias=False)
                 self.add_fn2 = add_fn
                 self.relu2 = torch.nn.ReLU()
                 self.use_relu = use_relu
@@ -1800,12 +1802,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
                         mod,
                         (v,),
                         [
+                            "torch.ops.onednn.qlinear_pointwise.tensor",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
+                        ]
+                        if config.abi_compatible
+                        else [
                             "op_onednn_qlinear_pointwise_tensor.call",
                             "op_onednn_qlinear_pointwise_binary_tensor.call",
                         ],
                         [],
                         check_quantization=True,
-                        num_include_ops=[2, 2],
+                        num_include_ops=[4, 4] if config.abi_compatible else [2, 2],
                     )
                 else:
                     # For python wrapper
