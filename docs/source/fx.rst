@@ -1149,9 +1149,8 @@ API Reference
 .. py:module:: torch.fx.experimental.schema_type_annotation
 .. py:module:: torch.fx.experimental.sym_node
 .. py:module:: torch.fx.experimental.shape_inference
-.. py:module:: torch.fx.experimental.shape_inference.infer_symbol_values
-.. py:module:: torch.fx.experimental.shape_inference
 .. py:module:: torch.fx.experimental.shape_inference.infer_shape
+.. py:module:: torch.fx.experimental.shape_inference.infer_symbol_values
 .. py:module:: torch.fx.experimental.unification.core
 .. py:module:: torch.fx.experimental.unification.dispatch
 .. py:module:: torch.fx.experimental.unification.match
