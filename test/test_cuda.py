@@ -524,7 +524,7 @@ class TestCuda(TestCase):
     @recover_orig_fp32_precision
     def test_fp32_precision_with_float32_matmul_precision(self):
         torch.set_float32_matmul_precision("highest")
-        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "none")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
         torch.set_float32_matmul_precision("high")
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
         torch.set_float32_matmul_precision("medium")
