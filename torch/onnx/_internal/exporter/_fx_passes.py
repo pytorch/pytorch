@@ -22,7 +22,8 @@ def decompose_with_registry(
     # We can only preserve implemented ops
     can_preserve = tuple(to_preserve.intersection(onnx_registered_ops))
     for op in can_preserve:
-        decomp_table[op] = None  # type: ignore[assignment]
+        if op in decomp_table:
+            del decomp_table[op]
     return exported_program.run_decompositions(decomp_table)
 
 

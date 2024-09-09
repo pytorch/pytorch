@@ -197,8 +197,8 @@ _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY = [
 
 def _testing_decomp_table():
     """
-    This decomp table is intended for testing only. It basically tries its' best to 
-    replicate functional pre-dispatch IR. 
+    This decomp table is intended for testing only. It basically tries its' best to
+    replicate functional pre-dispatch IR.
     """
     decomp_table = {}
     for op in _COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY:

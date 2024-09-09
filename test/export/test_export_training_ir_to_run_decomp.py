@@ -16,7 +16,7 @@ test_classes = {}
 def mocked_training_ir_to_run_decomp_export_strict(*args, **kwargs):
     ep = torch.export.export_for_training(*args, **kwargs)
     decomp_table = testing._testing_decomp_table()
-    return ep.run_decompositions(decomp_table)
+    return ep.run_decompositions({})
 
 
 def mocked_training_ir_to_run_decomp_export_non_strict(*args, **kwargs):
@@ -26,7 +26,7 @@ def mocked_training_ir_to_run_decomp_export_non_strict(*args, **kwargs):
         ep = torch.export.export_for_training(*args, **kwargs, strict=False)
 
     decomp_table = testing._testing_decomp_table()
-    return ep.run_decompositions(decomp_table)
+    return ep.run_decompositions({})
 
 
 def make_dynamic_cls(cls, strict):
