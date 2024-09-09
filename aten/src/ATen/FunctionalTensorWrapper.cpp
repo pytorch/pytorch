@@ -490,8 +490,14 @@ c10::Device FunctionalTensorWrapper::device_custom() const {
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sizes();
 }
+int64_t FunctionalTensorWrapper::size_custom(int64_t d) const {
+  return value_.unsafeGetTensorImpl()->size(d);
+}
 at::IntArrayRef FunctionalTensorWrapper::strides_custom() const {
   return value_.unsafeGetTensorImpl()->strides();
+}
+int64_t FunctionalTensorWrapper::storage_offset_custom() const {
+  return value_.unsafeGetTensorImpl()->storage_offset();
 }
 int64_t FunctionalTensorWrapper::dim_custom() const {
   return value_.unsafeGetTensorImpl()->dim();
@@ -507,6 +513,9 @@ c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_strides_custom() const {
   return value_.unsafeGetTensorImpl()->sym_strides();
+}
+c10::SymInt FunctionalTensorWrapper::sym_numel_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_numel();
 }
 c10::SymInt FunctionalTensorWrapper::sym_size_custom(int64_t d) const {
   return value_.unsafeGetTensorImpl()->sym_size(d);
@@ -787,7 +796,9 @@ void mutate_view_meta(const at::Tensor& self, const functionalization::ViewMeta&
 // calls each {view} reference implementations with meta tensors.
 // The output meta tensor's stride info serves as a reference for what the correct strides should be.
 void set_sizes_strides_offset(const Tensor& out, const Tensor& reference_out) {
-  out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides(), reference_out.sym_storage_offset());
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(out));
+  auto value = from_functional_tensor(out);
+  value.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides(), reference_out.sym_storage_offset());
 }
 
 void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector<Tensor>& reference_outs) {

@@ -202,13 +202,15 @@ bool LTCTensorImpl::is_non_overlapping_and_dense_custom() const {
   return false;
 }
 
-bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
+bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat memory_format) const {
   // TODO(ezyang): I don't think this branch is actually necessary
   // TODO(ezyang): I don't think this logic is right, shouldn't we pass on
   // the memory format?
   if (tensor_->CurrentTensorData()) {
     return tensor_->CurrentTensorData()->is_contiguous();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   // Only check that the storage is already contiguous.
   TORCH_CHECK(is_contiguous_, "Non-contiguous storage for lazy tensor");
   // TODO: I don't think logic is right, we should check the requested memory

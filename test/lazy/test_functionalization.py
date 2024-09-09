@@ -94,6 +94,14 @@ IR {
 """,  # noqa: B950
         )
 
+    def test_storage_offset_after_slice(self):
+        def run(device):
+            base = torch.rand(10).to(device)
+            view = base[2:]
+            return view.storage_offset()
+
+        self.assertEqual(run("cpu"), run("lazy"))
+
 
 if __name__ == "__main__":
     run_tests()
