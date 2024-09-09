@@ -551,75 +551,71 @@ static SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const Sparse
     return r;
 }
 
-const SparseTensor broadcast_sparce_cpu(const SparseTensor& t, const std::vector<int64_t> expandedSizes, ScalarType commonDtype){
+const SparseTensor expand_sparce_cpu(const SparseTensor& t, const std::vector<int64_t>& expanded_sizes, ScalarType commonDtype){
   c10::IntArrayRef t_sizes = t.sizes();
   Tensor t_values = t._values().to(commonDtype);
-  Tensor t_indices= t._indices();
+  Tensor t_indices = t._indices();
 
-  // broadcasting t to match expandedSizes if needed
-  if(t_sizes!= expandedSizes){
-
-    // dimensions matching
-    int max_dim = expandedSizes.size();
-    int diff_dim = max_dim -t.sparse_dim();
+  // expand t to match expanded_sizes if needed
+  if(t_sizes != expanded_sizes){
+    // dimensions matching: create new indices tensor matching expanded_sizes dimension
+    int64_t max_dim = expanded_sizes.size();
+    int64_t diff_dim = max_dim - t.sparse_dim();
     int64_t t_nnz = t._nnz();
-    Tensor new_indices = at::empty({max_dim, t_nnz}, t._indices().options());
-    Tensor new_values = t_values;
-    for (int dim=0; dim<diff_dim; dim++){
-      for (int col=0; col<new_indices[dim].size(0); col++ ){
-        new_indices[dim][col] = 0;
+    Tensor new_indices = at::empty({max_dim, t_nnz}, t_indices.options());
+    Tensor new_values = at::empty({t_nnz}, t_values.options());
+    new_values.copy_(t_values);
+    for (int64_t dim = 0 ; dim < diff_dim ; dim++){
+      for (int64_t idx = 0 ; idx < new_indices[dim].size(0) ; idx++){
+        new_indices[dim][idx] = 0;
       }
     }
-    for (int dim=diff_dim; dim<max_dim; dim++){
-      for (int col=0; col<new_indices[dim].size(0); col++ ){
-        new_indices[dim][col] = t_indices[dim-diff_dim][col];
+    for (int64_t dim = diff_dim ; dim < max_dim ; dim++){
+      for (int64_t idx = 0 ; idx < new_indices[dim].size(0) ; idx++){
+        new_indices[dim][idx] = t_indices[dim - diff_dim][idx];
       }
     }
     std::vector<int64_t> new_sizes(max_dim);
-    for (int singdim=0; singdim<diff_dim; singdim++){
-      new_sizes[singdim] = 1;
+    for (int64_t dim = 0 ; dim < diff_dim ; dim++){
+      new_sizes[dim] = 1;
     }
-    for (int dim=diff_dim; dim<max_dim; dim++){
+    for (int64_t dim = diff_dim ; dim < max_dim ; dim++){
       new_sizes[dim] = t_sizes[dim - diff_dim];
     }
 
-    SparseTensor new_t = t.clone();
-    c10::IntArrayRef arrayref_newsizes(new_sizes);
-    new_t.sparse_resize_(arrayref_newsizes, max_dim, new_t.dense_dim());
-    alias_into_sparse(new_t, new_indices, new_values);
+    // sizes matching: expanding singleton dimensions to larger sizes
+    for (int64_t dim = 0 ; dim < max_dim ; dim++){
+      if(new_sizes[dim] == 1 && new_sizes[dim] < expanded_sizes[dim]){
+        Tensor* seq_indices = new Tensor[expanded_sizes[dim]];
+        Tensor* seq_values = new Tensor[expanded_sizes[dim]];
 
-    // sizes matching
-    for (int dim=1; dim<=max_dim;dim++){
-      if(new_sizes[dim-1]<expandedSizes[dim-1]){
-        Tensor* seq_indices = new Tensor[expandedSizes[dim - 1]];
-        Tensor* seq_values = new Tensor[expandedSizes[dim - 1]];
-        
-        seq_indices[0] = new_indices;
+        seq_indices[0] = new_indices.clone();
         seq_values[0] = new_values;
-      
-        for(int i=1; i<expandedSizes[dim-1];i++){
-          for(int k=0; k<(new_indices[dim-1]).size(0); k++){
-            new_indices[dim-1][k] = i;
+
+        for(int64_t i = 1 ; i < expanded_sizes[dim] ; i++){
+          for(int64_t k = 0 ; k < (new_indices[dim]).size(0) ; k++){
+            new_indices[dim][k] = i;
           }
-          
-          seq_indices[i] = new_indices;
+
+          seq_indices[i] = new_indices.clone();
           seq_values[i] = new_values;
-          
+
         }
-        TensorList arrayref_indices= c10::ArrayRef<Tensor>(seq_indices,expandedSizes[dim-1]);
-        TensorList arrayref_values= c10::ArrayRef<Tensor>(seq_values,expandedSizes[dim-1]);
-          
-        new_indices=at::cat(arrayref_indices, 1);
-        new_values=at::cat(arrayref_values, 0).to(t.scalar_type());
-        
-        new_t.sparse_resize_(expandedSizes, new_t.sparse_dim(), new_t.dense_dim());
-        alias_into_sparse(new_t, new_indices, new_values);
+        TensorList arrayref_indices = c10::ArrayRef<Tensor>(seq_indices, expanded_sizes[dim]);
+        TensorList arrayref_values = c10::ArrayRef<Tensor>(seq_values, expanded_sizes[dim]);
+
+        new_indices = at::cat(arrayref_indices, 1);
+        new_values = at::cat(arrayref_values, 0).to(t.scalar_type());
+
         delete[] seq_indices;
         delete[] seq_values;
       }
-    const SparseTensor& const_t = new_t;
-    return const_t;
     }
+    bool is_coalesced = false;
+    SparseTensor new_t = at::_sparse_coo_tensor_with_dims_and_tensors(max_dim, t.dense_dim(), expanded_sizes, new_indices, new_values, t.options(), is_coalesced);
+    new_t = new_t.coalesce();
+    const SparseTensor const_t = new_t;
+    return const_t;
   }
   return t;
 }
@@ -641,27 +637,26 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
   TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in add operation");
 
   // get the result size using broadcasting rules
-  const std::vector<int64_t> res_shape = infer_size(t.sizes(), src.sizes());
+  const std::vector<int64_t>& res_shape = infer_size(t.sizes(), src.sizes());
 
   // expand the two tensors if necessary using broadcasting rules
-  const SparseTensor broadcasted_t = broadcast_sparce_cpu(t, res_shape, commonDtype);
-  const SparseTensor broadcasted_src = broadcast_sparce_cpu(src, res_shape, commonDtype);
+  const SparseTensor& broadcasted_t = expand_sparce_cpu(t, res_shape, commonDtype);
+  const SparseTensor& broadcasted_src = expand_sparce_cpu(src, res_shape, commonDtype);
 
-  if (broadcasted_src._nnz() == 0) {
+  if (src._nnz() == 0) {
     return copy_sparse_to_sparse_(r, broadcasted_t);
   }
-  if (broadcasted_t._nnz() == 0) {
+  if (t._nnz() == 0) {
     return mul_out_sparse_scalar(r, broadcasted_src, value);
   }
-
   r.resize_as_(broadcasted_src);
   if (r.is_meta()) {
     return r;
-  } else if (broadcasted_src._values().is_contiguous() && broadcasted_t._values().is_contiguous()) {
-    return add_out_sparse_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
-  } else {
-    return add_out_sparse_non_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
-  }
+    } else if (broadcasted_src._values().is_contiguous() && broadcasted_t._values().is_contiguous()) {
+      return add_out_sparse_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
+    } else {
+      return add_out_sparse_non_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
+    }
 }
 
 // --------------------------------------------------------------------
