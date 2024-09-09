@@ -21,8 +21,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_cuda import GFX942_Exact
+from torch.testing._internal.common_cuda import GFX942_Exact, _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -1159,6 +1158,15 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             assert torch.backends.cusparselt.version() == 602
         else:
             assert torch.backends.cusparselt.version() is None
+
+    @unittest.skipIf(not _IS_MI300x, "test only supported on MI300x")
+    def test_hipsparselt_backend(self):
+        assert torch.backends.cusparselt.is_available()
+        if torch.version.hip == '6.3.0':
+            assert torch.backends.cusparselt.version() >= 420
+        else:
+            # For other versions, we might want to keep the existing check or adjust accordingly
+            assert torch.backends.cusparselt.version() is not None
 
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
