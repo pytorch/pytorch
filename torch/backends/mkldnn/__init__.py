@@ -71,7 +71,7 @@ class verbose:
         return False
 
 
-def set_flags(_enabled=None, _deterministic=None, _fp32_precision=None):
+def set_flags(_enabled=None, _deterministic=None, _fp32_precision="none"):
     orig_flags = (
         torch._C._get_mkldnn_enabled(),
         torch._C._get_mkldnn_deterministic(),
@@ -87,7 +87,7 @@ def set_flags(_enabled=None, _deterministic=None, _fp32_precision=None):
 
 
 @contextmanager
-def flags(enabled=False, deterministic=False, fp32_precision="default"):
+def flags(enabled=False, deterministic=False, fp32_precision="none"):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(enabled, deterministic, fp32_precision)
     try:

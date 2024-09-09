@@ -512,7 +512,11 @@ def aot_dispatch_autograd(
                     == MutationType.MUTATED_IN_GRAPH
                     and fw_metadata.input_info[i].mutates_storage_metadata
                 )
-                if bw_out is None and not metadata_mutation_in_graph:
+                is_non_leaf = (
+                    fw_metadata.input_info[i].requires_grad
+                    and not fw_metadata.input_info[i].is_leaf
+                )
+                if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
