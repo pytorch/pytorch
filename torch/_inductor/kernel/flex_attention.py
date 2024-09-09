@@ -190,7 +190,7 @@ compute_flex_attention = r"""
     q_start = tl.program_id(0)
     off_zq = tl.program_id(1) // HQ
     off_hq = tl.program_id(1) % HQ
-    off_zkv = off_zq % ZKV
+    off_zkv = off_zq // KV_SHARED_BATCH
     off_hkv = off_hq // GQA_SHARED_HEADS
     off_g = off_hq % GQA_SHARED_HEADS
 
@@ -774,6 +774,10 @@ def flex_attention(
     gqa_shared_heads = Hq // Hkv
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
+    # Determine KV batch broadcast factor
+    kv_shared_batch = Bq // Bkv
+    kernel_options.setdefault("KV_SHARED_BATCH", kv_shared_batch)
+
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is None if partial blocks are not computed
     has_full_blocks = full_kv_num_blocks is not None
@@ -957,7 +961,7 @@ flex_attention_backward_template = TritonTemplate(
     off_hz = tl.program_id(2)
     off_zq = off_hz // HKV # q batch idx
     off_hkv = off_hz % HKV # kv head idx
-    off_zkv = off_zq % ZKV # kv batch idx
+    off_zkv = off_zq // KV_SHARED_BATCH # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
@@ -1663,9 +1667,13 @@ def flex_attention_backward(*args, **kwargs):
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
 
-
-    grad_key_size = (Bq, Hkv, seq_len_kv, qk_head_dim)
-    grad_key_stride = (Hkv * seq_len_kv * qk_head_dim, seq_len_kv * qk_head_dim, qk_head_dim, 1)
+    grad_key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
+    grad_key_stride = [
+        Hkv * seq_len_kv * qk_head_dim,
+        seq_len_kv * qk_head_dim,
+        qk_head_dim,
+        1,
+    ]
 
     layout_k = FixedLayout(
         key.get_device(),
@@ -1688,9 +1696,17 @@ def flex_attention_backward(*args, **kwargs):
         query.get_size(), query.get_stride(), dtype=dtype, device=device
     )
     broadcasted_grad_value_shape = (Bq, Hkv, seq_len_kv, v_head_dim)
-    broadcasted_grad_value_stride = (Hkv * seq_len_kv * v_head_dim, seq_len_kv * v_head_dim, v_head_dim, 1)
+    broadcasted_grad_value_stride = (
+        Hkv * seq_len_kv * v_head_dim,
+        seq_len_kv * v_head_dim,
+        v_head_dim,
+        1,
+    )
     broadcasted_grad_value = empty_strided(
-        broadcasted_grad_value_shape, broadcasted_grad_value_stride, dtype=dtype, device=device
+        broadcasted_grad_value_shape,
+        broadcasted_grad_value_stride,
+        dtype=dtype,
+        device=device,
     )
 
     # grad_value = empty_strided(
@@ -1702,6 +1718,10 @@ def flex_attention_backward(*args, **kwargs):
     # Determine GQA factor
     gqa_shared_heads = Hq // Hkv
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
+
+    # Determine KV batch broadcast factor
+    kv_shared_batch = Bq // Bkv
+    kernel_options.setdefault("KV_SHARED_BATCH", kv_shared_batch)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is torch.zeros([1, 1, 1]) if partial blocks are not computed.
@@ -1822,16 +1842,27 @@ def flex_attention_backward(*args, **kwargs):
     # grad_key = broadcasted_grad_key
     # grad_value = broadcasted_grad_value
 
-
     batch_group = Bq // Bkv
     grad_key_size = (Bkv, batch_group, Hkv, seq_len_kv, qk_head_dim)
-    grad_key_stride = (batch_group * Hkv * seq_len_kv * qk_head_dim, Hkv * seq_len_kv * qk_head_dim, seq_len_kv * qk_head_dim, qk_head_dim, 1)
+    grad_key_stride = (
+        batch_group * Hkv * seq_len_kv * qk_head_dim,
+        Hkv * seq_len_kv * qk_head_dim,
+        seq_len_kv * qk_head_dim,
+        qk_head_dim,
+        1,
+    )
 
-    grad_key = lowerings[aten.as_strided](broadcasted_grad_key, grad_key_size, grad_key_stride) # [Bkv, batch_group, grad_key.size(-3), grad_key.size(-2), grad_key.size(-1)]
-    grad_key = lowerings[aten.sum](grad_key, axis=1) # [Bkv, Hkv, seq_len_kv, k_head_dim]
+    grad_key = lowerings[aten.as_strided](
+        broadcasted_grad_key, grad_key_size, grad_key_stride
+    )  # [Bkv, batch_group, grad_key.size(-3), grad_key.size(-2), grad_key.size(-1)]
+    grad_key = lowerings[aten.sum](
+        grad_key, axis=1
+    )  # [Bkv, Hkv, seq_len_kv, k_head_dim]
     grad_key = lowerings[aten.div](grad_key, batch_group)
 
-    grad_value = lowerings[aten.as_strided](broadcasted_grad_value, grad_key_size, grad_key_stride) # [Bkv, batch_group, grad_key.size(-3), grad_key.size(-2), grad_key.size(-1)]
+    grad_value = lowerings[aten.as_strided](
+        broadcasted_grad_value, grad_key_size, grad_key_stride
+    )  # [Bkv, batch_group, grad_key.size(-3), grad_key.size(-2), grad_key.size(-1)]
     grad_value = lowerings[aten.sum](grad_value, axis=1)
     grad_value = lowerings[aten.div](grad_value, batch_group)
 

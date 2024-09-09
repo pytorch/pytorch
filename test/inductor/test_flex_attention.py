@@ -619,12 +619,14 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
-    # @common_utils.parametrize("bkv", [1, 2])
+    @common_utils.parametrize("bkv", [1, 2])
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
-    def test_batch_size_broadcast(self, dtype: torch.dtype, score_mod: Callable):
+    def test_batch_size_broadcast(
+        self, bkv: int, dtype: torch.dtype, score_mod: Callable
+    ):
         Q_B, Q_H, Q_S, Q_D = B, H, S, D
-        KV_B, KV_H, KV_S, V_D = 2, H, S, D
+        KV_B, KV_H, KV_S, V_D = bkv, H, S, D
 
         q = torch.rand(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
@@ -674,7 +676,7 @@ class TestFlexAttention(InductorTestCase):
         #     v_ref,
         #     v_braodcasted,
         # )
-        breakpoint()
+
         self._check_out_and_grad(
             golden_out,
             ref_out,
