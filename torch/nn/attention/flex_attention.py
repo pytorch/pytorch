@@ -391,12 +391,59 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
-        mapped_attributes = tree_map_only(
-            torch.Tensor,
-            lambda x: x[index],
-            self.as_tuple(flatten=False),
+        """
+        Returns a new BlockMask instance by getting the mask for the given index position.
+
+        Args:
+            index: Index to apply to all attributes.
+
+        Example Usage:
+            .. code-block:: python
+
+                def causal_mask(b, h, q_idx, kv_idx):
+                    return q_idx >= kv_idx
+
+                block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device="cuda")
+                assert block_mask.kv_num_blocks.shape == (4,2,4)
+                assert block_mask.kv_indices.shape == (4,2,4,4)
+
+                # Index on batch dimension
+                new_block_mask = block_mask[0]
+                assert new_block_mask.kv_num_blocks.shape == (2,4)
+                assert new_block_mask.kv_indices.shape == (2,4,4)
+
+                # Index on batch and head dimension
+                new_block_mask = block_mask[0, 1]
+                assert new_block_mask.kv_num_blocks.shape == (4,)
+                assert new_block_mask.kv_indices.shape == (4,4)
+
+                # slicing on batch and head dimension
+                new_block_mask = block_mask[0:2, 1:2]
+                assert new_block_mask.kv_num_blocks.shape == (2,1,4)
+                assert new_block_mask.kv_indices.shape == (2,1,4,4)
+
+                # slicing on batch, head, and query dimension
+                new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
+                assert new_block_mask.kv_num_blocks.shape == (2,1,1)
+                assert new_block_mask.kv_indices.shape == (2,1,1,4)
+        """
+        new_kv_num_blocks = self.kv_num_blocks[index]
+        new_kv_indices = self.kv_indices[index]
+        if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
+            new_full_kv_num_blocks = self.full_kv_num_blocks[index]
+            new_full_kv_indices = self.full_kv_indices[index]
+        else:
+            new_full_kv_num_blocks = None
+            new_full_kv_indices = None
+        return BlockMask.from_kv_blocks(
+            new_kv_num_blocks,
+            new_kv_indices,
+            new_full_kv_num_blocks,
+            new_full_kv_indices,
+            BLOCK_SIZE=self.BLOCK_SIZE,
+            mask_mod=None,
         )
-        return BlockMask(*mapped_attributes)
 
     def __repr__(self):
         def shape_or_none(x: Optional[torch.Tensor]):

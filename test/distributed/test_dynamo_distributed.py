@@ -615,21 +615,17 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_fsdp_setattr(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
+            from torch._dynamo.utils import counters
+
+            counters.clear()
             m, inputs, correct_outputs = get_mutating_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
-            prof = torch._dynamo.utils.CompileProfiler()
-            fsdp_m = torch.compile(fsdp_m, backend=prof, fullgraph=False)
+            fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
-            FileCheck().check("Torchdynamo Profiler Report").check(
-                "Graph Breaks"
-            ).check_not(
-                "setattr(FSDPManagedNNModuleVariable(MutatingModel), state, ...)"
-            ).check_not(
-                "setattr(FSDPManagedNNModuleVariable(FullyShardedDataParallel), _is_root, ...)"
-            ).run(
-                prof.report()
-            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            first_graph_break = list(counters["graph_break"].keys())[0]  # noqa: RUF015
+            self.assertTrue("setattr" not in first_graph_break)
 
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
@@ -918,9 +914,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
 
-            # TODO: This should be possible to do inside the function, but
-            device = f"cuda:{self.rank}"
-
             @torch.compile()
             def f(x, y):
                 zx = x.shape
@@ -937,6 +930,28 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     torch.randn(data, device=self.rank),
                     torch.randn(data, device=self.rank),
                 )
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_missing_source(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            @torch.compile()
+            def f(rank, xs):
+                return xs[rank].sum()
+
+            xs = []
+            for _ in range(self.world_size):
+                xs.append(torch.randn(10, device=self.rank))
+
+            f(self.rank, xs)
 
             metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
