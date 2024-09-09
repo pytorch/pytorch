@@ -6224,7 +6224,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                 self.assertTrue(gradcheck(
                     lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
-                    (inp,)))
+                    (inp,), check_forward_ad=True))
 
         # test CPU against CUDA
         if TEST_CUDA:
@@ -6276,7 +6276,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                 self.assertTrue(gradcheck(
                     lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
-                    (inp,)))
+                    (inp,), check_forward_ad=True))
 
         # test CPU against CUDA
         if TEST_CUDA:
