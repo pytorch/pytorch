@@ -8,7 +8,7 @@ import re
 import sys
 import warnings
 from enum import Enum
-from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Callable, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import sympy
 
@@ -239,16 +239,20 @@ def reduction_project(reduction_type, acc):
 
 
 def transform_kernel_codes_under_inner_loop(
-    code: IndentedBuffer, idx: str, new_idx: str, loop_start, loop_end
-):
+    code: IndentedBuffer,
+    iter_var: sympy.Expr,
+    new_iter_var: str,
+    loop_start: sympy.Expr,
+    loop_end: sympy.Expr,
+) -> BracesBuffer:
     r"""
-    f(idx) is transformed to f(new_idx) under the inner loop
+    f(iter_var) is transformed to f(new_iter_var) under the inner loop
       \/
-    for (new_idx = loop_start; new_idx < loop_end; new_idx++) {
-        f(new_idx)
+    for (new_iter_var = loop_start; new_iter_var < loop_end; new_iter_var++) {
+        f(new_iter_var)
     }
     Please be careful while using this function, the variable defined
-    in f(idx) while not be used outside the for loop
+    in f(iter_var) will be invalid outside the for loop
     for example
     auto tmp0 = in_ptr[x0]; ->
     for (new_x0 = start; new_x0 < end; new_x0++){
@@ -259,7 +263,7 @@ def transform_kernel_codes_under_inner_loop(
     transformed_code = BracesBuffer()
     with contextlib.ExitStack() as stack:
         transformed_code.writeline(
-            f"for (long {new_idx} = {cexpr_index(loop_start)}; {new_idx} < {cexpr_index(loop_end)}; {new_idx}++)"
+            f"for (long {new_iter_var} = {cexpr_index(loop_start)}; {new_iter_var} < {cexpr_index(loop_end)}; {new_iter_var}++)"
         )
         stack.enter_context(transformed_code.indent())
         for _, line in enumerate(code._lines):
@@ -268,14 +272,21 @@ def transform_kernel_codes_under_inner_loop(
                 deferred_name = line.name
                 line = line.line
             assert isinstance(line, str)
-            new_line = re.sub(r"\b" + f"{idx}" + r"\b", f"{new_idx}", line)
+            new_line = re.sub(r"\b" + f"{iter_var}" + r"\b", f"{new_iter_var}", line)
             if deferred_name:
                 new_line = DeferredLine(deferred_name, new_line)  # type: ignore[assignment]
             transformed_code.writeline(new_line)
     return transformed_code
 
 
-def reduction_prefix_array(acc_var, acc_type, reduction_type, dtype, len, init_fn):
+def reduction_prefix_array(
+    acc_var: Union[str, CSEVariable],
+    acc_type: str,
+    reduction_type: str,
+    dtype: torch.dtype,
+    len: int,
+    init_fn,
+):
     """
     MSVC don't support dynamic array(VLA). So we use std::unique_ptr here.
     Ref: https://stackoverflow.com/questions/56555406/creating-dynamic-sized-array-using-msvc-c-compiler
@@ -301,7 +312,7 @@ def reduction_prefix_array(acc_var, acc_type, reduction_type, dtype, len, init_f
     return code_buffer
 
 
-def replace_acc_name(buffer, name, new_name):
+def replace_acc_name(buffer: IndentedBuffer, name: str, new_name: str):
     for i, line in enumerate(buffer._lines):
         if isinstance(line, DeferredLine):
             line.line = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line.line)
@@ -1765,7 +1776,7 @@ class CppKernel(Kernel):
         self.itervars: List[sympy.Symbol] = []
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
-        self.reduction_prefix_fn = []
+        self.reduction_prefix_fn: List[Callable] = []  # type: ignore[type-arg]
         self.reduction_suffix = IndentedBuffer()
         self.parallel_reduction_prefix = IndentedBuffer()
         self.parallel_reduction_suffix = IndentedBuffer()
@@ -1781,7 +1792,7 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
-        self.reduction_var_names = []
+        self.reduction_var_names: List[str] = []
 
     def _gen_parallel_reduction_buffers(
         self,
@@ -1828,7 +1839,7 @@ class CppKernel(Kernel):
         for var_name in self.reduction_var_names:
             replace_acc_name(self.stores, var_name, f"{var_name}_local")
 
-    def gen_body(self, code=None):
+    def gen_body(self, code: Optional[BracesBuffer] = None):
         if code is None:
             code = BracesBuffer()
         with contextlib.ExitStack() as stack:
@@ -1954,14 +1965,21 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
 
-    def _gen_reduction_prefix(self, acc, acc_type, rtype, dtype, init_fn):
+    def _gen_reduction_prefix(
+        self,
+        acc: Union[CSEVariable, str],
+        acc_type: str,
+        rtype: str,
+        dtype: torch.dtype,
+        init_fn,
+    ):
         # gen preduction prefix
         # if size is None, we will define and init a single reduction var
         # => float tmp_acc0 = 0;
         # else, we will define and init a reduction array
         # => float tmp_acc0_arr[size];
         # => for (int i = 0; i < size, i++) tmp_acc0_arr[i] = 0;
-        def inner(size=None):
+        def inner(size: Optional[int] = None):
             if size is None:
                 return f"{acc_type} {acc} = {init_fn(rtype, dtype)};"
             else:
@@ -1976,7 +1994,7 @@ class CppKernel(Kernel):
 
         return inner
 
-    def finalize_reduction_prefix(self, size=None):
+    def finalize_reduction_prefix(self, size: Optional[int] = None):
         for gen_fn in self.reduction_prefix_fn:
             self.reduction_prefix.splice(gen_fn(size))
 
@@ -2241,7 +2259,12 @@ class CppKernel(Kernel):
         expr = self.get_to_dtype_expr(src, dst_dtype, src_dtype)
         self.cse.cache[expr] = dst
 
-    def codegen_conditions(self, code, prefix=None, var=None):
+    def codegen_conditions(
+        self,
+        code: BracesBuffer,
+        prefix: Optional[str] = None,
+        var: Optional[sympy.Symbol] = None,
+    ):
         if prefix is None:
             prefix = ""
         if not self.active_ranges:
@@ -4015,14 +4038,16 @@ class CppKernelProxy(CppKernel):
                             )
                     code.splice(body)
 
-    def aggregate_reduction_buffers(self, inner_loop_reduction_outer_not, outer_loop):
-        def get_buffer_from_main_loop_kernel(attr):
+    def aggregate_reduction_buffers(
+        self, inner_loop_reduction_outer_not: bool, outer_loop: Optional["LoopLevel"]
+    ):
+        def get_buffer_from_main_loop_kernel(attr: str):
             main_kernel = self.kernels[0]
             if attr == "reduction_prefix":
                 main_kernel.finalize_reduction_prefix()
             getattr(self, attr).splice(getattr(main_kernel, attr))
 
-        def aggregate_reduction_prefix_suffix(outer_loop):
+        def aggregate_reduction_prefix_suffix(outer_loop: "LoopLevel"):
             assert len(self.kernels) >= 2
             main_loop_kernel = self.kernels[0]
             tail_loop_kernel = self.kernels[-1]
@@ -4045,7 +4070,6 @@ class CppKernelProxy(CppKernel):
 
             # Suffix
             suffix_buf = BracesBuffer()
-            assert outer_loop  # type: ignore[possibly-undefined]
             with contextlib.ExitStack() as stack:
                 if main_loop_kernel.codegen_conditions(
                     suffix_buf, "C10_LIKELY", outer_loop.var
@@ -4079,6 +4103,7 @@ class CppKernelProxy(CppKernel):
             self.reduction_suffix = suffix_buf
 
         if inner_loop_reduction_outer_not:
+            assert outer_loop
             aggregate_reduction_prefix_suffix(outer_loop)
         else:
             get_buffer_from_main_loop_kernel("reduction_prefix")
