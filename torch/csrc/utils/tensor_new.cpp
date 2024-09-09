@@ -215,13 +215,14 @@ void recursive_store(
   bool is_symfloat = torch::is_symfloat(obj);
   bool is_symint = torch::is_symint(obj);
   if (dim == ndim) {
-    auto new_obj = py::reinterpret_borrow<py::object>(obj);
     if (is_symfloat) {
+      auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymFloat>();
       const double double_val = val.guard_float(__FILE__, __LINE__);
       obj = Py_BuildValue("d", double_val);
     }
     if (is_symint) {
+      auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymInt>();
       const int64_t int_val = val.guard_int(__FILE__, __LINE__);
       obj = Py_BuildValue("i", int_val);
