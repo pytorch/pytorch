@@ -1038,7 +1038,9 @@ def cudagraphify_impl(
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
-    static_input_idxs = OrderedSet(remove_unaligned_input_idxs(inputs, static_input_idxs))  # type: ignore[arg-type]
+    static_input_idxs: OrderedSet[int] = OrderedSet(
+        remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
+    )
     copy_misaligned_inputs(inputs, check_input_idxs)  # type: ignore[arg-type]
 
     assert isinstance(inputs, list)
