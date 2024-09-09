@@ -140,12 +140,12 @@ def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFun
 @contextlib.contextmanager
 def setup_onnx_logging(verbose: bool):
     is_originally_enabled = _C._jit_is_onnx_log_enabled
-    if is_originally_enabled or verbose:
+    if is_originally_enabled or verbose:  # type: ignore[truthy-function]
         _C._jit_set_onnx_log_enabled(True)
     try:
         yield
     finally:
-        if not is_originally_enabled:
+        if not is_originally_enabled:  # type: ignore[truthy-function]
             _C._jit_set_onnx_log_enabled(False)
 
 
