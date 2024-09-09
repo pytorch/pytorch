@@ -97,7 +97,7 @@ RANK_TYPES = Union[
     List[List[int]],
     dist.ProcessGroup,
     DeviceMesh,
-    Tuple["dist._tensor.DeviceMesh", int],
+    Tuple["dist.tensor.DeviceMesh", int],
     str,
 ]
 

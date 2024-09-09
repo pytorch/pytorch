@@ -9,6 +9,7 @@ a functionalized version of the graph under compilation.
 """
 
 import collections
+import contextlib
 import logging
 from functools import wraps
 from typing import Callable, DefaultDict, Dict, List, Optional
@@ -55,33 +56,21 @@ log = logging.getLogger(__name__)
 static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
 
 
-# Workaround of https://github.com/pytorch/pytorch/issues/62027
-# tensor.contiguous() guarantees to return non-zero sorted-stride,
-# tensor.to(memory_format=torch.contiguous_format) can keep zero strides.
-def _tensor_to_memory_format(t: torch.Tensor, memory_format: torch.memory_format):
-    if memory_format == torch.contiguous_format:
-        return t.contiguous()
-
-    return t.to(memory_format=memory_format)
-
-
-# Note [Tangents must be contiguous]
-# We force tangents to be contiguous today.
+# Note [Tangents memory format]
+# We assume tangents memory format to be similar to corresponding output's memory_format.
 # The idea is that we are technically making a guess about the strides of our tangents,
 # while we trace out the joint.
-# Today, we force this guess to be correct by additioanlly calling contiguous()
-# on all tangents at runtime.
-# In the future, you could imagine lifting this restriction, since these contiguous()
-# calls can have noticeable perf overhead depending on the model.
+# If runtime specfied tangents will not have the same memory format as predicted traced tangents,
+# we coerce them at runtime to traced tangents memory format.
 def coerce_tangent(x, memory_format=torch.contiguous_format):
     if not isinstance(x, Tensor):
         return x
 
     out = x.detach()
     if not is_traceable_wrapper_subclass(out):
-        out = _tensor_to_memory_format(out, memory_format)
+        out = out.contiguous(memory_format=memory_format)
 
-    # Note [Tangents must be contiguous, Part 2]
+    # Note [Tangents memory format, Part 2]
     # In the same way that "what strides do we assigns to our tangents" is a question
     # that we can not answer (and therefore have to guess) as we trace the backward ahead-of-time,
     # The same applies to any tensor subclass metadata, when we have tangents that are subclasses.
@@ -110,14 +99,14 @@ def coerce_tangent(x, memory_format=torch.contiguous_format):
     if is_traceable_wrapper_subclass(out):
         attrs = out.__tensor_flatten__()[0]
 
-        if isinstance(memory_format, list):
-            for attr, memory_format_i in zip(attrs, memory_format):
-                setattr(out, attr, coerce_tangent(getattr(out, attr), memory_format_i))
-        else:
-            # Allow specify single memory_format for all subclass tensors,
-            # To avoid redundant recursive traverse of non-output tangent subclass.
-            for attr in attrs:
-                setattr(out, attr, coerce_tangent(getattr(out, attr), memory_format))
+        assert isinstance(memory_format, list)
+        for attr, memory_format_i in zip(attrs, memory_format):
+            elem = getattr(out, attr)
+            new_elem = coerce_tangent(elem, memory_format_i)
+
+            if elem is not new_elem:
+                # Execution of setattr(out, attr, new_elem) fails with Dynamo, workaround via __dict__
+                out.__dict__[attr] = new_elem
 
     return out
 
@@ -182,15 +171,18 @@ def run_functionalized_fw_and_collect_metadata(
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
         mode = FunctionalTensorMode(_allow_token_discovery=True)
-        with disable_above, mode:
+        suppress_pending = contextlib.nullcontext()
+        fake_mode = detect_fake_mode()
+        if fake_mode and (shape_env := fake_mode.shape_env):
+            suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
+        with disable_above, mode, suppress_pending:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.
-            if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
-                shape_env.pending_fresh_unbacked_symbols.clear()
+            if fake_mode:
                 fake_mode.epoch += 1
                 fake_mode.reset_nt_tensor_id_counter()
 
@@ -700,7 +692,7 @@ from a multi-output view call"
         output_tangents_start_idx = len(f_input_tangents)
         output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
 
-        def _subclass_structure(t):
+        def _subclass_tree_spec(t):
             if is_traceable_wrapper_subclass(t):
                 return list(t.__tensor_flatten__()[0])
             return None
@@ -709,7 +701,7 @@ from a multi-output view call"
             recursive_suggest_memory_format(tt)
             if (output_tangents_start_idx <= i and i < output_tangents_end_idx)
             else torch.utils._pytree.tree_map(
-                lambda _: torch.contiguous_format, _subclass_structure(tt)
+                lambda _: torch.contiguous_format, _subclass_tree_spec(tt)
             )
             for i, tt in enumerate(traced_tangents)
         ]

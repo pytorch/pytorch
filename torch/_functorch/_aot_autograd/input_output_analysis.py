@@ -49,7 +49,7 @@ def remove_dupe_metadata(
     other_traced_tangents = m.traced_tangents[num_data_mutations:]
     inp_traced_tangents = m.traced_tangents[:num_data_mutations]
     filtered_inp_traced_tangents = [
-        # See Note [Tangents must be contiguous]
+        # See Note [Tangents memory format]
         x
         for i, x in enumerate(inp_traced_tangents)
         if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
@@ -229,7 +229,7 @@ def create_synthetic_base_metadata(
         )
 
     inner_mutated_tangents = [
-        # See Note [Tangents must be contiguous]
+        # See Note [Tangents memory format]
         coerce_tangent(x)
         for inner_idx, x in enumerate(inner_args)
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad

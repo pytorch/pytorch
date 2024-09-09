@@ -10,7 +10,7 @@ import copy
 import itertools
 import unittest
 import warnings
-from contextlib import nullcontext
+from contextlib import ContextDecorator, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
@@ -5799,6 +5799,62 @@ def forward(self, tangents_1, tangents_2):
             self.assertEqual(ref_out2.requires_grad, out2.requires_grad)
 
 
+class GradsNoForceContiguousContextManager(ContextDecorator):
+    def __enter__(self):
+        # flake8: noqa: TOR901
+        self.lib = torch.library.Library("_mylib", "FRAGMENT")
+        self.d = {
+            torch.channels_last: 0,
+            torch.contiguous_format: 0,
+        }
+
+        self.lib.define("foo(Tensor x) -> Tensor")
+        self.lib.define("foo2(Tensor x) -> Tensor")
+
+        def foo_impl(a):
+            return a.clone()
+
+        def foo_meta(a):
+            return a.clone()
+
+        def foo2_impl(x):
+            self.d[torch._prims_common.suggest_memory_format(x)] += 1
+            return x.clone()
+
+        def foo2_meta(a):
+            return a.clone()
+
+        for backend in ["CPU", "CUDA"]:
+            self.lib.impl("foo", foo_impl, backend)
+            self.lib.impl("foo2", foo2_impl, backend)
+
+        self.lib.impl("foo", foo_meta, "Meta")
+        self.lib.impl("foo2", foo2_meta, "Meta")
+
+        def foo_bwd(ctx, grad):
+            torch.ops._mylib.foo2(grad)
+            return grad.clone()
+
+        torch.library.register_autograd("_mylib::foo", foo_bwd, lib=self.lib)
+
+        from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+        _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+        _register_effectful_op(torch.ops._mylib.foo2.default, _EffectType.ORDERED)
+
+        return self
+
+    def __exit__(self, type, value, tb):
+        self.lib._destroy()
+        return False
+
+    def reset_counters(self):
+        self.d = {
+            torch.channels_last: 0,
+            torch.contiguous_format: 0,
+        }
+
+
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
@@ -6029,99 +6085,147 @@ class TestAOTModuleSimplified(AOTTestCase):
     # But for models working in channels_last memory format this will add additional contiguous() calls.
     # The fix is predicting tangents memory format to be similar to outputs memory format.
     # And coerce runtime tangents to that traced memory format.
-    def test_channels_last_grads_no_force_contiguous_dense(self):
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+    def test_grads_no_force_contiguous_dense(self):
+        with GradsNoForceContiguousContextManager() as ctx:
 
-            def forward(self, x, y, cont_inp):
-                z = y + 3
-                y.mul_(2)
-                r = self.conv(x)
-                return r, r.transpose(0, 1), z.view(-1), z.transpose(0, 1), cont_inp * 2
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
 
-        m = M()
-        m.to(memory_format=torch.channels_last)
-        m.train()
+                def forward(self, x, y, cont_inp):
+                    z = y + 3
+                    y.mul_(2)
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return (
+                        r,
+                        r.transpose(0, 1),
+                        z.view(-1),
+                        z.transpose(0, 1),
+                        cont_inp * 2,
+                    )
 
-        def dense_inps():
-            return (
-                torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                    memory_format=torch.channels_last
-                ),
-                torch.randn(3, 2, 1, 1, requires_grad=True).to(
-                    memory_format=torch.channels_last
-                ),
-                torch.randn(3, 2, 1, 1, requires_grad=True),
-            )
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
 
-        ref_inps = dense_inps()
-        ref_outs = m(*ref_inps)
-        ref_outs[0].sum().backward()
-
-        inps = dense_inps()
-        outs = torch.compile(m, backend="inductor", fullgraph=True)(*inps)
-        s = outs[0].sum()
-        # Using torch.profiler to verify that no contiguous() calls happened
-        with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU],
-        ) as prof:
-            s.backward()
-
-        contiguous_events = [
-            event for event in prof.events() if event.name == "aten::contiguous"
-        ]
-        self.assertTrue(len(contiguous_events) == 0)
-
-    def test_channels_last_grads_no_force_contiguous_subclass(self):
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x, y):
-                r = self.conv(x)
-                return r, y + 1
-
-        m = M()
-        m.to(memory_format=torch.channels_last)
-        m.train()
-
-        def inps_fn():
-            return (
-                TwoTensor(
+            def dense_inps():
+                return (
                     torch.randn(2, 3, 5, 5, requires_grad=True).to(
                         memory_format=torch.channels_last
                     ),
-                    torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                    torch.randn(3, 2, 1, 1, requires_grad=True).to(
                         memory_format=torch.channels_last
                     ),
-                ),
-                torch.randn(3, 2, requires_grad=True).clone(),
+                    torch.randn(3, 2, 1, 1, requires_grad=True),
+                )
+
+            ref_inps = dense_inps()
+            ref_outs = m(*ref_inps)
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+            inps = dense_inps()
+            outs = torch.compile(m, backend="inductor", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+
+            self.assertEqual(ctx.d[torch.channels_last], 1)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_subclass(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x, y):
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return r, y + 1
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def inps_fn():
+                return (
+                    TwoTensor(
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                    ),
+                    torch.randn(3, 2, requires_grad=True).clone(),
+                )
+
+            ref_outs = m(*inps_fn())
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+            mc = M()
+            mc.to(memory_format=torch.channels_last)
+            mc.train()
+            outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps_fn())
+            outs[0].sum().backward()
+
+            self.assertEqual(ctx.d[torch.channels_last], 2)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_nested_subclass(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x):
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return r
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def inps_fn(x):
+                return (
+                    TwoTensor(
+                        TwoTensor(x.clone(), x.clone()), TwoTensor(x.clone(), x.clone())
+                    ),
+                )
+
+            x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
             )
+            ref_inps = inps_fn(x)
+            ref_outs = m(*ref_inps)
+            ref_outs[0].sum().backward()
 
-        ref_inps = inps_fn()
-        ref_outs = m(*ref_inps)
-        ref_outs[0].sum().backward()
+            ctx.reset_counters()
 
-        mc = M()
-        mc.to(memory_format=torch.channels_last)
-        mc.train()
-        inps = inps_fn()
-        outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
-        s = outs[0].sum()
-        with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU],
-        ) as prof:
-            s.backward()
+            mc = M()
+            mc.to(memory_format=torch.channels_last)
+            mc.train()
 
-        contiguous_events = [
-            event for event in prof.events() if event.name == "aten::contiguous"
-        ]
-        self.assertTrue(len(contiguous_events) == 0)
+            x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
+            )
+            inps = inps_fn(x)
+            outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+            self.assertEqual(ctx.d[torch.channels_last], 4)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
 
-    def test_channels_last_grads_no_force_contiguous_nested_subclass(self):
+    def test_benchmark_grads_no_force_contiguous_nested_subclass(self):
+        num_iters = 200
+        warmup_iters = 20
+
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -6142,93 +6246,66 @@ class TestAOTModuleSimplified(AOTTestCase):
                 ),
             )
 
-        x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
-            memory_format=torch.channels_last
-        )
-        ref_inps = inps_fn(x)
-        ref_outs = m(*ref_inps)
-        ref_outs[0].sum().backward()
-
-        mc = M()
-        mc.to(memory_format=torch.channels_last)
-        mc.train()
-
-        x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
-            memory_format=torch.channels_last
-        )
-        inps = inps_fn(x)
-        outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
-        s = outs[0].sum()
-
-        with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU],
-        ) as prof:
-            s.backward()
-
-        contiguous_events = [
-            event for event in prof.events() if event.name == "aten::contiguous"
+        benchmark_inps = [
+            inps_fn(
+                torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                    memory_format=torch.channels_last
+                )
+            )
+            for _ in range(num_iters)
         ]
-        self.assertTrue(len(contiguous_events) == 0)
 
-        # Benchmark Subclasses handling overhead
-        # import time
+        for i, inps in enumerate(benchmark_inps):
+            if i == warmup_iters:
+                torch._functorch._aot_autograd.profile.reset()
 
-        # benchmark_inps = [
-        #     inps_fn(
-        #         torch.randn(2, 3, 5, 5, requires_grad=True).to(
-        #             memory_format=torch.channels_last
-        #         )
-        #     )
-        #     for _ in range(100)
-        # ]
+            outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
 
-        # bwd_total_duration = 0
-        # for inps in benchmark_inps:
-        #     outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
-        #     s = outs[0].sum()
-        #     time_start = time.time()
-        #     s.backward()
-        #     bwd_duration = time.time() - time_start
-        #     bwd_total_duration += bwd_duration
+        events = torch._functorch._aot_autograd.profile.get_events()
 
-        # avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
-        # print(f"Benchmark subclass avg_bwd_duration:{avg_bwd_duration*1000} ms")
+        bwd_total_duration = sum(e.duration_sec for e in events)
+        avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
 
-        # class M2(torch.nn.Module):
-        #     def __init__(self) -> None:
-        #         super().__init__()
-        #         self.conv = torch.nn.Conv2d(3, 3, 3)
+        print(f"Benchmark SUBCLASS avg_bwd_duration:{avg_bwd_duration*1000} ms")
 
-        #     def forward(self, x0, x1, x2, x3):
-        #         return self.conv(x0), self.conv(x1), self.conv(x2), self.conv(x3)
+        class M2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
 
-        # m2 = M2()
-        # m2.to(memory_format=torch.channels_last)
-        # m2.train()
+            def forward(self, x0, x1, x2, x3):
+                return self.conv(x0), self.conv(x1), self.conv(x2), self.conv(x3)
 
-        # def inps_fn2(x):
-        #     return (x.clone(), x.clone(), x.clone(), x.clone())
+        m2 = M2()
+        m2.to(memory_format=torch.channels_last)
+        m2.train()
 
-        # benchmark_inps2 = [
-        #     inps_fn2(
-        #         torch.randn(2, 3, 5, 5, requires_grad=True).to(
-        #             memory_format=torch.channels_last
-        #         )
-        #     )
-        #     for _ in range(100)
-        # ]
+        def inps_fn2(x):
+            return (x.clone(), x.clone(), x.clone(), x.clone())
 
-        # bwd_total_duration = 0
-        # for inps in benchmark_inps2:
-        #     outs = torch.compile(m2, backend="aot_eager", fullgraph=True)(*inps)
-        #     s = outs[0].sum()
-        #     time_start = time.time()
-        #     s.backward()
-        #     bwd_duration = time.time() - time_start
-        #     bwd_total_duration += bwd_duration
+        benchmark_inps2 = [
+            inps_fn2(
+                torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                    memory_format=torch.channels_last
+                )
+            )
+            for _ in range(num_iters)
+        ]
 
-        # avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
-        # print(f"Benchmark no_subclass avg_bwd_duration:{avg_bwd_duration * 1000} ms")
+        for i, inps in enumerate(benchmark_inps2):
+            if i == warmup_iters:
+                torch._functorch._aot_autograd.profile.reset()
+
+            outs = torch.compile(m2, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+
+        events = torch._functorch._aot_autograd.profile.get_events()
+
+        bwd_total_duration = sum(e.duration_sec for e in events)
+        avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
+
+        print(f"Benchmark NO_SUBCLASS avg_bwd_duration:{avg_bwd_duration * 1000} ms")
 
 
 # entries in here don't work and need to be fixed.
