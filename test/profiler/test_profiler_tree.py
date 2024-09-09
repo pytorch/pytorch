@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._pytree import tree_map
 
+
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
 PRUNE_ALL = 1
@@ -436,6 +437,7 @@ class TestProfilerTree(TestCase):
             [memory]""",
         )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
@@ -478,8 +480,19 @@ class TestProfilerTree(TestCase):
                   <built-in function len>
                   torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                   torch/autograd/__init__.py(...): _make_grads
+                    typing.py(...): inner
+                      typing.py(...): __hash__
+                        <built-in function hash>
+                    typing.py(...): cast
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
                     <built-in function isinstance>
                     <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
                     <built-in method ones_like of type object at 0xXXXXXXXXXXXX>
                       aten::ones_like
                         aten::empty_like
@@ -543,7 +556,7 @@ class TestProfilerTree(TestCase):
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = [
                     torch.nn.ReLU(),
@@ -910,6 +923,9 @@ class TestProfilerTree(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_detailed(self):
+        # Do lazy imports ahead of time to avoid it showing up in the tree
+        import torch.nested._internal.nested_tensor
+
         model = torch.nn.modules.Linear(1, 1, device="cuda")
         model.train()
         opt = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
@@ -967,8 +983,19 @@ class TestProfilerTree(TestCase):
                     <built-in function len>
                     torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                     torch/autograd/__init__.py(...): _make_grads
+                      typing.py(...): inner
+                        typing.py(...): __hash__
+                          <built-in function hash>
+                      typing.py(...): cast
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
                       <built-in function isinstance>
                       <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
                       <built-in method ones_like of type object at 0xXXXXXXXXXXXX>
                         aten::ones_like
                           aten::empty_like

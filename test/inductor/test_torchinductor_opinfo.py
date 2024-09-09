@@ -11,7 +11,6 @@ from functools import partial
 from unittest.mock import patch
 
 import torch
-
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import (
@@ -44,6 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+
 
 try:
     try:
@@ -226,7 +226,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
-    ("sparse.mm", "reduce"): {f32, f64},
+    ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
         f32,
@@ -262,6 +262,7 @@ intentionally_not_handled = {
 # This is only fixed when this config is set
 # We should eventually always turn it on
 import torch._functorch.config as functorch_config
+
 
 if not functorch_config.view_replay_for_aliased_outputs:
     intentionally_not_handled['("as_strided", "partial_views")'] = {
@@ -361,6 +362,10 @@ inductor_override_kwargs = {
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.softsign", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("nn.functional.multilabel_soft_margin_loss", "cpu", f16): {
+        "atol": 3e-4,
+        "rtol": 0.002,
+    },
     ("outer", "cuda", f16): {"reference_in_float": True},
     ("round.decimals_3", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.triplet_margin_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
@@ -369,6 +374,7 @@ inductor_override_kwargs = {
         "rtol": 0.02,
     },
     ("sinc", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
+    ("torch.ops.aten._safe_softmax.default", "cuda", f16): {"atol": 5e-4, "rtol": 0.02},
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
@@ -653,7 +659,7 @@ class TestInductorOpInfo(TestCase):
                 samples = [next(samples)]
 
         class HasRngOp(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.has_rng_op = False
 

@@ -864,16 +864,16 @@ public:
     auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_NEQ_UQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF));
   }
-  Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator<=(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator<=(const Vectorized<c10::complex<float>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator>(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator>(const Vectorized<c10::complex<float>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator>=(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator>=(const Vectorized<c10::complex<float>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 

@@ -10,12 +10,13 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.debug import CommDebugMode
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -166,7 +167,7 @@ class TestEmbeddingOp(DTensorTestBase):
         self._run_embedding_op_test(mesh, 0, [6, 7, 6], 13, 22)
         self._run_embedding_op_test(mesh, 0, [34], 15, 14, padding_idx=10)
 
-        from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
+        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
 
         # test collectives
         embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)
@@ -182,6 +183,49 @@ class TestEmbeddingOp(DTensorTestBase):
             output.full_tensor()
             self.assertEqual(comm_mode.get_total_counts(), 1)
             self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
+
+    @with_comms
+    def test_multiple_embeddings_rowwise(self):
+        mesh = self.build_device_mesh()
+
+        inp = torch.randint(0, 10, (4, 4), device=self.device_type)
+        replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
+
+        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+
+        # case 1: two embeddings with the same shape, thus sharing the underying _MaskPartial
+        # and MaskBuffer, because of cache hit from sharding propagation
+
+        emb1 = torch.nn.Embedding(10, 23, device=self.device_type)
+        sharded_emb1 = self._apply_sharding(emb1, 0, mesh)
+        output1 = sharded_emb1(replicated_inp)
+
+        emb2 = torch.nn.Embedding(10, 29, device=self.device_type)
+        sharded_emb2 = self._apply_sharding(emb2, 0, mesh)
+        output2 = sharded_emb2(replicated_inp)
+
+        partial_placement1 = output1.placements[0]
+        self.assertIsInstance(partial_placement1, _MaskPartial)
+        output1.full_tensor()
+
+        partial_placement2 = output2.placements[0]
+        self.assertIsInstance(partial_placement2, _MaskPartial)
+        output2.full_tensor()
+
+        self.assertTrue(id(partial_placement1), id(partial_placement2))
+
+        # case 2: two embeddings with the same logical_dim_size, but different logical_shape
+        # thus they will have different _MaskPartial placements (with no cache hit)
+
+        emb3 = torch.nn.Embedding(10, 29, device=self.device_type)
+        sharded_emb3 = self._apply_sharding(emb3, 0, mesh)
+        output3 = sharded_emb3(replicated_inp)
+        partial_placement3 = output3.placements[0]
+        self.assertIsInstance(partial_placement3, _MaskPartial)
+        output2.full_tensor()
+
+        # not equal because of different logical_shape, despite of same logical_dim_size
+        self.assertNotEqual(partial_placement1, partial_placement3)
 
 
 if __name__ == "__main__":
