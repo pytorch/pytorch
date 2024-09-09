@@ -25,6 +25,11 @@ def autotune_remote_cache_default() -> Optional[bool]:
     return None
 
 
+# Enable auto_functionalized_v2 (enabled by default)
+enable_auto_functionalized_v2 = (
+    os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "0") == "1"
+)
+
 # add some debug printouts
 debug = False
 
@@ -59,6 +64,13 @@ force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
+
+# The default layout constraint for custom operators.
+# This must be the name of one of the layout constraint tags
+# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
+# If the custom op does not have a layout constraint tag already
+# then we assume the following applies.
+custom_op_default_layout_constraint = "flexible_layout"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -568,17 +580,18 @@ compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil
-
     try:
+        from libfb.py import parutil
+
         if __package__:
             global_cache_dir = parutil.get_dir_path(
                 os.path.join(__package__.replace(".", os.sep), "fb/cache")
             )
         else:
             global_cache_dir = parutil.get_dir_path("fb/cache")
-    except ValueError:
+    except (ValueError, ModuleNotFoundError):
         global_cache_dir = None
+
 else:
     global_cache_dir = None
 
@@ -594,6 +607,37 @@ comprehensive_padding = (
     os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
 )
 pad_channels_last = False
+
+# Disable comprehensive padding on the CPU
+disable_padding_cpu = True
+
+# The width of comprehensive padding, in bytes.
+# CUDA max memory transaction size is 128 bytes for a warp.
+padding_alignment_bytes = 128
+
+# Threshold on the minimum stride that will be padded.
+#
+# Don't align a too small stride since that causes too much memory increase.
+# Pad too small stride may also cause perf loss. We may result in many tiny data blocks
+# with gaps in between. That causes less coalesced GPU memory access!
+#
+# Initially we pick 320 as the threshold since for alignement=16,
+# that results in at most 5% memory cost.
+#
+# But later on we raise the threshold to 1024 to avoid interfere with persistent reduction.
+# Let's say an inner reduction has a row size 513. Inductor will generate
+# persistent reduction code.
+# If we do padding, the strides are not contiguous any more. Inductor
+# uses a much smaller threshold for persistent reduction in this case and
+# generates potentially worse non-persistent reduction code.
+#
+# This change turns HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
+# (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
+padding_stride_threshold = 1024
+
+# Enable padding outputs, even if they would not be padded in eager mode.
+# By default, we use the same strides as eager mode.
+pad_outputs = False
 
 # Whether to treat output of the backward graph as user visible.
 # For user visible outputs, inductor will make sure the stride matches with eager.
@@ -675,6 +719,12 @@ assume_aligned_inputs: bool = False
 # ignoring the unsupported args may lead to unexpected autotuning behavior: don't
 # set unless you know what you're doing.
 unsafe_ignore_unsupported_triton_autotune_args: bool = False
+
+# When True, we will check in scheduler.py _codegen that there are no "loops"
+# in the call stack; that is to say, the same frame multiple times.  This
+# ensures that a cProfile trace to this frame will be a straight line without
+# any cycles.
+check_stack_no_cycles_TESTING_ONLY: bool = False
 
 
 # config specific to codegen/cpp.py

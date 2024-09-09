@@ -135,7 +135,7 @@ def set_flags(
     _benchmark_limit=None,
     _deterministic=None,
     _allow_tf32=None,
-    _fp32_precision=None,
+    _fp32_precision="none",
 ):
     orig_flags = (
         torch._C._get_cudnn_enabled(),
@@ -167,7 +167,7 @@ def flags(
     benchmark_limit=10,
     deterministic=False,
     allow_tf32=True,
-    fp32_precision="default",
+    fp32_precision="none",
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
