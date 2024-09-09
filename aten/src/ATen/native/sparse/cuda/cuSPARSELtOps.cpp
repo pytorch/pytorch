@@ -32,26 +32,31 @@ thread_local bool handle_initialized = false;
 #ifdef USE_ROCM
 std::mutex g_hipSparseLtSupportCacheMutex;
 static std::unordered_map<int, bool> g_hipSparseLtSupportCache;
-const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
+const static std::unordered_set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
+
 static bool isHipSparseLtSupported(int idx) {
     {
         std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
-        if (g_hipSparseLtSupportCache.find(idx) != g_hipSparseLtSupportCache.end()) {
-            return g_hipSparseLtSupportCache[idx];
+        auto it = g_hipSparseLtSupportCache.find(idx);
+        if (it != g_hipSparseLtSupportCache.end()) {
+            return it->second;
         }
     }
+
+    bool result = false;
     try {
-        std::unique_ptr<hipDeviceProp_t> prop(at::cuda::getDeviceProperties(idx));
-        std::string arch{prop->gcnArchName};
-        bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
-        {
-            std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
-            g_hipSparseLtSupportCache[idx] = result;
-        }
-        return result;
-    } catch (const std::exception& e) {
-        return false;
+        auto prop = at::cuda::getDeviceProperties(idx);
+        result = (supported_archs.count(prop->gcnArchName) > 0) && (ROCM_VERSION >= 63000);
+    } catch (const std::exception&) {
+        // If an exception occurs, we assume it's not supported
     }
+
+    {
+        std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
+        g_hipSparseLtSupportCache[idx] = result;
+    }
+
+    return result;
 }
 #endif
 
