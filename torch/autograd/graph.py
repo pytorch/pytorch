@@ -108,6 +108,13 @@ class Node(abc.ABC):
             See :ref:`backward-hooks-execution` for more information on how when this hook
             is executed, and how its execution is ordered relative to other hooks.
 
+        .. note::
+            In the rare case where the hook is registered while the Node has already
+            begun execution, there is no longer any guarantee on :attr:`grad_outputs`
+            content (it might be as usual or empty depending on other factors). The
+            hook can still optionally return a new gradient to be used in place of
+            :attr:`grad_inputs` independent of :attr:`grad_outputs`.
+
         Example::
 
             >>> import torch
