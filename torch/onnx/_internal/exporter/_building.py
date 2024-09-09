@@ -465,6 +465,12 @@ def _construct_node(
         else:
             inputs.append(value)
 
+    # If final inputs are None, strip them in the graph
+    for input in reversed(inputs):
+        if input is not None:
+            break
+        inputs.pop()
+
     # Construct and filter out None attributes
     attributes = [
         attr
