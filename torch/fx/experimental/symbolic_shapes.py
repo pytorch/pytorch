@@ -4462,7 +4462,7 @@ class ShapeEnv:
         subst = {}
         for e in axioms:
             if e.free_symbols.issubset(expr.free_symbols):
-                subst.update(dict(self.get_implications(e)))
+                subst.update(dict(self.get_implications(self.simplify(e))))
 
         expr = expr.xreplace(subst)
 
@@ -5390,7 +5390,7 @@ class ShapeEnv:
 
             # canonicalise to remove equations that are trivially equal
             orig_expr = expr
-            expr = self.simplify(expr)
+
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
