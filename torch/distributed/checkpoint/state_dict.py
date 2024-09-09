@@ -581,7 +581,7 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
         # The optimizer state is initialized.
         return
 
-    # There are some stateless optimizers, like SGD. These optimizer will
+    # There are some stateless optimizers like SGD. These optimizer will
     # not return in the above test. So if gradients exist, we should also
     # return. If gradients do not exist, the following initialization should
     # not disturb SGD because the gradients and lr are both zero.
