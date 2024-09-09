@@ -3464,7 +3464,13 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    PyObject* x = PyObject_CallNoArgs(obj); // borrowed ref
+    PyObject* x = PyObject_CallNoArgs(obj);
+    if (x == nullptr) {
+      // Call failed, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+
     bool result = _guard_manager->check_nopybind(x);
     Py_DECREF(x);
     return result;
@@ -3477,7 +3483,14 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
           false, std::string("Not a callable obj ") + get_source(), 0);
     }
 
-    PyObject* x = PyObject_CallNoArgs(obj); // borrowed ref
+    PyObject* x = PyObject_CallNoArgs(obj);
+    if (x == nullptr) {
+      // Call failed, clear the exception and return false.
+      std::string exc_message = get_exception_message();
+      PyErr_Clear();
+      return GuardDebugInfo(false, exc_message, 0);
+    }
+
     GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
     Py_DECREF(x);
     return result;

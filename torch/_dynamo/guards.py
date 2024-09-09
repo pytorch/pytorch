@@ -1094,14 +1094,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif isinstance(source, WeakRefCallSource):
+        elif istype(source, WeakRefCallSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.weakref_call_manager(
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif isinstance(source, CallFunctionNoArgsSource):
+        elif istype(source, CallFunctionNoArgsSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.call_function_no_args_manager(
                 source=source_name,
