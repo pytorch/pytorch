@@ -546,7 +546,7 @@ inline void transpose_mxn_8x8(const float* src, int64_t ld_src, float* dst, int6
   TORCH_CHECK(M <= 8 && N <= 8, "transpose_mxn<float> expects M, N <= 8.");
   // load from src to registers
   __m256 input[8];
-  unsigned i;
+  int i;
   if (N == 8) {
     for (i = 0; i < M; ++i) {
       input[i] = _mm256_loadu_ps(&src[i * ld_src]);
