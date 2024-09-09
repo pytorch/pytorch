@@ -1,5 +1,6 @@
 # Owner(s): ["module: nestedtensor"]
 
+import ast
 import io
 import itertools
 import math
@@ -7215,7 +7216,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             expected_grad = nt.grad.clone().detach()
             nt.grad = None
 
-        compiled_output = g(nt)
+        from torch._inductor.utils import run_and_get_code
+
+        compiled_output, generated_code = run_and_get_code(g, nt)
         if requires_grad:
             compiled_output.backward(torch.ones_like(compiled_output))
             compiled_grad = nt.grad.clone().detach()
@@ -7223,7 +7226,37 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         self.assertEqual(compiled_output, expected_output, rtol=1e-3, atol=1e-3)
 
-        # TODO: Verify that computation fusion happens
+        # === Verify that computation fusion happens. ===
+        # Fallback op call -> fusion didn't happen.
+        fallback_op_calls_present = any(
+            "torch.ops.aten._padded_dense_to_jagged_forward.default("
+            in generated_code[i]
+            or "torch.ops.aten._jagged_to_padded_dense_forward.default("
+            in generated_code[i]
+            for i in range(len(generated_code))
+        )
+
+        # NB: Fusion isn't supported on CPU.
+        self.assertEqual("cuda" in device, not fallback_op_calls_present)
+
+        for i in range(len(generated_code)):
+            # Examine buffer construction lines in the generated code to determine
+            # whether fusion occurred. If fusion happens, a 3D buffer with shape
+            # (B, max_seqlen, D) should never be materialized.
+            buffer_constructions = [
+                line.strip()
+                for line in generated_code[i].split("\n")
+                if "empty_strided_cuda(" in line
+            ]
+
+            buffer_dims = [
+                # buffer dim == number of elements in the tensor size tuple arg
+                len(ast.parse(t).body[0].value.args[0].elts)
+                for t in buffer_constructions
+            ]
+
+            if "cuda" in device:
+                self.assertFalse(any(d == 3 for d in buffer_dims))
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
