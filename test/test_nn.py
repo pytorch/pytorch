@@ -11527,8 +11527,8 @@ class TestNNDeviceType(NNTestCase):
         print(logits.numel(), labels.numel(), loss.numel())
         self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
 
-    def _nll_loss_helper(self, input_size, reduction, expected, device):
-        input = torch.rand(input_size, requires_grad=True, device=device)
+    def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
+        input = torch.rand(input_size, requires_grad=True, device=device, dtype=dtype)
         num_channels = input_size[1]
         target_size = (input_size[0], ) + tuple(input_size[2:])
         target = torch.randint(num_channels, target_size, device=device)
@@ -11539,28 +11539,34 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqual(input.grad.size(), input.size())
 
-    def test_nll_loss_empty_tensor_reduction_none(self, device):
-        self._nll_loss_helper([0, 3], "none", torch.empty([0], device=device), device)
-        self._nll_loss_helper([0, 3, 5, 7], "none", torch.empty([0, 5, 7], device=device), device)
-        self._nll_loss_helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device), device)
-        self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device)
-        self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
+    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
+    @dtypes(torch.float)
+    def test_nll_loss_empty_tensor_reduction_none(self, device, dtype):
+        self._nll_loss_helper([0, 3], "none", torch.empty([0], device=device), device, dtype)
+        self._nll_loss_helper([0, 3, 5, 7], "none", torch.empty([0, 5, 7], device=device), device, dtype)
+        self._nll_loss_helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device), device, dtype)
+        self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device, dtype)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device, dtype)
 
-    def test_nll_loss_empty_tensor_reduction_mean(self, device):
+    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
+    @dtypes(torch.float)
+    def test_nll_loss_empty_tensor_reduction_mean(self, device, dtype):
         nan = torch.tensor(float('nan'), device=device)
-        self._nll_loss_helper([0, 3], "mean", nan, device)
-        self._nll_loss_helper([0, 3, 5, 7], "mean", nan, device)
-        self._nll_loss_helper([2, 3, 0, 7], "mean", nan, device)
-        self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device)
-        self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device)
+        self._nll_loss_helper([0, 3], "mean", nan, device, dtype)
+        self._nll_loss_helper([0, 3, 5, 7], "mean", nan, device, dtype)
+        self._nll_loss_helper([2, 3, 0, 7], "mean", nan, device, dtype)
+        self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device, dtype)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device, dtype)
 
-    def test_nll_loss_empty_tensor_reduction_sum(self, device):
+    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
+    @dtypes(torch.float)
+    def test_nll_loss_empty_tensor_reduction_sum(self, device, dtype):
         zero = torch.tensor(0, device=device)
-        self._nll_loss_helper([0, 3], "sum", zero, device)
-        self._nll_loss_helper([0, 3, 5, 7], "sum", zero, device)
-        self._nll_loss_helper([2, 3, 0, 7], "sum", zero, device)
-        self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
-        self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
+        self._nll_loss_helper([0, 3], "sum", zero, device, dtype)
+        self._nll_loss_helper([0, 3, 5, 7], "sum", zero, device, dtype)
+        self._nll_loss_helper([2, 3, 0, 7], "sum", zero, device, dtype)
+        self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device, dtype)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device, dtype)
 
     def test_nll_loss_total_weight_is_zero(self, device):
 
