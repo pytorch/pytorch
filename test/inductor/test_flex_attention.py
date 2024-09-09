@@ -212,14 +212,18 @@ H = 8
 S = 2048
 D = 64
 
+test_Hq_Hkv = [
+    (4, 2),
+    (8, 1),
+]
+
 test_Bq_Bkv = [
     (5, 1),
+    (4, 1),
+    (4, 2),
     (8, 1),
     (8, 2),
-    (16, 1),
-    (16, 2),
-    (16, 4),
-    (16, 16),
+    (8, 4),
 ]
 
 
@@ -631,10 +635,18 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_kv_batch_broadcast(
-        self, dtype: torch.dtype, batch_dims: Tuple[int, int], score_mod: Callable
+        self,
+        dtype: torch.dtype,
+        batch_dims: Tuple[int, int],
+        head_dims: Tuple[int, int],
+        score_mod: Callable,
     ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
         Bq, Bkv = batch_dims
         assert Bq % Bkv == 0
 
@@ -642,11 +654,50 @@ class TestFlexAttention(InductorTestCase):
             score_mod,
             dtype,
             Bq,
-            H,
+            Hq,
             S,
             D,
             Bkv,
-            H,
+            Hkv,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast_causal_mask(
+        self,
+        dtype: torch.dtype,
+        batch_dims: Tuple[int, int],
+        head_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq % Bkv == 0
+
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, enable_gqa=(not Hq == Hkv)
+        )
+
+        self.run_test_with_call(
+            attention,
+            torch.float16,
+            Bq,
+            Hq,
+            S,
+            D,
+            Bkv,
+            Hkv,
             S,
             D,
         )
