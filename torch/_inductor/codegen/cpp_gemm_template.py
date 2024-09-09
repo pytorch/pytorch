@@ -193,7 +193,8 @@ extern "C" {{export_declaration}}
 {%- if maybe_k_slicing %}
                 if (num_Kt_blocks > 1) {
                     const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
-                    local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + k_slice_id].reset({{ kernel.release_buffer(acc_buf_name) }});
+                    local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + k_slice_id].reset(
+                        {{ kernel.release_buffer(acc_buf_name) }});
                 } else
 {%- endif %}
                 {
