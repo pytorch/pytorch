@@ -440,7 +440,7 @@ inline at::Tensor newLikeFlat(
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
   return at::empty_strided(
-      sizes, strides, t.options().memory_format(c10::nullopt));
+      sizes, strides, t.options().memory_format(std::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -610,8 +610,6 @@ using SizeType = uint64_t;
 // this common case with `SYSCHECK`.
 // Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
-
-void checkForNan(const at::Tensor& tensor);
 
 namespace tcputil {
 

@@ -72,12 +72,12 @@ inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(c10::SymIn
 
 template <>
 inline typename remove_symint<std::optional<c10::SymInt>>::type unpackSymInt(std::optional<c10::SymInt> x) {
-  return x.has_value() ? c10::make_optional(x->guard_int(__FILE__, __LINE__)) : c10::nullopt;
+  return x.has_value() ? std::make_optional(x->guard_int(__FILE__, __LINE__)) : std::nullopt;
 }
 
 template <>
 inline typename remove_symint<at::OptionalSymIntArrayRef>::type unpackSymInt(at::OptionalSymIntArrayRef x) {
-  return x.has_value() ? c10::make_optional(C10_AS_INTARRAYREF_SLOW(*x)) : c10::nullopt;
+  return x.has_value() ? std::make_optional(C10_AS_INTARRAYREF_SLOW(*x)) : std::nullopt;
 }
 
 template<class Return, class... Args>

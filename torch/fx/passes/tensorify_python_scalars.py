@@ -1,7 +1,8 @@
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 
 import torch
+
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -13,8 +14,8 @@ from torch.fx.graph_module import GraphModule
 
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
+from torch.utils._sympy.reference import TensorReferenceAnalysis
 
-from torch.utils._sympy.reference import PythonReferenceAnalysis
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -56,6 +57,8 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 #  * What operators can I Tensor-ify?  (Anything with a Scalar argument)
 #  * How do I Tensor-ify a SymFloat sympy expression (Sympy -> Op Handler ->
 #    Tensor)
+#
+# TODO: make sure this runs before CPU->CUDA pass for cudagraph friendliness
 
 
 def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
@@ -64,6 +67,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
     from torch.fx.experimental.symbolic_shapes import CallMethodKey
 
     graph = gm.graph
+    tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, fx.Proxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, fx.Proxy] = {}
 
@@ -76,10 +80,11 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
         else:
             placeholders.add(node)
 
-    Analysis = PythonReferenceAnalysis
+    Analysis = TensorReferenceAnalysis
 
     def _sympy_interp(expr: sympy.Expr) -> fx.Proxy:
-        # sympy_interp() with hash consing
+        # sympy_interp() with hash consing, and special handling for
+        # generating constants correctly
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
 
@@ -93,14 +98,35 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                 graph.call_function(
                     torch.ops.aten.scalar_tensor.default,
                     (expr_to_sym_proxy[expr].node,),
-                )
+                ),
+                tracer=tracer,
+            )
+
+        # cache constants, why not
+        if isinstance(expr, (Integer, Number, BooleanAtom)):
+            dtype = None
+            c: Union[bool, int, float]
+            if isinstance(expr, BooleanAtom):
+                dtype = torch.bool
+                c = bool(expr)
+            elif isinstance(expr, sympy.Integer):
+                dtype = torch.int64
+                c = int(expr)
+            elif isinstance(expr, sympy.Number):
+                dtype = torch.double
+                c = float(expr)
+            expr_to_tensor_proxy[expr] = fx.Proxy(
+                graph.call_function(
+                    torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
+                ),
+                tracer=tracer,
             )
 
         if expr in expr_to_tensor_proxy:
             return expr_to_tensor_proxy[expr]
 
-        # base cases, don't cache
-        if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
+        # don't cache
+        if isinstance(expr, Symbol):
             return sympy_interp(Analysis, expr_to_tensor_proxy, expr)  # type: ignore[arg-type]
 
         # hash cons on arguments, run expr handler
@@ -141,14 +167,17 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                     ):
                         # TODO: dtype conversion, so that we don't keep at too
                         # low precision
-                        expr_to_tensor_proxy[s] = fx.Proxy(src_node.args[0])
-                        expr_to_sym_proxy[s] = fx.Proxy(src_node)
+                        assert isinstance(src_node.args[0], fx.Node), src_node.args[0]
+                        expr_to_tensor_proxy[s] = fx.Proxy(
+                            src_node.args[0], tracer=tracer
+                        )
+                        expr_to_sym_proxy[s] = fx.Proxy(src_node, tracer=tracer)
 
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
                 ):
-                    expr_to_sym_proxy[sym_expr] = fx.Proxy(node)
+                    expr_to_sym_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)
 
             # Look for functions to convert
             if node.op == "call_function" and node.target is torch.ops.aten.add.Tensor:
@@ -160,7 +189,11 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                     ):
                         transform = True
                         # TODO: populate meta on these
-                        res = _sympy_interp(zf.node.expr).node
+                        try:
+                            res = _sympy_interp(zf.node.expr).node
+                        except NotImplementedError:
+                            transform = False
+                            break
                         args.append(res)
                     else:
                         args.append(a)

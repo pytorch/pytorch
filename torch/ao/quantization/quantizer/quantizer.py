@@ -9,6 +9,7 @@ from torch.ao.quantization import ObserverOrFakeQuantize
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.fx import Node
 
+
 __all__ = [
     "Quantizer",
     "QuantizationSpecBase",
@@ -25,8 +26,6 @@ class QuantizationSpecBase(ABC):  # noqa: B024
     """Base class for different types of quantization specs that allows users to
     specify how to quantize a Tensor (input/output of a Node) in the model
     """
-
-    pass
 
 
 @dataclass(eq=True, frozen=True)
