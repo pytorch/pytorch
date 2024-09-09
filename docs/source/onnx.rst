@@ -37,7 +37,7 @@ Next example shows how to export a simple model.
         model,                  # model to export
         (input_tensor,),        # inputs of the model,
         "my_model.onnx",        # filename of the ONNX model
-        input_names=["input"],  # input names in the ONNX model
+        input_names=["input"],  # Rename inputs for the ONNX model
         dynamo=True             # True or False to select the exporter to use
     )
 
