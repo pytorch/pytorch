@@ -1,21 +1,22 @@
 # Python dependencies required for development
-astunparse==1.6.3
+astunparse
 expecttest!=0.2.0
-hypothesis==5.35.1
-numpy==1.20.3
-psutil==6.0.0
-pyyaml==6.0.1
-requests==2.32.3
-types-dataclasses==0.6.6
+hypothesis
+numpy<2
+psutil
+pyyaml
+requests
+setuptools
+types-dataclasses
 typing-extensions>=4.8.0
 sympy<=1.12.1
-filelock==3.13.1
-networkx==2.8.8
-jinja2==3.1.4
-fsspec==2024.6.1
-lintrunner==0.12.5
-ninja==1.9.0
+filelock
+networkx
+jinja2
+fsspec
+lintrunner
+ninja
 # setuptools was removed from default python install
-setuptools==69.5.1 ; python_version >= "3.12"
-packaging==24.1
-optree==0.11.0
+setuptools ; python_version >= "3.12"
+packaging
+optree>=0.11.0
