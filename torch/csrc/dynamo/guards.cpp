@@ -3465,7 +3465,9 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
     }
 
     PyObject* x = PyObject_CallNoArgs(obj); // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3476,7 +3478,9 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
     }
 
     PyObject* x = PyObject_CallNoArgs(obj); // borrowed ref
-    return _guard_manager->check_verbose_nopybind(x);
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   std::string repr() const override {
