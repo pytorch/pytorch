@@ -191,7 +191,7 @@ manual_torch_name_rule_map = {
     "torch.Tensor#_make_wrapper_subclass": SkipFunctionVariable,
     "torch.Tensor#__init__": SkipFunctionVariable,
     "torch.cuda.set_device": SkipFunctionVariable,
-    "torch.cuda.current_device": SkipFunctionVariable,
+    "torch.cuda.current_device": TorchInGraphFunctionVariable,
     "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
     "torch._C.autocast_increment_nesting": SkipFunctionVariable,
     "torch.autograd.grad": SkipFunctionVariable,
