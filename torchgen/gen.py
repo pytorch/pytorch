@@ -271,7 +271,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             )
         # Check for reserved Python keywords
         for arg in f.func.arguments.flat_all:
-            if keyword.iskeyword(arg.name)
+            if keyword.iskeyword(arg.name):
                 raise AssertionError(
                     f"Argument name '{arg.name}' in function '{f.func.name}' is a reserved Python keyword."
                 )
