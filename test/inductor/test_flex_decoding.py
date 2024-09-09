@@ -450,6 +450,52 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("k_s", test_input_strides)
+    @common_utils.parametrize("v_s", test_input_strides)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    def test_strided_inputs_broadcast(self, dtype: torch.dtype, k_s, v_s, head_dims):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bkv = 1
+
+        q1 = torch.randn((B * Hq * D), dtype=dtype, device="cuda")
+        k1 = torch.randn((Bkv * Hkv * S * D * 4), dtype=dtype, device="cuda")
+        v1 = torch.randn((Bkv * Hkv * S * D * 4), dtype=dtype, device="cuda")
+
+        k_shape = (Bkv, Hkv, S, D)
+        v_shape = (Bkv, Hkv, S, D)
+
+        q = q1.view(1, Hq, B, D).transpose(0, 2)
+
+        k_strides, k_offset = k_s(Bkv, Hkv, S, D)
+        k_max = [x * (y - 1) for x, y in zip(k_strides, k_shape)]
+        assert sum(k_max) + k_offset < Bkv * Hkv * S * D * 4
+        assert k_strides[-1] == 1
+        k = torch.as_strided(k1, k_shape, k_strides, k_offset)
+
+        v_strides, v_offset = v_s(Bkv, Hkv, S, D)
+        v_max = [x * (y - 1) for x, y in zip(v_strides, v_shape)]
+        assert sum(v_max) + v_offset < Bkv * Hkv * S * D * 4
+        assert v_strides[-1] == 1
+        v = torch.as_strided(v1, v_shape, v_strides, v_offset)
+
+        sdpa_partial = create_attention(
+            score_mod=_generate_alibi_bias(8),
+            block_mask=None,
+            enable_gqa=(not Hq == Hkv),
+        )
+        compiled_sdpa = torch.compile(sdpa_partial)
+        ref_out = sdpa_partial(q, k, v)
+        compiled_out = compiled_sdpa(q, k, v)
+
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(
+            ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_skip_odd_keys(self, dtype: torch.dtype):
         def score_mod(score, b, h, q, kv):

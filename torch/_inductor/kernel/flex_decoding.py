@@ -83,6 +83,7 @@ flex_decoding_template = TritonTemplate(
 
 
     Z = {{size("Q", 0)}}
+    ZKV = {{size("K", 0)}}
     HKV = {{size("Q", 1)}}
     G: tl.constexpr = GQA_SHARED_HEADS
     HQ = HKV * G
@@ -101,8 +102,8 @@ flex_decoding_template = TritonTemplate(
     off_t = tl.program_id(1)
 
     q_offset = off_z * stride_qz + off_hkv * stride_qh
-    k_offset = off_z * stride_kz + off_hkv * stride_kh
-    v_offset = off_z * stride_vz + off_hkv * stride_vh
+    k_offset = (off_z % ZKV) * stride_kz + off_hkv * stride_kh
+    v_offset = (off_z % ZKV) * stride_vz + off_hkv * stride_vh
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
@@ -338,7 +339,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq == Bkv, "Batch dimension must match"
     B = Bq
     kernel_options = dict(kernel_options)
 
