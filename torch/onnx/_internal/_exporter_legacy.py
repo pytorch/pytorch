@@ -419,15 +419,10 @@ def enable_fake_mode():
         ...     arg1,
         ...     export_options=export_options
         ... )
-        ... onnx_program.apply_weights(MyModel().state_dict())
         >>> # Saving model WITHOUT initializers
-        >>> onnx_program.save(
-        ...     "my_model_without_initializers.onnx",
-        ...     include_initializers=False,
-        ...     keep_initializers_as_inputs=True,
-        ... )
+        >>> onnx_program.save("my_model_without_initializers.onnx")
         >>> # Saving model WITH initializers
-        >>> onnx_program.save("my_model_with_initializers.onnx")
+        >>> onnx_program.save("my_model_with_initializers.onnx", model_state=MyModel().state_dict())
 
     .. warning::
         This API is experimental and is *NOT* backward-compatible.
