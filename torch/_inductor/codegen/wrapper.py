@@ -597,14 +597,10 @@ class WrapperCodeGen(CodeGen):
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
-        device_type = V.graph.scheduler.get_current_device_or_throw().type
         import_str = f"""
             import triton
             import triton.language as tl
             from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
-            from torch._inductor.runtime import triton_helpers
-
-            triton_helpers.set_driver_to_{"cpu" if device_type == "cpu" else "gpu"}()
             """
         self.imports.splice(import_str, strip=True)
         if config.triton.autotune_at_compile_time:
@@ -1631,7 +1627,6 @@ class WrapperCodeGen(CodeGen):
         elif isinstance(arg, list):
             return f"[{', '.join(self.generate_example_arg_value(a, type(a)) for a in arg)}]"
         else:
-            breakpoint()
             raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def _grid_dim_str(self, grid_per_dim):

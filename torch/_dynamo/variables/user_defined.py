@@ -16,6 +16,7 @@ from typing import Dict, Generic, List, TYPE_CHECKING
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function
@@ -378,8 +379,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
+            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+                items = args[0].force_unpack_var_sequence(tx)
             else:
                 unimplemented("deque() with more than 1 arg not supported")
             return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
@@ -509,7 +510,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 user_cls_source=self.source,
                 mutable_local=MutableLocal(),
             )
-        elif self.value in self._in_graph_classes():
+        elif (
+            self.value in self._in_graph_classes()
+            or is_traceable_wrapper_subclass_type(self.value)
+        ):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
             if (
@@ -745,7 +749,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert not (args or kwargs)
                 items = []
                 keys = self.call_method(tx, "keys", [], {})
-                for key in keys.unpack_var_sequence(tx):
+                for key in keys.force_unpack_var_sequence(tx):
                     items.append(
                         TupleVariable(
                             [key, self.odict_getitem(tx, key)],

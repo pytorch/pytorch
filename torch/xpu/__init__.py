@@ -388,19 +388,6 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
-def empty_cache() -> None:
-    r"""Release all unoccupied cached memory currently held by the caching
-    allocator so that those can be used in other XPU application.
-
-    .. note::
-        :func:`~torch.xpu.empty_cache` doesn't increase the amount of XPU
-        memory available for PyTorch. However, it may help reduce fragmentation
-        of XPU memory in certain cases.
-    """
-    if is_initialized():
-        torch._C._xpu_emptyCache()
-
-
 def _get_generator(device: torch.device) -> torch._C.Generator:
     r"""Return the XPU Generator object for the given device.
 
@@ -448,7 +435,29 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
     return default_generator.get_offset()
 
 
-from .random import *  # noqa: F403
+# import here to avoid circular import
+from .memory import (
+    empty_cache,
+    max_memory_allocated,
+    max_memory_reserved,
+    memory_allocated,
+    memory_reserved,
+    memory_stats,
+    memory_stats_as_nested_dict,
+    reset_accumulated_memory_stats,
+    reset_peak_memory_stats,
+)
+from .random import (
+    get_rng_state,
+    get_rng_state_all,
+    initial_seed,
+    manual_seed,
+    manual_seed_all,
+    seed,
+    seed_all,
+    set_rng_state,
+    set_rng_state_all,
+)
 
 
 __all__ = [
@@ -475,6 +484,14 @@ __all__ = [
     "is_initialized",
     "manual_seed",
     "manual_seed_all",
+    "max_memory_allocated",
+    "max_memory_reserved",
+    "memory_allocated",
+    "memory_reserved",
+    "memory_stats",
+    "memory_stats_as_nested_dict",
+    "reset_accumulated_memory_stats",
+    "reset_peak_memory_stats",
     "seed",
     "seed_all",
     "set_device",
