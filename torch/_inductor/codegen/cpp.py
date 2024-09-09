@@ -4045,7 +4045,7 @@ class CppKernelProxy(CppKernel):
                 get_buffer_from_main_loop_kernel("reduction_prefix")
 
             # Suffix
-            suffix_buf = self.reduction_suffix
+            suffix_buf = BracesBuffer()
             assert outer_loop  # type: ignore[possibly-undefined]
             with contextlib.ExitStack() as stack:
                 if main_loop_kernel.codegen_conditions(
@@ -4077,6 +4077,7 @@ class CppKernelProxy(CppKernel):
                         )
                     else:
                         suffix_buf.splice(tail_loop_kernel.reduction_suffix)
+            self.reduction_suffix = suffix_buf
 
         if inner_loop_reduction_outer_not:
             aggregate_reduction_prefix_suffix(outer_loop)
