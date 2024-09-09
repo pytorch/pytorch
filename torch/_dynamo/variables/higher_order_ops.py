@@ -1024,16 +1024,16 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, input, dim):
-            return combine_fn, input, dim
+        def arg_extractor(combine_fn, xs, dim):
+            return combine_fn, xs, dim
 
-        combine_fn, input, dim = arg_extractor(*args, **kwargs)
+        combine_fn, xs, dim = arg_extractor(*args, **kwargs)
 
-        if input.python_type() != list:
+        if xs.python_type() != list:
             unimplemented(
-                f"Expected input to be a list of tensors but got {input.python_type()}",
+                f"Expected xs to be a list of tensors but got {xs.python_type()}",
             )
-        assert isinstance(input, torch._dynamo.variables.lists.BaseListVariable)
+        assert isinstance(xs, torch._dynamo.variables.lists.BaseListVariable)
 
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
@@ -1056,7 +1056,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
                 },
             )
-            for leaf in itertools.chain(input.items, input.items)
+            for leaf in itertools.chain(xs.items, xs.items)
         ]
         (
             (combine_result, combine_treespec),
@@ -1082,9 +1082,9 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
             )
 
-        input_proxy = input.as_proxy()
+        xs_proxy = xs.as_proxy()
         combine_result_proxy = combine_result.as_proxy()
-        for result, inp_proxy in zip(combine_result_proxy, input_proxy):
+        for result, inp_proxy in zip(combine_result_proxy, xs_proxy):
             inp_meta = inp_proxy.node.meta["example_value"]
             combine_result_meta = result.node.meta["example_value"]
             if combine_result_meta.device != inp_meta.device:
@@ -1103,14 +1103,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         p_args = (
             make_attr(tx, combine_fn_name),
-            input_proxy,
+            xs_proxy,
             dim.as_proxy(),
         )
 
         with tx.fake_mode:
             out_meta = tuple(
-                inp_proxy.node.meta["example_value"].clone()
-                for inp_proxy in input_proxy
+                inp_proxy.node.meta["example_value"].clone() for inp_proxy in xs_proxy
             )
         return wrap_fx_proxy(
             tx=tx,
@@ -1137,19 +1136,19 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, init, input, dim, reverse):
-            return combine_fn, init, input, dim, reverse
+        def arg_extractor(combine_fn, init, xs, dim, reverse):
+            return combine_fn, init, xs, dim, reverse
 
-        combine_fn, init, input, dim, reverse = arg_extractor(*args, **kwargs)
+        combine_fn, init, xs, dim, reverse = arg_extractor(*args, **kwargs)
 
-        if input.python_type() != list:
+        if xs.python_type() != list:
             unimplemented(
-                f"Expected input to be a list of tensors but got {input.python_type()}",
+                f"Expected xs to be a list of tensors but got {xs.python_type()}",
             )
-        assert isinstance(input, torch._dynamo.variables.lists.BaseListVariable)
+        assert isinstance(xs, torch._dynamo.variables.lists.BaseListVariable)
         if init.python_type() != list:
             unimplemented(
-                f"Expected input to be a list of tensors but got {input.python_type()}",
+                f"Expected init to be a list of tensors but got {init.python_type()}",
             )
         assert isinstance(init, torch._dynamo.variables.lists.BaseListVariable)
 
@@ -1158,9 +1157,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if type(dim.as_proxy()) == int
             else get_fake_value(dim.as_proxy().node, tx)
         )
-        scan_length = get_fake_value(input.items[0].as_proxy().node, tx).size()[
-            dim_fake
-        ]
+        scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[dim_fake]
         if scan_length == 0:
             unimplemented(
                 "scan() operator doesn't support zero-sized tensors during tracing."
@@ -1208,7 +1205,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     .call_function(tx, [inp, ConstantVariable.create("shape")], {})
                     .items
                 )
-                for inp in input.items
+                for inp in xs.items
             ],
             True,
         )
@@ -1223,7 +1220,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     "requires_grad": SourcelessBuilder.create(tx, inp.requires_grad),
                 },
             )
-            for inp, inp_sh in zip(input.items, sub_args_inp_shapes)
+            for inp, inp_sh in zip(xs.items, sub_args_inp_shapes)
         ]
         sub_args = sub_args_init + sub_args_inp
         (
@@ -1250,10 +1247,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
             )
 
-        input_proxy = input.as_proxy()
+        xs_proxy = xs.as_proxy()
         init_proxy = init.as_proxy()
         combine_carry_proxy = combine_result.items[0].as_proxy()
-        combine_output_proxy = combine_result.items[1].as_proxy()
 
         # Checks for carry and init
         for ini_proxy, carry in zip(init_proxy, combine_carry_proxy):
@@ -1275,14 +1271,14 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             make_attr(tx, combine_fn_name),
             init_proxy,
-            input_proxy,
+            xs_proxy,
             dim.as_proxy(),
             reverse.as_proxy(),
         )
 
         with tx.fake_mode:
             # For the fake mode, we need to duplicate the init tensor along the dim
-            # to have the same size as the input arguments
+            # to have the same size as the xs arguments
             # We also do a clone with contiguous_format. This is to be consistent with
             # eager semantic of map, which stacks the outputs. The result is contiguous
             # as a result of the stack operation.

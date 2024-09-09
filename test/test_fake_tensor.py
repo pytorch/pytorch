@@ -932,7 +932,7 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.randn((3, 5, 7), device="cpu")
             init = torch.randn((3, 1, 7), device="cpu")
-            r = scan(add, init=init, input=x, dim=1, reverse=reverse)
+            r = scan(add, init=init, xs=x, dim=1, reverse=reverse)
 
         self.assertIsInstance(r[0], FakeTensor)
         self.assertIsInstance(r[1], FakeTensor)
