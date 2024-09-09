@@ -52,7 +52,7 @@ __all__ = [
     "dims",
     "export",
     "export_for_training",
-    "decomp_table_to_core_aten" "load",
+    "load",
     "register_dataclass",
     "save",
     "unflatten",
