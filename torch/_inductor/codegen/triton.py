@@ -3126,9 +3126,10 @@ class TritonScheduling(SIMDScheduling):
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
                 # the input values between benchmarking
-                ms = ms - benchmarker.benchmark_gpu(
-                    lambda: wrapped_jit_function.clone_args(*args)
-                )
+                if len(wrapped_jit_function.mutated_arg_names) > 0:
+                    ms = ms - benchmarker.benchmark_gpu(
+                        lambda: wrapped_jit_function.clone_args(*args)
+                    )
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run",
