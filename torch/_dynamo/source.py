@@ -608,7 +608,7 @@ class TorchFunctionModeStackSource(Source):
     ind: int
 
     def name(self):
-        return ""
+        return f"___get_torch_function_mode_stack_at({self._get_index()})"
 
     def _get_index(self):
         from .variables.torch_function import TorchFunctionModeStackVariable
