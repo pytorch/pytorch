@@ -3256,6 +3256,7 @@ MOD_INLINELIST = [
     "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
+    "torch.utils._device",
     "torch.utils._foreach_utils",
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
@@ -3590,7 +3591,9 @@ def lookup_inner(
             if reasons is not None:
                 reasons.add("func name is patched_init")
             return SkipFunctionVariable
-        elif name == "__torch_function__":
+        elif name == "__torch_function__" or (
+            obj and obj.__name__ == "__torch_function__"
+        ):
             if reasons is not None:
                 reasons.add("func name is __torch_function__")
             return UserFunctionVariable
