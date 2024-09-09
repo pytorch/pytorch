@@ -138,7 +138,7 @@ class GeneratedFileCleaner:
 
 
 # Follow UNIX convention for paths to use '/' instead of '\\' on Windows
-def to_unix_path(path: str) -> str:
+def _to_unix_path(path: str) -> str:
     return path.replace(os.sep, '/')
 
 def match_extensions(filename: str, extensions: Iterable) -> bool:
@@ -177,8 +177,8 @@ def matched_files_iter(
                 dirs.remove("third_party")
                 dirs.append("third_party/nvfuser")
         for filename in filenames:
-            filepath = to_unix_path(os.path.join(abs_dirpath, filename))
-            rel_filepath = to_unix_path(os.path.join(rel_dirpath, filename))
+            filepath = _to_unix_path(os.path.join(abs_dirpath, filename))
+            rel_filepath = _to_unix_path(os.path.join(rel_dirpath, filename))
             # We respect extensions, UNLESS you wrote the entire
             # filename verbatim, in which case we always accept it
             if (
@@ -825,7 +825,7 @@ def preprocessor(
         hipify_result.current_state = CurrentState.DONE
         return hipify_result
 
-    rel_filepath = to_unix_path(os.path.relpath(filepath, output_directory))
+    rel_filepath = _to_unix_path(os.path.relpath(filepath, output_directory))
 
     with open(fin_path, encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
@@ -1117,8 +1117,8 @@ def hipify(
     if not os.path.exists(output_directory):
         shutil.copytree(project_directory, output_directory)
 
-    includes = map(to_unix_path, includes)
-    ignores = map(to_unix_path, ignores)
+    includes = map(_to_unix_path, includes)
+    ignores = map(_to_unix_path, ignores)
 
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
