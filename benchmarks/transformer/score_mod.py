@@ -46,8 +46,8 @@ class ExperimentConfig:
 
     def __post_init__(self):
         assert (
-            len(self.shape) == 7
-        ), "Shape must be of length 6"  # [Bq, Hq, M, Bkv, Hkv, N, D]
+            len(self.shape) == 6
+        ), "Shape must be of length 6"  # [B, Hq, M, Hkv, N, D]
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary
@@ -55,7 +55,7 @@ class ExperimentConfig:
         # Remove the 'calculate_bwd_time' and `cal_bandwidth` key
         d.pop("calculate_bwd_time", None)
         d.pop("cal_bandwidth", None)
-        d["shape(Bq,Hq,M,Bkv,Hkv,N,D)"] = d.pop("shape")
+        d["shape(B,Hq,M,Hkv,N,D)"] = d.pop("shape")
         return d
 
 
@@ -83,10 +83,9 @@ class Experiment:
 
 
 def generate_inputs(
-    q_bsz: int,
+    batch_size: int,
     q_heads: int,
     q_sequence_length: int,
-    kv_bsz: int,
     kv_heads: int,
     kv_sequence_length: int,
     head_dim: int,
@@ -94,8 +93,8 @@ def generate_inputs(
     device: torch.device,
     requires_grad: bool,
 ):
-    q_shape = (q_bsz, q_sequence_length, q_heads * head_dim)
-    kv_shape = (kv_bsz, kv_sequence_length, kv_heads * head_dim)
+    q_shape = (batch_size, q_sequence_length, q_heads * head_dim)
+    kv_shape = (batch_size, kv_sequence_length, kv_heads * head_dim)
 
     assert q_heads % kv_heads == 0
 
@@ -107,10 +106,18 @@ def generate_inputs(
     make_kv = partial(
         torch.rand, kv_shape, device=device, dtype=dtype, requires_grad=requires_grad
     )
-    query = make_q().view(q_bsz, q_sequence_length, q_heads, head_dim).transpose(1, 2)
-    key = make_kv().view(kv_bsz, kv_sequence_length, kv_heads, head_dim).transpose(1, 2)
+    query = (
+        make_q().view(batch_size, q_sequence_length, q_heads, head_dim).transpose(1, 2)
+    )
+    key = (
+        make_kv()
+        .view(batch_size, kv_sequence_length, kv_heads, head_dim)
+        .transpose(1, 2)
+    )
     value = (
-        make_kv().view(kv_bsz, kv_sequence_length, kv_heads, head_dim).transpose(1, 2)
+        make_kv()
+        .view(batch_size, kv_sequence_length, kv_heads, head_dim)
+        .transpose(1, 2)
     )
     return query, key, value
 
@@ -121,12 +128,11 @@ def run_single_experiment(
     max_autotune=False,
 ) -> ExperimentResults:
     device = torch.device("cuda")
-    q_bsz, q_heads, q_seq_len, kv_bsz, kv_heads, kv_seq_len, head_dim = config.shape
+    batch_size, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim = config.shape
     query, key, value = generate_inputs(
-        q_bsz,
+        batch_size,
         q_heads,
         q_seq_len,
-        kv_bsz,
         kv_heads,
         kv_seq_len,
         head_dim,
@@ -141,7 +147,7 @@ def run_single_experiment(
 
     def eager_sdpa(query, key, value, attn_mask):
         out = F.scaled_dot_product_attention(query, key, value, attn_mask, **kwargs)
-        return out.reshape(q_bsz, q_heads, q_seq_len, head_dim)
+        return out.reshape(batch_size, q_heads, q_seq_len, head_dim)
 
     if max_autotune:
         compiled_sdpa = torch.compile(
@@ -502,7 +508,7 @@ def generate_flash_configs(
 def generate_experiment_configs(
     calculate_bwd: bool,
     dtype: torch.dtype,
-    batch_sizes: List[Tuple[int, int]],
+    batch_sizes: List[int],
     num_heads: List[Tuple[int, int]],
     seq_lens: List[int],
     head_dims: List[int],
@@ -543,9 +549,6 @@ def generate_experiment_configs(
             )
             if bsz <= 0:
                 continue
-            q_bsz, kv_bsz = bsz, bsz
-        else:
-            q_bsz, kv_bsz = bsz
 
         assert q_heads % kv_heads == 0
 
@@ -554,15 +557,7 @@ def generate_experiment_configs(
 
         all_configs.append(
             ExperimentConfig(
-                shape=(
-                    q_bsz,
-                    q_heads,
-                    q_seq_len,
-                    kv_bsz,
-                    kv_heads,
-                    kv_seq_len,
-                    head_dim,
-                ),
+                shape=(bsz, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim),
                 score_mod=score_mod,
                 mask_mod=mask_mod,
                 dtype=dtype,
@@ -583,7 +578,7 @@ def main(args):
         generate_experiment_configs(
             args.calculate_bwd,
             args.dtype,
-            args.nb,
+            args.b,
             args.nh,
             args.s,
             args.d,
@@ -607,12 +602,12 @@ def main(args):
     print_results(results, args.save_path)
 
 
-def tuple_input_type(s):
+def heads_input_type(s):
     try:
-        nq, nkv = map(int, s.split(","))
-        return nq, nkv
+        hq, hkv = map(int, s.split(","))
+        return hq, hkv
     except Exception as e:
-        raise argparse.ArgumentTypeError("tuple input must be nq,nkv") from e
+        raise argparse.ArgumentTypeError("Heads must be Hq,Hkv") from e
 
 
 if __name__ == "__main__":
@@ -632,15 +627,11 @@ if __name__ == "__main__":
     parser.add_argument("-dtype", type=str, help="dtype", default="bfloat16")
 
     parser.add_argument(
-        "-nb",
-        type=tuple_input_type,
-        nargs="+",
-        help="# of q-batches, kv-batches",
-        default=[(2, 2), (8, 8), (16, 16), (4, 1)],
+        "-b", type=int, nargs="+", help="batch sizes", default=[2, 8, 16]
     )
     parser.add_argument(
         "-nh",
-        type=tuple_input_type,
+        type=heads_input_type,
         nargs="+",
         help="# of q-heads,kv-heads",
         default=[(16, 16), (16, 2)],
