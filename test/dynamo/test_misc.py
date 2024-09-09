@@ -10430,7 +10430,6 @@ fn
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious_simplification(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
