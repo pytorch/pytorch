@@ -276,6 +276,15 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 
 } // namespace BCELoss
 
+static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
+  auto* div = [mpsGraph divisionWithPrimaryTensor:divident secondaryTensor:divisor name:@"divisionTensor"];
+  // Replace NaNs with 0 for divident elements equal to 0
+  return [mpsGraph selectWithPredicateTensor:castMPSTensor(mpsGraph, divisor, MPSDataTypeBool)
+                         truePredicateTensor:div
+                        falsePredicateTensor:[mpsGraph constantWithScalar:0.0 dataType:div.dataType]
+                                        name:nil];
+}
+
 // NLLLoss
 static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                      const Tensor& grad_output_arg,
@@ -362,9 +371,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                                             name:@"scaleByWeightTensor"];
       }
       if (reduction == Reduction::Mean) {
-        oneHotTensor = [mpsGraph divisionWithPrimaryTensor:oneHotTensor
-                                           secondaryTensor:totalWeightTensor
-                                                      name:@"divisionTensor"];
+        oneHotTensor = divisionNoNaN(mpsGraph, oneHotTensor, totalWeightTensor);
       }
       MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
                                                                   secondaryTensor:gradOutputTensor
