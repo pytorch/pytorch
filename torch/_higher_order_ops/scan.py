@@ -49,7 +49,10 @@ def scan(
     ],
     init: pytree.PyTree,
     xs: pytree.PyTree,
-    **kwargs,
+    /,
+    *,
+    dim: int = 0,
+    reverse: bool = False,
 ) -> Tuple[pytree.PyTree, pytree.PyTree]:
     r"""
     Performs an inclusive scan with a combine function.
@@ -97,20 +100,6 @@ def scan(
 
 
     """
-    # Unpack kwargs
-    if "dim" in kwargs:
-        dim = kwargs["dim"]
-        del kwargs["dim"]
-    else:
-        dim = 0
-    if "reverse" in kwargs:
-        reverse = kwargs["reverse"]
-        del kwargs["reverse"]
-    else:
-        reverse = False
-    if len(kwargs) > 0:
-        raise RuntimeError("Unexpected kwarg provided: {kwargs}")
-
     if not callable(combine_fn):
         raise RuntimeError("Combine_fn must be a callable, but got {combine_fn}")
     if not isinstance(dim, int):
@@ -131,7 +120,7 @@ def scan(
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
             return torch.compile(_scan_op_wrapper, backend="eager", fullgraph=True)(
-                combine_fn, init=init, xs=xs, dim=dim, reverse=reverse
+                combine_fn, init, xs, dim=dim, reverse=reverse
             )
 
     leaves_init, spec_init = pytree.tree_flatten(init)
