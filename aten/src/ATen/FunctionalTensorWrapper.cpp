@@ -490,8 +490,14 @@ c10::Device FunctionalTensorWrapper::device_custom() const {
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sizes();
 }
+int64_t FunctionalTensorWrapper::size_custom(int64_t d) const {
+  return value_.unsafeGetTensorImpl()->size(d);
+}
 at::IntArrayRef FunctionalTensorWrapper::strides_custom() const {
   return value_.unsafeGetTensorImpl()->strides();
+}
+int64_t FunctionalTensorWrapper::storage_offset_custom() const {
+  return value_.unsafeGetTensorImpl()->storage_offset();
 }
 int64_t FunctionalTensorWrapper::dim_custom() const {
   return value_.unsafeGetTensorImpl()->dim();
@@ -507,6 +513,9 @@ c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_strides_custom() const {
   return value_.unsafeGetTensorImpl()->sym_strides();
+}
+c10::SymInt FunctionalTensorWrapper::sym_numel_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_numel();
 }
 c10::SymInt FunctionalTensorWrapper::sym_size_custom(int64_t d) const {
   return value_.unsafeGetTensorImpl()->sym_size(d);
