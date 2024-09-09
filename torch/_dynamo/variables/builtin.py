@@ -871,7 +871,7 @@ class BuiltinVariable(VariableTracker):
                 except TypeError as exc:
                     unimplemented(f"wrong type/number of arguments given to the unfoldable op {fn.__name__}")
                 except IndexError as exc:
-                    unimplemented(f"list index out of range given to  the unfoldable op {fn.__name__}")
+                    unimplemented(f"list index out of range given to the unfoldable op {fn.__name__}")
                 except Exception as exc:
                     unimplemented(f"unfoldable op exception: {repr(exc)}")
                 return builder(tx, res)
