@@ -1586,8 +1586,6 @@ class WrapperCodeGen(CodeGen):
                 buf_name = arg
                 buf = V.graph.get_buffer(arg)
             else:
-                if raw_arg is None:
-                    breakpoint()
                 assert (
                     raw_arg is not None
                 ), "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
