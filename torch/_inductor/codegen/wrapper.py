@@ -592,6 +592,7 @@ class WrapperCodeGen(CodeGen):
 
                 async_compile = AsyncCompile()
                 generate_example_value = AlgorithmSelectorCache.generate_example_value
+                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
             """
         )
 
@@ -1493,8 +1494,12 @@ class WrapperCodeGen(CodeGen):
             "workspace", device, torch.uint8, shape=(nbytes,), stride=(1,)
         )
         self.writeline(line)
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.writeline(line)
         if zero_fill:
             self.writeline(f"workspace.zero_(){self.ending}")
+            if config.triton.autotune_at_compile_time:
+                self.kernel_autotune_calls.writeline(f"workspace.zero_(){self.ending}")
 
     def wrap_kernel_call(self, name, call_args):
         return f"{name}({', '.join(call_args)}){self.ending}"
@@ -1581,6 +1586,8 @@ class WrapperCodeGen(CodeGen):
                 buf_name = arg
                 buf = V.graph.get_buffer(arg)
             else:
+                if raw_arg is None:
+                    breakpoint()
                 assert (
                     raw_arg is not None
                 ), "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"

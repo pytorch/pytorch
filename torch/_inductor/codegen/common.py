@@ -1339,7 +1339,7 @@ class KernelArgs:
     def python_argdefs(self):
         arg_defs: List[str] = []
         call_args: List[str] = []
-        arg_types: List[torch.dtype] = []
+        arg_types: List[Union[torch.dtype, str]] = []
         precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
@@ -1380,6 +1380,7 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
+            arg_types.append(str)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
