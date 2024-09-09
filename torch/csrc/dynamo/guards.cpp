@@ -3485,7 +3485,7 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
 
     PyObject* x = PyObject_CallNoArgs(obj);
     if (x == nullptr) {
-      // Call failed, clear the exception and return false.
+      // Call failed, clear the exception and return debug info.
       std::string exc_message = get_exception_message();
       PyErr_Clear();
       return GuardDebugInfo(false, exc_message, 0);
