@@ -23,6 +23,7 @@ from torch._C._functorch import (
     _vmap_increment_nesting,
     is_batchedtensor,
 )
+from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import (
     _broadcast_to_and_flatten,
     tree_flatten,
@@ -307,6 +308,18 @@ def lazy_load_decompositions():
 
 
 def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
+    if has_torch_function(args):
+        return handle_torch_function(
+            vmap_impl,
+            args,
+            func,
+            in_dims,
+            out_dims,
+            randomness,
+            chunk_size,
+            *args,
+            **kwargs,
+        )
     lazy_load_decompositions()
     _check_out_dims_is_int_or_int_pytree(out_dims, func)
     batch_size, flat_in_dims, flat_args, args_spec = _process_batched_inputs(
@@ -341,7 +354,7 @@ def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
 
 
 def get_chunk_sizes(total_elems, chunk_size):
-    n_chunks = n_chunks = total_elems // chunk_size
+    n_chunks = total_elems // chunk_size
     chunk_sizes = [chunk_size] * n_chunks
     # remainder chunk
     remainder = total_elems % chunk_size
@@ -519,6 +532,8 @@ def wrap_batched(args, bdims, level):
 
 
 def unwrap_batched(args, level):
+    if has_torch_function(args):
+        return handle_torch_function(unwrap_batched, args, args, level)
     flat_args, spec = tree_flatten(args)
     if len(flat_args) == 0:
         return args, ()

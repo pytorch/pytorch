@@ -1506,6 +1506,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__dlpack__: lambda self, stream=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
+        torch._functorch.vmap.vmap_impl: lambda func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs: -1,
+        torch._functorch.eager_transform.grad_impl: lambda func, argnums, has_aux, args, kwargs: -1,
     }  # fmt: skip
 
     privateuse1_backend_name = (
@@ -1815,6 +1817,8 @@ def _get_overridable_functions() -> (
         ("torch.linalg", torch.linalg, dir(torch.linalg)),
         ("torch.fft", torch.fft, dir(torch.fft)),
         ("torch.special", torch.special, dir(torch.special)),
+        # maybe keep this private?
+        ("torch._functorch.vmap", torch._functorch.vmap, dir(torch._functorch.vmap)),
     ]
     for namespace_str, namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:

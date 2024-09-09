@@ -829,7 +829,7 @@ provides a developer-facing API for ensuring full support for
 changes without warning in the future.
 
 First, to get a listing of all overridable functions, use
-``torch.overrides._get_overridable_functions``. This returns a dictionary whose
+``torch.overrides.get_overridable_functions``. This returns a dictionary whose
 keys are namespaces in the ``PyTorch`` Python API and whose values are a list of
 functions in that namespace that can be overridden. For example, let's print the
 names of the first 5 functions in ``torch.nn.functional`` that can be
@@ -846,7 +846,7 @@ This listing of functions makes it possible to iterate over all overridable
 functions, however in practice this is not enough to write tests for all of
 these functions without laboriously and manually copying the signature of each
 function for each test. To ease this process, the
-``torch.overrides._get_testing_overrides`` function returns a dictionary mapping
+``torch.overrides.get_testing_overrides`` function returns a dictionary mapping
 overridable functions in the ``PyTorch`` API to dummy lambda functions that have
 the same signature as the original function but unconditionally return -1. These
 functions are most useful to use with ``inspect`` to analyze the function

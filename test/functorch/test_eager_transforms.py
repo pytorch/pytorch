@@ -246,6 +246,34 @@ class TestGradTransform(TestCase):
         result = grad(torch.sin)(x)
         self.assertEqual(result, torch.cos(x))
 
+    def test_primitive_extend(self, device):
+        class SuperTensor:
+            def __init__(self, t):
+                self.t = t
+
+            @classmethod
+            def __torch_function__(
+                cls,
+                func,
+                types,
+                args,
+                kwargs,
+            ):
+                if func is torch._functorch.eager_transforms.grad_impl:
+                    args, kwargs = tree_map(
+                        lambda arg: arg.t if isinstance(arg, SuperTensor) else arg,
+                        (args, kwargs),
+                    )
+                    out = torch._functorch.eager_transforms.grad_impl(*args, **kwargs)
+                    return SuperTensor(out)
+                return func(*args, **kwargs)
+
+        x = torch.randn([], device=device)
+        x = SuperTensor(x)
+        result = grad(torch.sin)(x)
+        self.assertTrue(lambda x: isinstance(x, SuperTensor), x)
+        self.assertEqual(result.t, torch.cos(x.t))
+
     def test_composite_simple(self, device):
         x = torch.randn(2, 3, 4, device=device)
         result = grad(lambda x: torch.flatten(x).sum())(x)

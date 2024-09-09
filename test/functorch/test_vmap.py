@@ -15,7 +15,7 @@ import types
 import unittest
 import warnings
 from collections import namedtuple
-from typing import OrderedDict
+from typing import Any, Callable, OrderedDict
 from unittest.case import skipIf
 
 from common_utils import (
@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.utils import _pytree as pytree
+from torch.utils._pytree import tree_map
 
 
 def get_platform_specific_sdpa():
@@ -1260,6 +1261,33 @@ class TestVmapAPI(TestCase):
             RuntimeError, "mutating directly with `.data` under vmap"
         ):
             torch.func.vmap(foo)(torch.randn(3, 3))
+
+    def test_vmap_extend(self):
+        class SuperTensor:
+            def __init__(self, t):
+                self.t = t
+
+            @classmethod
+            def __torch_function__(
+                cls,
+                func: Callable,
+                types: tuple[type, ...],
+                args: tuple[Any, ...] = (),
+                kwargs: dict[str, Any] | None = None,
+            ):
+                if func is torch._functorch.vmap.vmap_impl:
+                    args, kwargs = tree_map(
+                        lambda arg: arg.t if isinstance(arg, SuperTensor) else arg,
+                        (args, kwargs),
+                    )
+                    out = torch._functorch.vmap.vmap_impl(*args, **kwargs)
+                    return SuperTensor(out)
+                return func(*args, **kwargs)
+
+        inps = SuperTensor(torch.ones(())), SuperTensor(torch.ones((1,)))
+        out = torch.vmap(torch.add, (None, 0), 0)(*inps)
+        self.assertTrue(lambda out: isinstance(out, SuperTensor), out)
+        self.assertEqual(out.t, 2.0)
 
 
 def slice_inputs(inputs, bdims, i):
