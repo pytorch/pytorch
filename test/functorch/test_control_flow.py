@@ -2908,7 +2908,7 @@ def forward(self, fct_1, init_1, xs_1):
     getitem_1 = getitem[0];  getitem = None
     getitem_2 = scan[1];  scan = None
     getitem_3 = getitem_2[0];  getitem_2 = None
-    return (getitem_1, getitem_3)""",
+    return (getitem_1, getitem_3)""",  # noqa: B950
         )
 
         # Check graph
@@ -2933,7 +2933,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     getitem_1 = getitem[0];  getitem = None
     getitem_2 = scan[1];  scan = None
     getitem_3 = getitem_2[0];  getitem_2 = None
-    return (getitem_1, getitem_3)""",
+    return (getitem_1, getitem_3)""",  # noqa: B950
         )
 
 
