@@ -373,8 +373,8 @@ def export(
 
         if dynamic_shapes:
             raise ValueError(
-                "This version of the exporter only supports dynamic "
-                "shapes through parameter dynamic_axes."
+                "The exporter only supports dynamic shapes "
+                "through parameter dynamic_axes when dynamo=False."
             )
 
         export(
