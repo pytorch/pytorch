@@ -5390,6 +5390,7 @@ class ShapeEnv:
 
             # canonicalise to remove equations that are trivially equal
             orig_expr = expr
+            expr = self.simplify(expr)
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
