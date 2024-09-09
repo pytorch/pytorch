@@ -603,15 +603,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
     // create a buffer for tiles of B.
-    // TODO: loop-unrolling of the "compute" lambda may result in incorrect output
-    // as this buffer would be used, so maybe 4 of these should be used?
-    // Since UT output is correct, looks like loop unrolling isn't actually happening.
     alignas(64) {{input_t}} bf16_weights_buf[512];
 
     int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
     int b_tile_ptr_stride = ldb * {{vnni_size}};
 
-    // TODO: verify whether or not these lambdas inline
     auto load_B_row = [&]({{input2_t}}* src, {{input_t}}* dst) {
         {{kernel.unroll_pragma(2)}}
         for (int i = 0; i < 2; i++) {
@@ -801,6 +797,14 @@ def create_micro_gemm(
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
+                if (
+                    config.vec_isa_cls == VecAMX
+                    and m < block_m
+                    and input_dtype == torch.bfloat16
+                    and input2_dtype == torch.int8
+                ):
+                    # For int8 WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
+                    continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC
                 # 2. Dividable by block sizes (block_m, block_n, block_k)
