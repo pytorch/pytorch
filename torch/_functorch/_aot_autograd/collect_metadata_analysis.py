@@ -93,9 +93,8 @@ def coerce_tangent(x, memory_format=torch.contiguous_format):
         out, "__coerce_tangent_metadata__"
     ):
         out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
-    # It's possible to have a subclass that advertises as contiguous,
-    # but has noncontiguous inner tensors.
-    # Force these to be conntiguous too
+
+    # Coerce subclasses elements to memory_format too.
     if is_traceable_wrapper_subclass(out):
         attrs = out.__tensor_flatten__()[0]
 
@@ -109,6 +108,43 @@ def coerce_tangent(x, memory_format=torch.contiguous_format):
                 out.__dict__[attr] = new_elem
 
     return out
+
+
+def coerce_tangent_and_suggest_memory_format(
+    x: Tensor, force_memory_format: Optional[torch.memory_format] = None
+):
+    if not isinstance(x, Tensor):
+        return x
+
+    out = x.detach()
+    out_memory_format = []
+
+    suggest_memory_format = torch._prims_common.suggest_memory_format
+
+    if not is_traceable_wrapper_subclass(out):
+        memory_format = force_memory_format or suggest_memory_format(out)
+        out_memory_format = memory_format
+        out = out.contiguous(memory_format=memory_format)
+
+    if is_traceable_wrapper_subclass(out) and hasattr(
+        out, "__coerce_tangent_metadata__"
+    ):
+        out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
+
+    if is_traceable_wrapper_subclass(out):
+        attrs = out.__tensor_flatten__()[0]
+
+        for attr in attrs:
+            elem = getattr(out, attr)
+            new_elem, new_elem_memory_format = coerce_tangent_and_suggest_memory_format(
+                elem, force_memory_format
+            )
+            out_memory_format.append(new_elem_memory_format)
+            if elem is not new_elem:
+                # Execution of setattr(out, attr, new_elem) fails with Dynamo, workaround via __dict__
+                out.__dict__[attr] = new_elem
+
+    return out, out_memory_format
 
 
 # This is a version of functionalization that is specifically designed
@@ -678,40 +714,21 @@ from a multi-output view call"
             view_avoid_dupes_with_primals, traced_tangents
         )
 
-        def recursive_suggest_memory_format(t):
-            suggest_memory_format = torch._prims_common.suggest_memory_format
-            if is_traceable_wrapper_subclass(t):
-                return [
-                    recursive_suggest_memory_format(getattr(t, attr))
-                    for attr in t.__tensor_flatten__()[0]
-                ]
-
-            assert isinstance(t, Tensor)
-            return suggest_memory_format(t)
-
         output_tangents_start_idx = len(f_input_tangents)
         output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
 
-        def _subclass_tree_spec(t):
-            if is_traceable_wrapper_subclass(t):
-                return list(t.__tensor_flatten__()[0])
-            return None
-
-        traced_tangent_memory_formats = [
-            recursive_suggest_memory_format(tt)
-            if (output_tangents_start_idx <= i and i < output_tangents_end_idx)
-            else torch.utils._pytree.tree_map(
-                lambda _: torch.contiguous_format, _subclass_tree_spec(tt)
+        tangents_and_memory_formats = [
+            coerce_tangent_and_suggest_memory_format(
+                tt,
+                None
+                if (output_tangents_start_idx <= i and i < output_tangents_end_idx)
+                else torch.contiguous_format,
             )
             for i, tt in enumerate(traced_tangents)
         ]
 
-        traced_tangents = [
-            coerce_tangent(tt, mf)
-            for tt, mf in zip(traced_tangents, traced_tangent_memory_formats)
-        ]
-
-        user_outs = pytree.tree_map(from_fun, f_output_tangents)
+        traced_tangents = [t[0] for t in tangents_and_memory_formats]
+        traced_tangent_memory_formats = [t[1] for t in tangents_and_memory_formats]
 
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []
