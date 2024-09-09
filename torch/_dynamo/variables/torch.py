@@ -1133,6 +1133,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
     def torch_function_override_enabled(self, tx, args, kwargs):
         return (
             self.get_function() in get_overridable_functions()
-            or self.get_function().__module__.startswith("torch._ops")
-            and can_dispatch_torch_function(tx, args, kwargs)
-        )
+            or isinstance(
+                self.get_function(),
+                (torch._ops.OpOverload, torch._ops.OpOverloadPacket),
+            )
+        ) and can_dispatch_torch_function(tx, args, kwargs)
