@@ -804,7 +804,7 @@ def logsumexp(
         dim = (dim,)
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.amax(torch.real(self), dim, keepdim=True)
     maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
     maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
@@ -3549,12 +3549,6 @@ def istft(
     y = y.narrow(dim=1, start=start, length=length)
     window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
 
-    window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
-    torch._check(
-        not window_envelop_lowest.item(),
-        lambda: "window overlap add min less than 1e-11",
-    )
-
     y = y / window_envelop
     if original_ndim == 2:
         y = y.squeeze(0)
@@ -5917,7 +5911,7 @@ def triu_indices(
 @register_decomposition(aten.bucketize)
 @out_wrapper(exact_dtype=True)
 def bucketize(
-    a: TensorLikeType,
+    a: TensorOrNumberLikeType,
     boundaries: TensorLikeType,
     *,
     out_int32: bool = False,
@@ -5928,6 +5922,7 @@ def bucketize(
         lambda: f"boundaries tensor must be 1 dimension but got dim({boundaries.dim()})",
     )
 
+    a = a if isinstance(a, torch.Tensor) else torch.tensor(a)
     out_dtype = torch.int32 if out_int32 else torch.int64
     n_boundaries = boundaries.shape[-1]
     if n_boundaries == 0:

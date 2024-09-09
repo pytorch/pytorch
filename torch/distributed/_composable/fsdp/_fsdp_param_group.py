@@ -337,7 +337,7 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
-            if default_prefetch:
+            if default_prefetch and not ca.compiled_autograd_enabled:
                 self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
@@ -617,7 +617,6 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
         ctx.param_group = param_group
-        ctx.set_materialize_grads(False)
         return inputs
 
     @staticmethod

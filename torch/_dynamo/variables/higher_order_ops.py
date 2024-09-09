@@ -606,6 +606,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_set_grad_enabled":
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "auto_functionalized":
+            return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1033,9 +1035,25 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
-        null_shape = SourcelessBuilder.create(tx, ())
         sub_args = [
-            leaf.call_method(tx, "new_empty", args=(null_shape,), kwargs={})
+            leaf.call_method(
+                tx,
+                "new_empty",
+                args=(
+                    SourcelessBuilder.create(
+                        tx,
+                        leaf.size
+                        if leaf.size is not None
+                        else BuiltinVariable(getattr)
+                        .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
+                        .items,
+                    ),
+                ),
+                kwargs={
+                    "dtype": SourcelessBuilder.create(tx, leaf.dtype),
+                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
+                },
+            )
             for leaf in itertools.chain(input.items, input.items)
         ]
         (
@@ -1076,11 +1094,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 unimplemented(
                     f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
                     + f"got {combine_result_meta.dtype}"
-                )
-
-            if combine_result_meta.shape != ():
-                unimplemented(
-                    f"Expected combine_fn to return a tensor with shape () but got {combine_result_meta.shape}"
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
@@ -1727,6 +1740,26 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        p_args = tuple(arg.as_proxy() for arg in args)
+        p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=None,
+        )
+
+
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     """
     Handles torch._dynamo._trace_wrapped_higher_order_op.inner_trace
@@ -1985,6 +2018,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
+            enable_grad=False,
             set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
@@ -2055,6 +2089,20 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # This is bug prone as if there's code after the output node, then
         # graph.output will append the output at the very end
         # This might be a behavior difference
+
+        # If users call ctx.mark_non_differentiable, we should capture these output tensors who
+        # are marked as non-differentiable and pass them to ApplyTemplate
+        # at torch._functorch.autograd_function.AutogradFunctionApply for reconstruction.
+        non_differentiable_idx = []
+        if ctx.non_differentiable is not None:
+            non_differentiable_set = set(ctx.non_differentiable)
+            assert isinstance(fwd_out, variables.BaseListVariable)
+            for i, x in enumerate(fwd_out.items):
+                if (
+                    isinstance(x, variables.TensorVariable)
+                    and x.as_proxy() in non_differentiable_set
+                ):
+                    non_differentiable_idx.append(i)
 
         # Rewrite the output of fwd_graph to (output, stuff_necessary_for_bwd)
         for node in fwd_graph.find_nodes(op="output"):
@@ -2175,7 +2223,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 "call_function",
                 autograd_function_apply,
                 args=p_args,
-                kwargs={"args_tensor_mask": args_tensor_mask},
+                kwargs={
+                    "args_tensor_mask": args_tensor_mask,
+                    "non_differentiable_idx": non_differentiable_idx,
+                },
             ),
             example_value=example_value,
         )

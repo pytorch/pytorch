@@ -20,12 +20,12 @@ from torch.distributed._composable.fsdp import (
     register_fsdp_forward_method,
 )
 from torch.distributed._tensor import DTensor, init_device_mesh
-from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
     apply_activation_checkpointing,
 )
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
