@@ -586,7 +586,7 @@ struct FooHooksArgs : public at::PrivateUse1HooksArgs {};
 struct FooHooksInterface : public at::PrivateUse1HooksInterface {
     FooHooksInterface(FooHooksArgs) {}
     ~FooHooksInterface() override = default;
-    const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) override {
+    const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) const override {
       static auto device_gen = make_generator_privateuse1(device_index);
       return device_gen;
     }
