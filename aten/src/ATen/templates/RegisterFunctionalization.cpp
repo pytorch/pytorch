@@ -14,6 +14,7 @@
 #else
 // needed for the meta tensor calls to get stride info in functionalization
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/as_strided_native.h>
 // needed for special handling of copy_().
 // See Note [functionalizating copy_() and not preserving strides]
@@ -58,7 +59,7 @@ inline Tensor to_meta(const Tensor& t) {
   if (!t.defined()) return t;
 
   // Fast path: storage offset is 0.
-  if (t.sym_storage_offset().sym_eq(0)) {
+  if (TORCH_GUARD_SIZE_OBLIVIOUS(t.sym_storage_offset().sym_eq(0))) {
     return at::native::empty_strided_meta_symint(
         t.sym_sizes(),
         t.sym_strides(),
