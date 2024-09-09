@@ -106,6 +106,7 @@ __device__ __forceinline__ void checkChunk(BytePack* ptr) {
 
 template <typename T>
 __global__ void checkForNaN(T* data, size_t size) {
+  constexpr int EltPerPack = sizeof(BytePack) / sizeof(T);
   // Offset of current thread
   size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -138,7 +139,14 @@ __global__ void checkForNaN(T* data, size_t size) {
   // We just do regular load and check
   for (; offset < sizeInBP; offset += blockDim.x * gridDim.x) {
     BytePack tmp = ptr[offset];
-    CheckBytePack<T, sizeof(BytePack)/sizeof(T)>::check(&tmp);
+    CheckBytePack<T, EltPerPack>::check(&tmp);
+  }
+
+  // We can still have a tail smaller than 1 BytePack
+  // TODO: merge this tail check with head check to make them concurrent
+  if (threadIdx.x < size % EltPerPack) {
+    T* tailPtr = (T*)(ptr + sizeInBP);
+    if (isnan(tailPtr[threadIdx.x])) __trap();
   }
 }
 
