@@ -1252,13 +1252,8 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
     )
 
     def is_last_dim_stride1(x):
-        if isinstance(x.layout, ir.FixedLayout):
-            return x.get_stride()[-1] == 1
-
-        if isinstance(x.data, ir.ComputedBuffer):
-            return x.data.get_fill_order()[-1] == 0
-
-        return False
+        x.freeze_layout()
+        return x.get_stride()[-1] == 1
 
     return (
         layout.dtype in layout_dtypes
