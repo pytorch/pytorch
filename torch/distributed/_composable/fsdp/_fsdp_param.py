@@ -611,7 +611,7 @@ class FSDPParam:
             graph inputs. They are created within the graph and is guaranteed to be freed
             by the end of the graph. They don't leak outside of the graph.
             """
-            free_storage(self._unsharded_param)
+            self._unsharded_param.untyped_storage().resize_(0)
             self.all_gather_outputs = []
             self._unsharded_inner_tensors = []
         else:
