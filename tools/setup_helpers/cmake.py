@@ -204,7 +204,6 @@ class CMake:
                     "UBSAN_FLAGS",
                     "BLAS",
                     "WITH_BLAS",
-                    "BUILDING_WITH_TORCH_LIBS",
                     "CUDA_HOST_COMPILER",
                     "CUDA_NVCC_EXECUTABLE",
                     "CUDA_SEPARABLE_COMPILATION",
@@ -231,6 +230,7 @@ class CMake:
                     "SELECTED_OP_LIST",
                     "TORCH_CUDA_ARCH_LIST",
                     "TRACING_BASED",
+                    "PYTHON_LIB_REL_PATH",
                 )
             }
         )

@@ -59,6 +59,30 @@ jobs:
           cat <<EOF > runner_determinator.py
           # flake8: noqa: G004
 
+          """
+          This runner determinator is used to determine which set of runners to run a
+          GitHub job on. It uses the first comment of a GitHub issue (by default
+          https://github.com/pytorch/test-infra/issues/5132) as a user list to determine
+          which users will get their jobs to run on experimental runners. This user list
+          is also a comma separated list of additional features or experiments which the
+          user could be opted in to.
+
+          The user list has the following rules:
+
+          - Users are GitHub usernames with the @ prefix
+          - If the first line is a "*" then all users will use the new runners
+          - If the first line is a "!" then all users will use the old runners
+          - Each user is also a comma-separated list of features/experiments to enable
+          - A "#" prefix indicates the user is opted out of the new runners but is opting
+            into features/experiments.
+
+          Example user list:
+
+              @User1
+              @User2,amz2023
+              #@UserOptOutOfNewRunner,amz2023
+          """
+
           import logging
           import os
           from argparse import ArgumentParser
@@ -71,8 +95,13 @@ jobs:
 
           WORKFLOW_LABEL_META = ""  # use meta runners
           WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
+          WORKFLOW_LABEL_LF_CANARY = "lf.c."  # use canary runners from the linux foundation
+
+          RUNNER_AMI_LEGACY = ""
+          RUNNER_AMI_AMZ2023 = "amz2023"
 
           GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
+          GH_OUTPUT_KEY_AMI = "runner-ami"
           GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
 
 
@@ -167,11 +196,14 @@ jobs:
 
 
           def get_potential_pr_author(
-              gh: Github, repo: str, username: str, ref_type: str, ref_name: str
+              github_token: str, repo: str, username: str, ref_type: str, ref_name: str
           ) -> str:
               # If the trigger was a new tag added by a bot, this is a ciflow case
               # Fetch the actual username from the original PR. The PR number is
               # embedded in the tag name: ciflow/<name>/<pr-number>
+
+              gh = get_gh_client(github_token)
+
               if username == "pytorch-bot[bot]" and ref_type == "tag":
                   split_tag = ref_name.split("/")
                   if (
@@ -193,22 +225,32 @@ jobs:
 
 
           def is_exception_branch(branch: str) -> bool:
+              """
+              Branches that get opted out of all experiments and should always use Meta runners
+              """
               return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
 
-          def get_workflow_type(issue: Issue, workflow_requestors: Iterable[str]) -> str:
-              try:
-                  first_comment = issue.get_comments()[0].body.strip("\n\t ")
+          def get_fleet(rollout_state: str, workflow_requestors: Iterable[str]) -> str:
+              """
+              Determines if the job should run on the LF fleet or the Meta fleet
 
-                  if first_comment[0] == "!":
+              Returns:
+                  The appropriate label prefix for the runner, corresponding to the fleet to use.
+                  This gets prefixed to the very start of the runner label.
+              """
+
+              try:
+                  if rollout_state[0] == "!":
                       log.info("LF Workflows are disabled for everyone. Using meta runners.")
                       return WORKFLOW_LABEL_META
-                  elif first_comment[0] == "*":
+                  elif rollout_state[0] == "*":
                       log.info("LF Workflows are enabled for everyone. Using LF runners.")
                       return WORKFLOW_LABEL_LF
                   else:
                       all_opted_in_users = {
-                          usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split()
+                          usr_raw.strip("\n\t@ ").split(",")[0]
+                          for usr_raw in rollout_state.split()
                       }
                       opted_in_requestors = {
                           usr for usr in workflow_requestors if usr in all_opted_in_users
@@ -231,42 +273,111 @@ jobs:
                   return WORKFLOW_LABEL_META
 
 
+          def get_optin_feature(
+              rollout_state: str, workflow_requestors: Iterable[str], feature: str, fallback: str
+          ) -> str:
+              """
+              Used to dynamically opt in jobs to specific runner-type variants.
+
+              Returns:
+                  The runner-type's variant name if the user has opted in to the feature, otherwise returns an empty string.
+                  This variant name is prefixed to the runner-type in the label.
+              """
+              try:
+                  userlist = {u.lstrip("#").strip("\n\t@ ") for u in rollout_state.split()}
+                  all_opted_in_users = set()
+                  for user in userlist:
+                      for i in user.split(","):
+                          if i == feature:
+                              all_opted_in_users.add(user.split(",")[0])
+                  opted_in_requestors = {
+                      usr for usr in workflow_requestors if usr in all_opted_in_users
+                  }
+
+                  if opted_in_requestors:
+                      log.info(
+                          f"Feature {feature} is enabled for {', '.join(opted_in_requestors)}. Using feature {feature}."
+                      )
+                      return feature
+                  else:
+                      log.info(
+                          f"Feature {feature} is disabled for {', '.join(workflow_requestors)}. Using fallback \"{fallback}\"."
+                      )
+                      return fallback
+
+              except Exception as e:
+                  log.error(
+                      f'Failed to determine if user has opted-in to feature {feature}. Using fallback "{fallback}". Exception: {e}'
+                  )
+                  return fallback
+
+
+          def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:
+              """
+              Gets the first comment of the issue, which contains the desired rollout state.
+
+              The default issue we use - https://github.com/pytorch/test-infra/issues/5132
+              """
+              gh = get_gh_client(github_token)
+              issue = get_issue(gh, repo, issue_num)
+              return str(issue.get_comments()[0].body.strip("\n\t "))
+
+
           def main() -> None:
               args = parse_args()
 
               if args.github_ref_type == "branch" and is_exception_branch(args.github_branch):
                   log.info(f"Exception branch: '{args.github_branch}', using meta runners")
                   label_type = WORKFLOW_LABEL_META
+                  runner_ami = RUNNER_AMI_LEGACY
               else:
                   try:
-                      gh = get_gh_client(args.github_token)
-                      # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
-                      issue = get_issue(gh, args.github_issue_repo, args.github_issue)
+                      rollout_state = get_rollout_state_from_issue(
+                          args.github_token, args.github_issue_repo, args.github_issue
+                      )
+
                       username = get_potential_pr_author(
-                          gh,
+                          args.github_token,
                           args.github_repo,
                           args.github_actor,
                           args.github_ref_type,
                           args.github_branch,
                       )
-                      label_type = get_workflow_type(
-                          issue,
+
+                      label_type = get_fleet(
+                          rollout_state,
                           (
                               args.github_issue_owner,
                               username,
                           ),
+                      )
+                      runner_ami = get_optin_feature(
+                          rollout_state=rollout_state,
+                          workflow_requestors=(
+                              args.github_issue_owner,
+                              username,
+                          ),
+                          feature=RUNNER_AMI_AMZ2023,
+                          fallback=RUNNER_AMI_LEGACY,
                       )
                   except Exception as e:
                       log.error(
                           f"Failed to get issue. Falling back to meta runners. Exception: {e}"
                       )
                       label_type = WORKFLOW_LABEL_META
+                      runner_ami = RUNNER_AMI_LEGACY
+
+              # For Canary builds use canary runners
+              if args.github_repo == "pytorch/pytorch-canary" and label_type == WORKFLOW_LABEL_LF:
+                  label_type = WORKFLOW_LABEL_LF_CANARY
 
               set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, label_type)
+              set_github_output(GH_OUTPUT_KEY_AMI, runner_ami)
 
 
           if __name__ == "__main__":
               main()
+
           EOF
 
           cat runner_determinator.py

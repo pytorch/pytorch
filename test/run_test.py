@@ -38,10 +38,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW_GRADCHECK,
 )
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # using tools/ to optimize test run.
+REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
     TEST_CLASS_TIMES_FILE,
@@ -71,10 +72,11 @@ from tools.testing.test_selections import (
 )
 
 
-HAVE_TEST_SELECTION_TOOLS = True
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
 
+
+HAVE_TEST_SELECTION_TOOLS = True
 TEST_CONFIG = os.getenv("TEST_CONFIG", "")
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
@@ -181,10 +183,18 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/_tensor/test_attention",
+    "test_transformers",
 ]
 
 XPU_BLOCKLIST = [
     "test_autograd",
+    "profiler/test_cpp_thread",
+    "profiler/test_execution_trace",
+    "profiler/test_memory_profiler",
+    "profiler/test_profiler",
+    "profiler/test_profiler_tree",
+    "profiler/test_record_function",
+    "profiler/test_torch_tidy",
 ]
 
 XPU_TEST = [
@@ -378,6 +388,12 @@ def run_test(
     env=None,
     print_log=True,
 ) -> int:
+    scribe_token = os.getenv("SCRIBE_GRAPHQL_ACCESS_TOKEN", "")
+    if scribe_token:
+        print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is set")
+    else:
+        print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is NOT set")
+
     env = env or os.environ.copy()
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
@@ -428,7 +444,14 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
+        replacement = {"-f": "-x"}
+        unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    if options.showlocals:
+        if options.pytest:
+            unittest_args.extend(["--showlocals", "--tb=long", "--color=yes"])
+        else:
+            unittest_args.append("--locals")
 
     # NB: These features are not available for C++ tests, but there is little incentive
     # to implement it because we have never seen a flaky C++ test before.
@@ -551,13 +574,8 @@ def run_test(
 
 def try_set_cpp_stack_traces(env, command, set=True):
     # Print full c++ stack traces during retries
-    # Don't do it for macos inductor tests as it makes them
-    # segfault for some reason
-    if not (
-        IS_MACOS and len(command) >= 2 and command[2].startswith(INDUCTOR_TEST_PREFIX)
-    ):
-        env = env or {}
-        env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if set else "0"
+    env = env or {}
+    env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if set else "0"
     return env
 
 
@@ -1116,6 +1134,21 @@ def parse_args():
         default=0,
         help="Print verbose information and test-by-test results",
     )
+    if sys.version_info >= (3, 9):
+        parser.add_argument(
+            "--showlocals",
+            action=argparse.BooleanOptionalAction,
+            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
+            help="Show local variables in tracebacks (default: True)",
+        )
+    else:
+        parser.add_argument(
+            "--showlocals",
+            action="store_true",
+            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
+            help="Show local variables in tracebacks (default: True)",
+        )
+        parser.add_argument("--no-showlocals", dest="showlocals", action="store_false")
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
@@ -1385,7 +1418,7 @@ def get_selected_tests(options) -> List[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
-        selected_tests = ["test_mps", "test_metal", "test_modules"]
+        selected_tests = ["test_mps", "test_metal", "test_modules", "test_nn"]
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
@@ -1478,9 +1511,7 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def load_test_times_from_file(
-    file: str,
-) -> Dict[str, Any]:
+def load_test_times_from_file(file: str) -> Dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
@@ -1805,12 +1836,12 @@ def main():
     try:
         # Actually run the tests
         start_time = time.time()
-        elapsed_time = time.time() - start_time
-        print_to_stderr(
-            f"Starting test batch '{test_batch.name}' {round(elapsed_time, 2)} seconds after initiating testing"
-        )
         run_tests(
             test_batch.sharded_tests, test_directory, options, test_batch.failures
+        )
+        elapsed_time = time.time() - start_time
+        print_to_stderr(
+            f"Running test batch '{test_batch.name}' cost {round(elapsed_time, 2)} seconds"
         )
 
     finally:

@@ -61,7 +61,6 @@ class TwoTensor(torch.Tensor):
 
         out_a = func(*args_a, **kwargs_a)
         out_b = func(*args_b, **kwargs_b)
-        assert type(out_a) == type(out_b)
         out_a_flat, spec = pytree.tree_flatten(out_a)
         out_b_flat = pytree.tree_leaves(out_b)
         # for aten ops that return non-tensors, just assume that

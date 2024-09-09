@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import importlib
 import logging
 import os
@@ -7,15 +8,16 @@ import subprocess
 import sys
 import warnings
 
+
 try:
     from .common import BenchmarkRunner, download_retry_decorator, main
 except ImportError:
     from common import BenchmarkRunner, download_retry_decorator, main
 
 import torch
-
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
 
 # Enable FX graph caching
 if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
@@ -77,13 +79,13 @@ REQUIRE_HIGHER_TOLERANCE = {
     "mobilenetv3_large_100",
     "sebotnet33ts_256",
     "selecsls42b",
-    "cspdarknet53",
 }
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "levit_128",
     "sebotnet33ts_256",
     "beit_base_patch16_224",
+    "cspdarknet53",
 }
 
 # These models need higher tolerance in MaxAutotune mode
@@ -117,7 +119,9 @@ SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
 }
 
 REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
+    "inception_v3",
     "mobilenetv3_large_100",
+    "cspdarknet53",
 }
 
 

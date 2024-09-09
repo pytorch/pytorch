@@ -133,11 +133,11 @@ class Verifier(metaclass=_VerifierMeta):
             operator.abs,
             math.ceil,
             math.floor,
+            math.trunc,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
-        from torch._export.serde.serialize import allowed_registered_op_types  # Avoid circular import.
-        return (OpOverload, HigherOrderOperator, *allowed_registered_op_types())
+        return (OpOverload, HigherOrderOperator)
 
     def allowed_getattr_types(self) -> Tuple[Type[Any], ...]:
         return (torch.fx.GraphModule,)
@@ -149,11 +149,11 @@ class Verifier(metaclass=_VerifierMeta):
         """
         Additional checks that are specific to some dialects.
         """
-        pass
 
     @final
     def check(self, ep: "ExportedProgram") -> None:
         self._check_graph_module(ep.graph_module)
+        _verify_exported_program_module_call_graph(ep)
         _verify_exported_program_signature(ep)
 
     @final
@@ -272,6 +272,25 @@ class TrainingIRVerifier(Verifier):
     dialect = "TRAINING"
 
 
+def _verify_exported_program_module_call_graph(exported_program) -> None:
+    module_call_graph = exported_program.module_call_graph
+    nodes = {
+        node.name for node in exported_program.graph.nodes
+    }
+    for entry in module_call_graph:
+        if entry.signature is not None:
+            for arg in entry.signature.inputs:
+                if arg.name and arg.name not in nodes:
+                    raise SpecViolationError(
+                        f"Input {arg.name} does not exist in the graph."
+                    )
+            for arg in entry.signature.outputs:
+                if arg.name and arg.name not in nodes:
+                    raise SpecViolationError(
+                        f"Output {arg.name} does not exist in the graph."
+                    )
+
+
 def _verify_exported_program_signature(exported_program) -> None:
     # Check ExportedProgram signature matches
     gs = exported_program.graph_signature
@@ -282,7 +301,7 @@ def _verify_exported_program_signature(exported_program) -> None:
     if len(input_node_names) != len(gs.input_specs):
         raise SpecViolationError(
             f"Number of graph inputs ({len(input_node_names)}) "
-            f"does not match number of inputs in the graph signature ({len(gs.user_inputs)})"
+            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})"
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):

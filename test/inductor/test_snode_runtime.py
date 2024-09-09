@@ -5,13 +5,13 @@ from unittest import skipIf
 
 import torch
 import torch.distributed as dist
-
 from torch._inductor import config, metrics
 from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 aten = torch.ops.aten
 c10d = torch.ops.c10d_functional

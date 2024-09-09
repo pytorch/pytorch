@@ -4,7 +4,6 @@ load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "APPLETVOS", "CXX", "IOS", "MACOSX", "WINDOWS")
 load(
     ":xnnpack_src_defs.bzl",
-    "JIT_SRCS",
     "LOGGING_SRCS",
     "OPERATOR_SRCS",
     "SUBGRAPH_SRCS",
@@ -108,7 +107,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         preprocessor_flags = [
             "-DXNN_LOG_LEVEL=0",
-            "-DXNN_ENABLE_JIT=0",
             "-DXNN_ENABLE_SPARSE=0",
             "-DXNN_ENABLE_MEMOPT",
         ],
@@ -150,37 +148,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":interface",
             third_party("FP16"),
             third_party("FXdiv"),
-            third_party("clog"),
-        ],
-    )
-
-    fb_xplat_cxx_library(
-        name = "jit_memory",
-        # srcs have to include HOT_SRCS to be able to build on ARVR
-        srcs = JIT_SRCS,
-        headers = subdir_glob([
-            ("XNNPACK/src", "**/*.h"),
-        ]),
-        header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
-        compiler_flags = [
-            "-Oz",
-        ],
-        fbobjc_preprocessor_flags = [
-            "-DXNN_PRIVATE=",
-            "-DXNN_INTERNAL=",
-        ],
-        labels = labels,
-        platforms = (APPLE, ANDROID, CXX, WINDOWS),
-        preferred_linkage = "static",
-        preprocessor_flags = [
-            "-DXNN_LOG_LEVEL=0",
-        ],
-        visibility = ["PUBLIC"],
-        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
-        windows_compiler_flags_override = WINDOWS_FLAGS,
-        deps = [
-            ":interface",
             third_party("clog"),
         ],
     )
@@ -792,6 +759,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preprocessor_flags = [
             "-DXNN_LOG_LEVEL=0",
         ],
+        exported_preprocessor_flags = [
+            "-DXNN_ENABLE_AVX512VNNI"
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx"],
@@ -832,6 +802,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         preprocessor_flags = [
             "-DXNN_LOG_LEVEL=0",
+        ],
+        exported_preprocessor_flags = [
+            "-DXNN_ENABLE_AVX512VNNI"
         ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
@@ -1015,103 +988,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mf16c"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mf16c"],
         windows_srcs = PROD_F16C_MICROKERNEL_SRCS,
-        deps = [
-            ":interface",
-        ],
-    )
-
-    fb_xplat_cxx_library(
-        name = "ukernels_xop",
-        srcs = PROD_XOP_MICROKERNEL_SRCS if is_arvr_mode() else [],
-        headers = subdir_glob([
-            ("XNNPACK/src", "**/*.h"),
-            ("XNNPACK/src", "**/*.c"),
-        ]),
-        header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
-        compiler_flags = [
-            "-O2",
-        ] + select({
-            "DEFAULT": [],
-            "ovr_config//cpu:x86_32": [
-                "-mxop",
-            ],
-            "ovr_config//cpu:x86_64": [
-                "-mxop",
-            ],
-        }),
-        platform_compiler_flags = [
-            (
-                "x86|x86_64|platform009|platform010",
-                [
-                    "-mxop",
-                ],
-            ),
-        ],
-        fbobjc_preprocessor_flags = [
-            "-DXNN_PRIVATE=",
-            "-DXNN_INTERNAL=",
-        ],
-        labels = labels,
-        platform_preprocessor_flags = [
-            (
-                "windows-x86_64",
-                [
-                    "-Drestrict=",
-                ],
-            ),
-        ],
-        platform_srcs = ([
-            (
-                "x86|x86_64|platform009|platform010",
-                PROD_XOP_MICROKERNEL_SRCS,
-            ),
-        ] if not is_arvr_mode() else []),
-        preferred_linkage = "static",
-        preprocessor_flags = [
-            "-DXNN_LOG_LEVEL=0",
-        ],
-        visibility = ["PUBLIC"],
-        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mxop"],
-        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mxop"],
-        deps = [
-            ":interface",
-        ],
-    )
-
-    fb_xplat_cxx_library(
-        name = "ukernels_xop_ovr_win32",
-        headers = subdir_glob([
-            ("XNNPACK/src", "**/*.h"),
-            ("XNNPACK/src", "**/*.c"),
-        ]),
-        header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
-        compiler_flags = [
-            "-O2",
-            "-mxop",
-        ],
-        fbobjc_preprocessor_flags = [
-            "-DXNN_PRIVATE=",
-            "-DXNN_INTERNAL=",
-        ],
-        labels = labels,
-        platform_preprocessor_flags = [
-            (
-                "windows-x86_64",
-                [
-                    "-Drestrict=",
-                ],
-            ),
-        ],
-        preferred_linkage = "static",
-        preprocessor_flags = [
-            "-DXNN_LOG_LEVEL=0",
-        ],
-        visibility = ["PUBLIC"],
-        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mxop"],
-        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mxop"],
-        windows_srcs = PROD_XOP_MICROKERNEL_SRCS,
         deps = [
             ":interface",
         ],
@@ -1328,6 +1204,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-mf16c",
         ],
         windows_compiler_flags_override = WINDOWS_FLAGS + [
+            "/D__AVX2__",
             "-mavx2",
             "-mfma",
             "-mf16c",
@@ -1576,6 +1453,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-mavx512bw",
             "-mavx512dq",
             "-mavx512vl",
+            
         ],
         deps = [
             ":interface",
@@ -1633,6 +1511,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-mavx512bw",
             "-mavx512dq",
             "-mavx512vl",
+            "/D__AVX512BW__",
         ],
         windows_srcs = PROD_AVX512SKX_MICROKERNEL_SRCS,
         deps = [
@@ -2463,7 +2342,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         windows_compiler_flags_override = WINDOWS_FLAGS,
         deps = [
             ":interface",
-            ":jit_memory",
             third_party("FP16"),
         ],
     )
@@ -2507,7 +2385,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         windows_compiler_flags_override = WINDOWS_FLAGS,
         deps = [
             ":interface",
-            ":jit_memory",
             third_party("FP16"),
         ],
     )
@@ -2519,7 +2396,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
         deps = [
-            ":jit_memory",
             ":ukernels_asm_aarch64",
             ":ukernels_neon",
             ":ukernels_neon_aarch64",
@@ -2554,7 +2430,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":ukernels_sse2",
             ":ukernels_sse41",
             ":ukernels_ssse3",
-            ":ukernels_xop",
             ":ukernels_avx512vbmi",
             ":ukernels_avx512vnni",
             ":ukernels_avx512vnnigfni",
@@ -2579,12 +2454,14 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":ukernels_sse41_ovr_win32",
             ":ukernels_sse_ovr_win32",
             ":ukernels_ssse3_ovr_win32",
-            ":ukernels_xop_ovr_win32",
             ":ukernels_avx512vbmi",
-            ":ukernels_avx512vnni_ovr_win32",
-            ":ukernels_avx512vnnigfni_ovr_win32",
+            # ":ukernels_avx512vnni_ovr_win32", # Build crashes on Windows Clang 17.0.3, re-enable when fixed (T199959765)
+            # ":ukernels_avx512vnnigfni_ovr_win32",
             # ":ukernels_avxvnni_ovr_win32" Excluding avxvnni microkernels because they fail on older compilers
         ],
+        exported_preprocessor_flags = [
+            "-DXNN_ENABLE_AVX512VNNIGFNI=0"
+        ]
     )
 
     fb_xplat_cxx_library(
@@ -2594,7 +2471,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
         deps = [
-            ":jit_memory",
             ":ukernels_armsimd32",
             ":ukernels_asm_aarch32",
             ":ukernels_asm_aarch64",
@@ -2622,7 +2498,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
         deps = [
-            ":jit_memory",
             ":ukernels_asm_aarch32",
             ":ukernels_neon",
             ":ukernels_neon_dot",
@@ -2690,7 +2565,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_NO_X8_OPERATORS",
             "-DXNN_ENABLE_MEMOPT",
             "-DXNN_ENABLE_SPARSE=0",
-            "-DXNN_ENABLE_JIT=0",
             "-DXNN_ENABLE_ASSEMBLY",
             "-DXNN_ENABLE_GEMM_M_SPECIALIZATION",
             "-DXNN_ENABLE_ARM_DOTPROD",
@@ -2712,7 +2586,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "XNNPACK/src/memory.c",
             "XNNPACK/src/mutex.c",
             "XNNPACK/src/microparams-init.c",
-            "XNNPACK/src/operators/post-operation.c",
         ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = (WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS) if XNNPACK_WINDOWS_AVX512F_ENABLED else WINDOWS_FLAGS,
