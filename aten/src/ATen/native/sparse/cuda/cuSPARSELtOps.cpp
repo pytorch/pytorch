@@ -277,10 +277,6 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   auto res_tensor_options = c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
   at::Tensor res = (transpose_result) ? at::empty({n, m}, res_tensor_options)
                                       : at::empty({m, n}, res_tensor_options);
-#ifdef USE_ROCM
-at::Tensor res_out = (transpose_result) ? at::empty({n, m}, res_tensor_options)
-                                      : at::empty({m, n}, res_tensor_options);
-#endif
 
   cusparseLtMatDescriptor_t res_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
@@ -350,11 +346,7 @@ at::Tensor res_out = (transpose_result) ? at::empty({n, m}, res_tensor_options)
         dense_B.data_ptr(),
         &beta,
         res.data_ptr(),
-    #ifdef USE_ROCM
-        res_out.data_ptr(),
-    #else
         res.data_ptr(),
-    #endif
         workspacePtr.get(),
         // jank because of the way we want this to be an array of streams
         &stream,
@@ -374,11 +366,7 @@ at::Tensor res_out = (transpose_result) ? at::empty({n, m}, res_tensor_options)
         dense_B.data_ptr(),
         &beta,
         res.data_ptr(),
-    #ifdef USE_ROCM
-        res_out.data_ptr(),
-    #else
         res.data_ptr(),
-    #endif
         workspacePtr.get(),
         // jank because of the way we want this to be an array of streams
         &stream,
