@@ -68,8 +68,15 @@ _backend_names = {
 }
 
 
-def _backend_from_string(name):
+def _backend_from_string(name: str):
     return getattr(SDPBackend, name)
+
+
+def _backend_name(backend: SDPBackend):
+    for name in _backend_names.values():
+        if backend is getattr(SDPBackend, name):
+            return name
+    return None
 
 
 def _cur_sdpa_kernel_backends():

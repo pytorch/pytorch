@@ -1007,19 +1007,18 @@ class SDPAKernelVariable(ContextWrappingVariable):
     def _backends_to_nodes(tx, backends):
         nodes = []
         for backend in backends:
-            for name in torch.nn.attention._backend_names.values():
-                if backend is getattr(torch.nn.attention.SDPBackend, name):
-                    nodes.append(
-                        tx.output.create_node(
-                            "call_function",
-                            torch.nn.attention._backend_from_string,
-                            (name,),
-                            {},
-                        )
-                    )
-                    break
-            else:
+            # convert to/from string in order to bake the backend into FX graph
+            backend_name = torch.nn.attention._backend_name(backend)
+            if backend_name is None:
                 unimplemented(f"{backend} backend not found")
+            nodes.append(
+                tx.output.create_node(
+                    "call_function",
+                    torch.nn.attention._backend_from_string,
+                    (backend_name,),
+                    {},
+                )
+            )
         return nodes
 
     def enter(self, tx):
