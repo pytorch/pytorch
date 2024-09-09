@@ -27,6 +27,10 @@ logger = logging.getLogger("torch.distributed._composable.fsdp")
 
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
+allgather_use_default_stream_forward: bool = False
+allgather_use_default_stream_backward: bool = False
+allgather_use_async_op: bool = False
+
 
 """
 [Note: Overlapping all-gather copy-in and all-gather]
@@ -75,7 +79,7 @@ class FSDPCommContext:
     def get_all_gather_streams(
         self, training_state: TrainingState
     ) -> Tuple[torch.cuda.Stream, torch.cuda.Stream]:
-        if training_state in (TrainingState.FORWARD, TrainingState.PRE_BACKWARD):
+        if (training_state == TrainingState.FORWARD and not allgather_use_default_stream_forward) or (training_state == TrainingState.PRE_BACKWARD and not allgather_use_default_stream_backward):
             # Use separate streams for implicit prefetching
             return self.all_gather_copy_in_stream, self.all_gather_stream
         current_stream = torch.cuda.current_stream()
@@ -430,7 +434,7 @@ class FSDPParamGroup:
         with record_function(
             f"FSDP::{pass_type}_prefetch for {target_fqn}"
         ), target_fsdp_param_group.use_training_state(training_state):
-            target_fsdp_param_group.unshard()
+            target_fsdp_param_group.unshard(async_op=allgather_use_async_op)
 
     # Utilities #
     def _to_sharded(self):
