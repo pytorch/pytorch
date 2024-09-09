@@ -342,11 +342,6 @@ def reorder_compute_and_comm_for_overlap(
     return order
 
 
-# mypy: allow-untyped-defs
-
-import torch
-
-
 def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     """
     This FX graph pass replaces uses of FSDP2 unsharded params with their corresponding
