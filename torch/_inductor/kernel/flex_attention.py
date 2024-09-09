@@ -743,6 +743,7 @@ def flex_attention(
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
+    assert Bq % Bkv == 0, "Bq must be divisible by Bkv"
     B = Bq
 
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
@@ -970,7 +971,9 @@ flex_attention_backward_template = TritonTemplate(
 
     k_adj = (stride_kh * off_hkv + stride_kz * off_zkv).to(tl.int64)
     v_adj = (stride_vh * off_hkv + stride_vz * off_zkv).to(tl.int64)
-    dv_adj = (stride_dvh * off_hkv + stride_dvz * off_zq).to(tl.int64) # dv shape: [Bq, Hkv, KV_LEN, V_HEAD_DIM]
+    # first compute broadcasted dv of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
+    # then reduce to dv of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
+    dv_adj = (stride_dvh * off_hkv + stride_dvz * off_zq).to(tl.int64)
 
     # offset K, V, DV pointers for batch/kv-head
     K += k_adj
@@ -1182,6 +1185,9 @@ flex_attention_backward_template = TritonTemplate(
 
         dk *= SM_SCALE
         mask = index_n < KV_LEN
+
+        # first compute broadcasted dk of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
+        # then reduce to dk of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
         {{store_output(("off_zq", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
 
 @triton.jit
@@ -1625,6 +1631,7 @@ def flex_attention_backward(*args, **kwargs):
     dtype = query.get_dtype()
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
+    assert Bq % Bkv == 0, "Bq must be divisible by Bkv"
 
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1667,19 +1674,19 @@ def flex_attention_backward(*args, **kwargs):
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
 
-    grad_key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
-    grad_key_stride = [
+    broadcasted_grad_key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
+    broadcasted_grad_key_stride = [
         Hkv * seq_len_kv * qk_head_dim,
         seq_len_kv * qk_head_dim,
         qk_head_dim,
         1,
     ]
 
-    layout_k = FixedLayout(
+    layout_broadcasted_k = FixedLayout(
         key.get_device(),
         key.get_dtype(),
-        grad_key_size,
-        grad_key_stride,
+        broadcasted_grad_key_size,
+        broadcasted_grad_key_stride,
     )
 
     # Create delta which will is needed for the bwd's kernel
@@ -1708,10 +1715,6 @@ def flex_attention_backward(*args, **kwargs):
         dtype=dtype,
         device=device,
     )
-
-    # grad_value = empty_strided(
-    #     value.get_size(), value.get_stride(), dtype=dtype, device=device
-    # )
 
     kernel_options.setdefault("SM_SCALE", scale)
 
@@ -1787,7 +1790,7 @@ def flex_attention_backward(*args, **kwargs):
                 full_q_num_blocks,
                 full_q_indices,
             ],
-            layout=layout_k,  # We use store_output only for grad_key
+            layout=layout_broadcasted_k,  # We use store_output only for grad_key
             subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
             mutated_inputs=[grad_query, broadcasted_grad_value],
             call_sizes=query.get_size() + key.get_size()[1:3],
@@ -1832,39 +1835,37 @@ def flex_attention_backward(*args, **kwargs):
         "flex_attention_backward",
         choices,
         inputs_for_autotuning,
-        layout_k,
+        layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
-    # Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
-    # Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
+    if Bq == Bkv:
+        grad_key = broadcasted_grad_key
+        grad_value = broadcasted_grad_value
+    else:
+        batch_group = Bq // Bkv
+        grad_key_size = (Bkv, batch_group, Hkv, seq_len_kv, qk_head_dim)
+        grad_key_stride = (
+            batch_group * Hkv * seq_len_kv * qk_head_dim,
+            Hkv * seq_len_kv * qk_head_dim,
+            seq_len_kv * qk_head_dim,
+            qk_head_dim,
+            1,
+        )
 
-    # grad_key = broadcasted_grad_key
-    # grad_value = broadcasted_grad_value
+        broadcasted_grad_key = lowerings[aten.as_strided](
+            broadcasted_grad_key, grad_key_size, grad_key_stride
+        )
+        grad_key = lowerings[aten.sum](
+            broadcasted_grad_key, axis=1
+        )  # [Bkv, Hkv, seq_len_kv, k_head_dim]
+        grad_key = lowerings[aten.div](grad_key, batch_group)
 
-    batch_group = Bq // Bkv
-    grad_key_size = (Bkv, batch_group, Hkv, seq_len_kv, qk_head_dim)
-    grad_key_stride = (
-        batch_group * Hkv * seq_len_kv * qk_head_dim,
-        Hkv * seq_len_kv * qk_head_dim,
-        seq_len_kv * qk_head_dim,
-        qk_head_dim,
-        1,
-    )
-
-    grad_key = lowerings[aten.as_strided](
-        broadcasted_grad_key, grad_key_size, grad_key_stride
-    )  # [Bkv, batch_group, grad_key.size(-3), grad_key.size(-2), grad_key.size(-1)]
-    grad_key = lowerings[aten.sum](
-        grad_key, axis=1
-    )  # [Bkv, Hkv, seq_len_kv, k_head_dim]
-    grad_key = lowerings[aten.div](grad_key, batch_group)
-
-    grad_value = lowerings[aten.as_strided](
-        broadcasted_grad_value, grad_key_size, grad_key_stride
-    )  # [Bkv, batch_group, grad_key.size(-3), grad_key.size(-2), grad_key.size(-1)]
-    grad_value = lowerings[aten.sum](grad_value, axis=1)
-    grad_value = lowerings[aten.div](grad_value, batch_group)
+        broadcasted_grad_value = lowerings[aten.as_strided](
+            broadcasted_grad_value, grad_key_size, grad_key_stride
+        )
+        grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=1)
+        grad_value = lowerings[aten.div](grad_value, batch_group)
 
     return (
         grad_query,
