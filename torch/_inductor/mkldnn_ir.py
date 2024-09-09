@@ -161,7 +161,7 @@ def _prepare_convolution_fusion_create(
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
-    assert x.get_device().type in ["xpu", "xpu"] and weight.get_device().type in ["cpu", "xpu"]
+    assert x.get_device().type in ["xpu", "cpu"] and weight.get_device().type in ["cpu", "xpu"]
     inputs = [x, weight]
 
     kernel_layout = FixedLayout(
