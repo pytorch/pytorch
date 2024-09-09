@@ -4577,17 +4577,16 @@ def forward(self, x, b, y):
         self.assertEqual(out, torch.ones(2, 2) + 1)
 
     def test_dynamo_enum_in_tuple(self):
-        from enum import Enum
         class IntEnum(int, Enum):
             X = 0
 
         def fn(tensor):
             return tensor[..., IntEnum.X]
 
-        tensor = torch.rand((5,5))
+        tensor = torch.rand((5, 5))
         graph, _ = torch._dynamo.export(fn)(tensor)
         out = graph(tensor)
-        self.assertEqual(out, tensor[:,0])
+        self.assertEqual(out, tensor[:, 0])
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
