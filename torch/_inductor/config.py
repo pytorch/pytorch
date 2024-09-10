@@ -70,7 +70,7 @@ sleep_sec_TESTING_ONLY: Optional[int] = None
 # (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
 # If the custom op does not have a layout constraint tag already
 # then we assume the following applies.
-custom_op_default_layout_constraint = "flexible_layout"
+custom_op_default_layout_constraint = "needs_fixed_stride_order"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -589,7 +589,7 @@ if is_fbcode():
             )
         else:
             global_cache_dir = parutil.get_dir_path("fb/cache")
-    except (ValueError, ModuleNotFoundError):
+    except (ValueError, ImportError):
         global_cache_dir = None
 
 else:
@@ -607,6 +607,9 @@ comprehensive_padding = (
     os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
 )
 pad_channels_last = False
+
+# Disable comprehensive padding on the CPU
+disable_padding_cpu = True
 
 # The width of comprehensive padding, in bytes.
 # CUDA max memory transaction size is 128 bytes for a warp.

@@ -23,7 +23,6 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.placement_types import _StridedShard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
@@ -34,6 +33,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
 from torch.testing._internal.common_utils import run_tests

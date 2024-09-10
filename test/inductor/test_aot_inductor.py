@@ -1745,7 +1745,7 @@ class AOTInductorTestsTemplate:
             torch._export.aot_compile(Model(), example_inputs)
 
         supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
-            torch.float32, self.device == "cuda"
+            torch.float32, self.device
         )
 
     def test_consecutive_compiles(self):
@@ -2958,29 +2958,24 @@ class AOTInductorTestsTemplate:
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(self, x0, x1, x2, x3):
-                t = (
-                    x0.to(torch.float)
-                    + x1.to(torch.float)
-                    + x2.to(torch.float)
-                    + x3.to(torch.float)
-                )
+            def forward(self, x0, x1):
+                t = x0.to(torch.float) + x1.to(torch.float)
                 return t
 
         inputs = []
         for dtype in (
             torch.float8_e4m3fn,
             torch.float8_e5m2,
-            torch.float8_e4m3fnuz,
-            torch.float8_e5m2fnuz,
+            # FP8 funz are for AMD
+            # see https://github.com/pytorch/pytorch/issues/126734
+            # torch.float8_e4m3fnuz,
+            # torch.float8_e5m2fnuz,
         ):
             inputs.append(torch.ones(8, 8, 8, dtype=dtype, device=self.device))
         dim0 = Dim("s0", min=2, max=1024)
         dynamic_shapes = {
             "x0": {0: dim0},
             "x1": {0: dim0},
-            "x2": {0: dim0},
-            "x3": {0: dim0},
         }
         with torch.no_grad(), config.patch(
             {
@@ -3265,7 +3260,9 @@ class AOTInductorTestsTemplate:
             model, example_inputs_list, dynamic_shapes=dynamic_shapes
         )
 
-    @common_utils.parametrize("max_autotune", [False, True])
+    # max_autotune is disabled due to https://github.com/pytorch/pytorch/issues/135106
+    # @common_utils.parametrize("max_autotune", [False, True])
+    @common_utils.parametrize("max_autotune", [False])
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
