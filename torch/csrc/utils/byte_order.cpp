@@ -118,7 +118,7 @@ THPByteOrder THP_nativeByteOrder() {
 }
 
 template <typename T, typename U>
-void THP_decodeBuffer(
+TORCH_API void THP_decodeBuffer(
     T* dst,
     const uint8_t* src,
     U type,
@@ -348,7 +348,7 @@ std::vector<T> complex_to_float(const c10::complex<T>* src, size_t len) {
 }
 
 template <typename T>
-void THP_encodeBuffer(
+TORCH_API void THP_encodeBuffer(
     uint8_t* dst,
     const T* src,
     THPByteOrder order,
