@@ -175,7 +175,7 @@ def _get_torch_export_args(
 def export(
     model: torch.nn.Module | torch.jit.ScriptModule | torch.jit.ScriptFunction,
     args: tuple[Any, ...] | torch.Tensor,
-    f: str | None = None,
+    f: str,
     *,
     kwargs: dict[str, Any] | None = None,
     export_params: bool = True,
@@ -1644,18 +1644,6 @@ def _export(
             if verbose:
                 torch.onnx.log("Exported graph: ", graph)
             onnx_proto_utils._export_file(proto, f, export_type, export_map)
-            # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
-            # we can skip this check.
-            # If large model format export is enabled, proto will only contain data location instead of
-            # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto
-            # string in memory.
-            if (operator_export_type is _C_onnx.OperatorExportTypes.ONNX) and (
-                not val_use_external_data_format
-            ):
-                try:
-                    _C._check_onnx_proto(proto)
-                except RuntimeError as e:
-                    raise errors.CheckerError(e) from e
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False
