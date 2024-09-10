@@ -186,6 +186,11 @@ class WeakRefCallSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class CallFunctionNoArgsSource(WeakRefCallSource):
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 
