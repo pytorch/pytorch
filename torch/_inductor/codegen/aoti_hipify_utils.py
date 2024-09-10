@@ -24,7 +24,7 @@ def maybe_hipify_code_wrapper(source_codes: str, force_hipify: bool = False) -> 
     # keyword at the beginning of code line. However, this can happen in codegen,
     # which will cause the pattern to not match.
 
-    # Note that lookahead (?=\W) is still needed to keep hipification idomponent, for example
+    # Note that lookahead (?=\W) is still needed to keep hipification idempotent, for example
     # we need to skip replacing "getStreamFromExternal" in "getStreamFromExternalMasqueradingAsCUDA"
     RE_PYTORCH_PREPROCESSOR = re.compile(rf"({PYTORCH_TRIE.export_to_regex()})(?=\W)")
 
