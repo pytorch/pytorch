@@ -105,6 +105,9 @@ class TestDifferentiableOptimizer(TestCase):
         state["exp_avg1"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state["exp_avg2"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
 
         gradcheck(
             _diff_fn,
