@@ -1025,7 +1025,7 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   fout.write(bytes.data(), bytes.size());
   fout.close();
 
-  std::cout << "aoti_torch_save_tensor_handle: Saved tensor to: "
+  std::cout << "aoti_torch_save_tensor_handle: Saved tensor to "
             << tensor_filepath_to_save << std::endl;
 #endif // !defined(C10_MOBILE)
 }
