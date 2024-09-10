@@ -707,7 +707,7 @@ class FSDPParam:
                     f"Expects swap_tensors to preserve object but got {new_param} "
                     f"instead of {self.sharded_param}"
                 )
-                self.sharded_param = new_param
+            self.sharded_param = new_param
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return

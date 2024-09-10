@@ -202,10 +202,8 @@ class FSDPParamGroup:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.reset_sharded_param()
             self._reset_sharded_params = True
-        
         self._validate_no_meta_params()
         self._validate_cpu_offload_params()
-        
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
