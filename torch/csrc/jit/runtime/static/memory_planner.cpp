@@ -401,7 +401,7 @@ void StandardMemoryPlanner::allocateManagedTensors() {
   if (managed_bytes_ == 0) {
     return;
   }
-  DCHECK(storages_.size() > 0);
+  DCHECK(!storages_.empty());
   size_t offset = 0;
   auto* start = allocateBuffer(managed_bytes_);
 

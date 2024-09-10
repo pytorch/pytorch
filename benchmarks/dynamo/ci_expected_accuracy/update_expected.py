@@ -30,6 +30,7 @@ from zipfile import ZipFile
 import pandas as pd
 import requests
 
+
 # Note: the public query url targets this rockset lambda:
 # https://console.rockset.com/lambdas/details/commons.artifacts
 ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/4ca0033e-0117-41f5-b043-59cde19eff35"
@@ -151,8 +152,16 @@ if __name__ == "__main__":
             [
                 "aot_eager",
                 "aot_inductor",
+                "cpu_aot_inductor",
+                "cpu_aot_inductor_amp_freezing",
+                "cpu_aot_inductor_freezing",
                 "cpu_inductor",
+                "cpu_inductor_amp_freezing",
+                "cpu_inductor_freezing",
                 "dynamic_aot_eager",
+                "dynamic_cpu_aot_inductor",
+                "dynamic_cpu_aot_inductor_amp_freezing",
+                "dynamic_cpu_aot_inductor_freezing",
                 "dynamic_cpu_inductor",
                 "dynamic_inductor",
                 "dynamo_eager",

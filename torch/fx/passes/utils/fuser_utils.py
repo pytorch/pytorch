@@ -24,7 +24,7 @@ def topo_sort(nodes: NodeList) -> NodeList:
         if indegree_map[node] == 0:
             candidates.put(node)
 
-    sorted_nodes: NodeList = list()
+    sorted_nodes: NodeList = []
     while not candidates.empty():
         node = candidates.get()
         sorted_nodes.append(node)
@@ -47,7 +47,7 @@ def validate_partition(partition: NodeList) -> bool:
 
     partition_set = set(partition)
 
-    outputs: NodeList = list()
+    outputs: NodeList = []
     for node in partition_set:
         for user_node in node.users:
             if user_node not in partition_set:
@@ -118,7 +118,7 @@ def fuse_as_graphmodule(gm: GraphModule,
     for node in nodes:
         assert node.graph.owning_module is gm, f"{node} doesn't belong to passed in graph module {gm._get_name()}"
         assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph.nodes, f"{node} is not found in graph module {gm._get_name()}"
+        assert node in gm.graph._find_nodes_lookup_table, f"{node} is not found in graph module {gm._get_name()}"
 
     # validates partition doesn't introduce dependency circles in the graph
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"

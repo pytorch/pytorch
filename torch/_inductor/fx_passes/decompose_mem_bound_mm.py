@@ -7,9 +7,9 @@ from torch import Tensor
 from torch._dynamo.utils import counters
 
 from .. import config
-
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
 from .split_cat import construct_pattern_matcher_pass
+
 
 aten = torch.ops.aten
 log = logging.getLogger(__name__)
@@ -98,7 +98,9 @@ def print_decompose_pattern(match: Match, inputs: List[torch.fx.Node]):
 )
 def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     def repl(mat1, mat2):
-        return torch.sum(mat1[:, :, :, None] * mat2[:, None, :, :], dim=-2)
+        return torch.sum(mat1[:, :, :, None] * mat2[:, None, :, :], dim=-2).to(
+            mat1.dtype
+        )
 
     if should_decompose_bmm(mat1, mat2):
         counters["inductor"]["decompose_bmm"] += 1
@@ -119,7 +121,9 @@ def decompose_addmm(
     mat3: torch.fx.Node,
 ):
     def repl(mat1, mat2, mat3):
-        return torch.sum(mat2[:, :, None] * mat3[None, :, :], dim=-2) + mat1
+        return (
+            torch.sum(mat2[:, :, None] * mat3[None, :, :], dim=-2).to(mat2.dtype) + mat1
+        )
 
     if should_decompose_mm(mat2, mat3):
         counters["inductor"]["decompose_addmm"] += 1
@@ -139,7 +143,7 @@ def decompose_mm(
     mat2: torch.fx.Node,
 ):
     def repl(mat1, mat2):
-        return torch.sum(mat1[:, :, None] * mat2[None, :, :], dim=-2)
+        return torch.sum(mat1[:, :, None] * mat2[None, :, :], dim=-2).to(mat1.dtype)
 
     if should_decompose_mm(mat1, mat2):
         counters["inductor"]["decompose_mm"] += 1

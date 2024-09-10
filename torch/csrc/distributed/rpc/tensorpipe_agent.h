@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <utility>
 
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
@@ -31,9 +32,7 @@ class Context;
 
 } // namespace tensorpipe
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // These priorities instruct TensorPipe on which transport/channel to pick
 // during handshake. Higher priorities will take precedence over lower ones.
@@ -86,7 +85,7 @@ struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
       std::string init_method,
       std::unordered_map<std::string, DeviceMap> device_maps = {},
       std::vector<c10::Device> devices = {})
-      : RpcBackendOptions(rpc_timeout, init_method),
+      : RpcBackendOptions(rpc_timeout, std::move(init_method)),
         numWorkerThreads(numWorkerThreads),
         transports(std::move(transports)),
         channels(std::move(channels)),
@@ -488,8 +487,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       std::string errorMsg);
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif // USE_TENSORPIPE
