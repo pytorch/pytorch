@@ -124,7 +124,7 @@ else:
         pass
 
 
-def supported_dtype_of_cpp_wrapper(dtype: torch.device, cuda: bool) -> bool:
+def supported_dtype_of_cpp_wrapper(dtype: torch.device, device_type: str) -> bool:
     supported_dtype = {
         torch.float32,
         torch.float64,
@@ -140,7 +140,7 @@ def supported_dtype_of_cpp_wrapper(dtype: torch.device, cuda: bool) -> bool:
         torch.complex128,
         torch.float16,
     }
-    if cuda:
+    if device_type == "cuda":
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
         supported_dtype.add(torch.float8_e4m3fnuz)
@@ -365,7 +365,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: OrderedSet[int] = (
             const_module.device_idxs if const_module else OrderedSet()
         )
-        self.cuda = False
+        self.device_type = "cpu"
         self.buffers: List[ir.Buffer] = []
         self.operations: List[ir.Operation] = []
         self.const_output_index: Dict[str, int] = (
@@ -1636,14 +1636,10 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
                 raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self) -> None:
-        self.cuda = "cuda" in self.device_types
-        if self.cpp_wrapper:
-            self.validate_can_generate_cpp_wrapper()
-
         device_types = self.device_types.copy()
         device_types.discard("cpu")
         device_types.discard("meta")
@@ -1652,13 +1648,18 @@ class GraphLowering(torch.fx.Interpreter):
             "+".join(device_types)
         )
         only_cpu = len(device_types) == 0
-        device_type = "cpu" if only_cpu else device_types.pop()
+        self.device_type = "cpu" if only_cpu else device_types.pop()
 
-        self.device_ops = get_device_op_overrides(device_type)
+        if self.cpp_wrapper:
+            self.validate_can_generate_cpp_wrapper()
+
+        self.device_ops = get_device_op_overrides(self.device_type)
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(
-            device_type, self.cpp_wrapper
+            self.device_type, self.cpp_wrapper
         )
-        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
+        assert (
+            wrapper_code_gen_cls is not None
+        ), f"Device {self.device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
 
         if self.const_module:
@@ -1676,7 +1677,7 @@ class GraphLowering(torch.fx.Interpreter):
         wrapper code and run it to generate autotuned kernel binaries in the first pass; and then
         generate cpp wrapper code and compile it to a dynamic library in the second pass.
         """
-        if "cuda" in self.device_types:
+        if any(device in self.device_types for device in ["cuda", "xpu"]):
             # first pass
             self.cpp_wrapper = False
             # Although triton.store_cubin was OrderedSet in compile_fx, the backward pass didn't pick
@@ -1906,7 +1907,7 @@ class GraphLowering(torch.fx.Interpreter):
 
             # Directly return the file path with the compiled code
             return AotCodeCompiler.compile(
-                self, code, serialized_extern_kernel_nodes, cuda=self.cuda
+                self, code, serialized_extern_kernel_nodes, device_type=self.device_type
             )
         else:
             return self.compile_to_module().call
