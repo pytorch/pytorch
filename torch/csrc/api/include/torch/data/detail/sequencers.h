@@ -12,7 +12,7 @@ namespace detail {
 namespace sequencers {
 namespace detail {
 template <typename Result>
-bool buffer_contains_result(const std::vector<optional<Result>>& buffer) {
+bool buffer_contains_result(const std::vector<std::optional<Result>>& buffer) {
   return std::any_of(
       buffer.begin(), buffer.end(), [](const std::optional<Result>& result) {
         return result.has_value();
@@ -27,7 +27,7 @@ bool buffer_contains_result(const std::vector<optional<Result>>& buffer) {
 /// buffers results internally to return them in order of their sequence number.
 template <typename Result>
 struct Sequencer {
-  using ResultProducer = std::function<optional<Result>()>;
+  using ResultProducer = std::function<std::optional<Result>()>;
   virtual ~Sequencer() = default;
   virtual std::optional<Result> next(ResultProducer next_result) = 0;
 };
@@ -105,7 +105,7 @@ struct OrderedSequencer : public Sequencer<Result> {
   size_t next_sequence_number_ = 0;
 
   /// A fixed-size buffer (after construction).
-  std::vector<optional<Result>> buffer_;
+  std::vector<std::optional<Result>> buffer_;
 };
 } // namespace sequencers
 } // namespace detail

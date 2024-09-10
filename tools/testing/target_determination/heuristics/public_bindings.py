@@ -15,6 +15,7 @@ class PublicBindings(HeuristicInterface):
     # Literally just a heuristic for test_public_bindings.  Pretty much anything
     # that changes the public API can affect this testp
     test_public_bindings = "test_public_bindings"
+    additional_files = ["test/allowlist_for_publicAPI.json"]
 
     def __init__(self, **kwargs: dict[str, Any]) -> None:
         super().__init__(**kwargs)
@@ -28,7 +29,8 @@ class PublicBindings(HeuristicInterface):
             changed_files = []
 
         if any(
-            file.startswith("torch/") and file.endswith(".py") for file in changed_files
+            file.startswith("torch/") or file in self.additional_files
+            for file in changed_files
         ):
             test_ratings[TestRun(self.test_public_bindings)] = 1.0
         return TestPrioritizations(tests, test_ratings)
