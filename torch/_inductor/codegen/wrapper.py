@@ -310,13 +310,13 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 if self.last_seen_device_guard_index is None:
                     if config.abi_compatible:
                         code.writeline(
-                            "AOTICudaStreamGuard stream_guard(stream, this->device_idx_);"
+                            f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
                         )
                     else:
                         code.writeline(
                             maybe_hipify_code_wrapper(
-                                "at::cuda::CUDAStreamGuard stream_guard("
-                                + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
+                                f"{V.graph.device_ops.cpp_stream_guard()} stream_guard("
+                                + f"{V.graph.device_ops.cpp_getStreamFromExternal()}(stream, this->device_idx_));"
                             )
                         )
                 else:
@@ -326,10 +326,10 @@ class EnterDeviceContextManagerLine(WrapperLine):
             else:
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
-                        f"AOTICudaGuard device_guard({self.device_idx});"
+                        f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
                         if config.abi_compatible
                         else maybe_hipify_code_wrapper(
-                            f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                            f"{V.graph.device_ops.cpp_device_guard()} device_guard({self.device_idx});"
                         )
                     )
                 else:
