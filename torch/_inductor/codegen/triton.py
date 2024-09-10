@@ -385,6 +385,12 @@ class TritonPrinter(PythonPrinter):
             f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
+    def _print_Float(self, expr):
+        # Use a tensor here to get float64. Otherwise the constant is
+        # truncated to float32.
+        ret = f"tl.full([1], {expr}, tl.float64)"
+        return ret
+
     def _print_ToFloat(self, expr):
         assert len(expr.args) == 1
         return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
