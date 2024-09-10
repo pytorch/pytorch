@@ -5,7 +5,7 @@ import functools
 import string
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -211,6 +211,17 @@ B = 4
 H = 8
 S = 2048
 D = 64
+
+test_Hq_Hkv = [
+    (4, 2),
+    (4, 1),
+]
+
+test_Bq_Bkv = [
+    (3, 1),
+    (4, 1),
+    (5, 1),
+]
 
 
 def query_key_value_clones(
@@ -614,6 +625,76 @@ class TestFlexAttention(InductorTestCase):
             D,
             B,
             H,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast(
+        self,
+        dtype: torch.dtype,
+        batch_dims: Tuple[int, int],
+        head_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq > 1 and Bkv == 1
+
+        self.run_test(
+            score_mod,
+            dtype,
+            Bq,
+            Hq,
+            S,
+            D,
+            Bkv,
+            Hkv,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast_causal_mask(
+        self,
+        dtype: torch.dtype,
+        batch_dims: Tuple[int, int],
+        head_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq > 1 and Bkv == 1
+
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, enable_gqa=(not Hq == Hkv)
+        )
+
+        self.run_test_with_call(
+            attention,
+            torch.float16,
+            Bq,
+            Hq,
+            S,
+            D,
+            Bkv,
+            Hkv,
             S,
             D,
         )

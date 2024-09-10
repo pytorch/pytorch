@@ -179,22 +179,27 @@ compute_flex_attention = r"""
     stride_kz, stride_kh, stride_kn, stride_kk = {{stride("K")}}
     stride_vz, stride_vh, stride_vn, stride_vk = {{stride("V")}}
 
-    Z = {{size("Q", 0)}}
+    ZQ = {{size("Q", 0)}}
     HQ = {{size("Q", 1)}}
     Q_LEN = {{size("Q", 2)}}
+    ZKV = {{size("K", 0)}}
     KV_LEN = {{size("K", 2)}}
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
     q_start = tl.program_id(0)
-    off_z = tl.program_id(1) // HQ
+    off_zq = tl.program_id(1) // HQ
     off_hq = tl.program_id(1) % HQ
+
+    # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
+    # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
+    off_zkv = off_zq % ZKV
     off_hkv = off_hq // GQA_SHARED_HEADS
     off_g = off_hq % GQA_SHARED_HEADS
 
-    q_offset = off_z * stride_qz + off_hq * stride_qh
-    k_offset = off_z * stride_kz + off_hkv * stride_kh
-    v_offset = off_z * stride_vz + off_hkv * stride_vh
+    q_offset = off_zq * stride_qz + off_hq * stride_qh
+    k_offset = off_zkv * stride_kz + off_hkv * stride_kh
+    v_offset = off_zkv * stride_vz + off_hkv * stride_vh
 
     Q = Q + q_offset
     K = K + k_offset
@@ -203,7 +208,7 @@ compute_flex_attention = r"""
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
 
-    sparse_idx_z = off_z % SPARSE_Z
+    sparse_idx_z = off_zq % SPARSE_Z
     sparse_idx_hq = off_hq % SPARSE_HQ
 
     SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M)
@@ -270,7 +275,7 @@ compute_flex_attention = r"""
         {{gen_argdefs()}},
         q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
         acc, l_i, m_i,
-        off_z, off_hq, offs_m[:, None], offs_n[None, :],
+        off_zq, off_hq, offs_m[:, None], offs_n[None, :],
         kv_indices, kv_num_blocks,
         0, block_n_end,
         MATMUL_PRECISION,
@@ -309,7 +314,7 @@ compute_flex_attention = r"""
             {{gen_argdefs()}},
             q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
             acc, l_i, m_i,
-            off_z, off_hq, offs_m[:, None], offs_n[None, :],
+            off_zq, off_hq, offs_m[:, None], offs_n[None, :],
             kv_indices, kv_num_blocks,
             0, block_n_end,
             MATMUL_PRECISION,
@@ -323,14 +328,14 @@ compute_flex_attention = r"""
     l_i = tl.where(l_i == 0.0, 1, l_i)
 
     acc = acc / l_i[:, None]
-    idx_z = tl.program_id(1) // HQ
+    idx_zq = tl.program_id(1) // HQ
     idx_hq = tl.program_id(1) % HQ
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, V_HEAD_DIM)[None, :]
 
     mask = idx_m < Q_LEN
     # TODO generalize and add proper mask support
-    {{store_output(("idx_z", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
+    {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
@@ -741,7 +746,10 @@ def flex_attention(
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq == Bkv, "Batch dimension must match"
+
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
+
     B = Bq
 
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
@@ -940,10 +948,11 @@ flex_attention_backward_template = TritonTemplate(
     stride_dqz, stride_dqh, stride_dqm, stride_dqd = {{stride("DQ")}}
     stride_dvz, stride_dvh, stride_dvm, stride_dvd = {{stride("DV")}}
 
-    Z = {{size("Q", 0)}}
+    ZQ = {{size("Q", 0)}}
     HQ = {{size("Q", 1)}}
     HKV = {{size("K", 1)}}
     Q_LEN = {{size("Q", 2)}}
+    ZKV = {{size("K", 0)}}
     KV_LEN = {{size("K", 2)}}
 
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -953,17 +962,20 @@ flex_attention_backward_template = TritonTemplate(
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
     off_hz = tl.program_id(2)
-    off_z = off_hz // HKV # batch idx
+    off_zq = off_hz // HKV # q batch idx
     off_hkv = off_hz % HKV # kv head idx
+    off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
 
-    sparse_idx_z = off_z % SPARSE_Z
+    sparse_idx_z = off_zq % SPARSE_Z
 
-    k_adj = (stride_kh * off_hkv + stride_kz * off_z).to(tl.int64)
-    v_adj = (stride_vh * off_hkv + stride_vz * off_z).to(tl.int64)
-    dv_adj = (stride_dvh * off_hkv + stride_dvz * off_z).to(tl.int64)
+    k_adj = (stride_kh * off_hkv + stride_kz * off_zkv).to(tl.int64)
+    v_adj = (stride_vh * off_hkv + stride_vz * off_zkv).to(tl.int64)
+    # first compute broadcasted dv of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
+    # then reduce to dv of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
+    dv_adj = (stride_dvh * off_hkv + stride_dvz * off_zq).to(tl.int64)
 
     # offset K, V, DV pointers for batch/kv-head
     K += k_adj
@@ -993,10 +1005,10 @@ flex_attention_backward_template = TritonTemplate(
         sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + off_pid_mask * stride_kv_idx_m  # noqa: B950
 
         # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
-        q_adj2 = (stride_qh * off_hq2 + stride_qz * off_z).to(tl.int64)
-        do_adj2 = (stride_doh * off_hq2 + stride_doz * off_z).to(tl.int64)
-        dq_adj2 = (stride_dqh * off_hq2 + stride_dqz * off_z).to(tl.int64)
-        off_chz2 = ((off_z * HQ + off_hq2) * Q_LEN).to(tl.int64)
+        q_adj2 = (stride_qh * off_hq2 + stride_qz * off_zq).to(tl.int64)
+        do_adj2 = (stride_doh * off_hq2 + stride_doz * off_zq).to(tl.int64)
+        dq_adj2 = (stride_dqh * off_hq2 + stride_dqz * off_zq).to(tl.int64)
+        off_chz2 = ((off_zq * HQ + off_hq2) * Q_LEN).to(tl.int64)
 
         Q2 = Q + q_adj2
         DO2 = DO + do_adj2
@@ -1042,7 +1054,7 @@ flex_attention_backward_template = TritonTemplate(
             {{gen_argdefs()}},
             K, V,
             dq, q, do, Di, lse,
-            off_z, off_hq2, offs_m2, offs_n2,
+            off_zq, off_hq2, offs_m2, offs_n2,
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION,
@@ -1061,7 +1073,7 @@ flex_attention_backward_template = TritonTemplate(
                 {{gen_argdefs()}},
                 K, V,
                 dq, q, do, Di, lse,
-                off_z, off_hq2, offs_m2, offs_n2,
+                off_zq, off_hq2, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION,
@@ -1106,10 +1118,10 @@ flex_attention_backward_template = TritonTemplate(
             off_hq1 = off_hkv * GQA_SHARED_HEADS + off_g
 
             # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
-            q_adj1 = (stride_qh * off_hq1 + stride_qz * off_z).to(tl.int64)
-            do_adj1 = (stride_doh * off_hq1 + stride_doz * off_z).to(tl.int64)
-            dq_adj1 = (stride_dqh * off_hq1 + stride_dqz * off_z).to(tl.int64)
-            off_chz1 = ((off_z * HQ + off_hq1) * Q_LEN).to(tl.int64)
+            q_adj1 = (stride_qh * off_hq1 + stride_qz * off_zq).to(tl.int64)
+            do_adj1 = (stride_doh * off_hq1 + stride_doz * off_zq).to(tl.int64)
+            dq_adj1 = (stride_dqh * off_hq1 + stride_dqz * off_zq).to(tl.int64)
+            off_chz1 = ((off_zq * HQ + off_hq1) * Q_LEN).to(tl.int64)
 
             Q1 = Q + q_adj1
             DO1 = DO + do_adj1
@@ -1135,7 +1147,7 @@ flex_attention_backward_template = TritonTemplate(
                 {{gen_argdefs()}},
                 Q1, DO1, DELTA1, LSE1,
                 dk, dv, k, v,
-                off_z, off_hq1, offs_n1, offs_m1,
+                off_zq, off_hq1, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION,
@@ -1155,7 +1167,7 @@ flex_attention_backward_template = TritonTemplate(
                     {{gen_argdefs()}},
                     Q1, DO1, DELTA1, LSE1,
                     dk, dv, k, v,
-                    off_z, off_hq1, offs_n1, offs_m1,
+                    off_zq, off_hq1, offs_n1, offs_m1,
                     stride_qm, stride_qd, stride_dom, stride_dod,
                     q_indices, sparse_q_num_blocks,
                     MATMUL_PRECISION,
@@ -1175,7 +1187,10 @@ flex_attention_backward_template = TritonTemplate(
 
         dk *= SM_SCALE
         mask = index_n < KV_LEN
-        {{store_output(("off_z", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
+
+        # first compute broadcasted dk of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
+        # then reduce to dk of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
+        {{store_output(("off_zq", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
 
 @triton.jit
 def bwd_dq_inner(
@@ -1618,8 +1633,9 @@ def flex_attention_backward(*args, **kwargs):
     dtype = query.get_dtype()
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq == Bkv, "Batch dimension must match"
-    B = Bq
+
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
 
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1662,10 +1678,10 @@ def flex_attention_backward(*args, **kwargs):
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
 
-    layout_k = FixedLayout(
+    layout_broadcasted_k = FixedLayout(
         key.get_device(),
         key.get_dtype(),
-        key.get_size(),
+        [Bq, Hkv, seq_len_kv, qk_head_dim],
         key.get_stride(),
     )
 
@@ -1682,8 +1698,11 @@ def flex_attention_backward(*args, **kwargs):
     grad_query = empty_strided(
         query.get_size(), query.get_stride(), dtype=dtype, device=device
     )
-    grad_value = empty_strided(
-        value.get_size(), value.get_stride(), dtype=dtype, device=device
+    broadcasted_grad_value = empty_strided(
+        (Bq, *value.get_size()[1:]),
+        value.get_stride(),
+        dtype=dtype,
+        device=device,
     )
 
     kernel_options.setdefault("SM_SCALE", scale)
@@ -1746,7 +1765,7 @@ def flex_attention_backward(*args, **kwargs):
                 delta,
                 grad_out,
                 grad_query,
-                grad_value,
+                broadcasted_grad_value,
                 kv_num_blocks,
                 kv_indices,
                 q_num_blocks,
@@ -1756,9 +1775,9 @@ def flex_attention_backward(*args, **kwargs):
                 full_q_num_blocks,
                 full_q_indices,
             ],
-            layout=layout_k,  # We use store_output only for grad_key
+            layout=layout_broadcasted_k,  # We use store_output only for grad_key
             subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
-            mutated_inputs=[grad_query, grad_value],
+            mutated_inputs=[grad_query, broadcasted_grad_value],
             call_sizes=query.get_size() + key.get_size()[1:3],
             num_stages=num_stages,
             num_warps=num_warps,
@@ -1773,7 +1792,7 @@ def flex_attention_backward(*args, **kwargs):
             delta,
             grad_out,
             grad_query,
-            grad_value,
+            broadcasted_grad_value,
             kv_num_blocks,
             kv_indices,
             q_num_blocks,
@@ -1797,13 +1816,24 @@ def flex_attention_backward(*args, **kwargs):
         15: create_indices_fake,
     }
 
-    grad_key = autotune_select_algorithm(
+    broadcasted_grad_key = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
         inputs_for_autotuning,
-        layout_k,
+        layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
-    )
+    )  # [Bq, Hkv, seq_len_kv, k_head_dim]
+
+    if Bq == Bkv:
+        grad_key = broadcasted_grad_key
+        grad_value = broadcasted_grad_value
+    else:
+        assert (
+            Bq > 1 and Bkv == 1
+        ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
+        grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
+        grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
+
     return (
         grad_query,
         grad_key,
