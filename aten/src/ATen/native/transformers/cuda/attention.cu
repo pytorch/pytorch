@@ -1103,16 +1103,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     } else {
       auto [seed, offset] = at::cuda::philox::unpack(philox_state);
 #ifdef USE_ROCM
-      seed_t = at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong).device(at::kCUDA));
-      offset_t = at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong).device(at::kCUDA));
+      const auto options = at::dtype(at::kLong).device(at::kCUDA);
 #else
-      seed_t = at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
-      offset_t = at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+      const auto options = at::dtype(at::kLong);
 #endif
+      seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), options);
+      offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), options);
     }
   } else {
     // Not using dropout
@@ -1159,7 +1155,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   using sdp::aotriton_adapter::mk_philoxtensor;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
   at::Tensor softmax_fa_t = at::empty({ 0, 0, 0, 0 }, query.options());
-  bool use_philox_state = in_capture_stream;
+  const bool use_philox_state = in_capture_stream;
   auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
   auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
   auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;

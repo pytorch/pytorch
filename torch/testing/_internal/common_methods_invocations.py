@@ -8812,9 +8812,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
             dropout_p=0.0)
     )
 
-    if TEST_WITH_ROCM:
-        pass
-    else:
+    if not TEST_WITH_ROCM:
         samples.append(
             SampleInput(
                 make((batch, num_heads_q_gqa, seq_q, head_dim)),
