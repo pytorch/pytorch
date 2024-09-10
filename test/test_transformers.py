@@ -66,6 +66,18 @@ SdpaShape = namedtuple('Sdpa_Shape', ['batch', 'num_heads', 'seq_len', 'head_dim
 Tolerances = namedtuple('Tolerances', ['atol', 'rtol'])
 
 @contextlib.contextmanager
+def enable_tensor_cores():
+    """
+    Temporarily set the float32 matmul precision to "high" in order to enable tensor cores
+    """
+    original_precision = torch.get_float32_matmul_precision()
+    try:
+        torch.set_float32_matmul_precision("medium")
+        yield
+    finally:
+        torch.set_float32_matmul_precision(original_precision)
+
+@contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
     r"""
     This context manager can be used to temporarily enable or disable deterministic algorithms.
@@ -2897,6 +2909,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if MEM_EFF_CAPABILITY_MATCHES_SM80
                  else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
+    @enable_tensor_cores()
     def test_mem_efficient_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                        head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                        scale: str):
@@ -2982,6 +2995,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if MEM_EFF_CAPABILITY_MATCHES_SM80
                  else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
+    @enable_tensor_cores()
     def test_mem_efficient_attention_attn_mask_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int,
                                                                  seq_len_k: int, head_dim: int, is_causal: bool,
                                                                  dropout_p: float, dtype: torch.dtype,
@@ -3078,6 +3092,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("scale", [None, "l1"])
     @parametrize("enable_gqa", [True, False])
     @parametrize("n_heads", [[16, 8], [10, 2]])
+    @enable_tensor_cores()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str, enable_gqa: bool, n_heads: List[int]):
@@ -3186,6 +3201,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
+    @enable_tensor_cores()
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int,
                                                          seq_len_q: int, seq_len_k: int,
                                                          head_dim: int,
