@@ -264,10 +264,12 @@ def clone_outputs_aliasing_inputs(args):
 def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
-        return fw_out, [
+        fw_out_flat, tree_spec = pytree.tree_flatten(fw_out)
+        fw_out_grad = [
             True if isinstance(ret, torch.Tensor) and ret.requires_grad else False
-            for ret in fw_out
+            for ret in fw_out_flat
         ]
+        return fw_out_flat, fw_out_grad
 
     return fw_with_masks
 

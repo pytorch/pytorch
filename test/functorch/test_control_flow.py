@@ -1336,13 +1336,15 @@ def forward(self, pred_1, x_1):
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
+    # @parametrize("compile_mode", ["none", "eager", "compile_dynamic_shape"])
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_compile(self, reverse, compile_mode, device):
+    @parametrize("autograd", [False, True])
+    def test_scan_compile2(self, reverse, compile_mode, device, autograd):
         def add2(x: torch.Tensor, y: torch.Tensor):
             return x * y, x + y
 
-        x = torch.randn(3, 10, 2, device=device)
+        x = torch.randn(10, 5, 7, device=device, requires_grad=autograd)
 
         scan_fct = compile_mode_helper(scan, compile_mode)
 
@@ -1350,12 +1352,12 @@ def forward(self, pred_1, x_1):
             (
                 get_scan_combine_fn("add", False),
                 torch.cumsum,
-                torch.zeros(10, 2, device=device),
+                torch.zeros(5, 7, device=device, requires_grad=autograd),
             ),
             (
                 get_scan_combine_fn("mul", False),
                 torch.cumprod,
-                torch.ones(10, 2, device=device),
+                torch.ones(5, 7, device=device, requires_grad=autograd),
             ),
         ]:
             result = scan_fct(op, init, x, dim=0, reverse=reverse)
@@ -1364,6 +1366,16 @@ def forward(self, pred_1, x_1):
             if not reverse:
                 result_exp_PT = op_pt(x, 0)
                 self.assertEqual(result[1], result_exp_PT)
+
+            if autograd:
+                result_flatten, _ = pytree.tree_flatten(result)
+                result_exp_flatten, _ = pytree.tree_flatten(result_exp)
+                grad_out = [torch.ones_like(el) for el in result_exp_flatten]
+                expected_grads = torch.autograd.grad(
+                    result_exp_flatten, (init, x), grad_out
+                )
+                grads = torch.autograd.grad(result_flatten, (init, x), grad_out)
+                self.assertEqual(grads, expected_grads)
 
         # Jax Examples
         x = torch.arange(0, 4, device=device, dtype=torch.int64)
@@ -1416,8 +1428,10 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result, result_exp)
 
         # Non associative operation
-        x = torch.arange(0, 5, device=device, dtype=torch.float32)
-        init = torch.ones(1, device=device, dtype=torch.float32)
+        x = torch.arange(
+            0, 5, device=device, dtype=torch.float32, requires_grad=autograd
+        )
+        init = torch.ones(1, device=device, dtype=torch.float32, requires_grad=autograd)
         result = scan_fct(
             get_scan_combine_fn("div", False),
             init,
@@ -1433,6 +1447,16 @@ def forward(self, pred_1, x_1):
             reverse=reverse,
         )
         self.assertEqual(result, result_exp)
+
+        if autograd:
+            result_flatten, _ = pytree.tree_flatten(result)
+            result_exp_flatten, _ = pytree.tree_flatten(result_exp)
+            grad_out = [torch.ones_like(el) for el in result_exp_flatten]
+            expected_grads = torch.autograd.grad(
+                result_exp_flatten, (init, x), grad_out
+            )
+            grads = torch.autograd.grad(result_flatten, (init, x), grad_out)
+            self.assertEqual(grads, expected_grads)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
