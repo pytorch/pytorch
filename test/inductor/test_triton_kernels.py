@@ -16,7 +16,12 @@ from torch._inductor import metrics
 from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -1013,6 +1018,7 @@ def forward(self, x_1, output_1):
     @torch._inductor.config.patch(
         triton_kernel_default_layout_constraint="needs_fixed_stride_order"
     )
+    @requires_gpu
     def test_layout_constraint_needs_fixed_stride_order(self):
         # Construct a custom op whose output strides are (1, 2)
         @torch.library.custom_op("mylib::weird_op_with_lowering", mutates_args={})
@@ -1603,6 +1609,18 @@ def forward(self, x_1, output_1):
 
         x = torch.randn(4, device=GPU_TYPE)
         f(x, x)
+
+    @requires_gpu
+    @parametrize("dtype", (torch.float16, torch.float32, torch.float64))
+    def test_triton_kernel_float64_constant(self, dtype):
+        def f(x):
+            return x * (0.12 * x.shape[0])
+
+        x = torch.ones(200, device=GPU_TYPE, dtype=torch.float64)
+
+        eager_out = f(x)
+        compiled_out = torch.compile(f, dynamic=True)(x)
+        self.assertEqual(compiled_out, eager_out)
 
 
 def make_mutation_test(fn):
