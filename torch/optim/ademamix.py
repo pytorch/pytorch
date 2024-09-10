@@ -1,7 +1,12 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import time
-from typing import List, Optional, Tuple, Union, cast
+from typing import (
+    List,
+    Optional,
+    Tuple,
+    Union,
+    cast
+)
 
 import torch
 from torch import Tensor
@@ -13,7 +18,10 @@ from torch.optim.optimizer import (
     _use_grad_for_differentiable,
     Optimizer,
     ParamsT,
-    _get_scalar_dtype, _dispatch_sqrt, _capturable_doc, _maximize_doc, _differentiable_doc,
+    _get_scalar_dtype,
+    _capturable_doc,
+    _maximize_doc,
+    _differentiable_doc,
 )
 
 __all__ = ["AdEMAMix", "ademamix"]
@@ -398,7 +406,7 @@ def _single_tensor_ademamix(
 
             step_size = lr / bias_correction1
 
-            bias_correction2_sqrt = _dispatch_sqrt(bias_correction2)
+            bias_correction2_sqrt = bias_correction2 ** .5
 
             if amsgrad:
                 torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
