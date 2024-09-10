@@ -29,7 +29,6 @@
 #include <ATen/ops/_efficient_attention_backward.h>
 #include <ATen/ops/_efficient_attention_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
-#include <ATen/ops/zeros.h>
 #endif
 
 #ifdef USE_FLASH_ATTENTION
