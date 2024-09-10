@@ -74,7 +74,9 @@ from .schema import (  # type: ignore[attr-defined]
     ModuleCallEntry,
     ModuleCallSignature,
     NamedArgument,
+    NNModuleFrame,
     Node,
+    NodeMeta,
     OptionalTensorArgument,
     OutputSpec,
     OutputTokenSpec,
@@ -503,6 +505,7 @@ class GraphModuleSerializer(metaclass=Final):
             or (meta_val is not None and isinstance(meta_val, (torch.SymInt, torch.SymBool)))
         ):
             assert len(node.kwargs) == 0
+            metadata, metadata_struct = self.serialize_metadata(node)
             ex_node = Node(
                 target=self.serialize_operator(node.target),
                 inputs=self.serialize_sym_op_inputs(node.target, node.args),
@@ -515,22 +518,27 @@ class GraphModuleSerializer(metaclass=Final):
                         as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val)
                     )
                 ],
-                metadata=self.serialize_metadata(node),
+                metadata=metadata,
+                metadata_struct=metadata_struct,
             )
         elif isinstance(node.target, torch._ops.OpOverload):
+            metadata, metadata_struct = self.serialize_metadata(node)
             ex_node = Node(
                 target=self.serialize_operator(node.target),
                 inputs=self.serialize_inputs(node.target, node.args, node.kwargs),
                 outputs=self.serialize_outputs(node),
                 # TODO: create a new tensor_values here, meta might have faketensor info
-                metadata=self.serialize_metadata(node),
+                metadata=metadata,
+                metadata_struct=metadata_struct,
             )
         elif isinstance(node.target, torch._ops.HigherOrderOperator):
+            metadata, metadata_struct = self.serialize_metadata(node)
             ex_node = Node(
                 target=self.serialize_operator(node.target),
                 inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
                 outputs=self.serialize_hoo_outputs(node),
-                metadata=self.serialize_metadata(node),
+                metadata=metadata,
+                metadata_struct=metadata_struct,
             )
         elif type(node.target) in _serialization_registry:
             # Sanity check for unhandled serialization.
@@ -541,11 +549,13 @@ class GraphModuleSerializer(metaclass=Final):
             op_name = handler.to_op_name(node.target)
             assert isinstance(namespace, str) and isinstance(op_name, str)
             assert ":" not in namespace and ":" not in op_name
+            metadata, metadata_struct = self.serialize_metadata(node)
             ex_node = Node(
                 target=f"#{namespace}:{op_name}",
                 inputs=self.serialize_inputs(node.target, node.args, node.kwargs),
                 outputs=self.serialize_outputs(node),
-                metadata=self.serialize_metadata(node),
+                metadata=metadata,
+                metadata_struct=metadata_struct,
             )
         else:
             raise SerializeError(f"Serializing {node.target} is not supported")
@@ -575,27 +585,18 @@ class GraphModuleSerializer(metaclass=Final):
         else:
             return user_node.name
 
-    def serialize_metadata(self, node: torch.fx.Node) -> Dict[str, str]:
+    def serialize_metadata(self, node: torch.fx.Node) -> Tuple[Dict[str, str], Optional[NodeMeta]]:
         ret = {}
+        ret_struct = None
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 
         if nn_module_stack := node.meta.get("nn_module_stack"):
-
-            def export_nn_module_stack(val):
-                assert isinstance(val, tuple) and len(val) == 2
-                path, ty = val
-
-                assert isinstance(path, str)
-                assert isinstance(ty, str)
-
-                return path + "," + ty
-
-            # Serialize to "key,orig_path,type_str"
-            nn_module_list = [
-                f"{k},{export_nn_module_stack(v)}" for k, v in nn_module_stack.items()
-            ]
-            ret["nn_module_stack"] = ST_DELIMITER.join(nn_module_list)
+            nn_module_list = []
+            for k, v in nn_module_stack.items():
+                assert isinstance(v, tuple) and len(v) == 2
+                nn_module_list.append(NNModuleFrame(k, v[0], v[1]))
+            ret_struct = NodeMeta(nn_module_stack=nn_module_list)
 
         if source_fn_st := node.meta.get("source_fn_stack"):
             source_fn_list = [
@@ -615,7 +616,7 @@ class GraphModuleSerializer(metaclass=Final):
                     f"Failed to serialize custom metadata for node {node.name} with error {e}"
                 ) from e
 
-        return ret
+        return (ret, ret_struct)
 
     def serialize_script_obj_meta(
         self, script_obj_meta: ep.CustomObjArgument
@@ -1712,7 +1713,12 @@ class GraphModuleDeserializer(metaclass=Final):
                 "call_function", target, args, kwargs, name
             )
             self.deserialize_outputs(serialized_node, fx_node)
-            fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+            fx_node.meta.update(
+                self.deserialize_metadata(
+                    serialized_node.metadata,
+                    serialized_node.metadata_struct
+                )
+            )
 
         elif isinstance(target, (torch._ops.OpOverload, *_registered_extension_types())):
             # For convenience: if this node returns a single tensor, name the
@@ -1733,7 +1739,12 @@ class GraphModuleDeserializer(metaclass=Final):
                 f"Unsupported target type for node {serialized_node}: {type(target)}"
             )
 
-        fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+        fx_node.meta.update(
+            self.deserialize_metadata(
+                serialized_node.metadata,
+                serialized_node.metadata_struct
+            )
+        )
         if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
             fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
@@ -2106,7 +2117,10 @@ class GraphModuleDeserializer(metaclass=Final):
     def deserialize_multiple_outputs(
         self, serialized_node: Node, fx_node: torch.fx.Node
     ) -> None:
-        deserialized_metadata = self.deserialize_metadata(serialized_node.metadata)
+        deserialized_metadata = self.deserialize_metadata(
+            serialized_node.metadata,
+            serialized_node.metadata_struct
+        )
 
         def generate_getitem(
             meta_val,
@@ -2171,8 +2185,37 @@ class GraphModuleDeserializer(metaclass=Final):
         fx_node.meta["val"] = tuple(meta_val)
         self.serialized_name_to_node[fx_node.name] = fx_node
 
-    def deserialize_metadata(self, metadata: Dict[str, str]) -> Dict[str, Any]:
+    def deserialize_metadata(
+        self, metadata: Dict[str, str], metadata_struct: Optional[NodeMeta]
+    ) -> Dict[str, Any]:
         ret: Dict[str, Any] = {}
+        if metadata_struct:
+            if metadata_struct.nn_module_stack:
+                nn_module_stack = {
+                    frame.key: (frame.path, frame.ty)
+                    for frame in metadata_struct.nn_module_stack
+                }
+                ret["nn_module_stack"] = nn_module_stack
+
+        if nn_module_stack_str := metadata.get("nn_module_stack"):
+            log.warning("The program is from an older serializer.")
+
+            # Originally serialized to "key,orig_path,type_str"
+            def import_nn_module_stack(key, path, ty):
+                return key, (path, ty)
+
+            def metadata_split(metadata):
+                # Remove the parentheses and commas inside them
+                metadata = re.sub(r'\(.*?\)', '', metadata)
+                # Split the string by comma, except for those inside parentheses
+                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+
+            nn_module_stack = dict(
+                import_nn_module_stack(*metadata_split(item))
+                for item in nn_module_stack_str.split(ST_DELIMITER)
+            )
+            ret["nn_module_stack"] = nn_module_stack
+
         if stack_trace := metadata.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 
@@ -2194,29 +2237,6 @@ class GraphModuleDeserializer(metaclass=Final):
                 else:
                     target = getattr(target, name)
             return target
-
-        if nn_module_stack_str := metadata.get("nn_module_stack"):
-            # Originally serialized to "key,orig_path,type_str"
-            def import_nn_module_stack(key, path, ty):
-                return key, (path, ty)
-
-            # Helper function that splits strings by commas except for those
-            # encapsulated by parens, which are valid traces.
-            # TODO: Currently this is needed due to indexing Sequential
-            # layers introducing names in the form "layer.slice(1, None, None)".
-            # If that naming is improved, this fancier splitting can probably be
-            # reverted to a simple split by comma.
-            def metadata_split(metadata):
-                # Remove the parentheses and commas inside them
-                metadata = re.sub(r'\(.*?\)', '', metadata)
-                # Split the string by comma, except for those inside parentheses
-                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
-
-            nn_module_stack = dict(
-                import_nn_module_stack(*metadata_split(item))
-                for item in nn_module_stack_str.split(ST_DELIMITER)
-            )
-            ret["nn_module_stack"] = nn_module_stack
 
         if source_fn_st_str := metadata.get("source_fn_stack"):
             # Originally serializes to "fx_node_name,op_str"
@@ -2304,10 +2324,10 @@ class ExportedProgramDeserializer(metaclass=Final):
         example_inputs: Optional[Union[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
     ) -> ep.ExportedProgram:
         assert isinstance(exported_program, ExportedProgram)
-        version = exported_program.schema_version
+        schema_version = exported_program.schema_version
 
         # TODO(zhxchen17) blocked on thrift schema refactor
-        if version.major != SCHEMA_VERSION[0] and not (version.major == 0 and version.minor == 0):
+        if schema_version.major != SCHEMA_VERSION[0] and not (schema_version.major == 0 and schema_version.minor == 0):
             raise SerializeError(
                 f"Serialized schema version {exported_program.schema_version} "
                 f"does not match our current schema version {SCHEMA_VERSION}."

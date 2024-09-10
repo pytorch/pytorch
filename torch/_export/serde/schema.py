@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (7, 3)
+SCHEMA_VERSION = (7, 4)
 TREESPEC_VERSION = 1
 
 
@@ -186,11 +186,28 @@ class NamedArgument:
 
 
 @dataclass
+class NNModuleFrame:
+    key: str
+    path: str
+    ty: str
+
+
+@dataclass
+class NodeMeta:
+    stack_trace: Optional[str] = None
+    nn_module_stack: Optional[List[NNModuleFrame]] = None
+    source_fn_stack: Optional[List[str]] = None
+    torch_fn: Optional[List[str]] = None
+    custom: Optional[str] = None
+
+
+@dataclass
 class Node:
     target: str
     inputs: List[NamedArgument]
     outputs: List[Argument]
     metadata: Dict[str, str]
+    metadata_struct: Optional[NodeMeta] = None
 
 
 @dataclass

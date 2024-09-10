@@ -8,6 +8,7 @@ with test_sym_bool)
 import copy
 import io
 import math
+import json
 import tempfile
 import unittest
 import zipfile
@@ -22,6 +23,7 @@ from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     canonicalize,
     deserialize,
+    EnumEncoder,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
     serialize,
@@ -1053,6 +1055,119 @@ def forward(self, x):
         ep._example_inputs = None
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
+
+    def test_nn_module_stack_serde_commas(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.linear(x))
+
+        # export the model
+        ep = torch.export.export(M(), (torch.randn(2, 2),))
+        # modify the nn_module_stack to contain comma(,) and semicolon(;)
+        for node in ep.graph.nodes:
+            if nn_module_stack := node.meta.get("nn_module_stack"):
+                for k, (p, t) in nn_module_stack.items():
+                    nn_module_stack[k] = (p + ";semicolon", t + ",comma")
+                node.meta["nn_module_stack"] = nn_module_stack
+        # serialize and deserialize the model
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        # check that the output is the same
+        inp = (torch.randn(2, 2),)
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+        self.assertEqual(exp_out.requires_grad, actual_out.requires_grad)
+
+    def test_nn_module_stack_serde_backward_compatible(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=8, kernel_size=3, padding=1
+                )
+                self.relu = torch.nn.ReLU()
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=2)
+
+            def forward(self, x, constant=None):
+                a = self.conv(x)
+                a.add_(constant)
+                return self.maxpool(self.relu(a))
+
+        def modify_serialized_node_metadata(buffer):
+            # modify the serialized node metadata to have the same behavior as the old serializer
+            buffer.seek(0)
+            with zipfile.ZipFile(buffer, "r") as zipf:
+                schema_version = zipf.read("version").decode().split(".")
+                files = {
+                    file_info.filename: zipf.read(file_info.filename)
+                    for file_info in zipf.infolist()
+                }
+                ep_dict = json.loads(
+                    files["serialized_exported_program.json"].decode("utf-8")
+                )
+                # Hard code the schema version
+                ep_dict["schema_version"] = {
+                    "major": int(schema_version[0]),
+                    "minor": int(schema_version[1]) - 1,
+                }
+                # Hard code the nn_module_stack in the old fashion
+                ep_graph_node_dict = ep_dict["graph_module"]["graph"]["nodes"]
+                ep_graph_node_dict[0]["metadata"][
+                    "nn_module_stack"
+                ] = "L__self__,,__main__.M;L__self___conv,conv,torch.nn.modules.conv.Conv2d"
+                ep_graph_node_dict[1]["metadata"][
+                    "nn_module_stack"
+                ] = "L__self__,,__main__.M"
+                ep_graph_node_dict[2]["metadata"][
+                    "nn_module_stack"
+                ] = "L__self__,,__main__.M;L__self___relu,relu,torch.nn.modules.activation.ReLU"
+                ep_graph_node_dict[3]["metadata"][
+                    "nn_module_stack"
+                ] = "L__self__,,__main__.M;L__self___maxpool,maxpool,torch.nn.modules.pooling.MaxPool2d"
+                json_program_bytes = json.dumps(ep_dict, cls=EnumEncoder).encode(
+                    "utf-8"
+                )
+
+            with zipfile.ZipFile(buffer, "w") as zipf:
+                zipf.writestr("serialized_exported_program.json", json_program_bytes)
+                zipf.writestr(
+                    "serialized_state_dict.pt", files["serialized_state_dict.pt"]
+                )
+                zipf.writestr(
+                    "serialized_constants.pt", files["serialized_constants.pt"]
+                )
+                zipf.writestr(
+                    "serialized_example_inputs.pt",
+                    files["serialized_example_inputs.pt"],
+                )
+                zipf.writestr(
+                    "version", f"{schema_version[0]}.{str(int(schema_version[1])-1)}"
+                )
+
+        example_args = (torch.randn(1, 3, 64, 64),)
+        example_kwargs = {"constant": torch.ones(1, 8, 64, 64)}
+
+        # export the model and record the expected output
+        ep = export(M(), args=example_args, kwargs=example_kwargs)
+        exp_out = ep.module()(*example_args, **example_kwargs)
+
+        # save the exported program to a buffer
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        modify_serialized_node_metadata(buffer)
+
+        # use new deserializer to load the exported program from old serializer
+        loaded_ep = load(buffer)
+        actual_out = loaded_ep.module()(*example_args, **example_kwargs)
+        self.assertEqual(exp_out, actual_out)
 
 
 instantiate_parametrized_tests(TestDeserialize)
