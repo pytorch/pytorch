@@ -1444,24 +1444,25 @@ class AOTDispatchAutograd:
         if not isinstance(x, torch.Tensor):
             return x
 
-        x = x.contiguous(memory_format=memory_format)
+        is_subclass: bool = is_traceable_wrapper_subclass(x)
+        x = x.contiguous(
+            memory_format=memory_format[0] if is_subclass else memory_format
+        )
 
-        if not is_traceable_wrapper_subclass(x):
+        if not is_subclass:
             return x
         for i, attr in enumerate(x.__tensor_flatten__()[0]):  # type: ignore[attr-defined]
             elem = getattr(x, attr)
-            setattr(
-                x,
-                attr,
-                AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
-                    elem, memory_format[i]
-                ),
+            new_elem = AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                elem, memory_format[1 + i]
             )
+            setattr(x, attr, new_elem)
+
         return x
 
     # See Note [Tangents memory format, Part 2]
     @staticmethod
-    def coerce_runtime_subclass_tangent(x, metadata):
+    def coerce_runtime_tangent(x, metadata):
         if not isinstance(x, torch.Tensor):
             return x
         if not is_traceable_wrapper_subclass(x):
@@ -1864,9 +1865,28 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
                         (
-                            AOTDispatchAutograd.coerce_runtime_subclass_tangent(
+                            AOTDispatchAutograd.coerce_runtime_tangent(
                                 t,
                                 CompiledFunction.metadata.traced_tangent_metas[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if tangents_start_idx <= i < tangents_end_idx
+                            else t
+                        )
+                        for i, t in enumerate(all_args)
+                    ]
+                    # Coercing tangents memory format before unwrapping tensor subclasses,
+                    # As we have to coerce Subclass tangent first and then its Tensor attributes.
+                    assert (
+                        CompiledFunction.metadata.traced_tangent_memory_formats
+                        is not None
+                    )
+                    all_args = [
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_memory_formats[
                                     i - tangents_start_idx
                                 ],
                             )
@@ -1878,28 +1898,24 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     all_args = unwrap_tensor_subclasses(
                         all_args, is_joint_structure=False
                     )
-                    tangents_start_idx = (
-                        len(all_args) - len_tangents - len(rng_args) - len(bw_tokens)
+                else:
+                    assert (
+                        CompiledFunction.metadata.traced_tangent_memory_formats
+                        is not None
                     )
-                    tangents_end_idx = tangents_start_idx + len_tangents
-
-                assert (
-                    CompiledFunction.metadata.traced_tangent_memory_formats is not None
-                )
-                flat_traced_tangent_memory_formats = torch.utils._pytree.tree_leaves(
-                    CompiledFunction.metadata.traced_tangent_memory_formats
-                )
-                all_args = [
-                    (
-                        AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
-                            t,
-                            flat_traced_tangent_memory_formats[i - tangents_start_idx],
+                    all_args = [
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_memory_formats[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if (tangents_start_idx <= i < tangents_end_idx)
+                            else t
                         )
-                        if (tangents_start_idx <= i < tangents_end_idx)
-                        else t
-                    )
-                    for i, t in enumerate(all_args)
-                ]
+                        for i, t in enumerate(all_args)
+                    ]
 
                 def call_compiled_backward():
                     if ctx._is_compiled_autograd_tracing():

@@ -314,7 +314,14 @@ class ViewAndMutationMeta:
     # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: Optional[List[Any]] = None
 
-    traced_tangent_memory_formats: Optional[List[Any]] = None
+    # for each tangent at index i:
+    #   if the tangent is a plain tensor, traced_tangent_memory_formats[i] holds the memory format
+    #     of the tangent that we need to coerce to
+    #   if the tangent is a subclass, traced_tangent_memory_formats[i] holds a list of memory formats,
+    #     containing the expected memory format of the subclass **and** all of its inner tensors
+    traced_tangent_memory_formats: Optional[
+        List[Union[torch.memory_format, List[torch.memory_format]]]
+    ] = None
 
     num_symints_saved_for_bw: Optional[int] = None
 
