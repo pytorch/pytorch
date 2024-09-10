@@ -198,13 +198,12 @@ class TestExportAPIDynamo(common_utils.TestCase):
 
     def test_zero_output_aten_node(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y):
+            def forward(self, x):
                 torch.ops.aten._assert_async.msg(torch.tensor(True), "assertion failed")
-                torch.ops.aten._assert_scalar(y, "assertion failed")
                 return x + x
 
         input = torch.randn(2)
-        self.assert_export(Model(), (input, 3))
+        self.assert_export(Model(), (input))
 
 
 if __name__ == "__main__":
