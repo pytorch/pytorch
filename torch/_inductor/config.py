@@ -589,7 +589,7 @@ if is_fbcode():
             )
         else:
             global_cache_dir = parutil.get_dir_path("fb/cache")
-    except (ValueError, ModuleNotFoundError):
+    except (ValueError, ImportError):
         global_cache_dir = None
 
 else:
