@@ -474,19 +474,6 @@ class Module:
         """Initialize internal Module state, shared by both nn.Module and ScriptModule."""
         torch._C._log_api_usage_once("python.nn_module")
 
-        # validation checks for some of the inputs
-        for attr_name, attr_value in kwargs.items():
-            if attr_name in [
-                "in_features",
-                "out_features",
-                "in1_features",
-                "in2_features",
-            ]:  # TODO : add more
-                if not isinstance(attr_value, int):
-                    raise TypeError(
-                        f"Expected 'int' for {attr_name}, but got {type(attr_value).__name__}"
-                    )
-
         # Backward compatibility: no args used to be allowed when call_super_init=False
         if self.call_super_init is False and bool(kwargs):
             raise TypeError(
