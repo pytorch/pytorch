@@ -192,35 +192,6 @@ class FSDPParamGroup:
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
         self._reduce_dtype = next(iter(reduce_dtypes))
-    
-    def _validate_no_meta_params(self):
-        param_names_on_meta = [
-            fsdp_param._param_fqn
-            for fsdp_param in self.fsdp_params
-            if fsdp_param.sharded_param.device.type == "meta"
-        ]
-        if param_names_on_meta:
-            raise RuntimeError(
-                "FSDP parameters should be materialized from meta device before training, "
-                f"but the following were still on meta device: {param_names_on_meta}\n"
-                "For example, call module.to_empty(device) to materialize to device and "
-                "call module.reset_parameters() on each module to initialize values."
-            )
-    
-    def _validate_cpu_offload_params(self):
-        if not isinstance(self.offload_policy, CPUOffloadPolicy):
-            return
-        param_names_not_on_cpu = [
-            fsdp_param._param_fqn
-            for fsdp_param in self.fsdp_params
-            if fsdp_param.offload_to_cpu and fsdp_param.sharded_param.device.type != "cpu"
-        ]
-        if param_names_not_on_cpu:
-            raise RuntimeError(
-                "FSDP parameters should be materialized on cpu when enabling cpu offloading. "
-                "For example, load cpu state dict or call module.to_empty(device=\"cpu\"). " 
-                "Found following parameters on non-cpu device: {param_names_not_on_cpu}\n"
-            )
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -590,6 +561,35 @@ class FSDPParamGroup:
 
     def __repr__(self):
         return f"FSDPParamGroup(fqn={self._module_fqn})"
+    
+    def _validate_no_meta_params(self):
+        param_names_on_meta = [
+            fsdp_param._param_fqn
+            for fsdp_param in self.fsdp_params
+            if fsdp_param.sharded_param.device.type == "meta"
+        ]
+        if param_names_on_meta:
+            raise RuntimeError(
+                "FSDP parameters should be materialized from meta device before training, "
+                f"but the following were still on meta device: {param_names_on_meta}\n"
+                "For example, call module.to_empty(device) to materialize to device and "
+                "call module.reset_parameters() on each module to initialize values."
+            )
+    
+    def _validate_cpu_offload_params(self):
+        if not isinstance(self.offload_policy, CPUOffloadPolicy):
+            return
+        param_names_not_on_cpu = [
+            fsdp_param._param_fqn
+            for fsdp_param in self.fsdp_params
+            if fsdp_param.sharded_param.device.type != "cpu"
+        ]
+        if param_names_not_on_cpu:
+            raise RuntimeError(
+                "FSDP parameters should be materialized on cpu when enabling cpu offloading. "
+                "For example, load cpu state dict or call module.to_empty(device=\"cpu\"). " 
+                "Found following parameters on non-cpu device: {param_names_not_on_cpu}\n"
+            )
 
 
 def _get_param_module_infos(

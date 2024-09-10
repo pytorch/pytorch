@@ -707,6 +707,7 @@ class FSDPParam:
                     f"Expects swap_tensors to preserve object but got {new_param} "
                     f"instead of {self.sharded_param}"
                 )
+                self.sharded_param = new_param
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
@@ -715,20 +716,11 @@ class FSDPParam:
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
             local_tensor = padded_local_tensor
-        if self.offload_to_cpu and not local_tensor.is_cpu:
-            local_tensor = local_tensor.cpu()
         if self.pin_memory and not local_tensor.is_pinned():
             local_tensor = local_tensor.cpu().pin_memory()
         self._sharded_param_data = local_tensor.view(-1)
-        if not isinstance(new_param, DTensor):
-            raise ValueError(
-                f"expect the new parameter to be DTensor but got {type(new_param)}"
-            )
-        self.sharded_param = nn.Parameter(
-            self.to_sharded_dtensor(local_tensor[: self.sharded_size[0]]),
-            requires_grad=new_param.requires_grad,
-        )
-        self._setattr_on_modules(self.sharded_param)
+        assert isinstance(self.sharded_param, DTensor)  # mypy
+        self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
