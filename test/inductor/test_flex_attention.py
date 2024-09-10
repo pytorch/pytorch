@@ -400,7 +400,11 @@ class TestFlexAttention(InductorTestCase):
         S: int = S,
         D: int = D,
     ):
-        sdpa_partial = create_attention(score_mod)
+        # If the seqlen becomes smaller than the seqlen of the previous batch,
+        # we can still reuse the block_mask created from a larger seqlen.
+        MAX_S = S
+        block_mask = create_block_mask(noop_mask, 1, 1, MAX_S, MAX_S)
+        sdpa_partial = create_attention(score_mod, block_mask=block_mask)
         # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
@@ -483,7 +487,9 @@ class TestFlexAttention(InductorTestCase):
         S: int = S,
         D: int = D,
     ):
-        sdpa_partial = create_attention(score_mod)
+        MAX_S = S
+        block_mask = create_block_mask(noop_mask, 1, 1, MAX_S, MAX_S)
+        sdpa_partial = create_attention(score_mod, block_mask=block_mask)
         # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
@@ -583,14 +589,12 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
-    @expectedFailure  # TODO: supports block sparsity with dynamic shapes
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
         self.run_dynamic_test(score_mod, dtype)
 
-    @expectedFailure  # TODO: supports block sparsity with dynamic shapes
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
