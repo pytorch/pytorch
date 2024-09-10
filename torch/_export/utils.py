@@ -6,28 +6,15 @@ import math
 import operator
 import re
 from inspect import Parameter
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-)
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._subclasses.functional_tensor import FunctionalTensor
 
 
 if TYPE_CHECKING:
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
-    from torch._ops import OpOverload
     from torch.export import ExportedProgram
     from torch.export.graph_signature import ExportGraphSignature
 
@@ -56,110 +43,6 @@ placeholder_prefixes = {
     InputKind.CUSTOM_OBJ: "obj_",
     InputKind.TOKEN: "token",
 }
-
-
-# Our strategy for deciding if we can preserve a op is following:
-# 1. The op should be known statically that it is functional
-# 2. If it is maybe aliasing, we decompose because we must know if an op
-#    is mutating or aliasing.
-# TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
-# decomp part. (https://github.com/pytorch/pytorch/issues/129431)
-def _assert_valid_to_preserve(op_overload):
-    if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
-        raise RuntimeError(
-            f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
-        )
-    if op_overload in FunctionalTensor.metadata_fns:
-        raise RuntimeError(
-            f"{op_overload} is a metadata query function, "
-            "it will be preserved implicitly in our tracing system. "
-            "Please file an issue on github if you see otherwise"
-        )
-
-    alias_info = len(
-        [i for i in op_overload._schema.arguments if i.alias_info is not None]
-    )
-
-    is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
-
-    if is_mutating_or_aliasing:
-        raise RuntimeError(
-            f"{op_overload} is a mutating/aliasing op, we can't preserve it as is"
-        )
-
-    if not torch._C._dispatch_has_kernel(op_overload.name()):
-        raise RuntimeError(
-            f"{op_overload} is a TorchScript op, we can't preserve it as is"
-        )
-
-    return True
-
-
-def _check_valid_to_preserve(op_overload):
-    try:
-        _assert_valid_to_preserve(op_overload)
-        return True
-    except RuntimeError:
-        return False
-
-
-def _is_cia_op(op: "OpOverload") -> bool:
-    return (
-        torch._C._dispatch_has_kernel_for_dispatch_key(
-            op.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-        )
-        or torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels
-    )
-
-
-def _is_special_op_to_decompose() -> None:
-    raise RuntimeError("You can't call this operator directly")
-
-
-def _is_special_op_to_preserve(*args, **kwargs):
-    return NotImplemented
-
-
-def _collect_all_valid_cia_ops() -> Set["OpOverload"]:
-    cia_ops = set()
-    for op in torch.ops.aten:
-        op_instance = getattr(torch.ops.aten, op)
-        for overload in op_instance.overloads():
-            op_overload = getattr(op_instance, overload)
-            if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
-                cia_ops.add(op_overload)
-    return cia_ops
-
-
-def _core_aten_decomp_table_without_functional_cia_ops() -> (
-    Dict["OpOverload", Callable]
-):
-    from torch._decomp import core_aten_decompositions
-
-    core_aten_decomp = core_aten_decompositions()
-    all_preservable_cia_ops = _collect_all_valid_cia_ops()
-    for k in list(core_aten_decomp.keys()):
-        if k in all_preservable_cia_ops:
-            del core_aten_decomp[k]
-
-    return core_aten_decomp
-
-
-def decomp_table_to_core_aten() -> Dict["OpOverload", Callable]:
-    all_preservable_cia_ops = _collect_all_valid_cia_ops()
-    _core_aten_decomp_table_without_functional_cia_ops()
-
-    decomp_table = {}
-
-    for op in all_preservable_cia_ops:
-        decomp_table[op] = _is_special_op_to_decompose
-
-    a = {**decomp_table, **_core_aten_decomp_table_without_functional_cia_ops()}
-    return a
-
-
-def decomp_table_to_post_autograd_aten() -> Dict["OpOverload", Callable]:
-    return {k: _is_special_op_to_decompose for k in _collect_all_valid_cia_ops()}
 
 
 def _collect_and_set_constant_attrs(

@@ -1,3 +1,13 @@
+Error processing line 1 of /home/tmanlaibaatar/local/miniconda3/envs/pytorch/lib/python3.10/site-packages/vision-1.0.0-py3.10-nspkg.pth:
+
+  Traceback (most recent call last):
+    File "/home/tmanlaibaatar/local/miniconda3/envs/pytorch/lib/python3.10/site.py", line 186, in addpackage
+      exec(line)
+    File "<string>", line 1, in <module>
+    File "<frozen importlib._bootstrap>", line 568, in module_from_spec
+  AttributeError: 'NoneType' object has no attribute 'loader'
+
+Remainder of file ignored
 # mypy: allow-untyped-defs
 from __future__ import annotations
 

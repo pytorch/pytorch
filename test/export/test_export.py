@@ -18,7 +18,11 @@ import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._decomp import core_aten_decompositions, get_decompositions
+from torch._decomp import (
+    core_aten_decompositions,
+    decomp_table_to_post_autograd_aten,
+    get_decompositions,
+)
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
@@ -1051,7 +1055,7 @@ graph():
                 x = self.linear(x)
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
-        decomp_table = torch._export.utils.decomp_table_to_post_autograd_aten()
+        decomp_table = decomp_table_to_post_autograd_aten()
         del decomp_table[torch.ops.aten.linear.default]
 
         gm = (
@@ -1497,7 +1501,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     return (add,)""",
         )
 
-        decomp_table = torch._export.utils.decomp_table_to_core_aten()
+        decomp_table = core_aten_decompositions()
         del decomp_table[torch.ops.aten.conv2d.default]
         del decomp_table[torch.ops.aten.conv1d.default]
 
@@ -1518,7 +1522,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     return (add,)""",
         )
 
-        decomp_table = torch._export.utils.decomp_table_to_core_aten()
+        decomp_table = core_aten_decompositions()
         del decomp_table[torch.ops.aten.conv2d.default]
 
         ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
@@ -1582,7 +1586,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        decomp_table = torch._export.utils.decomp_table_to_core_aten()
+        decomp_table = core_aten_decompositions()
         del decomp_table[torch.ops.aten.conv2d.default]
         del decomp_table[torch.ops.aten.conv1d.default]
 
@@ -1604,7 +1608,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        decomp_table = torch._export.utils.decomp_table_to_core_aten()
+        decomp_table = core_aten_decompositions()
         del decomp_table[torch.ops.aten.conv2d.default]
 
         ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
@@ -1643,7 +1647,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 return x.sin() + x.sum()
 
         ep = export(Foo(), (torch.ones(3, 3),))
-        decomp_table = torch._export.utils.decomp_table_to_core_aten()
+        decomp_table = core_aten_decompositions()
         del decomp_table[torch.ops.aten.sum.default]
 
         # Even though we are decomposing to core aten which should make
@@ -1659,9 +1663,7 @@ def forward(self, x):
     return (add,)""",
         )
 
-        ep_no_preserve_sum = ep.run_decompositions(
-            torch._export.utils.decomp_table_to_core_aten()
-        )
+        ep_no_preserve_sum = ep.run_decompositions()
         self.assertExpectedInline(
             str(ep_no_preserve_sum.graph_module.code).strip(),
             """\
@@ -4716,7 +4718,7 @@ def forward(self, b_a_buffer, x):
         def custom_decomp_callable(x, weight, bias):
             return x + bias
 
-        decomp_table = torch._export.utils.decomp_table_to_core_aten()
+        decomp_table = core_aten_decompositions()
         decomp_table[torch.ops.aten.linear.default] = custom_decomp_callable
         core_aten_ep = ep.run_decompositions(decomp_table)
         self.assertExpectedInline(
@@ -5346,9 +5348,7 @@ graph():
                 eps,
             ),
         )
-        ep.run_decompositions(
-            decomp_table=torch._export.utils.decomp_table_to_core_aten()
-        )
+        ep.run_decompositions()
         self.assertEqual(
             ep.module()(
                 input, weight, bias, running_mean, running_var, training, momentum, eps
@@ -5578,9 +5578,7 @@ graph():
         output = model(t, dim, index, src)
 
         ep = torch.export.export(model, args=(t, dim, index, src))
-        ep.run_decompositions(
-            decomp_table=torch._export.utils.decomp_table_to_core_aten()
-        )
+        ep = ep.run_decompositions()
         self.assertEqual(ep.module()(t, dim, index, src), output)
 
     def test_fqn(self):
@@ -8147,7 +8145,7 @@ class TestExportCustomClass(TorchTestCase):
             ep.graph_module.code
         )
 
-        decomp_table = torch._export.utils.decomp_table_to_core_aten()
+        decomp_table = core_aten_decompositions()
         del decomp_table[torch.ops.aten.elu.default]
 
         ep = ep.run_decompositions(
@@ -8174,7 +8172,7 @@ class TestExportCustomClass(TorchTestCase):
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
-        decomp_table = torch._export.utils.decomp_table_to_core_aten()
+        decomp_table = core_aten_decompositions()
         del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
         ep = ep.run_decompositions(
             decomp_table=decomp_table,

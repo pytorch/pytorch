@@ -43,18 +43,13 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import (
-    _assert_valid_to_preserve,
-    _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
     _detect_fake_mode_from_gm,
-    _is_special_op_to_decompose,
-    _is_special_op_to_preserve,
     _name_hoo_subgraph_placeholders,
     _overwrite_signature_for_non_persistent_buffers,
     _populate_param_buffer_metadata_to_new_gm,
     _rename_without_collisions,
-    decomp_table_to_core_aten,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
@@ -231,6 +226,8 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
 
 @contextmanager
 def _override_decomp_aten_to_variants():
+    from torch._decomp import _is_special_op_to_preserve
+
     # Preserve variants of aten::to understanding that they are mutating/aliasing
     # and their CompositeImplicitAutograd kernels will not become NotImplemented.
     # We will later replace them with aten._to_copy when functionalizing.
@@ -250,7 +247,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
     decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
 ):
-    from torch._decomp import core_aten_decompositions
+    from torch._decomp import (
+        _assert_valid_to_preserve,
+        _collect_all_valid_cia_ops,
+        _is_special_op_to_decompose,
+        _is_special_op_to_preserve,
+        core_aten_decompositions,
+    )
     from torch._functorch.aot_autograd import aot_export_module
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.export._trace import (
@@ -1006,9 +1009,10 @@ class ExportedProgram:
             decomp_table[your_op] = None
             ep = ep.run_decompositions(decomp_table={your_op: None})
         """
+        from torch._decomp import core_aten_decompositions
 
         _decomp_table = (
-            decomp_table_to_core_aten() if decomp_table is None else dict(decomp_table)
+            core_aten_decompositions() if decomp_table is None else dict(decomp_table)
         )
 
         return _decompose_exported_program(

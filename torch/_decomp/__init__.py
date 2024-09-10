@@ -10,6 +10,7 @@ import torch
 import torch.library
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils import _pytree as pytree
 
 
@@ -20,6 +21,7 @@ __all__ = [
     "register_decomposition",
     "get_decompositions",
     "core_aten_decompositions",
+    "decomp_table_to_post_autograd_aten",
 ]
 
 _T = TypeVar("_T")
@@ -250,14 +252,100 @@ import torch._decomp.decompositions
 import torch._refs
 
 
+# Our strategy for deciding if we can preserve a op is following:
+# 1. The op should be known statically that it is functional
+# 2. If it is maybe aliasing, we decompose because we must know if an op
+#    is mutating or aliasing.
+# TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
+# decomp part. (https://github.com/pytorch/pytorch/issues/129431)
+def _assert_valid_to_preserve(op_overload):
+    if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+        raise RuntimeError(
+            f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
+        )
+    if op_overload in FunctionalTensor.metadata_fns:
+        raise RuntimeError(
+            f"{op_overload} is a metadata query function, "
+            "it will be preserved implicitly in our tracing system. "
+            "Please file an issue on github if you see otherwise"
+        )
+
+    alias_info = len(
+        [i for i in op_overload._schema.arguments if i.alias_info is not None]
+    )
+
+    is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
+
+    if is_mutating_or_aliasing:
+        raise RuntimeError(
+            f"{op_overload} is a mutating/aliasing op, we can't preserve it as is"
+        )
+
+    if not torch._C._dispatch_has_kernel(op_overload.name()):
+        raise RuntimeError(
+            f"{op_overload} is a TorchScript op, we can't preserve it as is"
+        )
+
+    return True
+
+
+def _check_valid_to_preserve(op_overload):
+    try:
+        _assert_valid_to_preserve(op_overload)
+        return True
+    except RuntimeError:
+        return False
+
+
+def _is_cia_op(op: "OpOverload") -> bool:
+    return (
+        torch._C._dispatch_has_kernel_for_dispatch_key(
+            op.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        )
+        or torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels
+    )
+
+
+def _is_special_op_to_decompose() -> None:
+    raise RuntimeError("You can't call this operator directly")
+
+
+def _is_special_op_to_preserve(*args, **kwargs):
+    return NotImplemented
+
+
+def _collect_all_valid_cia_ops():
+    cia_ops = set()
+    for op in torch.ops.aten:
+        op_instance = getattr(torch.ops.aten, op)
+        for overload in op_instance.overloads():
+            op_overload = getattr(op_instance, overload)
+            if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
+                cia_ops.add(op_overload)
+    return cia_ops
+
+
 # See NOTE [Core ATen Ops]
 #
 # list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
 def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
+    decomp_table = _core_aten_decompositions_after_cia()
+    all_preservable_cia_ops = _collect_all_valid_cia_ops()
+
+    for op in all_preservable_cia_ops:
+        decomp_table[op] = _is_special_op_to_decompose
+    return decomp_table
+
+
+def decomp_table_to_post_autograd_aten():
+    return {k: _is_special_op_to_decompose for k in _collect_all_valid_cia_ops()}
+
+
+def _core_aten_decompositions_after_cia() -> Dict[torch._ops.OperatorBase, Callable]:
     aten = torch.ops.aten
-    return get_decompositions(
+    decomp = get_decompositions(
         [
             aten.addcdiv,
             aten.addcdiv_,
@@ -482,3 +570,10 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten._weight_norm_interface,
         ]
     )
+
+    all_preservable_cia_ops = _collect_all_valid_cia_ops()
+    for k in list(decomp.keys()):
+        if k in all_preservable_cia_ops:
+            del decomp[k]
+
+    return decomp
