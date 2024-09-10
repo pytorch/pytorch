@@ -43,7 +43,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMPSVersionIfLessThan, skipMeta, get_all_device_types
+    skipMeta, get_all_device_types
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
@@ -4829,6 +4829,28 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         mixed_dtype = False
                     helper(self, nn.BatchNorm3d, shape, dtype, mixed_dtype, torch.channels_last_3d, precisons[dtype])
 
+    def test_batchnorm_half_overflow(self):
+        def helper(self, mod, size, format):
+            channels = size[1]
+            input = torch.randn(size, dtype=torch.half, device='cpu', requires_grad=True)
+            input = input.contiguous(memory_format=format)
+            bn = mod(channels).cpu().to(torch.half)
+            out = bn(input)
+
+            ref_bn = mod(channels).cpu().to(torch.float)
+            ref_bn.load_state_dict(bn.to(torch.float).state_dict())
+            ref_out = ref_bn(input)
+
+            self.assertFalse(out.isinf().any())
+            self.assertFalse(out.isnan().any())
+            self.assertEqual(out, ref_out)
+
+        for format in [torch.contiguous_format, torch.channels_last]:
+            helper(self, nn.BatchNorm2d, (4, 80, 500, 500), format)
+
+        for format in [torch.contiguous_format, torch.channels_last_3d]:
+            helper(self, nn.BatchNorm3d, (4, 80, 20, 100, 100), format)
+
     @parametrize_test(
         'bn_module',
         [
@@ -8205,9 +8227,8 @@ class TestNNDeviceType(NNTestCase):
         data = torch.rand(880801, 1, 1, 1, device=device, dtype=dtype)
         out = bn(data).sum().backward()
 
-    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.complex128)
-    @dtypesIfMPS(torch.float, torch.bfloat16, torch.complex64)
+    @dtypesIfMPS(torch.float, torch.half, torch.complex64)
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.complex128)
     def test_conv_empty_input(self, device, dtype):
         def help(input, conv, memory_format):
@@ -8584,7 +8605,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
-    @expectedFailureMPS  # TODO(hvaara): Investigate as possible bug.
+    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
@@ -8609,7 +8630,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
-    @expectedFailureMPS  # TODO(hvaara): Investigate as possible bug.
+    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
@@ -12085,9 +12106,9 @@ if __name__ == '__main__':
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
-    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     def test_elu_inplace_overlap(self, device):
-        x = torch.randn((1, 6), dtype=torch.bfloat16, device=device).expand((6, 6))
+        dtype = torch.bfloat16 if device != 'mps:0' else torch.float16
+        x = torch.randn((1, 6), dtype=dtype, device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.elu(x, inplace=True)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -12163,7 +12184,6 @@ if __name__ == '__main__':
             b.backward(torch.ones(2, device=device))
 
     # Merge into OpInfo?
-    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     def test_leaky_relu_inplace_with_zero_slope(self, device):
         a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
@@ -12171,10 +12191,11 @@ if __name__ == '__main__':
         expected = torch.tensor([0., 0., 1.], device=device)
         self.assertEqual(a.grad, expected)
 
-        a_bf16 = torch.tensor([-2., 0., 2.], device=device, dtype=torch.bfloat16, requires_grad=True)
+        dtype = torch.bfloat16 if device != 'mps:0' else torch.float16
+        a_bf16 = torch.tensor([-2., 0., 2.], device=device, dtype=dtype, requires_grad=True)
         b_bf16 = torch.nn.functional.leaky_relu_(a_bf16.clone(), 0.0)
         b_bf16.backward(torch.ones(3, device=device))
-        expected_bf16 = torch.tensor([0., 0., 1.], device=device, dtype=torch.bfloat16)
+        expected_bf16 = torch.tensor([0., 0., 1.], device=device, dtype=dtype)
         self.assertEqual(a_bf16.grad, expected_bf16)
 
     @onlyCPU

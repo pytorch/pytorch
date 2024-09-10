@@ -39,6 +39,11 @@ class TestJustKnob(TestCase):
             self.assertTrue(a.get())
             a.set(False)
             self.assertTrue(a.get())
+        with self.subTest("Checks __bool__"):
+            a = JustKnobsConfig(name="fake_name", default=False)
+            if a:
+                raise RuntimeError("Should not be true")
+            self.assertFalse(a)
 
     def test_justknob_feature(self):
         with self.subTest("OSS is True"):
