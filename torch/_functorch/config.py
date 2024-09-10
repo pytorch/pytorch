@@ -98,6 +98,8 @@ ban_recompute_reductions = True
 # Prevents the partitioner from ever saving views (i.e. always recompute them).
 # Generally a good idea since views are free to recompute.
 recompute_views = False
+# Force-saving the output from the activation checkpoint region.
+must_save_checkpoint_output = False
 
 # By default, the partitioner is purely trying to optimize for runtime (although
 # it should always use less memory than eager)
