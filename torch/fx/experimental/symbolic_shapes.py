@@ -404,7 +404,7 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
         t = type(expr)
 
     def is_neg(t):
-        return t.is_negative or (isinstance(t, sympy.Mul) and t.args[0].is_negative)
+        return (t.is_Number and t.is_negative) or (isinstance(t, sympy.Mul) and t.args[0].is_Number and t.args[0].is_negative)
 
     lhs = 0
     rhs = _reduce_to_lowest_terms(rhs)
@@ -432,20 +432,31 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     Useful when an expression is == or != to 0.
     """
     def integer_coefficient(x):
-        if isinstance(x, sympy.Integer):
+        if x.is_Integer:
             return abs(int(x))
-        elif isinstance(x, sympy.Mul):
-            return math.prod([abs(int(arg)) for arg in x.args if isinstance(arg, sympy.Integer)])
+        elif x.is_Mul:
+            return abs(int(x.args[0])) if x.args[0].is_Integer else 1
         else:
             return 1
 
-    if isinstance(expr, sympy.Add):
+    def div_by_factor(x, factor):
+        if x.is_Integer:
+            return x / factor
+        elif x.is_Mul:
+            return sympy.Mul._from_args((x.args[0] / factor, *x.args[1:]), is_commutative=x.is_commutative)
+
+    if expr.is_Add:
         atoms = expr.args
         factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
+        if factor == 1:
+            return expr
         atoms = [x / factor for x in atoms]
-        return sympy.Add(*atoms)
-    else:
-        return expr / integer_coefficient(expr)
+        return sympy.Add._from_args(*atoms)
+    elif expr.is_Integer:
+        return sympy.One
+    elif expr.is_Mul:
+        return div_by_factor(expr, integer_coefficient(expr))
+    return expr
 
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
