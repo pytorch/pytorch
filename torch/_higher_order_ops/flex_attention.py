@@ -519,8 +519,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         block_mask,
         scale,
         kernel_options,
-        score_mod_other_buffers,
         mask_mod_other_buffers,
+        *score_mod_other_buffers, # This is on purpose so it can be flattened
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         any_buffer_requires_grad = any(
             buffer.requires_grad
@@ -593,8 +593,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             other_buffers[ctx._score_mod_other_buffers_len :]
         )
         # We have asserted that other_buffers do not require grad in the forward
-        none_grads = [None] * 7
-        grad_query, grad_key, grad_value = flex_attention_backward(
+        none_grads = [None] * 6
+        grad_query, grad_key, grad_value, grad_score_mod_captured = flex_attention_backward(
             query,
             key,
             value,
@@ -622,7 +622,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-        return grad_query, grad_key, grad_value, *none_grads
+        return grad_query, grad_key, grad_value, *none_grads, *grad_score_mod_captured
 
 
 @flex_attention.py_impl(DispatchKey.Autograd)
@@ -657,8 +657,8 @@ def flex_attention_autograd(
             block_mask,
             scale,
             kernel_options,
-            score_mod_other_buffers,
             mask_mod_other_buffers,
+            *score_mod_other_buffers,
         )
     return out, logsumexp
 
@@ -683,6 +683,11 @@ def sdpa_dense_backward(
     score_mod_other_buffers: Tuple,
     mask_mod_other_buffers: Tuple,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Get outputs before calling repeat interleave
+    actual_grad_query = torch.empty_like(query)
+    actual_grad_key = torch.empty_like(key)
+    actual_grad_value = torch.empty_like(value)
+
     G = query.size(1) // key.size(1)
     key = torch.repeat_interleave(key, G, dim=1)
     value = torch.repeat_interleave(value, G, dim=1)
@@ -764,7 +769,11 @@ def sdpa_dense_backward(
     grad_key = torch.sum(grad_key, 2, keepdim=False)
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
-    return grad_query.contiguous(), grad_key.contiguous(), grad_value.contiguous()
+    actual_grad_query.copy_(grad_query)
+    actual_grad_key.copy_(grad_key)
+    actual_grad_value.copy_(grad_value)
+
+    return actual_grad_query, actual_grad_key, actual_grad_value
 
 
 def trace_flex_attention_backward(
@@ -943,7 +952,7 @@ def flex_attention_backward_functionalize(
         functional_fw_graph = ctx.functionalize(fw_graph)
         functional_joint_graph = ctx.functionalize(joint_graph)
 
-        grad_query, grad_key, grad_value = flex_attention_backward(
+        grad_query, grad_key, grad_value, grad_score_mod_captured = flex_attention_backward(
             query_unwrapped,
             key_unwrapped,
             value_unwrapped,
@@ -960,7 +969,7 @@ def flex_attention_backward_functionalize(
             mask_mod_other_buffers_unwrapped,
         )
 
-    return ctx.wrap_tensors((grad_query, grad_key, grad_value))  # type: ignore[return-value,arg-type]
+    return ctx.wrap_tensors((grad_query, grad_key, grad_value, grad_score_mod_captured))  # type: ignore[return-value,arg-type]
 
 
 @flex_attention_backward.py_impl(FakeTensorMode)
@@ -985,7 +994,7 @@ def flex_attention_backward_fake_tensor_mode(
         grad_query = torch.empty_like(query)
         grad_key = torch.empty_like(key)
         grad_value = torch.empty_like(value)
-        return grad_query, grad_key, grad_value
+        return grad_query, grad_key, grad_value, [torch.empty_like(i) for i in score_mod_other_buffers]
 
 
 flex_attention_backward.py_impl(DispatchKey.Autograd)(

@@ -10,7 +10,6 @@
 #include <thread>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
 #include <nccl.h>
@@ -177,14 +176,14 @@ namespace c10d {
 #define DEFINE_CONSTANT(name, value) \
   static c10::IValue name = value;   \
   static std::string name##_str = value;
-DEFINE_CONSTANT(entries_key, "entries");
-DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
-DEFINE_CONSTANT(version_key, "version");
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.3");
+DEFINE_CONSTANT(version_val, "2.4");
+DEFINE_CONSTANT(entries_key, "entries");
+DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
+DEFINE_CONSTANT(version_key, "version");
 DEFINE_CONSTANT(pg_config_key, "pg_config");
 DEFINE_CONSTANT(pg_status_key, "pg_status");
 DEFINE_CONSTANT(record_id_key, "record_id");
@@ -714,11 +713,6 @@ struct NCCLTraceBuffer {
       bool includeStackTraces,
       bool onlyActive);
 };
-
-// Check for NaNs in a tensor on a given stream. If any are found, throw a
-// device-side error.
-void checkForNan(const at::Tensor& tensor, at::cuda::CUDAStream& stream);
-
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

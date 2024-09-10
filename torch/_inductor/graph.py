@@ -186,7 +186,9 @@ def getattr_recursive(
     return attr_itr
 
 
-def mark_nodes_dislike_padding(g: Graph) -> None:
+def mark_nodes_dislike_padding(
+    g: Graph, user_visible_outputs: Optional[Dict[str, None]]
+) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
     If we pad their inputs, we result in extra calls to copy kernels!  On the other hand, padding usually helps reduction.
@@ -244,6 +246,13 @@ def mark_nodes_dislike_padding(g: Graph) -> None:
                     continue
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
+        # We only want to mark output nodes. So, move it after the above prior nodes process.
+        if (
+            not config.pad_outputs
+            and user_visible_outputs
+            and cur.name in user_visible_outputs
+        ):
+            cur.meta["dislike_padding"] = True
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -415,11 +424,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
-        mark_nodes_dislike_padding(gm.graph)
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = (
             user_visible_outputs if user_visible_outputs is not None else {}
         )
+        mark_nodes_dislike_padding(gm.graph, user_visible_outputs)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -783,8 +792,8 @@ class GraphLowering(torch.fx.Interpreter):
         name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
-        # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
         if (
+            # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
             not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
             and buffer.get_device() is not None
         ):
@@ -845,7 +854,6 @@ class GraphLowering(torch.fx.Interpreter):
     def allocate_non_dup_const_name(
         self, name: Optional[str], data: Union[Tensor]
     ) -> str:
-        orig_name = name
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
                 if (
@@ -862,7 +870,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if name is None:
             name = f"constant{len(self.constants)}"
-        assert name is not None
+        orig_name = name
         if name[0].isdigit():
             name = f"constant_{name}"
         name = self.qualify_name(name)
@@ -949,7 +957,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        self.add_device_info(example.device)
+        if self.current_node.users:  # cudagraphs should work with an unused CPU input
+            self.add_device_info(example.device)
 
         # Note: [Input Alignment handling in Inductor]
         # Alignment matters for generating efficient code. Some operations,
@@ -1352,27 +1361,47 @@ class GraphLowering(torch.fx.Interpreter):
                 n.meta["val"], torch.Tensor
             ):
                 strides = n.meta["val"].stride()
-                dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
-                unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
-                # requiring a stride order for a non-dense output wouldn't
-                # recreate the same strides, and would fail with view, defer for now.
-                if not unbacked_symbols_in_strides and dense and len(strides):
-                    stride_order = ir.get_stride_order(strides)
+                if len(strides):
+                    allow_padding = (
+                        config.pad_outputs or n.name not in self.user_visible_outputs
+                    ) and not is_input_for_as_strided
+                    dense = torch._prims_common.is_non_overlapping_and_dense(
+                        n.meta["val"]
+                    )
+                    unbacked_symbols_in_strides = (
+                        len(free_unbacked_symbols(strides)) > 0
+                    )
                     if (
-                        len(result.get_size()) == 4
+                        not unbacked_symbols_in_strides
+                        and dense
+                        and len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
                         and n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
                     ):
-                        stride_order = ir.NHWC_STRIDE_ORDER
-
-                    allow_padding = (
-                        n.name not in self.user_visible_outputs
-                        and not is_input_for_as_strided
-                    )
-                    result = ir.ExternKernel.require_stride_order(
-                        result, stride_order, allow_padding=allow_padding
-                    )
+                        strides = ir.FlexibleLayout.stride_ordered_for_memory_format(
+                            result.get_size(), torch.channels_last
+                        )
+                    if not unbacked_symbols_in_strides and len(strides):
+                        # To avoid converting possible view ops to a copy kernel, we use the previous
+                        # require_exact_strides to handle views. But ultimately it's better to require
+                        # the right strides at the tensor definition.
+                        if n.meta["val"]._is_view() or isinstance(
+                            result.data, ir.BaseView
+                        ):
+                            result = ir.ExternKernel.require_stride_order(
+                                result,
+                                ir.get_stride_order(strides),
+                                allow_padding=allow_padding,
+                            )
+                        else:
+                            strides = [
+                                s.node.expr if isinstance(s, torch.SymInt) else s
+                                for s in strides
+                            ]
+                            result = ir.ExternKernel.require_exact_strides(
+                                result, strides, allow_padding=allow_padding
+                            )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
