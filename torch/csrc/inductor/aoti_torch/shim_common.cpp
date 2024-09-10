@@ -55,6 +55,39 @@ namespace fs = std::filesystem;
 namespace fs = std::experimental::filesystem;
 #endif
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
+// HACK for failed builds in ARVR, where it cannot find these symbols within
+// std::experimental::filesystem
+namespace {
+fs::path get_current_path() {
+#if __has_include("filesystem")
+  return fs::current_path();
+#else
+  throw std::runtime_error("Not implemented");
+#endif
+}
+
+bool file_exists(std::string& path) {
+#ifdef _WIN32
+  return fs::exists(path);
+#else
+  struct stat rc;
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
+
+bool create_directories(const std::string& path) {
+#if __has_include("filesystem")
+  return fs::create_directories(path);
+#else
+  throw std::runtime_error("Not implemented");
+#endif
+}
+} // namespace
+
 using namespace torch::aot_inductor;
 
 namespace {
@@ -1004,14 +1037,14 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
   // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
-  std::string cwd = fs::current_path().string();
+  std::string cwd = get_current_path().string();
   std::string tmp_folder = cwd + "/tmp/aoti_torch/";
-  if (!fs::exists(tmp_folder)) {
+  if (!file_exists(tmp_folder)) {
     std::cout
         << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
         << tmp_folder << std::endl;
 
-    if (!fs::create_directories(tmp_folder)) {
+    if (!create_directories(tmp_folder)) {
       std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
                 << tmp_folder << std::endl;
       return;
