@@ -96,10 +96,10 @@ nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 pick_loop_orders = True
 
 # reuse a kernel input as the output
-inplace_buffers = False
+inplace_buffers = True
 
 # reuse a buffer for an unrelated purpose
-allow_buffer_reuse = False
+allow_buffer_reuse = True
 
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
