@@ -1252,7 +1252,7 @@ class WrapperCodeGen(CodeGen):
             )
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
+        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         body = f"\n\n{metadata_comment}{name} = {kernel}"
@@ -1554,7 +1554,7 @@ class WrapperCodeGen(CodeGen):
         self,
         kernel_name: str,
         grid: List[Any],
-        cuda: bool = True,
+        gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = None,
         **grid_extra_kwags,
     ):
@@ -1646,7 +1646,7 @@ class WrapperCodeGen(CodeGen):
         call_args,
         grid=None,
         device_index=None,
-        cuda=True,
+        gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
@@ -1658,13 +1658,13 @@ class WrapperCodeGen(CodeGen):
         """
         Generates kernel call code.
 
-        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
-                Only valid when cuda == True.
+                Only valid when gpu == True.
         """
-        if cuda:
+        if gpu:
             device_index, call_args_str = self.prepare_triton_kernel_call(
                 device_index, call_args
             )

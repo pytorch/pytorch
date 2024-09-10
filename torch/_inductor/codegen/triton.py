@@ -2834,7 +2834,7 @@ class TritonKernel(SIMDKernel):
             call_args,
             grid,
             current_device.index,
-            cuda=True,
+            gpu=True,
             triton=True,
             arg_types=arg_types,
             grid_fn=self._get_grid_fn(),

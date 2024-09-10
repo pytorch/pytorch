@@ -1087,7 +1087,7 @@ class ComboKernel(Kernel):
             call_args,
             grid,
             V.graph.scheduler.get_current_device_or_throw().index,
-            cuda=True,
+            gpu=True,
             triton=True,
             arg_types=arg_types,
             grid_fn="grid_combo_kernels",
