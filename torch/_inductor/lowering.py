@@ -6217,6 +6217,20 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(torch.ops.higher_order.scan)
+def scan(combine_fn, init, inputs, dim, reverse, additional_inputs):
+    if any(map(is_triton, [init, inputs, *additional_inputs])):
+        msg = "control flow operator: torch.scan."
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.SequentialScan.create(
+        combine_fn, init, inputs, dim, reverse, additional_inputs
+    )
+    return list(map(TensorBox.create, result))
+
+
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph

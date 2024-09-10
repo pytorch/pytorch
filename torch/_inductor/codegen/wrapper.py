@@ -2023,6 +2023,61 @@ class WrapperCodeGen(CodeGen):
         )
         self.writeline(ExitSubgraphLine(self))
 
+    def codegen_sequential_scan(self, sequential_scan):
+        from torch._higher_order_ops.scan import _extract_carry_and_out
+
+        name = sequential_scan.get_name()
+        outer_init = [buf.codegen_reference() for buf in sequential_scan.init]
+        outer_xs = [buf.codegen_reference() for buf in sequential_scan.xs]
+        outer_additional_inputs = [
+            buf.codegen_reference() for buf in sequential_scan.additional_inputs
+        ]
+        dim = sequential_scan.dim
+
+        self.writeline(f"{name} = [None] * {len(sequential_scan.outputs)}")
+        outer_outputs = [f"{name}[{i}]" for i in range(len(sequential_scan.outputs))]
+        outer_carry_out, outer_ys_out = _extract_carry_and_out(
+            outer_outputs, len(outer_init)
+        )
+        # Initialize the carry output to be init.
+        for carry_out, init in zip(outer_carry_out, outer_init):
+            self.writeline(f"{carry_out} = {init}")
+
+        self.writeline(f"scan_length = {outer_xs[0]}.shape[{dim}]")
+        self.writeline(f"dim = {sequential_scan.dim}")
+        self.writeline(f"reverse = {sequential_scan.reverse}")
+        scatter_idxs = []
+        self.writeline(f"intermediate_outs = [[]] * {len(outer_ys_out)}")
+
+        self.writeline("for i in range(scan_length):")
+        self.writeline(EnterSubgraphLine(self, sequential_scan.combine_subgraph.graph))
+        # set idx to i if not reverse, else to scan_length - i - 1
+        self.writeline("idx = i if not reverse else scan_length - i - 1")
+        # inner_input = outer_input[idx]
+        self.writeline(f"inner_input = [None] * {len(outer_xs)}")
+        inner_xs = []
+        for i, inp in enumerate(outer_xs):
+            self.writeline(f"inner_input[{i}] = {inp}.select(dim, idx)")
+            inner_xs.append(f"inner_input[{i}]")
+
+        inner_ys_out = []
+        self.writeline(f"inner_ys_out = [None] * {len(outer_ys_out)}")
+        for i in range(len(outer_ys_out)):
+            inner_ys_out.append(f"inner_ys_out[{i}]")
+
+        self.codegen_subgraph(
+            sequential_scan.combine_subgraph,
+            outer_carry_out + inner_xs + outer_additional_inputs,
+            outer_carry_out + inner_ys_out,
+        )
+
+        for i, inner_ys in enumerate(inner_ys_out):
+            self.writeline(f"intermediate_outs[{i}].append({inner_ys})")
+
+        self.writeline(ExitSubgraphLine(self))
+        for i, outer_ys in enumerate(outer_ys_out):
+            self.writeline(f"{outer_ys} = torch.stack(intermediate_outs[{i}], dim)")
+
     @staticmethod
     def statically_known_int_or_none(x):
         try:

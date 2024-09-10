@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch._dynamo.testing
 from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -801,9 +802,113 @@ class AssociativeScanTests(TestCase):
             self.assertEqual(result1, result3)
 
 
+class ScanModels:
+    class ChunkedCE(torch.nn.Module):
+        def __init__(self, chunk_size):
+            super().__init__()
+            self.chunk_size = chunk_size
+            self.ce = lambda logits, target: torch.abs(target - logits).sum()
+
+        def forward(self, scan_op, _input, weight, target, bias):
+            CHUNK_SIZE = self.chunk_size
+
+            def compute_loss(input_chunk, weight, bias, target):
+                logits = torch.addmm(bias, input_chunk, weight.t())
+                logits = logits.float()
+                loss = self.ce(logits, target)
+                return loss
+
+            grad_weight = torch.zeros_like(weight)
+            grad_bias = torch.zeros_like(bias)
+            loss_acc = torch.zeros((), device=_input.device)
+
+            chunks = _input.shape[0] // CHUNK_SIZE
+
+            _input_chunks = _input.view(CHUNK_SIZE, chunks, *_input.shape[1:])
+            target_chunks = target.view(CHUNK_SIZE, chunks, *target.shape[1:])
+
+            def combine_fn(carry, xs):
+                grad_weight, grad_bias, loss_acc = carry
+                input_chunk, target_chunk = xs
+                (
+                    chunk_grad_input,
+                    chunk_grad_weight,
+                    chunk_grad_bias,
+                ), chunk_loss = torch.func.grad_and_value(
+                    compute_loss, argnums=(0, 1, 2)
+                )(
+                    input_chunk, weight, bias, target_chunk
+                )
+                return (
+                    (
+                        grad_weight + chunk_grad_weight,
+                        grad_bias + chunk_grad_bias,
+                        loss_acc + chunk_loss,
+                    ),
+                    chunk_grad_input,
+                )
+
+            (grad_weight, grad_bias, loss_acc), grad_inputs = scan_op(
+                combine_fn,
+                (grad_weight, grad_bias, loss_acc),
+                (_input_chunks, target_chunks),
+            )
+            return (
+                grad_weight / chunks,
+                grad_bias / chunks,
+                loss_acc / chunks,
+                grad_inputs / chunks,
+            )
+
+
+class ScanTests(TestCase):
+    def _run_test(
+        self,
+        model,
+        inputs,
+        device,
+        dynamic=False,
+        num_predicates=1,
+    ):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        inputs = [inp.to(device=device) for inp in inputs]
+        input_sets = [inputs]
+
+        for inputs in input_sets:
+            cloned_inputs = [inp.clone() for inp in inputs]
+            result = model(scan, *cloned_inputs)
+            result_exp = model(_fake_scan, *cloned_inputs)
+
+            result_compiled = compiled_model(scan, *cloned_inputs)
+            result_compiled_exp = compiled_model(_fake_scan, *cloned_inputs)
+
+            self.assertEqual(result, result_exp)
+            self.assertEqual(result_compiled, result_compiled_exp)
+
+    @requires_gpu
+    @parametrize("device", [GPU_TYPE])
+    @parametrize("dynamic", [False])
+    def test_scan_chunked_ce(self, device, dynamic):
+        # while_loop control flow with nesting
+        self._run_test(
+            model=ScanModels.ChunkedCE(10),
+            inputs=(
+                torch.randn(100, 20),
+                torch.randn(20, 20),
+                torch.randn(100, 20),
+                torch.randn(20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+
 instantiate_parametrized_tests(CondTests)
 instantiate_parametrized_tests(WhileLoopTests)
 instantiate_parametrized_tests(AssociativeScanTests)
+instantiate_parametrized_tests(ScanTests)
 
 
 if __name__ == "__main__":
