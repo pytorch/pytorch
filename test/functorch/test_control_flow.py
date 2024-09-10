@@ -2857,7 +2857,7 @@ def forward(self, fct_1, init_1, xs_1):
     clone = torch.ops.aten.clone.default(init_1);  clone = None
     select_copy = torch.ops.aten.select_copy.int(xs_1, 0, 0);  select_copy = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [xs_1], 0, True);  scan_combine_graph_0 = init_1 = xs_1 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [xs_1], 0, True, []);  scan_combine_graph_0 = init_1 = xs_1 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
@@ -2880,7 +2880,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     child = l_init_.clone();  child = None
     child_1 = torch.select_copy(l_xs_, 0, 0);  child_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, True);  scan_combine_fn_0 = l_init_ = l_xs_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, True, []);  scan_combine_fn_0 = l_init_ = l_xs_ = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
