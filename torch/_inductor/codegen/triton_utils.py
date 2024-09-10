@@ -69,10 +69,15 @@ def signature_to_meta(
     *,
     size_dtype: str,
     indices: Optional[List[int]] = None,
-) -> Dict[int, str]:
+) -> Dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
-    return {arg.name: signature_of(arg, size_dtype=size_dtype) for arg in signature}
+    return {
+        f"arg_{i}"
+        if isinstance(arg, WorkspaceArg)
+        else arg.name: signature_of(arg, size_dtype=size_dtype)
+        for i, arg in zip(indices, signature)
+    }
 
 
 def is_unaligned_buffer(arg: TensorArg):
