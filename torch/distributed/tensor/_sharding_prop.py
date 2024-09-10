@@ -490,7 +490,7 @@ class ShardingPropagator:
 
         # adjust the stride arg for aten.new_empty_strided.default
         if stride_idx:
-            expected_input_schema[stride_idx], _ = compute_local_shape_and_global_offset(
+            expected_input_schema[stride_idx] = compute_local_stride(
                 out_tensor_meta.stride, mesh, spec.placements
             )
 

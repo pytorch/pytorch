@@ -58,7 +58,7 @@ def compute_local_shape_and_global_offset(
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty offset
-        return ((), ())
+        return ((0,), ())
     else:
         local_shape = list(global_shape)
         global_offset = [0] * len(global_shape)

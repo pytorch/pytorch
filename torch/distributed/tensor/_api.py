@@ -931,7 +931,9 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     torch_stride = torch._prims_common.make_contiguous_strides_for(size)
 
     # get local tensor shape
-    local_shape, _ = compute_local_shape_and_global_offset(size, device_mesh, placements)
+    local_shape, _ = compute_local_shape_and_global_offset(
+        size, device_mesh, placements
+    )
 
     # initialize the local tensor
     if init_op == torch.full:
