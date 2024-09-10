@@ -187,15 +187,18 @@ def math_attention(
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
     """
-    # broadcast query & key along batch dim for paged attention
-    batch_group = query.size(0) // key.size(0)
-    key = torch.repeat_interleave(key, batch_group, dim=0)
-    value = torch.repeat_interleave(value, batch_group, dim=0)
-
     # broadcast query & key along head dim for GQA
     G = query.size(1) // key.size(1)
     value = torch.repeat_interleave(value, G, dim=1)
     key = torch.repeat_interleave(key, G, dim=1)
+
+    Bq, Bk = query.size(0), key.size(0)
+    if Bq != Bk:
+        assert (
+            Bq > 1 and Bk == 1
+        ), "Batch dimension must match. Otherwise, Bk should be 1 and Bq should be larger than 1."
+        key = key.expand((Bq, *key.size()[1:]))
+        value = value.expand((Bq, *value.size()[1:]))
 
     _, post_mod_scores = _math_attention_inner(
         query,
@@ -696,10 +699,14 @@ def sdpa_dense_backward(
     actual_grad_key = torch.empty_like(key)
     actual_grad_value = torch.empty_like(value)
 
-    # broadcast query & key along batch dim for paged attention
-    batch_group = query.size(0) // key.size(0)
-    key = torch.repeat_interleave(key, batch_group, dim=0)
-    value = torch.repeat_interleave(value, batch_group, dim=0)
+    Bq, Bkv = query.size(0), key.size(0)
+    if Bq != Bkv:
+        assert (
+            Bq > 1 and Bkv == 1
+        ), "Batch dimension must match. Otherwise, Bkv should be 1 and Bq should be larger than 1."
+        key = key.expand((Bq, *key.size()[1:]))
+        value = value.expand((Bq, *value.size()[1:]))
+    kv_shared_batch = Bq // Bkv
 
     G = query.size(1) // key.size(1)
     key = torch.repeat_interleave(key, G, dim=1)
@@ -783,15 +790,8 @@ def sdpa_dense_backward(
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
     # Reduce DK, DV along broadcasted batches.
-    grad_key = grad_key.view(
-        -1, batch_group, grad_key.size(-3), grad_key.size(-2), grad_key.size(-1)
-    )
-    grad_value = grad_value.view(
-        -1, batch_group, grad_value.size(-3), grad_value.size(-2), grad_value.size(-1)
-    )
-
-    grad_key = torch.sum(grad_key, 1, keepdim=False) / batch_group
-    grad_value = torch.sum(grad_value, 1, keepdim=False) / batch_group
+    grad_key = torch.sum(grad_key, 0, keepdim=True) / kv_shared_batch
+    grad_value = torch.sum(grad_value, 0, keepdim=True) / kv_shared_batch
 
     actual_grad_query.copy_(grad_query)
     actual_grad_key.copy_(grad_key)

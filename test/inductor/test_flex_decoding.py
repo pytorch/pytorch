@@ -187,13 +187,10 @@ test_Hq_Hkv = [
 ]
 
 test_Bq_Bkv = [
+    (3, 1),
     (5, 1),
     (8, 1),
-    (8, 2),
     (16, 1),
-    (16, 2),
-    (16, 4),
-    (16, 16),
 ]
 
 (Hq, Hkv) = (16, 8)
@@ -475,7 +472,7 @@ class TestFlexDecoding(InductorTestCase):
         assert Hq % Hkv == 0
 
         Bq, Bkv = batch_dims
-        assert Bq % Bkv == 0
+        assert Bq > 1 and Bkv == 1
 
         self.run_test(
             score_mod,

@@ -218,12 +218,11 @@ test_Hq_Hkv = [
 ]
 
 test_Bq_Bkv = [
-    (5, 1),
+    (3, 1),
     (4, 1),
-    (4, 2),
+    (5, 1),
     (8, 1),
-    (8, 2),
-    (8, 4),
+    (16, 1),
 ]
 
 
@@ -648,7 +647,7 @@ class TestFlexAttention(InductorTestCase):
         assert Hq % Hkv == 0
 
         Bq, Bkv = batch_dims
-        assert Bq % Bkv == 0
+        assert Bq > 1 and Bkv == 1
 
         self.run_test(
             score_mod,
@@ -679,7 +678,7 @@ class TestFlexAttention(InductorTestCase):
         assert Hq % Hkv == 0
 
         Bq, Bkv = batch_dims
-        assert Bq % Bkv == 0
+        assert Bq > 1 and Bkv == 1
 
         def mask_mod(b, h, q, kv):
             return q >= kv

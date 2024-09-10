@@ -56,7 +56,6 @@ flex_decoding_template = TritonTemplate(
     # BLOCK_M: block size that Q is padded along seqlen dim.
     # BLOCK_N: block size of K & V along N dimension.
     # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
-    # KV_SHARED_BATCH: number of query batches sharing one kv batch in KV batch dim broadcast setups.
     #
     # change of base out of the loop
     # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
@@ -84,6 +83,7 @@ flex_decoding_template = TritonTemplate(
 
 
     Z = {{size("Q", 0)}}
+    ZKV = {{size("K", 0)}}
     HKV = {{size("Q", 1)}}
     G: tl.constexpr = GQA_SHARED_HEADS
     HQ = HKV * G
@@ -98,7 +98,7 @@ flex_decoding_template = TritonTemplate(
     TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
 
     off_z = tl.program_id(0) // HKV
-    off_zkv = off_z // KV_SHARED_BATCH
+    off_zkv = off_z % ZKV
     off_hkv = tl.program_id(0) % HKV
     off_t = tl.program_id(1)
 
@@ -340,7 +340,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq % Bkv == 0, "Bq must be divisible by Bkv"
+
+    if Bq != Bkv:
+        assert (
+            Bq > 1 and Bkv == 1
+        ), "Batch dimension must match. Otherwise, Bk should be 1 and Bq should be larger than 1."
+
     B = Bq
     kernel_options = dict(kernel_options)
 
@@ -357,10 +362,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
             "Number of shared query heads sharing the same KV head must be power of 2. "
         )
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
-
-    # Determine KV batch broadcast factor
-    kv_shared_batch = Bq // Bkv
-    kernel_options.setdefault("KV_SHARED_BATCH", kv_shared_batch)
 
     # Determine if there are "full" blocks where we only need to apply score_mod, and can skip mask_mod
     has_full_blocks = full_kv_num_blocks is not None

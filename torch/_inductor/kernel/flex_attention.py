@@ -151,7 +151,6 @@ compute_flex_attention = r"""
     # V_HEAD_DIM: The dimension of the value embeddings
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
     # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
-    # KV_SHARED_BATCH: number of query batches sharing one kv batch in KV batch dim broadcast setups.
     #
     # The following FULL_* and PARTIAL_* is defined in the block sparse mask grid, rather than the thread block grid.
     # KV_NUM_BLKS: The number of KV blocks (that may or may not require masking) for each query.
@@ -183,6 +182,7 @@ compute_flex_attention = r"""
     ZQ = {{size("Q", 0)}}
     HQ = {{size("Q", 1)}}
     Q_LEN = {{size("Q", 2)}}
+    ZKV = {{size("K", 0)}}
     KV_LEN = {{size("K", 2)}}
 
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -190,7 +190,7 @@ compute_flex_attention = r"""
     q_start = tl.program_id(0)
     off_zq = tl.program_id(1) // HQ
     off_hq = tl.program_id(1) % HQ
-    off_zkv = off_zq // KV_SHARED_BATCH
+    off_zkv = off_zq % ZKV
     off_hkv = off_hq // GQA_SHARED_HEADS
     off_g = off_hq % GQA_SHARED_HEADS
 
@@ -743,7 +743,12 @@ def flex_attention(
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq % Bkv == 0, "Bq must be divisible by Bkv"
+
+    if Bq != Bkv:
+        assert (
+            Bq > 1 and Bkv == 1
+        ), "Batch dimension must match. Otherwise, Bk should be 1 and Bq should be larger than 1."
+
     B = Bq
 
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
@@ -774,10 +779,6 @@ def flex_attention(
     # Determine GQA broadcast factor.
     gqa_shared_heads = Hq // Hkv
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
-
-    # Determine KV batch broadcast factor
-    kv_shared_batch = Bq // Bkv
-    kernel_options.setdefault("KV_SHARED_BATCH", kv_shared_batch)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is None if partial blocks are not computed
@@ -916,7 +917,6 @@ flex_attention_backward_template = TritonTemplate(
     # V_HEAD_DIM: The dimension of the value embeddings
     # z: Batch size, h: Number of heads, m: Number of queries or keys/values, d: Head dim
     # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
-    # KV_SHARED_BATCH: number of query batches sharing one kv batch in KV batch dim broadcast setups.
     # (Modifiable) Performance tuning options
     # BLOCK_M1: when calculating DK & DV, iterate over BLOCK_M1 across the seqlen dim of Q in each thread block.
     # BLOCK_N1: when calculating DK & DV, the thread block size across the seqlen dim of K/V.
@@ -951,6 +951,7 @@ flex_attention_backward_template = TritonTemplate(
     HQ = {{size("Q", 1)}}
     HKV = {{size("K", 1)}}
     Q_LEN = {{size("Q", 2)}}
+    ZKV = {{size("K", 0)}}
     KV_LEN = {{size("K", 2)}}
 
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -962,7 +963,7 @@ flex_attention_backward_template = TritonTemplate(
     off_hz = tl.program_id(2)
     off_zq = off_hz // HKV # q batch idx
     off_hkv = off_hz % HKV # kv head idx
-    off_zkv = off_zq // KV_SHARED_BATCH # kv batch idx
+    off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
@@ -1631,7 +1632,11 @@ def flex_attention_backward(*args, **kwargs):
     dtype = query.get_dtype()
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq % Bkv == 0, "Bq must be divisible by Bkv"
+
+    if Bq != Bkv:
+        assert (
+            Bq > 1 and Bkv == 1
+        ), "Batch dimension must match. Otherwise, Bk should be 1 and Bq should be larger than 1."
 
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1721,10 +1726,6 @@ def flex_attention_backward(*args, **kwargs):
     # Determine GQA factor
     gqa_shared_heads = Hq // Hkv
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
-
-    # Determine KV batch broadcast factor
-    kv_shared_batch = Bq // Bkv
-    kernel_options.setdefault("KV_SHARED_BATCH", kv_shared_batch)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is torch.zeros([1, 1, 1]) if partial blocks are not computed.
@@ -1843,29 +1844,12 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
     else:
-        batch_group = Bq // Bkv
-        grad_key_size = (Bkv, batch_group, Hkv, seq_len_kv, qk_head_dim)
-        grad_key_stride = (
-            batch_group * Hkv * seq_len_kv * qk_head_dim,
-            Hkv * seq_len_kv * qk_head_dim,
-            seq_len_kv * qk_head_dim,
-            qk_head_dim,
-            1,
-        )
+        kv_shared_batch = Bq // Bkv
+        grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
+        grad_key = lowerings[aten.div](grad_key, kv_shared_batch)
 
-        broadcasted_grad_key = lowerings[aten.as_strided](
-            broadcasted_grad_key, grad_key_size, grad_key_stride
-        )
-        grad_key = lowerings[aten.sum](
-            broadcasted_grad_key, axis=1
-        )  # [Bkv, Hkv, seq_len_kv, k_head_dim]
-        grad_key = lowerings[aten.div](grad_key, batch_group)
-
-        broadcasted_grad_value = lowerings[aten.as_strided](
-            broadcasted_grad_value, grad_key_size, grad_key_stride
-        )
-        grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=1)
-        grad_value = lowerings[aten.div](grad_value, batch_group)
+        grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
+        grad_value = lowerings[aten.div](grad_value, kv_shared_batch)
 
     return (
         grad_query,
