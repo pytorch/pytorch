@@ -2210,10 +2210,10 @@ def _write_ninja_file_to_build_library(path,
 
     # include_paths() gives us the location of torch/extension.h
     # TODO generalize with_cuda as specific device type.
-     if with_cuda:
-         system_includes = include_paths("cuda")
-     else:
-         system_includes = include_paths("cpu")
+    if with_cuda:
+        system_includes = include_paths("cuda")
+    else:
+        system_includes = include_paths("cpu")
     # sysconfig.get_path('include') gives us the location of Python.h
     # Explicitly specify 'posix_prefix' scheme on non-Windows platforms to workaround error on some MacOS
     # installations where default `get_path` points to non-existing `/Library/Python/M.m/include` folder
