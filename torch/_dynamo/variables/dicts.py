@@ -137,8 +137,8 @@ class ConstDictVariable(VariableTracker):
         # lines below
         if "original_items" in kwargs:
             kwargs.pop("original_items")
-        if "reconstruct_all" in kwargs:
-            kwargs.pop("reconstruct_all")
+        if "should_reconstruct_all" in kwargs:
+            kwargs.pop("should_reconstruct_all")
 
         super().__init__(**kwargs)
 
@@ -155,9 +155,9 @@ class ConstDictVariable(VariableTracker):
             return key if isinstance(key, Hashable) else Hashable(key)
 
         self.items = {make_hashable(x): v for x, v in items.items()}
-        # Mark where a pop/delitem was executed
         # need to reconstruct everything if the dictionary is an intermediate value
-        self.reconstruct_all = not is_from_local_source(self.source)
+        # or if a pop/delitem was executed
+        self.should_reconstruct_all = not is_from_local_source(self.source)
         self.original_items = items.copy()
         self.user_cls = user_cls
 
@@ -225,7 +225,7 @@ class ConstDictVariable(VariableTracker):
                 self._maybe_realize(self.original_items.get(key.vt)) != value.realize()
             )
 
-            if is_new_item or self.reconstruct_all:
+            if is_new_item or self.should_reconstruct_all:
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
@@ -314,7 +314,7 @@ class ConstDictVariable(VariableTracker):
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
         elif name == "__delitem__" and arg_hashable and self.mutable_local:
-            self.reconstruct_all = True
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
@@ -325,11 +325,11 @@ class ConstDictVariable(VariableTracker):
             else:
                 return args[1]
         elif name == "pop" and arg_hashable and self.mutable_local:
-            self.reconstruct_all = True
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "clear":
-            self.reconstruct_all = True
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
