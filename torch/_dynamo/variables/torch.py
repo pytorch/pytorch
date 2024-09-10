@@ -27,7 +27,7 @@ from ..create_parameter_op import (
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import SyntheticLocalSource
+from ..source import CallFunctionNoArgsSource, SyntheticLocalSource
 from ..utils import (
     check_unspec_or_constant_args,
     guard_if_dyn,
@@ -100,6 +100,10 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     ]
 )
 
+constant_fold_functions_need_guards = [
+    torch.cuda.current_device,
+]
+
 constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
@@ -120,7 +124,7 @@ constant_fold_functions = [
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
     torch.autograd._is_checkpoint_valid,
-]
+] + constant_fold_functions_need_guards
 if torch.distributed.is_available():
     constant_fold_functions.extend(
         [
@@ -130,6 +134,7 @@ if torch.distributed.is_available():
         ]
     )
 # Convert to dict for O(1) access times
+constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need_guards)
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
@@ -836,6 +841,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
         ):
+            # constant fold functions need to be guarded.
+            if self.value in constant_fold_functions_need_guards:
+                source = CallFunctionNoArgsSource(self.source)
+                install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
             # constant fold
             return ConstantVariable.create(
                 self.as_python_constant()(
