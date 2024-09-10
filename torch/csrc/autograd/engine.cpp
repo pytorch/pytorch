@@ -1107,7 +1107,8 @@ void Engine::evaluate_function(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
 
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        // NB: The first forward output's device determines the queue
+        auto queue = ready_queue(cpu_ready_queue, next.function->input_metadata(0).device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
       } else {
@@ -1122,7 +1123,8 @@ void Engine::evaluate_function(
       input_buffer.add(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        // NB: The first forward output's device determines the queue
+        auto queue = ready_queue(cpu_ready_queue, next.function->input_metadata(0).device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
