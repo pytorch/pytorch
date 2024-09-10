@@ -581,6 +581,9 @@ class WrapperCodeGen(CodeGen):
             strip=True,
         )
 
+    def include_extra_header(self, header: str):
+        pass
+
     def write_kernel_autotune_defs_header(self) -> None:
         self.kernel_autotune_defs.splice(
             f"""
@@ -1627,7 +1630,6 @@ class WrapperCodeGen(CodeGen):
         elif isinstance(arg, list):
             return f"[{', '.join(self.generate_example_arg_value(a, type(a)) for a in arg)}]"
         else:
-            breakpoint()
             raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def _grid_dim_str(self, grid_per_dim):
