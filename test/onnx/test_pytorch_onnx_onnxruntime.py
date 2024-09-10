@@ -483,7 +483,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
+                    x_in[list(x_in.keys())[0]],  # noqa: RUF015
+                    list(x_in.keys())[0],  # noqa: RUF015
                 )
                 return x_out
 
@@ -13581,7 +13582,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         ):
             if self.opset_version < 20:
                 with self.assertRaises(
-                    torch.onnx.errors.OnnxExporterError,
+                    torch.onnx.OnnxExporterError,
                 ):
                     self.run_test(
                         GridSampleModule(mode, padding_mode, align_corners),

@@ -271,8 +271,8 @@ def get_device_op_overrides(device: str):
 @functools.lru_cache(None)
 def boolean_ops():
     return (
-        "is_inf",
-        "is_nan",
+        "isinf",
+        "isnan",
         "logical_not",
         "signbit",
         "le",
@@ -344,6 +344,8 @@ def deduce_output_dtype_by_name(
     ):
         buf_name = args[1]
         return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+    elif op_name == "to_dtype_bitcast":
+        return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
 
 
@@ -437,7 +439,7 @@ class DataTypePropagation:
 
     @classmethod
     def propagate_scheduler_node(cls, node):
-        from ..ir import LoopBody
+        from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
         assert isinstance(node, SchedulerNode)
@@ -1335,9 +1337,9 @@ class KernelArgs:
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
-        arg_defs = []
-        call_args = []
-        arg_types = []
+        arg_defs: List[str] = []
+        call_args: List[str] = []
+        arg_types: List[torch.dtype] = []
         precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):

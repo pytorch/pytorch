@@ -16,8 +16,14 @@ from torch._inductor import metrics
 from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+from torch.testing._internal.logging_utils import logs_to_string
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -265,6 +271,57 @@ def forward(self, x_1, output_1):
         )
         self.assertEqual(2 * t_view, compiled_func(t).view(16))
         self.assertEqual(2 * t, compiled_func(t))
+
+    @requires_gpu
+    def test_no_nan_kernels(self):
+        @triton.jit
+        def add_one_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            output = x + 1
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def add_one(x, out):
+            n_elements = x.numel()
+            add_one_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=4)
+
+        class AddOne(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = torch.empty_like(x)
+                add_one(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = torch.empty_like(grad)
+                add_one(saved, out)
+                return out
+
+        @torch.compile
+        def f(x):
+            return AddOne.apply(x)
+
+        log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
+
+        x = torch.randn(3, requires_grad=True, device=GPU_TYPE)
+        with ctx():
+            y = f(x)
+
+        output_code = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+        self.assertTrue(len(output_code) > 0, msg="output code is not empty")
+        self.assertEqual(output_code.count('float("nan")'), 0)
+        self.assertEqual(output_code.count("float('nan')"), 0)
 
     @requires_gpu
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
@@ -1492,6 +1549,18 @@ def forward(self, x_1, output_1):
 
         x = torch.randn(4, device=GPU_TYPE)
         f(x, x)
+
+    @requires_gpu
+    @parametrize("dtype", (torch.float16, torch.float32, torch.float64))
+    def test_triton_kernel_float64_constant(self, dtype):
+        def f(x):
+            return x * (0.12 * x.shape[0])
+
+        x = torch.ones(200, device=GPU_TYPE, dtype=torch.float64)
+
+        eager_out = f(x)
+        compiled_out = torch.compile(f, dynamic=True)(x)
+        self.assertEqual(compiled_out, eager_out)
 
 
 def make_mutation_test(fn):

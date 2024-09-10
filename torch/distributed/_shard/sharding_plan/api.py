@@ -85,4 +85,3 @@ class ShardingPlanner(abc.ABC):
             A :class:`torch.distributed._shard.sharding_plan.ShardingPlan` object that
             represents how to shard the module.
         """
-        pass

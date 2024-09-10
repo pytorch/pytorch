@@ -23,6 +23,8 @@ from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+HAS_TLPARSE = shutil.which("tlparse") is not None
+requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
@@ -57,6 +59,11 @@ ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 class StructuredTraceTestingFilter(logging.Filter):
     def filter(self, record):
         return "str" not in record.metadata
+
+
+class ChromiumEventFilter(logging.Filter):
+    def filter(self, record):
+        return "chromium_event" not in record.metadata
 
 
 class StructuredTraceTestingFormatter(logging.Formatter):
@@ -99,6 +106,21 @@ class StructuredTraceTestingFormatter(logging.Formatter):
 
 trace_log = logging.getLogger("torch.__trace")
 
+chrome_event_filter = ChromiumEventFilter()
+
+
+def show_chrome_events(fn):
+    """
+    Don't hide chrome events for this test
+    """
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        self.handler.removeFilter(chrome_event_filter)
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
 
 class StructuredTraceTest(TestCase):
     def setUp(self):
@@ -112,6 +134,7 @@ class StructuredTraceTest(TestCase):
         self.handler = logging.StreamHandler(self.buffer)
         self.handler.setFormatter(StructuredTraceTestingFormatter())
         self.handler.addFilter(StructuredTraceTestingFilter())
+        self.handler.addFilter(chrome_event_filter)
         trace_log.addHandler(self.handler)
 
         self.raw_file = tempfile.NamedTemporaryFile(
@@ -192,6 +215,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_recompiles(self):
         def fn(x, y):
             return torch.add(x, y)
@@ -236,6 +260,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_example_fn(self):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
@@ -259,6 +284,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_dynamo_error(self):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
@@ -278,6 +304,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_inductor_error(self):
         import torch._inductor.lowering
 
@@ -442,6 +469,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_graph_breaks(self):
         @torch._dynamo.optimize("inductor")
         def fn(x):
@@ -475,6 +503,7 @@ class StructuredTraceTest(TestCase):
 
     # TODO: bring in the trace_source tests once we start emitting bytecode
 
+    @requires_tlparse
     def test_graph_sizes_dynamic(self):
         def fn(a, b):
             return a @ b
@@ -514,6 +543,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_guards_recompiles(self):
         def fn(x, ys, zs):
             return inner(x, ys, zs)
@@ -585,6 +615,7 @@ def forward(self, x, y):
 """,  # noqa: B950
         )
 
+    @requires_tlparse
     @torch._inductor.config.patch("fx_graph_cache", True)
     def test_codecache(self):
         def fn(a):
@@ -596,6 +627,7 @@ def forward(self, x, y):
         torch._dynamo.reset()
         # Trigger a cache hit
         fn_opt(x)
+
         # Should print twice, including inductor_output_code
         self.assertExpectedInline(
             self.buffer.getvalue(),
@@ -624,6 +656,25 @@ def forward(self, x, y):
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 """,  # noqa: B950
         )
+        self.assertParses()
+
+    @requires_tlparse
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    @show_chrome_events
+    def test_chromium_event(self):
+        def fn(a):
+            return a.sin()
+
+        x = torch.tensor([1.0])
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt(x)
+        torch._dynamo.reset()
+        # Trigger a cache hit
+        fn_opt(x)
+        # Should print twice, including inductor_output_code
+        self.assertParses()
+        chromium_event = '{"chromium_event": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}'
+        self.assertTrue(chromium_event in self.buffer.getvalue())
 
 
 if __name__ == "__main__":

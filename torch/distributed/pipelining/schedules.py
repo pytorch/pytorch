@@ -8,15 +8,30 @@ import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import Enum
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
+from torch.distributed._composable.fsdp.fully_shard import FSDPModule, UnshardHandle
 from torch.profiler import record_function
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
 from .stage import _PipelineStageBase
 
+
+if TYPE_CHECKING:
+    from torch.distributed import Work
 
 __all__ = [
     "get_schedule_class",
@@ -27,6 +42,7 @@ __all__ = [
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
+    "ScheduleInterleavedZeroBubble",
 ]
 
 logger = logging.getLogger(__name__)
@@ -142,7 +158,6 @@ def _format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) -
     Formats the pipeline order in a timestep (row) x rank (column) grid of actions
     and returns the formatted string
     """
-
     # Calculate the maximum number of steps across all ranks
     num_steps = max(len(actions) for actions in pipeline_order.values())
     step_labels = [
@@ -874,7 +889,7 @@ class Schedule1F1B(PipelineScheduleSingle):
 def _add_unshard_reshard(
     compute_actions: List[Optional[_Action]],
     max_active_stages: int = 3,
-) -> List[Optional[_Action]]:
+) -> List[_Action]:
     """Given a basic schedule involving only compute actions (F,B,W), add UNSHARD/RESHARD actions for FSDP.
 
     UNSHARD refers to fetching the full contents of an FSDP-sharded layer, requiring an all-gather operation.
@@ -903,7 +918,7 @@ def _add_unshard_reshard(
         return ret
 
     active_stages: Set[int] = set()
-    fsdp_aware_actions: List[Optional[_Action]] = []
+    fsdp_aware_actions: List[_Action] = []
 
     def _unshard(stage_index: int):
         active_stages.add(stage_index)
@@ -924,13 +939,13 @@ def _add_unshard_reshard(
         # Unclear what the best policy is for eviction, but we can maintain order so we do
         evict = list(filter(lambda s: s not in next_n, active_stages))
 
-        logger.debug(
-            "_add_unshard_reshard Step %d active: %s fetch %s, evict %s",
-            i,
-            active_stages,
-            fetch,
-            evict,
-        )
+        # logger.debug(
+        #     "_add_unshard_reshard Step %d active: %s fetch %s, evict %s",
+        #     i,
+        #     active_stages,
+        #     fetch,
+        #     evict,
+        # )
 
         for stage in evict:
             _reshard(stage)
@@ -942,7 +957,7 @@ def _add_unshard_reshard(
 
 
 def _add_send_recv(
-    compute_actions: Dict[int, List[Optional[_Action]]],
+    compute_actions: Dict[int, List[_Action]],
     stage_to_rank: Callable[[int], int],
     num_stages: int,
 ) -> Dict[int, List[_Action]]:
@@ -1078,9 +1093,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 stage._prepare_backward_infra(n_microbatches)
 
     def _dump_csv(self, filename):
-        """Dump a CSV representation of the schedule into a file with the provided filename.
-        This API will most likely get renamed/refactored so is marked as internal for now.
-        """
+        """Dump a CSV representation of the schedule into a file with the provided filename."""
         with open(filename, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
             for rank in self.pipeline_order:
@@ -1149,10 +1162,13 @@ class PipelineScheduleMulti(_PipelineSchedule):
             self._n_microbatches,
         )
 
-    def _load_csv(self, filename):
+    def _load_csv(self, filename, format="compute_only"):
         """Load a CSV representation of the schedule from a file with the provided filename.
         This API will most likely get renamed/refactored so is marked as internal for now.
+
+        format must be "compute_only" for PipelineScheduleMulti
         """
+        assert format == "compute_only"
         with open(filename, newline="") as csvfile:
             reader = csv.reader(csvfile)
             for rank, row in enumerate(reader):
@@ -1341,6 +1357,254 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 )
                 logger.error("%s", _format_pipeline_order(self.pipeline_order))
                 raise e
+        # Return losses if there is a container passed in
+        self._update_losses(self._stages, losses)
+
+
+class _PipelineScheduleRuntime(PipelineScheduleMulti):
+    """
+    Provides a simple runtime that requires a 'schedule IR' including specified communication operations.
+
+    Can be instantiated directly by creating _PipelineScheduleRuntime and calling load_csv, or can be
+    subclassed and the subclass can be responsible for creating a schedule IR.
+    """
+
+    def _load_actions(
+        self,
+        actions: Dict[int, List[Optional[_Action]]],
+        format: str = "compute_only",
+    ):
+        """
+        Given an in-memory representation for a simple compute-only schedule, lower it to a complex schedule including
+        communication actions.  Stores the schedule in self, and must be called before running step_mo()
+        """
+        assert (
+            self.stage_index_to_group_rank is not None
+        ), "stage_index_to_group_rank is required for PipelineScheduleRuntime"
+        self.pipeline_order_with_comms: Dict[int, List[_Action]] = {}
+        if format == "compute_comms":
+            for rank in actions:
+                self.pipeline_order_with_comms[rank] = []
+                for action in actions[rank]:
+                    assert action is not None
+                    self.pipeline_order_with_comms[rank].append(action)
+            # TODO what level of validation should we offer for compute+comms schedule?
+        elif format == "compute_only":
+            # Perform schedule lowering
+            for rank in actions:
+                self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
+                    actions[rank]
+                )
+
+            self.pipeline_order_with_comms = _add_send_recv(
+                self.pipeline_order_with_comms,
+                stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
+                num_stages=self._num_stages,
+            )
+        else:
+            raise NotImplementedError(f"{format=} is not implemented")
+
+    def _load_csv(self, filename: str, format: str = "compute_only"):
+        """Loads a csv in simple format and then lowers it to include comunication actions
+
+        format must be either "compute_only" or "compute_comms".  If compute_only, the lowering passes
+        will automatically be run to generate a compute_comms schedule.
+        """
+        if format == "compute_only":
+            # this will populate self.pipeline_order
+            super()._load_csv(filename)
+            # this will populate self.pipeline_order_with_comms
+            self._load_actions(self.pipeline_order)
+        elif format == "compute_comms":
+            actions = {}
+            with open(filename, newline="") as csvfile:
+                reader = csv.reader(csvfile)
+                for rank, row in enumerate(reader):
+                    actions[rank] = [_Action.from_str(s) for s in row]
+                self._load_actions(actions, format=format)
+        else:
+            raise NotImplementedError(f"{format=} is not implemented")
+
+    def _dump_csv(self, filename: str):
+        """Dump a CSV representation of the compute + comms schedule into a file with the provided filename."""
+        # TODO should there be an option to dump the compute_only schedule from PipelineScheduleRuntime? It's possible
+        # that it does not exist if it was created from a compute_comms schedule.
+        assert (
+            self.pipeline_order_with_comms is not None
+        ), "Must initialize compute_comms schedule before dump_csv"
+        with open(filename, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for rank in self.pipeline_order_with_comms:
+                writer.writerow(self.pipeline_order_with_comms[rank])
+
+    def _step_microbatches(
+        self,
+        arg_mbs: Optional[List] = None,
+        kwarg_mbs: Optional[List] = None,
+        target_mbs: Optional[List] = None,
+        losses: Optional[List] = None,
+    ):
+        """
+        Operate on the microbatches for looped schedules (multiple stages on each rank).
+
+        TODO: Does not use sorted_batch_isend_irecv(). As a result, this schedule does
+        not support models with skip connections.
+        """
+        arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
+
+        # Based on the plan in Step 1 created in __init__:
+        # 2. Perform communication based on the pipeline_order
+        stage_index_to_stage: Dict[int, _PipelineStageBase] = {
+            stage.stage_index: stage for stage in self._stages
+        }
+
+        assert (
+            self.pipeline_order_with_comms is not None
+        ), "Must call _load_actions() before calling _step_microbatches()"
+
+        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
+        bwd_recv_ops: Dict[Tuple[int, int], Work] = {}
+        fwd_recv_ops: Dict[Tuple[int, int], Work] = {}
+
+        # send ops should be waited on before step() exists, mainly for hygeine
+        send_ops: List[Work] = []
+
+        # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
+        unshard_ops: Dict[int, UnshardHandle] = {}
+        unsharded_stages = set()
+
+        def _assert_unsharded(stage_idx: int):
+            """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
+            if stage_idx in unshard_ops:
+                unshard_ops[stage_idx].wait()
+                del unshard_ops[stage_idx]
+                unsharded_stages.add(stage_idx)
+            assert (
+                stage_idx in unsharded_stages
+            ), f"Attempted to compute on sharded {stage_idx=}"
+
+        for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
+            try:
+                comp_type = action.computation_type
+                mb_index: int = (
+                    action.microbatch_index
+                    if action.microbatch_index is not None
+                    else -1
+                )
+                assert mb_index >= 0 or comp_type in (
+                    UNSHARD,
+                    RESHARD,
+                ), f"{action=} missing mb_index"
+                stage_idx = action.stage_index
+                stage = stage_index_to_stage[stage_idx]
+                stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
+
+                logger.debug(
+                    "_PipelineScheduleRuntime running time_step %d, action %s",
+                    time_step,
+                    action,
+                )
+
+                # TODO(whc) it's not actually safe to use _batch_p2p here in the uncommon case the model has skip-connections,
+                # since we do not want to batch up ops between more than a pair of ranks.  _sorted_batch_p2p would be
+                # safe to use instead.
+                # However, I was wondering if I should avoid calling batched operators at all in the case that there is
+                # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
+                if comp_type == SEND_F:
+                    send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
+                elif comp_type == SEND_B:
+                    send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
+                elif comp_type == RECV_F:
+                    assert (
+                        stage_idx,
+                        mb_index,
+                    ) not in fwd_recv_ops, "Recv twice for {stage_idx=} {mb_index=} without executing forward"
+                    fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                        stage.get_fwd_recv_ops(mb_index)
+                    )
+                elif comp_type == RECV_B:
+                    assert (
+                        stage_idx,
+                        mb_index,
+                    ) not in bwd_recv_ops, "Recv twice for {stage_idx=} {mb_index=} without executing backward"
+                    bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                        stage.get_bwd_recv_ops(mb_index)
+                    )
+                elif comp_type == UNSHARD:
+                    if stage_uses_fsdp:
+                        assert (
+                            stage_idx not in unsharded_stages
+                            and stage_idx not in unshard_ops
+                        ), f"Unsharding the same {stage_idx=} twice"
+                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)
+                elif comp_type == RESHARD:
+                    if stage_uses_fsdp:
+                        assert (
+                            stage_idx in unsharded_stages
+                        ), f"Resharding {stage_idx=} without unsharding"
+                        assert (
+                            stage_idx not in unshard_ops
+                        ), f"Resharding {stage_idx=} before finishing unshard"
+                        stage.submod.reshard()
+                elif comp_type == FORWARD:
+                    if stage_uses_fsdp:
+                        _assert_unsharded(stage_idx)
+
+                    if not stage.is_first:
+                        assert (
+                            stage_idx,
+                            mb_index,
+                        ) in fwd_recv_ops, f"Computing {action=} before receiving input"
+                        fwd_recv_ops.pop((stage_idx, mb_index)).wait()
+                    output = stage.forward_one_chunk(
+                        mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
+                    )
+                    self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+                elif comp_type == BACKWARD:
+                    if stage_uses_fsdp:
+                        _assert_unsharded(stage_idx)
+
+                    if not stage.is_last:
+                        assert (
+                            stage_idx,
+                            mb_index,
+                        ) in bwd_recv_ops, (
+                            f"Attempted to run compute {action=} before receiving input"
+                        )
+                        bwd_recv_ops.pop((stage_idx, mb_index)).wait()
+                    loss = self._maybe_get_loss(stage, mb_index)
+                    stage.backward_one_chunk(
+                        mb_index, loss=loss, full_backward=self.use_full_backward
+                    )
+                elif comp_type == WEIGHT:
+                    if stage_uses_fsdp:
+                        _assert_unsharded(stage_idx)
+
+                    if self.use_full_backward:
+                        raise ValueError(
+                            f"We detected a weight update in the pipeline schedule, but \
+                            {self.use_full_backward=}"
+                        )
+                    stage.backward_weight_one_chunk(mb_index)
+                else:
+                    raise ValueError(f"{action=} is unknown or unsupported")
+            except Exception as e:
+                logger.error(
+                    "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:",
+                    time_step,
+                    action,
+                )
+                # TODO(whc) what is the best practice for printing a multiline log?
+                # logger will split it into multiple log lines, but this makes it hard to read (too wide)
+                print(_format_pipeline_order(self.pipeline_order_with_comms))  # type: ignore[arg-type]
+                raise e
+
+        # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
+        while len(send_ops):
+            send_ops.pop().wait()
+
+        assert len(unshard_ops) == 0, "Unused unshard operations"
+
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)
 
@@ -1847,6 +2111,35 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
         return result
 
 
+class ScheduleInterleavedZeroBubble(ScheduleFlexibleInterleaved1F1B):
+    """
+    The Interleaved Zero Bubble schedule.
+    See https://arxiv.org/pdf/2401.10241 for details.
+    Will perform one forward and one backward on inputs for the microbatches in steady
+    state and supports multiple stages per rank. Uses the backward for weights to fill in
+    the pipeline bubble.
+    """
+
+    def __init__(
+        self,
+        stages: List[_PipelineStageBase],
+        n_microbatches: int,
+        loss_fn: Optional[Callable] = None,
+        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    ):
+        super().__init__(
+            stages=stages,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
+            output_merge_spec=output_merge_spec,
+            enable_zero_bubble=True,
+        )
+
+
 def get_schedule_class(schedule_name: str):
     """
     Maps a schedule name to its corresponding class object.
@@ -1860,6 +2153,7 @@ def get_schedule_class(schedule_name: str):
         "GPipe": ScheduleGPipe,
         "FlexibleInterleaved1F1B": ScheduleFlexibleInterleaved1F1B,
         "LoopedBFS": ScheduleLoopedBFS,
+        "InterleavedZeroBubble": ScheduleInterleavedZeroBubble,
         "PipelineScheduleSingle": PipelineScheduleSingle,
         "PipelineScheduleMulti": PipelineScheduleMulti,
     }

@@ -10,7 +10,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Iterable,
     Iterator,
     List,
     Mapping,
@@ -1747,9 +1746,11 @@ class Module:
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*args, **kwargs)
 
-        try:
-            result = None
-            called_always_called_hooks = set()
+        result = None
+        called_always_called_hooks = set()
+
+        def inner():
+            nonlocal result, args, kwargs
 
             full_backward_hooks, non_full_backward_hooks = [], []
             backward_pre_hooks = []
@@ -1827,6 +1828,20 @@ class Module:
 
             return result
 
+        from torch.compiler import is_compiling
+
+        # This is technically not behavior equivalent when compiling, but it's
+        # incredibly unlikely we will ever support throwing an exception in NN
+        # module, and then catching it here, and then reraising it, and then
+        # catching it again, and expecting the resulting frame to be compiled.
+        # The reraise here just gunks up our exception handling for no good
+        # reason.  Don't try to run the always called hooks in event of
+        # exception.
+        if is_compiling():
+            return inner()
+
+        try:
+            return inner()
         except Exception:
             # run always called hooks if they have not already been run
             # For now only forward hooks have the always_call option but perhaps
@@ -2574,12 +2589,8 @@ class Module:
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
     def _named_members(
-        self,
-        get_members_fn: Callable[[Self], Iterable[Tuple[str, Any]]],
-        prefix="",
-        recurse: bool = True,
-        remove_duplicate: bool = True,
-    ) -> Iterator[Tuple[str, Any]]:
+        self, get_members_fn, prefix="", recurse=True, remove_duplicate: bool = True
+    ):
         r"""Help yield various names + members of modules."""
         memo = set()
         modules = (
@@ -2654,18 +2665,13 @@ class Module:
         )
         yield from gen
 
-    def buffers(
-        self, recurse: bool = True, *, persistent: Optional[bool] = None
-    ) -> Iterator[Tensor]:
+    def buffers(self, recurse: bool = True) -> Iterator[Tensor]:
         r"""Return an iterator over module buffers.
 
         Args:
-            recurse (bool, optional): if ``True``, then yields buffers of this module
+            recurse (bool): if True, then yields buffers of this module
                 and all submodules. Otherwise, yields only buffers that
                 are direct members of this module.
-            persistent (bool, optional): if ``True``, then yields persistent buffers only.
-                If ``False``, then yields only non-persistent buffers.
-                If ``None``, then yields both. Default: ``None``
 
         Yields:
             torch.Tensor: module buffer
@@ -2679,28 +2685,20 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
-        for _, buf in self.named_buffers(recurse=recurse, persistent=persistent):
+        for _, buf in self.named_buffers(recurse=recurse):
             yield buf
 
     def named_buffers(
-        self,
-        prefix: str = "",
-        recurse: bool = True,
-        remove_duplicate: bool = True,
-        *,
-        persistent: Optional[bool] = None,
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Tensor]]:
         r"""Return an iterator over module buffers, yielding both the name of the buffer as well as the buffer itself.
 
         Args:
             prefix (str): prefix to prepend to all buffer names.
-            recurse (bool, optional): if ``True``, then yields buffers of this module
+            recurse (bool, optional): if True, then yields buffers of this module
                 and all submodules. Otherwise, yields only buffers that
-                are direct members of this module. Default: ``True``.
-            remove_duplicate (bool, optional): whether to remove the duplicated buffers in the result. Default: ``True``.
-            persistent (bool, optional): if ``True``, then yields persistent buffers only.
-                If ``False``, then yields only non-persistent buffers.
-                If ``None``, then yields both. Default: ``None``.
+                are direct members of this module. Defaults to True.
+            remove_duplicate (bool, optional): whether to remove the duplicated buffers in the result. Defaults to True.
 
         Yields:
             (str, torch.Tensor): Tuple containing the name and buffer
@@ -2713,21 +2711,8 @@ class Module:
             >>>         print(buf.size())
 
         """
-
-        def _get_members(module):
-            if persistent is None:
-                yield from module._buffers.items()
-            elif persistent:
-                for k, v in module._buffers.items():
-                    if k not in module._non_persistent_buffers_set:
-                        yield k, v
-            else:  # persistent=False
-                for k, v in module._buffers.items():
-                    if k in module._non_persistent_buffers_set:
-                        yield k, v
-
         gen = self._named_members(
-            _get_members,
+            lambda module: module._buffers.items(),
             prefix=prefix,
             recurse=recurse,
             remove_duplicate=remove_duplicate,

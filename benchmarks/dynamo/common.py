@@ -1364,14 +1364,13 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            # TODO(angelayi): change this to predispatch
-            # https://github.com/pytorch/pytorch/issues/127513 needs to be fixed before changing
-            # to predispatch to avoid performance regressions
-            gm = torch.export._trace._export_to_torch_ir(
+            gm = torch.export._trace._export(
                 model,
                 example_args,
                 example_kwargs,
-            )
+                pre_dispatch=True,
+                strict=False,
+            ).module()
             with torch.no_grad():
                 so_path = torch._inductor.aot_compile(
                     gm, example_args, example_kwargs
@@ -1391,7 +1390,7 @@ def export(model, example_inputs):
 
     def opt_export(_, example_inputs):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return ep(*example_args, **example_kwargs)
+        return ep.module()(*example_args, **example_kwargs)
 
     return opt_export
 
@@ -2371,7 +2370,11 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def skip_models_for_freezing(self):
+    def skip_models_for_freezing_cpu(self):
+        return set()
+
+    @property
+    def skip_models_for_freezing_cuda(self):
         return set()
 
     @property
@@ -3455,7 +3458,7 @@ def parse_args(args=None):
         "--total-partitions",
         type=int,
         default=1,
-        choices=range(1, 10),
+        choices=range(1, 16),
         help="Total number of partitions we want to divide the benchmark suite into",
     )
     parser.add_argument(
@@ -4276,7 +4279,6 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.slow_models)
 
     if args.devices == ["cpu"]:
-        runner.skip_models.update(runner.very_slow_models)
         runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
@@ -4285,7 +4287,10 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.skip_multiprocess_models)
 
     if args.freezing:
-        runner.skip_models.update(runner.skip_models_for_freezing)
+        if args.devices == ["cpu"]:
+            runner.skip_models.update(runner.skip_models_for_freezing_cpu)
+        elif args.devices == ["cuda"]:
+            runner.skip_models.update(runner.skip_models_for_freezing_cuda)
 
     if args.no_skip:
         runner.skip_models.clear()
