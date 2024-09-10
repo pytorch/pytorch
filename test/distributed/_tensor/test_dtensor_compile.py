@@ -299,6 +299,70 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_dynamo_dtensor_from_local_dynamic_shapes(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # Case 1: all dims dynamic
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                [Replicate()],
+                run_check=False,
+                shape=x.shape,
+                stride=x.stride(),
+            )
+            return dt.to_local() + 2
+
+        inp = torch.randn(4, 6, requires_grad=True)
+        ref = fn(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)(inp)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Case 2: only sizes are dynamic, strides are static
+        def fn(x):
+            dt = DTensor.from_local(
+                x, mesh, [Replicate()], run_check=False, shape=x.shape, stride=(1,)
+            )
+            return dt.to_local() + 2
+
+        inp = torch.randn(4, requires_grad=True)
+        torch._dynamo.mark_dynamic(inp, 0)
+        ref = fn(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(fn, backend=cnt, fullgraph=True)(inp)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Case 3: both sizes and strides have a mix of dynamic and static dims
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                [Replicate()],
+                run_check=False,
+                shape=(x.shape[0], x.shape[1], 2),
+                stride=(x.stride()[0], 2, 1),
+            )
+            return dt.to_local() + 2
+
+        inp = torch.randn(4, 6, 2, requires_grad=True)
+        torch._dynamo.mark_dynamic(inp, 0)
+        torch._dynamo.mark_dynamic(inp, 1)
+        ref = fn(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(fn, backend=cnt, fullgraph=True)(inp)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_dynamo_dtensor_recompile(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -488,6 +552,37 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_dont_recompile_on_same_placement_devicemesh(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            dt = DTensor.from_local(x, mesh, [placement], run_check=False)
+
+        x = torch.ones(4, 4, requires_grad=True)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placement = Shard(1)
+        fn(x)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placement = Shard(1)
+        # no recompile, placement is unchanged
+        fn(x)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placement = Partial()
+        # recompile since placement is different
+        fn(x)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placement = Partial()
+        # no recompile, placement is unchanged
+        fn(x)
+
+        # 2 total frames (one for Partial(), one for Shard())
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_dtensor_dynamo_device_mesh_attrs(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -558,7 +653,7 @@ def forward(self, primals_1):
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     def test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.wq = nn.Linear(16, 16)
                 self.wk = nn.Linear(16, 16)
@@ -574,7 +669,7 @@ def forward(self, primals_1):
                 return self.wo(xo)
 
         class FakeTransformerBlock(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attn = FakeAttention()
 
@@ -582,7 +677,7 @@ def forward(self, primals_1):
                 return self.attn(x)
 
         class FakeTransformer(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block = FakeTransformerBlock()
 

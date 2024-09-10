@@ -16,12 +16,21 @@ from torch.utils import _pytree as pytree
 
 log = logging.getLogger(__name__)
 
+
 # The call_torchbind operator represents a method invocation on a torchbind
 # object. The calling convention is:
 #   call_torchbind(self: ScriptObject, method_name: str, *method_args, **method_kwargs)
 # We do not expect users to write this operator directly. Instead it will be
 # emitted by Dynamo when tracing encounters a torchbind object.
-call_torchbind = HigherOrderOperator("call_torchbind")
+class CallTorchBind(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("call_torchbind")
+
+    def __call__(self, obj, method, *args, **kwargs):
+        return super().__call__(obj, method, *args, **kwargs)
+
+
+call_torchbind = CallTorchBind()
 
 # Register this operator as side-effectful with FX.
 # TODO: this is not really sufficient. While passes (hopefully) check
@@ -68,42 +77,39 @@ def call_torchbind_impl(obj, method, *args, **kwargs):
 
 @call_torchbind.py_impl(ProxyTorchDispatchMode)
 def inner(mode, *args, **kwargs):
-    if mode.enable_tracing:
-        proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
-        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+    proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
+    proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
 
-        out_proxy = mode.tracer.create_proxy(
-            "call_function",
-            call_torchbind,
-            proxy_args,
-            proxy_kwargs,
+    out_proxy = mode.tracer.create_proxy(
+        "call_function",
+        call_torchbind,
+        proxy_args,
+        proxy_kwargs,
+    )
+    out = call_torchbind(*args, **kwargs)
+
+    obj, method, *rest_args = args
+    if isinstance(obj, torch.ScriptObject):
+        ns, class_name = _ns_and_class_name(
+            obj._type().qualified_name()  # type: ignore[attr-defined]
         )
-        out = call_torchbind(*args, **kwargs)
+        log.warning(
+            "Tracing torchbind method %s.%s with real ScriptObject. This may"
+            " cause the original object being mutated. If this is not intended,"
+            ' You can register a fake class with torch._library.register_fake_class("%s::%s").',
+            class_name,
+            method,
+            ns,
+            class_name,
+        )
 
-        obj, method, *rest_args = args
-        if isinstance(obj, torch.ScriptObject):
-            ns, class_name = _ns_and_class_name(
-                obj._type().qualified_name()  # type: ignore[attr-defined]
-            )
-            log.warning(
-                "Tracing torchbind method %s.%s with real ScriptObject. This may"
-                " cause the original object being mutated. If this is not intended,"
-                ' You can register a fake class with torch._library.register_fake_class("%s::%s").',
-                class_name,
-                method,
-                ns,
-                class_name,
-            )
-
-        ret = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
-        if "val" not in out_proxy.node.meta:
-            assert out is None or isinstance(
-                out, (int, float, bool)
-            ), "Currently, only these constant dtypes are supported to be returned from torchbind methods."
-            out_proxy.node.meta["val"] = out
-        return ret
-    else:
-        return call_torchbind(*args, **kwargs)
+    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+    if "val" not in out_proxy.node.meta:
+        assert out is None or isinstance(
+            out, (int, float, bool)
+        ), "Currently, only these constant dtypes are supported to be returned from torchbind methods."
+        out_proxy.node.meta["val"] = out
+    return ret
 
 
 # When tracing with fake script object, the call_torchbind op will return a fake tensor

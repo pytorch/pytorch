@@ -5,14 +5,10 @@ import sys
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    slowTest,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -23,20 +19,9 @@ sys.path.append(pytorch_test_dir)
 import contextlib
 import unittest
 
+from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 from torch._inductor import config
 from torch._inductor.scheduler import Scheduler
-
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
-
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
 
 class TestCase(InductorTestCase):
@@ -181,6 +166,14 @@ class BenchmarkFusionTestTemplate:
             FileCheck().check("async_compile.wait").check("DeviceGuard").check_count(
                 "empty_strided_cuda", 2, exactly=True
             ).check("return").run(c)
+
+    def test_tield_kernel_fusion(self):
+        def f(x):
+            y = realize(x + x.t())
+            return y + 1
+
+        x = torch.randn(1024, 1024, device=self.device)
+        self.common(f, (x,))
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

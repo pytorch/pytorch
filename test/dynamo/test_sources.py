@@ -52,7 +52,7 @@ class SourceTests(torch._dynamo.test_case.TestCase):
 
     def test_supported_nodes(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.randn(10, 10)
 
@@ -72,7 +72,6 @@ class SourceTests(torch._dynamo.test_case.TestCase):
             lambda x, _: CausalLMOutputWithPast(),
         )
 
-        # breakpoint()
         torch.export.export(Model(), ())
 
 

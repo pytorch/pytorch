@@ -44,8 +44,7 @@
 
 // clang-format on
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 #if AT_MKLDNN_ENABLED()
 
@@ -1179,5 +1178,4 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
 
 #endif
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
