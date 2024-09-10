@@ -169,7 +169,8 @@ std::string repro_from_args(const ConvolutionParams& params) {
   ss << "If that doesn't trigger the error, please include your original repro script when reporting this issue.\n\n";
   ss << "import torch\n";
   ss << "torch.backends.cuda.matmul.allow_tf32 = "
-     << pybool(at::globalContext().allowTF32CuBLAS()) << "\n";
+     << pybool(at::globalContext().float32Precision("cuda", "matmul") == "tf32")
+     << "\n";
   ss << "torch.backends.cudnn.benchmark = "
      << pybool(at::globalContext().benchmarkCuDNN()) << "\n";
   ss << "torch.backends.cudnn.deterministic = " << pybool(params.deterministic)
