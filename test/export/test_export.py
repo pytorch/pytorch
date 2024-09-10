@@ -1426,6 +1426,9 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
 
+    @unittest.skipIf(
+        IS_FBCODE, "In fbcode, we just warn users that some ops are unsafe"
+    )
     def test_keep_composite_ops_invalid(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -1632,6 +1635,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
+    @unittest.skipIf(IS_FBCODE, "In fbcode, we just warn about mutating ops")
     def test_error_when_passing_mutating_primitive_op(self):
         class Foo(torch.nn.Module):
             def forward(self, x):

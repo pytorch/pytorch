@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
-from functools import wraps
+from functools import partial, wraps
 from itertools import chain
 from typing import Callable, Dict, List, Sequence, TypeVar, Union
 from typing_extensions import ParamSpec
@@ -290,6 +290,8 @@ def _assert_valid_to_preserve(op_overload):
 
 
 def _check_valid_to_preserve(op_overload):
+    if op_overload == torch.ops.aten._upsample_nearest_exact3d:
+        breakpoint()
     try:
         _assert_valid_to_preserve(op_overload)
         return True
@@ -306,8 +308,18 @@ def _is_cia_op(op: "OpOverload") -> bool:
     )
 
 
-def _is_special_op_to_decompose() -> None:
-    raise RuntimeError("You can't call this operator directly")
+def _is_special_op_to_decompose(*args, **kwargs):
+    kernel = kwargs["kernel"]
+    del kwargs["kernel"]
+    # Can't call kernel.decompose due to infinite recursion as
+    # we register this kernel to py_impl directly
+    dk = torch._C.DispatchKey.CompositeImplicitAutograd
+    if torch._C._dispatch_has_kernel_for_dispatch_key(
+        kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+    ):
+        return kernel._op_dk(dk, *args, **kwargs)
+    else:
+        return NotImplemented
 
 
 def _is_special_op_to_preserve(*args, **kwargs):
@@ -315,13 +327,35 @@ def _is_special_op_to_preserve(*args, **kwargs):
 
 
 def _collect_all_valid_cia_ops():
+    cia_ops = torch._C._dispatch_get_registrations_for_dispatch_key(
+        "CompositeImplicitAutograd"
+    )
+    # Ignore quantized namespace ops
+    cia_ops = [name[6:] for name in cia_ops if name.startswith("aten::")]
+    op_list = []
+    for op in cia_ops:
+        if "." not in op:
+            op_list.append(op + ".default")
+        else:
+            op_list.append(op)
+
+    # materialize the ops
     cia_ops = set()
-    for op in torch.ops.aten:
-        op_instance = getattr(torch.ops.aten, op)
-        for overload in op_instance.overloads():
-            op_overload = getattr(op_instance, overload)
-            if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
-                cia_ops.add(op_overload)
+    for op in op_list:
+        op_name, overload_name = op.split(".")
+        op_overload = getattr(getattr(torch.ops.aten, op_name), overload_name)
+        if _check_valid_to_preserve(op_overload):
+            cia_ops.add(op_overload)
+
+    ops_that_dont_showup = {
+        torch.ops.aten._upsample_nearest_exact1d.default,
+        torch.ops.aten._upsample_nearest_exact2d.default,
+        torch.ops.aten._upsample_nearest_exact3d.default,
+        torch.ops.aten.upsample_nearest1d.default,
+        torch.ops.aten.upsample_nearest2d.default,
+        torch.ops.aten._upsample_nearest_exact3d.default,
+    }
+    cia_ops.update(ops_that_dont_showup)
     return cia_ops
 
 
@@ -331,20 +365,42 @@ def _collect_all_valid_cia_ops():
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
 def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
-    decomp_table = _core_aten_decompositions_after_cia()
     all_preservable_cia_ops = _collect_all_valid_cia_ops()
+    decomp_table = _core_aten_decompositions_after_cia(all_preservable_cia_ops)
 
     for op in all_preservable_cia_ops:
-        decomp_table[op] = _is_special_op_to_decompose
+        # [NOTE] Seperating out func.decompose
+        # Ideally we should be able to just register func.decompose but
+        # we can't as this decomp is gonna be registered to the py_impl.
+        # As a result it will infinitely recurse. So we first check if the op
+        # has py_impl entry for CIA and if it is we use that first. If not,
+        # we register C++ query to py_impl.
+        if torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels:
+            decomp_table[op] = op.py_kernels[
+                torch._C.DispatchKey.CompositeImplicitAutograd
+            ]
+        else:
+            decomp_table[op] = partial(_is_special_op_to_decompose, kernel=op)
     return decomp_table
 
 
 def decomp_table_to_post_autograd_aten():
-    return {k: _is_special_op_to_decompose for k in _collect_all_valid_cia_ops()}
+    decomp_table = {}
+    for k in _collect_all_valid_cia_ops():
+        if torch._C.DispatchKey.CompositeImplicitAutograd in k.py_kernels:
+            decomp_table[k] = k.py_kernels[
+                torch._C.DispatchKey.CompositeImplicitAutograd
+            ]
+        else:
+            decomp_table[k] = partial(_is_special_op_to_decompose, kernel=k)
+    return decomp_table
 
 
-def _core_aten_decompositions_after_cia() -> Dict[torch._ops.OperatorBase, Callable]:
+def _core_aten_decompositions_after_cia(
+    all_preservable_cia_ops,
+) -> Dict[torch._ops.OperatorBase, Callable]:
     aten = torch.ops.aten
+    # TODO Delete all mutating or CIA ops from this list
     decomp = get_decompositions(
         [
             aten.addcdiv,
@@ -571,7 +627,11 @@ def _core_aten_decompositions_after_cia() -> Dict[torch._ops.OperatorBase, Calla
         ]
     )
 
-    all_preservable_cia_ops = _collect_all_valid_cia_ops()
+    # We are deleting custom decomp in core_aten_decomp
+    # for CIA ops but it should be fine technically
+    # because this table is only meant to be used in export context
+    # in which we really carefully control the decomp behaviour
+    # In any case, C++ decomps should be preferred
     for k in list(decomp.keys()):
         if k in all_preservable_cia_ops:
             del decomp[k]

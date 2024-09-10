@@ -50,6 +50,7 @@ from torch._export.utils import (
     _overwrite_signature_for_non_persistent_buffers,
     _populate_param_buffer_metadata_to_new_gm,
     _rename_without_collisions,
+    is_fbcode,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
@@ -248,9 +249,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
     joint_loss_index: Optional[int],
 ):
     from torch._decomp import (
-        _assert_valid_to_preserve,
+        _check_valid_to_preserve,
         _collect_all_valid_cia_ops,
-        _is_special_op_to_decompose,
         _is_special_op_to_preserve,
         core_aten_decompositions,
     )
@@ -277,15 +277,34 @@ def _decompose_and_get_gm_with_new_signature_constants(
     #    checking if they are statically functional is enough.
 
     all_preservable_cia_ops = _collect_all_valid_cia_ops()
-    core_aten_decomp = core_aten_decompositions()
     cia_ops_to_callable = {}
+
+    core_aten_decomp = core_aten_decompositions()
+
     for op in list(decomp_table.keys()):
         # In the user specified decomp table, we want to assert that it is something
         # we can customize.
         # TODO We should fix the core aten decomp table to filter out mutating/aliasing ops
         # One example is: aten.addcdiv.out
-        if op not in core_aten_decomp:
-            _assert_valid_to_preserve(op)
+        # TODO Some existing internal users are passing in mutating ops into decomp table,
+        # we should hard error
+        if not _check_valid_to_preserve(op):
+            if not (
+                op in core_aten_decomp and decomp_table[op] is core_aten_decomp[op]
+            ):
+                # TODO We should fix the core aten decomp table to filter out mutating/aliasing ops
+                # One example is: aten.addcdiv.out
+                if is_fbcode():
+                    warnings.warn(
+                        f"The op {op} that is specified in the decomp table is unsafe to be customized. "
+                        f"Therefore, we will ignore this custom decomposition "
+                    )
+                else:
+                    raise RuntimeError(
+                        f"The op {op} that is specified in the decomp table is unsafe to be customized. "
+                        f"Therefore, we will ignore this custom decomposition "
+                    )
+
         # if it is a valid CIA op we can mess with in export, we check if it is:
         #  1. Has been marked as to be decomposed. Example:
         #        decomp_table = decomp_table_to_core_aten()
@@ -299,11 +318,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # In both cases, we want to remove this CIA op from the decomp_table as it is special
         # handled.
         if op in all_preservable_cia_ops:
-            if decomp_table[op] is _is_special_op_to_decompose:
-                all_preservable_cia_ops.remove(op)
-            else:
-                cia_ops_to_callable[op] = decomp_table[op]
-                all_preservable_cia_ops.remove(op)
+            cia_ops_to_callable[op] = decomp_table[op]
+            all_preservable_cia_ops.remove(op)
             del decomp_table[op]
 
     for k in all_preservable_cia_ops:
