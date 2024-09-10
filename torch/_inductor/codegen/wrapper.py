@@ -1679,9 +1679,15 @@ class WrapperCodeGen(CodeGen):
                     if grid_extra_kwargs:
                         grid_str = f"{grid_str}, {grid_extra_kwargs}"
                     grid_str = f"{grid_fn}({grid_str})"
-                self.writeline(
-                    f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                # add debug printer code for triton kernel calls at (jit) inductor level
+                debug_printer_manager = V.graph.wrapper_code.debug_printer
+                debug_printer_manager.set_printer_args(
+                    call_args, kernel_name, arg_types, None
                 )
+                with debug_printer_manager:
+                    self.writeline(
+                        f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                    )
                 if (
                     config.triton.autotune_at_compile_time
                     and kernel_name not in self.kernel_autotune_names
