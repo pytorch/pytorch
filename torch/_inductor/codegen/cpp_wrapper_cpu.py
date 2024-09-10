@@ -44,7 +44,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.ending = ";"
         self.open_bracket = "{"
         self.closed_bracket = "}"
-        self.comment = "//"
+        self.comment = " //"
         self.namespace = "at::"
         self.none_str = "nullptr" if config.abi_compatible else "at::Tensor()"
         self.extern_call_ops = set()
@@ -1772,18 +1772,27 @@ class CppWrapperCpu(WrapperCodeGen):
                         reinterpret_call
                     )
                     call_strs.extend(tmp_call_strs)
+                    final_tmp_name_is_RAIIAtenTensorHandle = True
+                elif (
+                    self.can_stack_allocate_buffer(data)
+                    and self.is_statically_known_list_of_ints(size_list)
+                    and self.is_statically_known_list_of_ints(stride_list)
+                    and ir.is_contiguous_strides_for_shape(stride_list, size_list)
+                ):
+                    # No need to wrap with RAIIAtenTensorHandle when using stack_allocation
+                    final_tmp_name_is_RAIIAtenTensorHandle = False
+                else:
+                    call_strs.append(
+                        f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
+                    )
+                    final_tmp_name = f"{final_tmp_name}_raii"
+                    final_tmp_name_is_RAIIAtenTensorHandle = True
+
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.
             if writer is None:
                 writer = self
             writer.writelines(call_strs)
-            if (
-                self.can_stack_allocate_buffer(data)
-                and self.is_statically_known_list_of_ints(size_list)
-                and self.is_statically_known_list_of_ints(stride_list)
-                and ir.is_contiguous_strides_for_shape(stride_list, size_list)
-            ):
-                return final_tmp_name
 
             # NB, the return handle here represents a temporary tensor, which will be automatically
             # released.

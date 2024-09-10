@@ -481,7 +481,7 @@ class WrapperCodeGen(CodeGen):
         self.ending = ""
         self.open_bracket = "["
         self.closed_bracket = "]"
-        self.comment = "#"
+        self.comment = " #"
         self.namespace = ""
         self.none_str = "None"
         self.size = "size()"
@@ -1810,7 +1810,7 @@ class WrapperCodeGen(CodeGen):
         )
 
     def make_tensor_alias(self, new_name, old_name, comment=""):
-        return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
+        return f"{self.declare}{new_name} = {old_name}{self.ending}{self.comment} {comment}"
 
     def make_buffer_free(self, buffer):
         return f"del {buffer.get_name()}"
@@ -1819,7 +1819,7 @@ class WrapperCodeGen(CodeGen):
         return f"del {', '.join(name for name in names_to_del)}"
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
-        return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
+        return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}{self.comment} reuse"
 
     def make_buffer_reuse(self, old: ir.Buffer, new: ir.Buffer, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
@@ -1839,13 +1839,17 @@ class WrapperCodeGen(CodeGen):
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
-        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        move_end = ")" if V.graph.cpp_wrapper else ""
+        return f"{self.declare_maybe_reference}{new_name} = {move_begin}{reinterpret_view}{move_end}{del_line}{self.comment} reuse"
 
     def codegen_deferred_allocation(self, name, layout):
+        move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        move_end = ")" if V.graph.cpp_wrapper else ""
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_maybe_reference}{name} = {layout.view.codegen_reference()}{self.ending}  "
+                f"{self.declare_maybe_reference}{name} = {move_begin}{layout.view.codegen_reference()}{move_end}{self.ending}"
                 f"{self.comment} alias",
             )
         )
