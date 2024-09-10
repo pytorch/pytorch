@@ -1719,9 +1719,22 @@ class AotCodeCompiler:
             # Currently, this only support serializing extern nodes in fbcode
             # Eventually, we should also have a serializer for OSS.
             if serialized_extern_kernel_nodes:
-                output_json = os.path.splitext(input_path)[0] + ".json"
-                with open(output_json, "w") as f:
+                extern_kernel_nodes_json = os.path.splitext(input_path)[0] + ".json"
+                with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
+
+            metadata = config.aot_inductor.metadata
+            metadata["AOTI_DEVICE_KEY"] = device_type
+
+            # Save user provided metadata
+            meta_json = os.path.splitext(input_path)[0] + "_metadata.json"
+            for k, v in config.aot_inductor.metadata.items():
+                assert isinstance(k, str) and isinstance(
+                    v, (str)
+                ), "Metadata must only contain strings"
+
+            with open(meta_json, "w") as f:
+                f.write(json.dumps(config.aot_inductor.metadata))
 
             output_so = (
                 config.aot_inductor.output_path
@@ -1755,60 +1768,39 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
-            if config.aot_inductor.package:
-                (
-                    object_output_name,
-                    object_output_dir,
-                ) = get_name_and_dir_from_output_file_path(input_path)
-                object_build_options = CppTorchDeviceOptions(
-                    vec_isa=picked_vec_isa,
-                    device_type=device_type,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                )
-                object_builder = CppBuilder(
-                    name=object_output_name,
-                    sources=input_path,
-                    output_dir=object_output_dir,
-                    BuildOption=object_build_options,
-                )
-                compile_cmd = object_builder.get_command_line()
-                output_o = object_builder.get_target_file_path()
+            (
+                object_output_name,
+                object_output_dir,
+            ) = get_name_and_dir_from_output_file_path(input_path)
+            object_build_options = CppTorchDeviceOptions(
+                vec_isa=picked_vec_isa,
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+                use_mmap_weights=use_mmap_weights,
+            )
+            object_builder = CppBuilder(
+                name=object_output_name,
+                sources=input_path,
+                output_dir=object_output_dir,
+                BuildOption=object_build_options,
+            )
+            compile_cmd = object_builder.get_command_line()
+            output_o = object_builder.get_target_file_path()
 
-                compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
-                object_build_options.save_flags_to_file(compile_flags)
-
-            else:
-                (
-                    object_output_name,
-                    object_output_dir,
-                ) = get_name_and_dir_from_output_file_path(input_path)
-                object_build_options = CppTorchDeviceOptions(
-                    vec_isa=picked_vec_isa,
-                    device_type=device_type,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                )
-                object_builder = CppBuilder(
-                    name=object_output_name,
-                    sources=input_path,
-                    output_dir=object_output_dir,
-                    BuildOption=object_build_options,
-                )
-                compile_cmd = object_builder.get_command_line()
-                output_o = object_builder.get_target_file_path()
-
-                log.debug("aot compilation command: %s", compile_cmd)
+            log.debug("aot compilation command: %s", compile_cmd)
+            if not config.aot_inductor.package_cpp_only:
                 if fbcode_aot_cpu_re:
                     output_o = os.path.splitext(input_path)[0] + ".o"
                     compile_file(input_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
                 else:
                     run_command_and_check(compile_cmd)
+
+            if config.aot_inductor.package:
+                compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
+                object_build_options.save_flags_to_file(compile_flags)
 
             def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
                 def _pad_to_alignment(raw_bytes: bytes) -> bytes:
@@ -1859,29 +1851,37 @@ class AotCodeCompiler:
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
 
-            if config.aot_inductor.package:
-                output_name, output_dir = get_name_and_dir_from_output_file_path(
-                    output_so
-                )
-                so_build_options = CppTorchDeviceOptions(
-                    vec_isa=picked_vec_isa,
-                    device_type=device_type,
-                    aot_mode=graph.aot_mode,
-                    use_absolute_path=use_absolute_path,
-                )
-                so_builder = CppBuilder(
-                    name=output_name,
-                    sources=[output_o, consts_o],
-                    output_dir=output_dir,
-                    BuildOption=so_build_options,
-                )
-                link_cmd = so_builder.get_command_line()
-                output_so = so_builder.get_target_file_path()
+            output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
+            so_build_options = CppTorchDeviceOptions(
+                vec_isa=picked_vec_isa,
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
+                use_absolute_path=use_absolute_path,
+            )
+            so_builder = CppBuilder(
+                name=output_name,
+                sources=[output_o, consts_o],
+                output_dir=output_dir,
+                BuildOption=so_build_options,
+            )
+            link_cmd = so_builder.get_command_line()
+            output_so = so_builder.get_target_file_path()
 
+            log.debug("aot linkage command: %s", link_cmd)
+
+            # Append cmds to the end of codegen-ed wrapper file
+            with open(input_path, "a") as f:
+                f.write("\n")
+                f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                f.write(f"// Link cmd\n// {link_cmd}\n")
+
+            if config.aot_inductor.package:
                 linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
                 so_build_options.save_flags_to_file(linker_flags)
 
-                from torch._inductor.package import package_aoti
+            if config.aot_inductor.package_cpp_only:
+                # If we only want to package the cpp, then we need to save the
+                # weights separately into a bin, and we also need to prevent compiling the so
 
                 if use_mmap_weights:
                     weight_file = (
@@ -1891,28 +1891,7 @@ class AotCodeCompiler:
                         f_weights.write(serialized_weights)
                         f_weights.write(struct.pack("q", magic_number))
 
-                archive_path = package_aoti(os.path.split(input_path)[0])
-                return archive_path
             else:
-                output_name, output_dir = get_name_and_dir_from_output_file_path(
-                    output_so
-                )
-                so_build_options = CppTorchDeviceOptions(
-                    vec_isa=picked_vec_isa,
-                    device_type=device_type,
-                    aot_mode=graph.aot_mode,
-                    use_absolute_path=use_absolute_path,
-                )
-                so_builder = CppBuilder(
-                    name=output_name,
-                    sources=[output_o, consts_o],
-                    output_dir=output_dir,
-                    BuildOption=so_build_options,
-                )
-                link_cmd = so_builder.get_command_line()
-                output_so = so_builder.get_target_file_path()
-
-                log.debug("aot linkage command: %s", link_cmd)
                 if fbcode_aot_cpu_re:
                     output_so = (
                         config.aot_inductor.output_path
@@ -1937,11 +1916,10 @@ class AotCodeCompiler:
                         f_so.write(serialized_weights)
                         f_so.write(struct.pack("q", magic_number))
 
-                # Append cmds to the end of codegen-ed wrapper file
-                with open(input_path, "a") as f:
-                    f.write("\n")
-                    f.write(f"// Compile cmd\n// {compile_cmd}\n")
-                    f.write(f"// Link cmd\n// {link_cmd}\n")
+        if config.aot_inductor.package:
+            # We want to return the directory that contains all the AOTI
+            # generated files, not just the so
+            return os.path.split(output_so)[0]
 
         return output_so
 

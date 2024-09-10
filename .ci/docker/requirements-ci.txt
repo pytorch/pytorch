@@ -337,3 +337,8 @@ onnxscript==0.1.0.dev20240817
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
+
+parameterized==0.8.1
+#Description: Parameterizes unittests, both the tests themselves and the entire testing class
+#Pinned versions:
+#test that import:
