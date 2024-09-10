@@ -59,6 +59,9 @@ def maybe_clone(x):
     return x
 
 
+saved_scalars = []
+next_op = 0
+
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
@@ -95,7 +98,7 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
+        args_proxy, sizes_proxy, self.scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in self.graph_placeholders
         )
@@ -138,7 +141,7 @@ class AutogradCompilerInstance:
                 )
             else:
                 raise AssertionError("Unexpected scalar type: ", type(val))
-        self.bind_tensors_to_proxies(scalars, scalars_proxy)
+        self.bind_tensors_to_proxies(scalars, self.scalars_proxy)
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
@@ -154,17 +157,6 @@ class AutogradCompilerInstance:
         inputs,
         output_metadatas,
     ):
-        # register a call to that idx
-        proxies = self.fx_tracer.create_proxy(
-            kind="call_function",
-            target=call_lambda,
-            args=(
-                *self.to_proxy(inputs),
-                idx,
-            ),
-            kwargs={},
-        )
-  
         with disable_proxy_modes_tracing():
             # create fake Tensors
             grad_ins: List[Optional[torch.Tensor]] = []
@@ -177,7 +169,51 @@ class AutogradCompilerInstance:
                 grad_ins.append(
                     torch.empty(size=size, dtype=dtype, layout=layout, device=device)
                 )
+
+            global next_op
+            @torch.library.custom_op(f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=())
+            def cpp_node_op_i(inputs: List[torch.Tensor], idx: int) -> List[torch.Tensor]:
+                breakpoint()
+                outs = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
+                return [out.clone() for out in outs]
+            
+            op_outs = [x.clone().detach() for x in grad_ins]
+
+            @cpp_node_op_i.register_fake
+            def _(inputs, idx):
+                grad_ins: List[Optional[torch.Tensor]] = []
+                for output_metadata in output_metadatas:
+                    if output_metadata is None:
+                        grad_ins.append(None)
+                        continue
+
+                    layout, device, dtype, size = output_metadata
+                    grad_ins.append(
+                        torch.empty(size=size, dtype=dtype, layout=layout, device=device)
+                    )
+                return grad_ins
+
+            next_op += 1
+
+        # register a call to that idx
+        # proxies = self.fx_tracer.create_proxy(
+        #     kind="call_function",
+        #     target=call_lambda,
+        #     args=(
+        #         self.to_proxy(inputs),
+        #         self.scalars_proxy[idx], # idx here is wrong?
+        #     ),
+        #     kwargs={},
+        # )
+        proxies = cpp_node_op_i(self.to_proxy(inputs), self.scalars_proxy[idx])
+
+        with disable_proxy_modes_tracing():
             self.bind_tensors_to_proxies(grad_ins, proxies)
+
+
+        # with disable_proxy_modes_tracing():
+            # create fake Tensors
+        # return list(grad_ins)
         return list(grad_ins)
 
     def proxy_call_backward(
@@ -364,6 +400,7 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
+            breakpoint()
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True

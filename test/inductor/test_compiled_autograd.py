@@ -1519,14 +1519,15 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
         )
 
         def fn():
-            # for i in [10, 100, 10, 20, 10]:
-            for i in [10]:
+            for i in [10, 100, 10, 20, 10]:
+                print(f"running test with i={i}")
+            # for i in [10]:
                 x = torch.ones(i, i, requires_grad=True)
                 out = torch.ops.test_autograd_cpp_node.custom_op_backed_by_autograd_fn(
                     x
                 )
                 loss = out.sum()
-                loss.backward(retain_graph=True)
+                loss.backward()
                 yield x.grad
 
         # compiles for 10 (static) and 100 (dynamic)
@@ -1684,8 +1685,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 
         def fn():
             fixed = torch.ones(2, 2)
-            # for i in [10, 100, 10, 20, 10]:
-            for i in [10]:
+            for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
                 out = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
@@ -1695,7 +1695,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
                 loss.backward(retain_graph=True)
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, count=[1,3])
+        self.check_output_and_recompiles(fn)
 
     def test_autograd_cpp_node_saved_dynamic(self):
         cpp_source = """

@@ -368,14 +368,27 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
 
 // figure out clean up policy
 static std::vector<std::function<variable_list(variable_list)>> lambdas;
+static std::vector<at::IValue> lambda_idxs;
 static std::vector<std::vector<VariableInfo>> lambda_output_infos;
 static size_t next_lambdas_idx = 0;
+static size_t offset_lambdas_idx = 0;
 
-static void lambda_collect(Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<VariableInfo>& output_info) {
+static at::IValue* lambda_collect(CompiledNodeArgs& args, Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<VariableInfo>& output_info) {
   std::cout << "storing lambdas[" << lambdas.size() << "], should output " << output_info.size() << " grads" << std::endl;
   lambdas.emplace_back(std::move(lambda));
   lambda_output_infos.emplace_back(output_info);
+  std::cout << "inserted lambda_output_infos at idx=" << (lambda_output_infos.size()-1) << std::endl;
   // _compiler.lifted_lambdas.emplace_back(lambda);
+  size_t idx = lambdas.size() - 1;
+  lambda_idxs.emplace_back(at::IValue(static_cast<int64_t>(idx)));
+  for (auto i : c10::irange(output_info.size())) {
+    args.collect(output_info[i].layout);
+    args.collect(output_info[i].device);
+    args.collect(output_info[i].scalar_type);
+    args.collect(output_info[i].size);
+  }
+  std::cout << "done storing lambdas[" << idx << "]" << std::endl;
+  return &lambda_idxs[idx];
 }
 
 PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
@@ -398,11 +411,16 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
   return ret.release();
 }
 
-static variable_list lambda_lift(PyObject* py_compiler, variable_list&& inputs) {
-  size_t idx = next_lambdas_idx++;
+static variable_list lambda_lift(SwapSavedVariables& ssv, PyObject* py_compiler, variable_list&& inputs) {
+  std::cout << "try lift" << std::endl;
+  // c10::SymInt idx = lambda_idxs[next_lambdas_idx++].toSymInt();
+  // need to before(at::IValue) but with the proper next_proxy idx.
+  at::IValue& idx = lambda_idxs[next_lambdas_idx++];
+  int hackidx = idx.toInt();
+  ssv.before(idx);
   static PyObject* method_name = PyUnicode_InternFromString("proxy_call_lambda");
   THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
-  auto lambda_output_info = lambda_output_infos[idx];
+  auto lambda_output_info = lambda_output_infos[hackidx];
   std::cout << "lifting lambdas[" << idx << "], expecting " << lambda_output_info.size() << " outputs" << std::endl;
   THPObjectPtr pyoutputmetas(
       PyTuple_New(static_cast<Py_ssize_t>(lambda_output_info.size())));
@@ -422,10 +440,11 @@ static variable_list lambda_lift(PyObject* py_compiler, variable_list&& inputs) 
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
     py_compiler,
     method_name,
-    PyLong_FromSsize_t(idx),
+    PyLong_FromSsize_t(hackidx-offset_lambdas_idx),  // doesnt work when there's 2 lifted in same graph
     pyinputs.get(),
     pyoutputmetas.get(),
     nullptr)));
+  ssv.after(idx);
   return THPVariable_UnpackList(pyresult.get());
 }
 
@@ -562,6 +581,8 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
+  next_lambdas_idx = lambdas.size();  // cache hit will not lift
+  offset_lambdas_idx = lambdas.size();
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
@@ -592,6 +613,7 @@ CacheNode* _compiled_autograd_impl(
       CompiledNodeArgs node_args(compiler_call, call);
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
+        std::cout << "compiled_args on " << call.node->name() << std::endl;
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
@@ -706,6 +728,7 @@ CacheNode* _compiled_autograd_impl(
           set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
+      std::cout << "apply_with_saved on " << call.node->name() << std::endl;
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
       saved.debug_asserts();
@@ -762,11 +785,11 @@ CacheNode* _compiled_autograd_impl(
   } // End cache miss region
 
   // TODO(jansel): clear grads we will overwrite below
-  if (!graph_task.keep_graph_) {
-    for (auto& call : calls) {
-      call->node->release_variables();
-    }
-  }
+  // if (!graph_task.keep_graph_) {
+  //   for (auto& call : calls) {
+  //     call->node->release_variables();
+  //   }
+  // }
 
   *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);

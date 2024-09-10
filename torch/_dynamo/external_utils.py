@@ -54,8 +54,7 @@ def call_hook(hook, *args, **kwargs):
     return result
 
 def call_lambda(inputs: List[torch.tensor], idx: int, **kwargs):
-    res = torch._C._dynamo.compiled_autograd.call_lambda(list(inputs), idx)
-    return list(res)
+    return torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
 
 def wrap_numpy(f):
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
