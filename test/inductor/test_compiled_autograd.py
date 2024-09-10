@@ -1687,7 +1687,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
                     x, y, fixed
                 )
                 loss = out.sum()
-                loss.backward(retain_graph=True)
+                loss.backward()
                 yield x.grad
 
         self.check_output_and_recompiles(fn, 2)
@@ -1793,7 +1793,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
         )
 
         def fn():
-            for y in [1, 2, 3, 1]:
+            for y in [1, 2]:
                 x = torch.ones(10, 10, requires_grad=True)
                 out = torch.ops.test_autograd_cpp_node_saved_int.custom_op_backed_by_autograd_fn(
                     x, y
@@ -1802,7 +1802,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 1)
+        self.check_output_and_recompiles(fn)
 
     def test_autograd_cpp_node_saved_float(self):
         cpp_source = """

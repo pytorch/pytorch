@@ -372,8 +372,10 @@ static std::vector<at::IValue> lambda_idxs;
 static std::vector<std::vector<std::optional<VariableInfo>>> lambda_output_infos;
 static size_t next_lambdas_idx = 0;
 static size_t offset_lambdas_idx = 0;
+static std::unordered_set<const NodeCall*> lifted_node_calls;  // do not free these immediately
 
 static at::IValue* lambda_collect(CompiledNodeArgs& args, Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<bool>& is_variable_input, const std::vector<VariableInfo>& output_info) {
+  lifted_node_calls.emplace(args.get_node_call());
   std::cout << "storing lambdas[" << lambdas.size() << "], should output " << output_info.size() << " grads" << std::endl;
   lambdas.emplace_back(std::move(lambda));
   std::vector<std::optional<VariableInfo>> output_info_for_vars;
@@ -481,6 +483,7 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   variable_list outs = lambdas[cppidx](std::move(cppinputs));
   // TODO: free properly
   // lambdas[cppidx] = {};
+  // also free the node itself
   return THPVariable_WrapList(outs);
   END_HANDLE_TH_ERRORS;
 }
@@ -800,11 +803,16 @@ CacheNode* _compiled_autograd_impl(
   } // End cache miss region
 
   // TODO(jansel): clear grads we will overwrite below
-  // if (!graph_task.keep_graph_) {
-  //   for (auto& call : calls) {
-  //     call->node->release_variables();
-  //   }
-  // }
+  if (!graph_task.keep_graph_) {
+    for (auto& call : calls) {
+      if (lifted_node_calls.find(call) == lifted_node_calls.end()) {
+        std::cout << "freeing " << call->node->name() << std::endl;
+        call->node->release_variables();
+      } else {
+        std::cout << "not freeing " << call->node->name() << std::endl;
+      }
+    }
+  }
 
   *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);

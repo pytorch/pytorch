@@ -548,6 +548,10 @@ class CompiledNodeArgs {
   }
   CompiledNodeArgs(const CompiledNodeArgs&) = delete;
 
+  NodeCall* get_node_call() {
+    return &_node_call;
+  }
+
  private:
   template <typename T>
   void specialize_on_bytes(const T& t) {
