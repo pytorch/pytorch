@@ -73,5 +73,6 @@ class TestOpenReg(TestCase):
         pinned_a = cpu_a.pin_memory()
         self.assertTrue(pinned_a.is_pinned())
 
+
 if __name__ == "__main__":
     run_tests()
