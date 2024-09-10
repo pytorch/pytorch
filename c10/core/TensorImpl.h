@@ -2779,7 +2779,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_access_should_throw_ = true;
   }
 
-  static bool is_generic_tensor_metadata_equal(const TensorImpl* lhs, const TensorImpl* rhs);
+  static bool is_generic_tensor_metadata_equal(
+      const TensorImpl* lhs,
+      const TensorImpl* rhs);
 
  public:
   void set_custom_sizes_strides(SizesStridesPolicy policy) {

@@ -156,9 +156,10 @@ Value* TracingState::getValue(const IValue& var) {
         if (!ten.requires_grad())
           continue;
         else {
-          // If we can't find a corresponding TensorImpl based on ptr hash which requires a gradient,
-          // perform linear search based on matching storage alias and metadata since this tensor could
-          // be created by SavedVariable::unpack() via make_variable
+          // If we can't find a corresponding TensorImpl based on ptr hash which
+          // requires a gradient, perform linear search based on matching
+          // storage alias and metadata since this tensor could be created by
+          // SavedVariable::unpack() via make_variable
           it = value_map.begin();
           for (; it != value_map.end(); ++it) {
             if (it->first.is_alias_of(ten.unsafeGetTensorImpl())) {
@@ -185,9 +186,9 @@ Value* TracingState::getValue(const IValue& var) {
     // Didn't find it. Bake in a constant
     if (ten.requires_grad()) {
 #if 0
-      std::cout << "[DEBUG][TracingState::getValue] Failed to find mapped node for Tensor [impl = " 
-                << ten.unsafeGetTensorImpl() 
-                << ", storage = " 
+      std::cout << "[DEBUG][TracingState::getValue] Failed to find mapped node for Tensor [impl = "
+                << ten.unsafeGetTensorImpl()
+                << ", storage = "
                 << ten.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl() << "]" << std::endl;
 
       std::cout << "EnvStack contains following tensors: " << std::endl;
@@ -586,15 +587,18 @@ void TracingState::setValue(const IValue& v, Value* value) {
     AT_ASSERT(var.defined());
     env_stack.back()[v] = value;
 
-    // Hold tensor reference requiring gradient for the duration of tracing so that
-    // temporary Variables (i.e. created in SavedVariable::unpack when calling make_variable)
-    // are not released too early
+    // Hold tensor reference requiring gradient for the duration of tracing so
+    // that temporary Variables (i.e. created in SavedVariable::unpack when
+    // calling make_variable) are not released too early
     if (var.requires_grad()) {
-      auto is_equal = [var](const at::Tensor& t) { return t.unsafeGetTensorImpl() == var.unsafeGetTensorImpl(); };
-      if (auto it = std::find_if(backup_.begin(), backup_.end(), is_equal); it == backup_.end())
+      auto is_equal = [var](const at::Tensor& t) {
+        return t.unsafeGetTensorImpl() == var.unsafeGetTensorImpl();
+      };
+      if (auto it = std::find_if(backup_.begin(), backup_.end(), is_equal);
+          it == backup_.end())
         backup_.push_back(var);
     }
-    
+
     // If the value comes from a CallFunction or CallMethod, it may not have
     // shape information attached. For debuggability, we enhance the type
     // information by assigning the concrete value's tupe to the jit::Value.

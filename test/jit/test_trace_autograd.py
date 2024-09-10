@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: jit"]
 
 import torch
-
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -12,12 +12,13 @@ if __name__ == "__main__":
         "instead."
     )
 
+
 @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestTraceAutograd(JitTestCase):
     def validateTrace(self, model):
         inputs = torch.FloatTensor(2, 3, 4).uniform_(0, 10)
         traced = torch.jit.trace(model, inputs)
-        self.assertEqual(abs(traced(inputs) - model(inputs)).sum(), 0.)
+        self.assertEqual(abs(traced(inputs) - model(inputs)).sum(), 0.0)
 
     def test_autograd_sqrt(self):
         class Model(torch.nn.Module):

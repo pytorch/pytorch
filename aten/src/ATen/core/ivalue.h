@@ -1433,7 +1433,7 @@ struct TORCH_API WeakIValue final {
   void debugPrint() const {
     if (tag != IValue::Tag::Tensor)
       return;
-    
+
     auto impl = static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
     const auto& storage = impl->unsafe_storage();
 
