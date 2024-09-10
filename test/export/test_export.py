@@ -1436,13 +1436,16 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 x = self.linear(x)
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
+        def _(*args, **kwargs):
+            return NotImplemented
+
         with self.assertRaisesRegex(
             RuntimeError, "aten.chunk.default is a mutating/aliasing op"
         ):
             _ = torch.export.export(
                 Foo(),
                 (torch.randn(3, 3),),
-            ).run_decompositions({torch.ops.aten.chunk.default: None})
+            ).run_decompositions({torch.ops.aten.chunk.default: _})
 
         with self.assertRaisesRegex(
             RuntimeError, "aten.sym_size.default is a metadata query function"
@@ -1450,7 +1453,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             _ = torch.export.export(
                 Foo(),
                 (torch.randn(3, 3),),
-            ).run_decompositions({torch.ops.aten.sym_size.default: None})
+            ).run_decompositions({torch.ops.aten.sym_size.default: _})
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -1459,7 +1462,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             _ = torch.export.export(
                 Foo(),
                 (torch.randn(3, 3),),
-            ).run_decompositions({torch.ops.aten.native_batch_norm.default: None})
+            ).run_decompositions({torch.ops.aten.native_batch_norm.default: _})
 
     def test_keep_composite_ops_linear_convd(self):
         class MyLinear(torch.nn.Module):
