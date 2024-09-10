@@ -5588,8 +5588,17 @@ def _suggest_fixes_for_data_dependent_error_non_strict(e):
         # map symbol names reachable via frame locals to their source-level names
         src_map = defaultdict(list)
         for var, val in frame.f_locals.items():
+            try:
+                tree_leaves_with_path = pytree.tree_leaves_with_path(val)
+            except ValueError:
+                log.warning(
+                    "pytree.tree_leaves_with_path failed for value of type {%s} in local variable {%s}",
+                    type(val),
+                    var,
+                )
+                continue
             # figure out how to access any symbol inside `val` through `var`
-            for path, leaf in pytree.tree_leaves_with_path(val):
+            for path, leaf in tree_leaves_with_path:
                 name = var + pytree.keystr(path)
                 if isinstance(leaf, torch.SymInt):
                     src_map[str(leaf.node.expr)].append(name)

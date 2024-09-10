@@ -2490,6 +2490,36 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 strict=strict,
             )
 
+        class Box:
+            def __init__(self, content):
+                self.content = content
+
+        from torch.utils._pytree import register_pytree_node
+
+        register_pytree_node(
+            Box,
+            lambda box: ([box.content], None),  # flatten_fn
+            lambda contents, _context: Box(*contents),  # unflatten_fn
+            flatten_with_keys_fn=None,  # unflatten_fn
+            serialized_type_name="test_no_suggested_fixes_for_data_dependent_errors.Box",
+        )
+
+        class cf_stacklist_udd(torch.nn.Module):
+            def forward(self, xs, y):
+                box = Box(y.item())
+                # box.content is not a local, so we can't suggest a fix
+                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+
+        with self.assertRaisesRegex(
+            error_type,
+            "Could not guard on data-dependent expression u0 < 0",
+        ):
+            export(
+                cf_stacklist_udd(),
+                ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+                strict=strict,
+            )
+
     def test_tolist(self):
         class M(torch.nn.Module):
             def forward(self, x):
