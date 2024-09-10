@@ -50,7 +50,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
-        self.cuda = False
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
@@ -1137,7 +1136,7 @@ class CppWrapperCpu(WrapperCodeGen):
         result.splice(
             f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(
-                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, {self.cuda}, {len(V.graph.graph_outputs)})
+                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, "{self.device}", {len(V.graph.graph_outputs)})
             """
         )
 
@@ -1647,6 +1646,11 @@ class CppWrapperCpu(WrapperCodeGen):
                 f"at::Tensor {name} = at::detail::empty_strided_cuda("
                 f"{size}, {stride}, {dtype_code}, c10::DeviceType::CUDA);"
             )
+        if device.type == "xpu":
+            return (
+                f"at::Tensor {name} = at::detail::empty_strided_xpu("
+                f"{size}, {stride}, {dtype_code}, c10::DeviceType::XPU);"
+            )
         return (
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype_code})){self.ending}"
@@ -1735,7 +1739,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 )
                 call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
                 dtype_name = str(dtype).split(".")[-1]
-                device_name = "cuda" if data.layout.device.type == "cuda" else "cpu"
+                device_name = data.layout.device.type
                 get_dtype_function = f"aoti_torch_dtype_{dtype_name}"
                 dtypeview_function = f"aoti_torch_{device_name}_view_dtype"
                 call_strs.append(
