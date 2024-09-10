@@ -206,37 +206,6 @@ if TEST_WITH_ROCM:
     inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
 inductor_skips["xpu"] = {
-    # fp16 atomic_add is not supported on Intel GPU.
-    "__getitem__": {f16},
-    "take": {f16},
-    "take_along_dim": {f16},
-    "cummax": {f16},
-    "cummin": {f16},
-    "gather": {f16},
-    "put": {f16},
-    "index_add": {f16},
-    ("index_reduce", "mean"): {f16},
-    ("index_reduce", "prod"): {f16},
-    ("index_reduce", "amax"): {f16},
-    ("index_reduce", "amin"): {f16},
-    "index_select": {f16},
-    "scatter_add": {f16},
-    ("scatter_reduce", "amax"): {f16},
-    ("scatter_reduce", "amin"): {f16},
-    ("scatter_reduce", "sum"): {f16},
-    ("scatter_reduce", "mean"): {f16},
-    ("scatter_reduce", "prod"): {f16},
-    # Jiterator kernel is not expected to work with inductor
-    "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
-    "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
-    "jiterator_binary": {b8, f16, f32, f64, i32, i64},
-    "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
-    "jiterator_unary": {b8, f16, f32, f64, i32, i64},
-    # flaky
-    "nn.functional.cosine_embedding_loss": {b8},
-    "native_batch_norm": {f16, f32, f64},
-    "_native_batch_norm_legit": {f16, f32, f64},
-    "_batch_norm_with_update": {f16, f32, f64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -601,6 +570,9 @@ inductor_override_kwargs["xpu"] = {
     ("masked.softmin", f16): {"atol": 1e-4, "rtol": 0.01},
     ("masked.softmax", f16): {"atol": 2e-4, "rtol": 0.01},
     ("masked.var", f16): {"atol": 2e-5, "rtol": 5e-3},
+    ("native_batch_norm", f64): {"atol": 1e-7, "rtol": 1e-5},
+    ("_native_batch_norm_legit", f64): {"atol": 1e-7, "rtol": 5e-6},
+    ("_batch_norm_with_update", f64): {"atol": 1e-7, "rtol": 1e-6},
     ("native_layer_norm", f16): {"atol": 5e-3, "rtol": 5e-3},
     ("native_layer_norm", f32): {"atol": 5e-3, "rtol": 5e-3},
     ("nn.functional.batch_norm", f16): {"reference_in_float": True},
