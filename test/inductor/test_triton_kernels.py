@@ -1556,7 +1556,7 @@ def forward(self, x_1, output_1):
         def f(x):
             return x * (0.12 * x.shape[0])
 
-        x = torch.ones(200, device=GPU_TYPE, dtype=torch.float64)
+        x = torch.ones(200, device=GPU_TYPE, dtype=dtype)
 
         eager_out = f(x)
         compiled_out = torch.compile(f, dynamic=True)(x)
