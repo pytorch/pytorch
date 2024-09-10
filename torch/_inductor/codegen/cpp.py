@@ -256,9 +256,9 @@ def transform_kernel_codes_under_inner_loop(
     for example
     auto tmp0 = in_ptr[x0]; ->
     for (new_x0 = start; new_x0 < end; new_x0++){
-        auto tmp0 = in_ptr[x0]
+        auto tmp0 = in_ptr[new_x0];
     }
-    the tmp0 are invalid outside the loop
+    the tmp0 is invalid outside the loop
     """
     transformed_code = BracesBuffer()
     with contextlib.ExitStack() as stack:
@@ -267,7 +267,13 @@ def transform_kernel_codes_under_inner_loop(
         )
         stack.enter_context(transformed_code.indent())
         for _, line in enumerate(code._lines):
-            assert isinstance(line, (str, DeferredLine, ))
+            assert isinstance(
+                line,
+                (
+                    str,
+                    DeferredLine,
+                ),
+            )
             deferred_name = None
             if isinstance(line, DeferredLine):
                 deferred_name = line.name
@@ -314,7 +320,13 @@ def reduction_prefix_array(
 
 def replace_acc_name(buffer: IndentedBuffer, name: str, new_name: str):
     for i, line in enumerate(buffer._lines):
-        assert isinstance(line, (str, DeferredLine, ))
+        assert isinstance(
+            line,
+            (
+                str,
+                DeferredLine,
+            ),
+        )
         if isinstance(line, DeferredLine):
             line.line = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line.line)
         else:
