@@ -214,7 +214,7 @@ Tensor searchsorted_cuda(
 
 Tensor& bucketize_out_cuda(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  at::native::searchsorted_out_cuda(boundaries, self, out_int32, right, nullopt, nullopt, result);
+  at::native::searchsorted_out_cuda(boundaries, self, out_int32, right, std::nullopt, std::nullopt, result);
   return result;
 }
 

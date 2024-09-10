@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import onnx
 import onnx.inliner
+
 import pytorch_test_common
 
 import torch
@@ -18,15 +19,9 @@ def assert_op_in_onnx_model(model: onnx.ModelProto, op_type: str):
 
 
 class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
-    def _test_exported_program_forces_decomposition(self, model, input, op_type):
-        ep = torch.export.export(model, input)
-        onnx_program = torch.onnx.dynamo_export(ep, *input)
-        with self.assertRaises(AssertionError):
-            assert_op_in_onnx_model(onnx_program.model_proto, op_type)
-
     def test_upsample_bilinear2d(self):
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.upsample = torch.nn.Upsample(scale_factor=2, mode="bilinear")
 
@@ -36,9 +31,6 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
         onnx_program = torch.onnx.dynamo_export(TestModel(), torch.randn(1, 1, 2, 2))
         # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
         assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
-        self._test_exported_program_forces_decomposition(
-            TestModel(), (torch.randn(1, 1, 2, 2),), "Resize"
-        )
 
     def test_upsample_bilinear2d_output_size(self):
         def func(x: torch.Tensor):
@@ -50,7 +42,7 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
 
     def test_upsample_trilinear3d(self):
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.upsample = torch.nn.Upsample(scale_factor=2, mode="trilinear")
 
@@ -60,9 +52,6 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
         onnx_program = torch.onnx.dynamo_export(TestModel(), torch.randn(1, 1, 2, 2, 3))
         # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
         assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
-        self._test_exported_program_forces_decomposition(
-            TestModel(), (torch.randn(1, 1, 2, 2, 3),), "Resize"
-        )
 
     def test_upsample_trilinear3d_output_size(self):
         def func(x: torch.Tensor):
@@ -81,9 +70,6 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
         # If decomposition is skipped, the model will contain an InstanceNormalization op
         # instead of BatchNormalization op w/ training=True.
         assert_op_in_onnx_model(onnx_program.model_proto, "InstanceNormalization")
-        self._test_exported_program_forces_decomposition(
-            TestModel(), (torch.randn(1, 1, 2, 2),), "InstanceNormalization"
-        )
 
 
 if __name__ == "__main__":
