@@ -789,7 +789,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return ConstantVariable(len(self.value))
 
-        breakpoint()
         return super().call_method(tx, name, args, kwargs)
 
     def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
