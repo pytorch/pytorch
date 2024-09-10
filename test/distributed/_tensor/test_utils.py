@@ -5,7 +5,7 @@ import itertools
 import torch
 from torch.distributed._tensor import distribute_tensor, DTensor
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, Replicate, Shard
@@ -28,14 +28,13 @@ class UtilTest(DTensorTestBase):
     def test_compute_local_shape_and_global_offset_1D(self):
         one_d_placements = [[Shard(0)], [Replicate()]]
 
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         for placements in one_d_placements:
             # When the placements is [Shard(0)], we test for three different scenarios:
             # 1) sharding resulting in empty shards on all or some of the ranks
             # 2) sharding resulting in shards of different size across different ranks
             # 3) sharding resulting in non-empty shards of same size across all ranks
             for size in range(self.world_size * 2 + 1):
-                mesh_tensor = torch.arange(self.world_size)
-                device_mesh = DeviceMesh(self.device_type, mesh_tensor)
                 global_tensor = torch.arange(size)
                 global_shape = global_tensor.size()
 
@@ -64,8 +63,7 @@ class UtilTest(DTensorTestBase):
         )
 
         # mesh: 2 * 4
-        mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        device_mesh = init_device_mesh(self.device_type, (2, 4))
         for placements in two_d_placements:
             for dim_0_size in range(1, 9):
                 nelem = 64 // dim_0_size * dim_0_size
