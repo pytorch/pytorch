@@ -486,7 +486,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         store = dist.HashStore()
 
         def f(info) -> List[Worker]:
-            _, role_info = info
+            i, role_info = info
             spec = self._get_worker_spec(
                 max_restarts=3,
                 monitor_interval=0.1,

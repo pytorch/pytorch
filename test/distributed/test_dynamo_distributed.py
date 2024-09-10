@@ -362,7 +362,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
 
             def forward(self, x, y):
-                u0, u1 = y.tolist()
+                u0, _ = y.tolist()
                 x = torch.cat([x, x])
                 y = x @ self.weight1
                 z = (x + y @ self.weight2) * u0
@@ -383,7 +383,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
 
             def forward(self, x, y):
-                u0, u1 = y.tolist()
+                u0, _ = y.tolist()
                 a = torch.ones(u0)
                 x = torch.cat([x, x])
                 y = x @ self.weight1
@@ -407,7 +407,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
             def forward(self, x, y):
                 # partition one (contains the u0 def)
-                u0, u1 = y.tolist()
+                u0, _ = y.tolist()
                 x = torch.cat([x, x])
                 y1 = x @ self.weight1
                 # partition two (contains the variable)
@@ -452,7 +452,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
             ):
                 super().__init__()
                 layers = []
-                for l in range(2):
+                for _ in range(2):
                     layer = nn.ModuleList(
                         [
                             nn.LayerNorm(96),
@@ -470,7 +470,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                 for m in self.layers:
                     x = x.reshape(B * F, T, H)
                     x = m[0](x)
-                    x, attn = m[1].forward(x, x, x)
+                    x, _ = m[1].forward(x, x, x)
                     x = x.reshape(B, F, T, H)
                 return x
 
@@ -852,6 +852,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(x, y):
+                # pylint: disable=unused-variable
                 zx = x.shape
                 zy = y.shape
                 return x.sum() + y.sum()
@@ -880,10 +881,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
 
-            device = f"cuda:{self.rank}"
-
             @torch.compile()
             def f(x, y):
+                # pylint: disable=unused-variable
                 z = y
                 print("woof")
                 zx = x.shape
@@ -916,6 +916,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(x, y):
+                # pylint: disable=unused-variable
                 zx = x.shape
                 zy = y.shape
                 return x.sum() + y.sum()
@@ -1458,7 +1459,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
-        m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+        m, inputs, _ = get_model(f"cuda:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
         fsdp_m = torch._dynamo.optimize()(fsdp_m)
         self.assertRaisesRegex(

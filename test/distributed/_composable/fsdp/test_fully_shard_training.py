@@ -556,7 +556,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             ref_losses.append(ref_model(inp).sum())
             ref_losses[-1].backward()
             ref_optim.step()
-        for _ in range(10):
+        for iter_idx in range(10):
             optim.zero_grad()
             losses.append(model(inp).sum())
             losses[-1].backward()

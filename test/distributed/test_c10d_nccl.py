@@ -312,7 +312,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             thread.start()
 
             # We would get stuck here due to d2h if we didn't abort.
-            t_cpu = t.cpu()
+            t.cpu()
 
             thread.join()
 
@@ -516,7 +516,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # First allreduce to initialize default PG's communicator.
         pg.allreduce(t).wait()
         # PG1 is an PG without comms initialized, since we don't call collective on it
-        new_pg1 = c10d.new_group([0, 1])
+        new_pg1 = c10d.new_group([0, 1])  # pylint: disable=unused-variable
         new_pg2 = c10d.new_group([0, 1])
         t2 = torch.rand(10, 10, device=device)
 
@@ -582,7 +582,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # 'timeout' kwarg (or its kwdefault) taking precedence
         opts = dist.ProcessGroupNCCL.Options()
         opts._timeout = timedelta(seconds=123)
-        with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True):
             dist.init_process_group(**base_opts, pg_options=opts)
             # TODO(whc) i verified that we are indeed emitting this warning, and i can't figure out why i can't catch it.
             # self.assertEqual(len(w), 1)
@@ -974,30 +974,26 @@ class DistributedDataParallelTest(
             "DistributedDataParallel device_ids and output_device arguments only work with "
             "single-device/multiple-device GPU modules or CPU modules",
         ):
-            ddp_model = DistributedDataParallel(
+            DistributedDataParallel(
                 model, output_device=gpus[1], process_group=process_group
             )
 
         with self.assertRaisesRegex(
             ValueError, "device_ids can only be None or contain a single element."
         ):
-            ddp_model = DistributedDataParallel(
-                model, device_ids=gpus, process_group=process_group
-            )
+            DistributedDataParallel(model, device_ids=gpus, process_group=process_group)
 
         with self.assertRaisesRegex(
             ValueError, "input module must be on the same type of devices"
         ):
             model.fc1 = model.fc1.cpu()
-            ddp_model = DistributedDataParallel(model, process_group=process_group)
+            DistributedDataParallel(model, process_group=process_group)
 
         model = model.cpu()
         with self.assertRaisesRegex(
             ValueError, "device_ids can only be None or contain a single element."
         ):
-            ddp_model = DistributedDataParallel(
-                model, device_ids=gpus, process_group=process_group
-            )
+            DistributedDataParallel(model, device_ids=gpus, process_group=process_group)
 
     def _test_fp16(self, gradient_as_bucket_view=False):
         process_group = self._get_process_group()
@@ -1648,11 +1644,9 @@ class DistributedDataParallelTest(
                                     ),
                                     named_msg,
                                 )
-                                for j, ((param_name, p), p_ddp) in enumerate(
-                                    zip(
-                                        m_child.named_parameters(),
-                                        m_ddp_child.parameters(),
-                                    )
+                                for (param_name, p), p_ddp in zip(
+                                    m_child.named_parameters(),
+                                    m_ddp_child.parameters(),
                                 ):
                                     named_msg = (
                                         layer_name + "." + param_name + " " + iter_msg
@@ -1718,7 +1712,7 @@ class DistributedDataParallelTest(
 
         m = ConvNet(layer_devs, layer_formats, layer_dtypes)
         if self.rank == 0:
-            m_ddp = DistributedDataParallel(
+            DistributedDataParallel(
                 m, device_ids=[dev0], process_group=process_group
             )
         else:
@@ -1726,7 +1720,7 @@ class DistributedDataParallelTest(
                 RuntimeError,
                 ".* appears not to match strides of the same param in process 0",
             ):
-                m_ddp = DistributedDataParallel(
+                DistributedDataParallel(
                     m, device_ids=[dev0], process_group=process_group
                 )
 
@@ -2064,7 +2058,7 @@ class DistributedDataParallelTest(
                 process_group=process_group,
             )
 
-            for i in range(3):
+            for _ in range(3):
                 m.zero_grad(set_to_none=try_set_to_none)
                 m(1).sum().backward()
 
@@ -2409,7 +2403,7 @@ class WorkHookTest(MultiProcessTestCase):
         pg._register_on_completion_hook(hook)
         tensor = torch.ones([2, 3]).cuda(self.rank) * self.rank
         work_count = 3
-        for i in range(work_count):
+        for _ in range(work_count):
             work += 1
             pg.broadcast([tensor]).wait()
 
@@ -2514,7 +2508,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # Run some GPU operations to make sure cuda has not gotten stuck.
             # It was observed cuda could get stuck if NCCL communicators were
             # not properly aborted before throwing RuntimeError.
-            a = torch.rand(10).cuda(self.rank)
+            torch.rand(10).cuda(self.rank)
         elif self.rank == 1:
             # Clean up structures (ex: files for FileStore before going down)
             del process_group
@@ -2589,7 +2583,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
         store = c10d.FileStore(self.file_name, self.world_size)
         with self.assertRaises(RuntimeError):
-            process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+            c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
@@ -3540,7 +3534,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
     def _join_processes(self, fn):
         # We need to patch sys.exit() as skip_if will use sys.exit() and
         # the exit code from the this process will not be catched.
-        with mock.patch("sys.exit") as exit_mock:
+        with mock.patch("sys.exit"):
             fn()
         super()._join_processes(fn)
 
@@ -3548,7 +3542,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         proc = torch.multiprocessing.get_context("spawn").Process
         self.children_pipes = []
         parent_pipes = []
-        for i in range(self.world_size):
+        for _ in range(self.world_size):
             parent_conn, child_conn = torch.multiprocessing.Pipe()
             self.children_pipes.append(child_conn)
             parent_pipes.append(parent_conn)
@@ -3663,7 +3657,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             pg._enable_collectives_timing()
         device = self.local_device
         a = torch.full((3, 4), float(self.rank), device=device)
-        for i in range(2):
+        for _ in range(2):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
@@ -3689,7 +3683,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             pg._enable_collectives_timing()
         device = self.local_device
         a = torch.full((3, 4), float(self.rank), device=device)
-        for i in range(2):
+        for _ in range(2):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
@@ -3737,7 +3731,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         pg = self._create_process_group_nccl()
         device = self.local_device
         a = torch.full((3, 4), float(self.rank), device=device)
-        for i in range(2):
+        for _ in range(2):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
@@ -3753,7 +3747,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         pg = self._create_process_group_nccl()
         device = self.local_device
         a = torch.full((3, 4), float(self.rank), device=device)
-        for i in range(2):
+        for _ in range(2):
             # test some other primitives to make sure
             # their strings are valid
             xs = [torch.ones(3, 4, device=device)]
@@ -3791,7 +3785,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         pg = self._create_process_group_nccl()
         device = self.local_device
         # send more works than the buffer size to overwrite the previous entry
-        for i in range(12):
+        for _ in range(12):
             a = [torch.ones(3, 4, device=device)]
             pg.broadcast(a).wait()
         torch.cuda.synchronize(device=device)
@@ -3906,7 +3900,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 th.start()
                 # fill the cuda buffer, at around 1024 events
                 # this will stall
-                for i in range(2000):
+                for _ in range(2000):
                     a = a + a
                 th.join()
             else:
@@ -3941,7 +3935,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         num_coalesced_ops = 20
         ops_per_coalesce = len(op_sizes_per_coalesce)
-        for i in range(num_coalesced_ops):
+        for _ in range(num_coalesced_ops):
             ops = []
             for input_sizes in op_sizes_per_coalesce:
                 tensor = torch.zeros(input_sizes).to(self.local_device)
@@ -4042,7 +4036,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             pg._enable_collectives_timing()
         num_repeats = 10
         ops_per_repeat = len(op_sizes)
-        for i in range(num_repeats):
+        for _ in range(num_repeats):
             for input_sizes in op_sizes:
                 tensor = torch.zeros(input_sizes).to(self.local_device)
                 if self.rank == 0:
@@ -4341,7 +4335,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
                 # Block the current stream on the NCCL stream
                 work.wait()
                 # Run some GPU operations
-                a = torch.rand(10).cuda(self.rank)
+                torch.rand(10).cuda(self.rank)
         elif self.rank == 1:
             # Clean up structures (ex: files for FileStore before going down)
             del process_group
@@ -4402,7 +4396,6 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
 
         tensor = torch.full((1,), self.rank).cuda(device)
         ng1 = c10d.split_group(pg, [[0, 1], [2, 3, 4, 5, 6, 7]])
-        backend1 = ng1._get_backend(torch.device(device))
 
         # comm split happens eagerly since device_id is passed to init_process_group.
         self.assertEqual(backend.comm_split_count(), 1)

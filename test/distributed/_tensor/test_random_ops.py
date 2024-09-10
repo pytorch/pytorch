@@ -87,7 +87,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         # seed synchronization happens after the first `distribute_tensor` call
-        dtensor = distribute_tensor(
+        distribute_tensor(
             torch.empty([self.world_size], device="cuda"), device_mesh, [Shard(0)]
         )
         self.assertEqual(seed_from_rank_0, random._rng_tracker.get_seed("parallel-rng"))

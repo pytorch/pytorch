@@ -78,7 +78,7 @@ class TestUtils(FSDPTest):
         fully_shard(new_model.u1)
         fully_shard(new_model)
         (
-            _,
+            sharded_tree_info,
             sharded_module_name_to_fqns,
         ) = _get_sharded_module_tree_with_module_name_to_fqns(new_model)
         self.assertEqual(
