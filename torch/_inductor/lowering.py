@@ -18,6 +18,7 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.scan import scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
     canonicalize_dim,
@@ -6217,7 +6218,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
-@register_lowering(torch.ops.higher_order.scan)
+@register_lowering(scan_op)
 def scan(combine_fn, init, inputs, dim, reverse, additional_inputs):
     if any(map(is_triton, [init, inputs, *additional_inputs])):
         msg = "control flow operator: torch.scan."
