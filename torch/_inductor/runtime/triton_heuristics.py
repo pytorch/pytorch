@@ -683,19 +683,21 @@ class CachingAutotuner(KernelInterface):
         # it leads to increase memory use
         cloned_args = []
         for i, arg in enumerate(args):
-            if self.fn.arg_names[i] in self.mutated_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                cloned_args.append(clone_preserve_strides(arg))
-            else:
-                cloned_args.append(arg)
+            cloned_args.append(arg)
+            # if self.fn.arg_names[i] in self.mutated_arg_names:
+            #     assert isinstance(arg, torch.Tensor)
+            #     cloned_args.append(clone_preserve_strides(arg))
+            # else:
+            #     cloned_args.append(arg)
 
         cloned_kwargs: Dict[str, Any] = {}
         for name, arg in kwargs.items():
-            if name in self.mutated_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                cloned_kwargs[name] = clone_preserve_strides(arg)
-            else:
-                cloned_kwargs[name] = arg
+            cloned_kwargs[name] = arg
+            # if name in self.mutated_arg_names:
+            #     assert isinstance(arg, torch.Tensor)
+            #     cloned_kwargs[name] = clone_preserve_strides(arg)
+            # else:
+            #     cloned_kwargs[name] = arg
 
         return cloned_args, cloned_kwargs
 
