@@ -16,7 +16,12 @@ from torch._inductor import metrics
 from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -1546,7 +1551,8 @@ def forward(self, x_1, output_1):
         f(x, x)
 
     @requires_gpu
-    def test_triton_kernel_float64_constant(self):
+    @parametrize("dtype", (torch.float16, torch.float32, torch.float64))
+    def test_triton_kernel_float64_constant(self, dtype):
         def f(x):
             return x * (0.12 * x.shape[0])
 
