@@ -3319,10 +3319,6 @@ class TestSDPACudaOnly(NNTestCase):
             tmp = torch.rand_like(query, device=query.device)  # test non-zero intragraph offset
             # Create real output
             output_tuple = fused_op(query, key, value, **kwargs)
-            # for o in output_tuple:
-            #     print(f'{o.__class__=}')
-            #     if isinstance(o, torch.Tensor):
-            #         print(f'{o.is_cuda=}')
             assert all(not isinstance(o, torch.Tensor) or o.is_cuda for o in output_tuple)
         g.replay()
         out_first = output_tuple[0].clone()
