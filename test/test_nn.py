@@ -41,7 +41,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipMPSVersionIfLessThan, \
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types
 
@@ -11539,8 +11539,7 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqual(input.grad.size(), input.size())
 
-    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
-    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_nll_loss_empty_tensor_reduction_none(self, device, dtype):
         self._nll_loss_helper([0, 3], "none", torch.empty([0], device=device), device, dtype)
@@ -11549,8 +11548,7 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device, dtype)
         self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device, dtype)
 
-    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
-    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_nll_loss_empty_tensor_reduction_mean(self, device, dtype):
         nan = torch.tensor(float('nan'), device=device)
@@ -11560,8 +11558,7 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device, dtype)
         self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device, dtype)
 
-    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
-    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_nll_loss_empty_tensor_reduction_sum(self, device, dtype):
         zero = torch.tensor(0, device=device)
