@@ -386,12 +386,12 @@ void Context::setFloat32Precision(const std::string& backend, const std::string&
       msg += p;
       msg += " ";
     }
-    TORCH_WARN(
-        "you have set wrong precision for backend:",
-        backend,
-        " setFloat32Precision call has no effect.",
-        "Please choose precision from: ",
-        msg);
+    // TORCH_WARN(
+    //     "you have set wrong precision for backend:",
+    //     backend,
+    //     " setFloat32Precision call has no effect.",
+    //     "Please choose precision from: ",
+    //     msg);
   }
 }
 
