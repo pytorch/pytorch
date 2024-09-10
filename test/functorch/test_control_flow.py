@@ -5350,6 +5350,51 @@ def forward(self, l_inp_, l_tmp_):
         ):
             functional_f(example_init, example_inputs)
 
+    def test_scan_pytree_closure(self):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        param_buffer = ({"param": torch.randn(3, 3)}, (torch.randn(3),))
+
+        def add(carry, x):
+            ret = (carry @ param_buffer[0]["param"]) @ x + param_buffer[1][0]
+            return ret, ret.sum()
+
+        def f(init, xs):
+            return scan(add, init, xs)
+
+        init = torch.randn(4, 3)
+        xs = torch.randn(3, 3, 3)
+
+        backend = EagerAndRecordGraphs()
+        eager_out = f(init, xs)
+        compiled_out = torch.compile(f, backend=backend)(init, xs)
+        exp_out = _fake_scan(add, init, xs)
+
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_cell_contents_0_param_ : torch.Tensor, L_add_closure_0_cell_contents_1_0_ : torch.Tensor):
+    l_init_ = L_init_
+    l_xs_ = L_xs_
+    l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
+    l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
+    select = l_xs_.select(0, 0)
+    matmul = l_init_ @ l_add_closure_0_cell_contents_0_param_
+    matmul_1 = matmul @ select;  matmul = select = None
+    ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
+    sum_1 = ret.sum();  ret = sum_1 = None
+    child = l_init_.clone();  child = None
+    child_1 = torch.select_copy(l_xs_, 0, 0);  child_1 = None
+    scan_combine_fn_0 = self.scan_combine_fn_0
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    getitem = scan[0]
+    getitem_1 = scan[1];  scan = None
+    return (getitem, getitem_1)""",  # noqa: B950
+        )
+        self.assertEqual(eager_out, exp_out)
+        self.assertEqual(compiled_out, exp_out)
+
 
 _hop_schema_test_schema_types = [
     "bool",
