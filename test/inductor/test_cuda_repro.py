@@ -1317,7 +1317,7 @@ class CudaReproTests(TestCase):
         # Expect the code iterates in contiguous order, and is not tiled
         lines = code[0].split("\n")
         start = lines.index("@triton.jit")
-        kernel_code = "\n".join(lines[start:start + 14])
+        kernel_code = "\n".join(lines[start : start + 14])
         self.assertExpectedInline(
             kernel_code,
             """\
