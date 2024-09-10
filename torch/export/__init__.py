@@ -175,8 +175,7 @@ def export(
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
-    :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
-    a method) along with example inputs, and produces a traced graph representing
+    :func:`export` takes any nn.Module along with example inputs, and produces a traced graph representing
     only the Tensor computation of the function in an Ahead-of-Time (AOT) fashion,
     which can subsequently be executed with different inputs or serialized.  The
     traced graph (1) produces normalized operators in the functional ATen operator set
