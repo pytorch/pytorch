@@ -125,7 +125,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         context = (
             self.assertRaisesRegex(
                 RuntimeError,
-                r"Found following parameters on non-cpu device: \['0.weight']",
+                r"Found following parameters on non-CPU device: \[\('0.weight', device\(type='cuda'",
             )
             if not cpu_state_dict
             else nullcontext()

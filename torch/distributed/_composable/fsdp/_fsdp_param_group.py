@@ -577,16 +577,17 @@ class FSDPParamGroup:
     def _validate_cpu_offload_params(self):
         if not isinstance(self.offload_policy, CPUOffloadPolicy):
             return
-        param_names_not_on_cpu = [
-            fsdp_param._param_fqn
+        fsdp_params_not_on_cpu = [
+            fsdp_param
             for fsdp_param in self.fsdp_params
             if fsdp_param.sharded_param.device.type != "cpu"
         ]
-        if param_names_not_on_cpu:
+        if fsdp_params_not_on_cpu:
             raise RuntimeError(
-                "FSDP parameters should be materialized on cpu when enabling cpu offloading. "
-                'For example, load cpu state dict or call module.to_empty(device="cpu"). '
-                f"Found following parameters on non-cpu device: {param_names_not_on_cpu}\n"
+                "FSDP parameters should be materialized on CPU when enabling CPU offloading. "
+                'For example, load a CPU state dict or call module.to_empty(device="cpu"). '
+                "Found following parameters on non-CPU device: "
+                f"{[(fsdp_param._param_fqn, fsdp_param.sharded_param.device) for fsdp_param in fsdp_params_not_on_cpu]}\n"
             )
 
 
