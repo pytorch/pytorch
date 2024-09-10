@@ -190,6 +190,9 @@ compute_flex_attention = r"""
     q_start = tl.program_id(0)
     off_zq = tl.program_id(1) // HQ
     off_hq = tl.program_id(1) % HQ
+
+    # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
+    # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
     off_zkv = off_zq % ZKV
     off_hkv = off_hq // GQA_SHARED_HEADS
     off_g = off_hq % GQA_SHARED_HEADS
@@ -744,10 +747,8 @@ def flex_attention(
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    if Bq != Bkv:
-        assert (
-            Bq > 1 and Bkv == 1
-        ), "Batch dimension must match. Otherwise, Bkv should be 1 and Bq should be larger than 1."
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
 
     B = Bq
 
@@ -1633,10 +1634,8 @@ def flex_attention_backward(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    if Bq != Bkv:
-        assert (
-            Bq > 1 and Bkv == 1
-        ), "Batch dimension must match. Otherwise, Bkv should be 1 and Bq should be larger than 1."
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
 
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1682,7 +1681,7 @@ def flex_attention_backward(*args, **kwargs):
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
         key.get_dtype(),
-        (Bq, *key.get_size()[1:]),
+        [Bq, Hkv, seq_len_kv, qk_head_dim],
         key.get_stride(),
     )
 
@@ -1829,12 +1828,11 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
     else:
-        kv_shared_batch = Bq // Bkv
+        assert (
+            Bq > 1 and Bkv == 1
+        ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
-        grad_key = lowerings[aten.div](grad_key, kv_shared_batch)
-
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
-        grad_value = lowerings[aten.div](grad_value, kv_shared_batch)
 
     return (
         grad_query,

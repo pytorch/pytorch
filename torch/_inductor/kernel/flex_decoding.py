@@ -341,10 +341,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    if Bq != Bkv:
-        assert (
-            Bq > 1 and Bkv == 1
-        ), "Batch dimension must match. Otherwise, Bkv should be 1 and Bq should be larger than 1."
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
 
     B = Bq
     kernel_options = dict(kernel_options)
