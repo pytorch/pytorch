@@ -15,7 +15,11 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.runtime.hints import DeviceProperties
-from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
+from torch._inductor.utils import (
+    run_and_get_code,
+    run_and_get_graph_lowering,
+    run_fw_bw_and_get_code,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
@@ -163,7 +167,7 @@ class CudaReproTests(TestCase):
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self):
@@ -284,7 +288,7 @@ class CudaReproTests(TestCase):
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_inplace_updates_cudagraphs(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight1 = torch.nn.Parameter(
                     torch.randn(10, 20, requires_grad=True)
@@ -334,7 +338,7 @@ class CudaReproTests(TestCase):
 
     def test_accuracy_issue1(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(
                     in_features=768, out_features=2, bias=True
@@ -599,14 +603,13 @@ class CudaReproTests(TestCase):
             return (x > 0) - (x < 0)
 
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 nheads = 16
                 start = math.log2(0.5)
                 end = math.log2(1 / (2**8))
 
-                self.register_buffer(
-                    "scales",
+                self.scales = nn.Buffer(
                     2
                     ** torch.arange(
                         start,
@@ -677,7 +680,7 @@ class CudaReproTests(TestCase):
 
     def test_issue_103924(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.temperature = 1
                 self.layer = torch.nn.Softmax(dim=1)
@@ -781,7 +784,7 @@ class CudaReproTests(TestCase):
     # https://github.com/pytorch/pytorch/issues/96406
     def test_linear_cpu_input(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(4, 4)
 
@@ -796,7 +799,7 @@ class CudaReproTests(TestCase):
     @config.patch({"fallback_random": True, "triton.cudagraphs": True})
     def test_xlnet_lm_stride_repro(self):
         class Repro(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dropout = nn.Dropout(p=0.1, inplace=False)
 
@@ -839,7 +842,7 @@ class CudaReproTests(TestCase):
 
     def test_issue100806(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(10, 20)
                 self.linear2 = torch.nn.Linear(20, 30)
@@ -1240,9 +1243,23 @@ class CudaReproTests(TestCase):
         idxs = remove_unaligned_input_idxs(inputs, [0, 2])
         self.assertEqual(idxs, [0])
 
+    @config.patch("triton.cudagraphs", True)
+    def test_unused_cpu_input_cudagraphs(self):
+        def fn(x, y):
+            return x.sin().sin().sin().sin().cos() + 1
+
+        fx_graph = torch.fx.symbolic_trace(fn)
+        inp = [torch.randn(64, device="cuda"), torch.randn(64, device="cpu")]
+        compiled_fn, (graph,) = run_and_get_graph_lowering(
+            torch._inductor.compile, fx_graph, inp
+        )
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+        self.assertEqual(compiled_fn(*inp), fn(*inp))
+
     def test_epilogue_fusion_with_view(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
                 self.linear = torch.nn.Linear(262144, 100)
@@ -1263,6 +1280,27 @@ class CudaReproTests(TestCase):
             out2 = m(input_tensor)
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
 
+    @config.patch("triton.cudagraphs", True)
+    def test_cpu_index(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x[torch.arange(32)]
+
+        result, (graph,) = run_and_get_graph_lowering(
+            fn, torch.randn(64, device="cuda")
+        )
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+
+        inp = torch.randn(64, device="cuda", requires_grad=True)
+        result, (graph,) = run_and_get_graph_lowering(fn, inp)
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+
+        result, (graph,) = run_and_get_graph_lowering(lambda: result.sum().backward())
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+
     def test_reflection_pad_loop_order(self):
         def fn(x, y):
             a = torch.nn.functional.pad(x, (5, 5, 5, 5), mode="reflect")
@@ -1277,7 +1315,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        kernel_code = "\n".join(code[0].split("\n")[50:64])
+        kernel_code = "\n".join(code[0].split("\n")[60:74])
         self.assertExpectedInline(
             kernel_code,
             """\

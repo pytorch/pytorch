@@ -1,7 +1,7 @@
 import json
 import os
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic_utils import (
@@ -12,6 +12,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     CHOICE_COL,
     Feedback,
     FEEDBACK_COL,
+    get_metadata_str_from_log,
 )
 from torch._inductor.autoheuristic.learned_heuristic_controller import (
     LearnedHeuristicController,
@@ -19,25 +20,6 @@ from torch._inductor.autoheuristic.learned_heuristic_controller import (
 from torch._inductor.ir import ChoiceCaller
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import get_gpu_shared_memory
-
-
-def deserialize_data(log_path: str) -> Tuple[Any, Dict[str, Any]]:
-    json_string = get_metadata_str_from_log(log_path)
-    metadata = deserialize_metadata(json_string)
-    import pandas as pd  # type: ignore[import-untyped]
-
-    df = pd.read_csv(log_path, skiprows=1)
-    return (df, metadata)
-
-
-def deserialize_metadata(json_string: str) -> Dict[str, Any]:
-    return json.loads(json_string)
-
-
-def get_metadata_str_from_log(log_path: str) -> str:
-    with open(log_path, newline="") as file:
-        json_string = file.readline().strip()
-        return json_string
 
 
 class LocalFeedback:
@@ -59,8 +41,6 @@ class InconsistentMetadata(Exception):
     Exception that is thrown when AutoHeuristic tries to log data to a file where the metadata stored in the file does
     not match the metadata it would store if the file didn't exist.
     """
-
-    pass
 
 
 class AutoHeuristic:
@@ -147,9 +127,34 @@ class AutoHeuristic:
                 self.context,
             )
             decision = controller.get_decision()
+            if decision not in self.choices:
+                # TODO(AlnisM): We might want to allow this in the future
+                return self.fallback()
             if decision is not None:
                 return decision
         return self.fallback()
+
+    def get_top_k_choices(
+        self, top_k: int, always_included: Optional[List[str]] = None
+    ) -> Optional[List[Choice]]:
+        if not self.satisfies_precondition():
+            return None
+        if torch._inductor.config.use_autoheuristic(self.name):
+            if self.augment_context is not None:
+                self.context.apply_operations(self.augment_context)
+            controller = LearnedHeuristicController(
+                self.metadata,
+                self.context,
+            )
+            choices = controller.get_decisions_ranked(top_k)
+            if choices is None:
+                return None
+            if always_included is not None:
+                for choice in always_included:
+                    if choice not in choices:
+                        choices.append(choice)
+            return choices
+        return None
 
     def get_collected_feedback(self, choice: Choice) -> Any:
         return self.collected_feedback.get(choice, None)
@@ -300,3 +305,11 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
     def get_choice_caller(self) -> Optional[ChoiceCaller]:
         choice = self.get_choice()
         return self.choicestr2choice.get(choice, None)
+
+    def get_top_k_choices_caller(
+        self, top_k: int, always_included: Optional[List[str]] = None
+    ) -> Optional[List[ChoiceCaller]]:
+        choices = self.get_top_k_choices(top_k, always_included)
+        if choices is None:
+            return None
+        return [self.choicestr2choice[choice] for choice in choices]
