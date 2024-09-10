@@ -6,11 +6,6 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.export._trace
 from torch._ops import OpOverload
-from torch.ao.quantization.fx._decomposed import (
-    dequantize_per_channel,
-    dequantize_per_tensor,
-    quantize_per_tensor,
-)
 from torch.ao.quantization.utils import calculate_qmin_qmax
 from torch.fx.graph_module import _assign_attr
 
@@ -51,7 +46,7 @@ def insert_quantized_node(
     qscheme: Optional[torch.qscheme],
 ) -> torch.fx.Node:
     return gm.graph.call_function(
-        quantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_tensor.default,
         (
             val_node,
             scale_node,
@@ -74,7 +69,7 @@ def get_dequantized(
     qscheme: Optional[torch.qscheme],
 ) -> torch.Tensor:
     if qscheme is torch.per_tensor_affine:
-        return dequantize_per_tensor(
+        return torch.ops.quantized_decomposed.dequantize_per_tensor.default(
             val,
             scale,
             zero_point,
@@ -83,7 +78,7 @@ def get_dequantized(
             dtype,
         )
     elif qscheme is torch.per_channel_affine:
-        return dequantize_per_channel(
+        return torch.ops.quantized_decomposed.dequantize_per_channel(
             val,
             scale,
             zero_point,
@@ -109,7 +104,7 @@ def insert_dequantized_node(
 ) -> torch.fx.Node:
     if qscheme is torch.per_tensor_affine:
         return gm.graph.call_function(
-            dequantize_per_tensor,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             (
                 val_node,
                 scale_node,
@@ -121,7 +116,7 @@ def insert_dequantized_node(
         )
     elif qscheme is torch.per_channel_affine:
         return gm.graph.call_function(
-            dequantize_per_channel,
+            torch.ops.quantized_decomposed.dequantize_per_channel,
             (
                 val_node,
                 scale_node,

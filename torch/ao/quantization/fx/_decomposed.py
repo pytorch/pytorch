@@ -42,7 +42,7 @@ def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
 
 
 quantized_decomposed_lib.define(
-    "quantize_per_tensor(Tensor input, float scale, int zero_point, "
+    "quantize_per_tensor(Tensor input, Scalar scale, Scalar zero_point, "
     "int quant_min, int quant_max, ScalarType dtype) -> Tensor"
 )
 
@@ -215,7 +215,7 @@ def quantize_per_tensor_tensor2_meta(
 # matching in the future
 # We will revisit this later if we found there are no use cases for it
 quantized_decomposed_lib.define(
-    "dequantize_per_tensor(Tensor input, float scale, int zero_point, "
+    "dequantize_per_tensor(Tensor input, Scalar scale, Scalar zero_point, "
     "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor"
 )
 
