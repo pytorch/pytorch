@@ -44,7 +44,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.ending = ";"
         self.open_bracket = "{"
         self.closed_bracket = "}"
-        self.comment = " //"
+        self.comment = "//"
         self.namespace = "at::"
         self.none_str = "nullptr" if config.abi_compatible else "at::Tensor()"
         self.extern_call_ops = set()
