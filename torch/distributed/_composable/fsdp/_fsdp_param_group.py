@@ -12,7 +12,7 @@ from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 
-from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy, CPUOffloadPolicy
+from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
@@ -559,7 +559,7 @@ class FSDPParamGroup:
 
     def __repr__(self):
         return f"FSDPParamGroup(fqn={self._module_fqn})"
-    
+
     def _validate_no_meta_params(self):
         param_names_on_meta = [
             fsdp_param._param_fqn
@@ -573,7 +573,7 @@ class FSDPParamGroup:
                 "For example, call module.to_empty(device) to materialize to device and "
                 "call module.reset_parameters() on each module to initialize values."
             )
-    
+
     def _validate_cpu_offload_params(self):
         if not isinstance(self.offload_policy, CPUOffloadPolicy):
             return
@@ -585,7 +585,7 @@ class FSDPParamGroup:
         if param_names_not_on_cpu:
             raise RuntimeError(
                 "FSDP parameters should be materialized on cpu when enabling cpu offloading. "
-                "For example, load cpu state dict or call module.to_empty(device=\"cpu\"). " 
+                'For example, load cpu state dict or call module.to_empty(device="cpu"). '
                 f"Found following parameters on non-cpu device: {param_names_not_on_cpu}\n"
             )
 
