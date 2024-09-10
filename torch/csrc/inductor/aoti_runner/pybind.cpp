@@ -2,7 +2,6 @@
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
-#include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
