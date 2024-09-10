@@ -384,20 +384,23 @@ class TestGradCollectives(MultiThreadedTestCase):
         self.assertIsNone(x.grad)
 
 
-class TestMakeFx(MultiThreadedTestCase):
-    @property
-    def world_size(self):
-        return 2
-
+class TestMakeFx(TestCase):
     def setUp(self):
-        super().setUp()
-        self._spawn_threads()
+        # make_fx is not thread-safe due to patching nd mutating global states
+        # so create a fake_pg.
+        self.rank = 0
+        self.world_size = 2
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
 
     def tearDown(self):
         super().tearDown()
 
-        # race condition with threads causes is_fx_tracing flag to be set incorrectly.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
         self.assertFalse(torch.fx._symbolic_trace.is_fx_tracing())
 
     def test_all_reduce_tracing(self):
@@ -586,6 +589,28 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
             store=FakeStore(),
         )
         allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @requires_nccl()
+    @with_comms()
+    def test_tracing_with_dce_code(self):
+        if self.world_size > 2:
+            return
+
+        def func(batch, group, rank):
+            ret = ft_c.permute_tensor(batch, [1, 0], group)
+            if hasattr(ret, "wait"):
+                ret = ret.wait()
+            if rank == 0:
+                return ret
+            else:
+                return batch * 5
+
+        compiled_func = torch.compile(func)
+        ret = compiled_func(
+            torch.ones((100,), device="cuda"), self.process_group, self.rank
+        )
+        dist.barrier()
 
 
 class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):

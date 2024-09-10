@@ -11,6 +11,7 @@ from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
 from .pt2e._numeric_debugger import (  # noqa: F401
     compare_results,
+    CUSTOM_KEY,
     extract_results_from_loggers,
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
@@ -30,8 +31,16 @@ from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
 
 
+# ensure __module__ is set correctly for public APIs
 ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
 ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
+for _f in [
+    compare_results,
+    extract_results_from_loggers,
+    generate_numeric_debug_handle,
+    prepare_for_propagation_comparison,
+]:
+    _f.__module__ = "torch.ao.quantization"
 
 __all__ = [
     "DeQuantStub",
@@ -154,6 +163,7 @@ __all__ = [
     "swap_module",
     "weight_observer_range_neg_127_to_127",
     "generate_numeric_debug_handle",
+    "CUSTOM_KEY",
     "NUMERIC_DEBUG_HANDLE_KEY",
     "prepare_for_propagation_comparison",
     "extract_results_from_loggers",
