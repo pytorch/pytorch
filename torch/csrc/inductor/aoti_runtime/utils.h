@@ -112,6 +112,10 @@ class RAIIAtenTensorHandle {
     return storage_offset;
   }
 
+  void zero_() {
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(handle_.get()));
+  }
+
  private:
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
