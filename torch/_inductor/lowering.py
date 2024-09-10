@@ -2114,6 +2114,8 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
         if isinstance(arg, ir.IRNode):
             stride_order = ir.get_stride_order(fx_arg.meta["val"].stride())
             return ir.ExternKernel.require_stride_order(arg, stride_order)
+        if isinstance(arg, dict):
+            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg.keys()}
         return arg
 
     args = tuple(

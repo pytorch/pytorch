@@ -1015,6 +1015,66 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
+    @torch._inductor.config.patch(
+        triton_kernel_default_layout_constraint="needs_fixed_stride_order"
+    )
+    @requires_gpu
+    def test_layout_constraint_needs_fixed_stride_order(self):
+        # Construct a custom op whose output strides are (1, 2)
+        @torch.library.custom_op("mylib::weird_op_with_lowering", mutates_args={})
+        def weird_op_with_lowering(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_strided((2, 2), (1, 2), dtype=x.dtype, device=x.device)
+
+        @weird_op_with_lowering.register_fake
+        def _(x):
+            return torch.empty_strided((2, 2), (1, 2), dtype=x.dtype, device=x.device)
+
+        # The lowering for the custom op produces output strides (2, 1).
+        from torch._inductor.lowering import empty_strided, register_lowering
+
+        @register_lowering(torch.ops.mylib.weird_op_with_lowering)
+        def _(x):
+            return empty_strided(
+                x.shape, (2, 1), dtype=x.dtype, device=torch.device("cuda:0")
+            )
+
+        # Triton kernel that has different behavior depending on the input strides.
+        @triton.jit
+        def kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            output = offsets
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def arange_out(x, out):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            kernel[grid](x, out, n_elements, BLOCK_SIZE=4)
+
+        def f(x):
+            y = weird_op_with_lowering(x)
+            # Inductor lowering will decide that y is better having strides (2, 1).
+            # This is different from the strides at tracing time (1, 2).
+            # Under the "needs_fixed_stride_order" config, inductor will coerce
+            # y to have strides (1, 2) before passing it to arange_out.
+            # If it doesn't, then the result will be different from eager mode.
+            arange_out(x, y)
+            return x + y
+
+        x = torch.randn(2, 2, device="cuda")
+        eager_out = f(x)
+
+        compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
+        compiled_inductor_out = compiled_inductor_f(x)
+        self.assertEqual(compiled_inductor_out, eager_out)
+
     @requires_gpu
     def test_triton_kernel_strided_input_nonzero_offset(self):
         def f(inp):
