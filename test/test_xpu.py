@@ -404,6 +404,12 @@ print(torch.xpu.device_count())
             )
         )
 
+    def test_tensor_storage_data_ptr_consistency(self):
+        torch.xpu.empty_cache()
+        t = torch.randn(8, device='xpu')
+        self.assertGreater(t.data_ptr, 0)
+        self.assertEqual(t.data_ptr(), t.untyped_storage().data_ptr())
+
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
 
