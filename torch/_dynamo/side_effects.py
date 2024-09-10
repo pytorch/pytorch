@@ -5,6 +5,7 @@ import warnings
 from collections.abc import MutableMapping
 from typing import Any, Dict, List, Optional, Type, Union
 import weakref
+import contextlib
 
 import torch.nn
 
@@ -708,3 +709,12 @@ class SideEffects:
     def clear(self):
         self.keepalive.clear()
         self.id_to_variable.clear()
+
+
+@contextlib.contextmanager
+def ignore_side_effects(tx: "InstructionTranslator"):
+    try:
+        tx.output.current_tracer.ignore_side_effects = True
+        yield
+    finally:
+        tx.output.current_tracer.ignore_side_effects = False

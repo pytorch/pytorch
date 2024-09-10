@@ -331,7 +331,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             except:
                 FSDPState = None
             if FSDPState is not None and self.fn in [FSDPState._pre_forward, FSDPState._post_forward]:
-                with torch._dynamo.variables.higher_order_ops.dynamo_ignore_side_effects(tx):
+                with torch._dynamo.side_effects.ignore_side_effects(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
 

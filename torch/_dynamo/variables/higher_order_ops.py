@@ -71,15 +71,6 @@ def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
         GradModeVariable.create(tx, org_value, initialized=True)
 
 
-@contextlib.contextmanager
-def dynamo_ignore_side_effects(tx: "InstructionTranslator"):
-    try:
-        tx.output.current_tracer.ignore_side_effects = True
-        yield
-    finally:
-        tx.output.current_tracer.ignore_side_effects = False
-
-
 def only_consist_of(var, types, allow_none=False):
     if isinstance(var, types):
         return True
