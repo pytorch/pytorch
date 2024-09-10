@@ -2415,7 +2415,7 @@ class TestPagedCache(InductorTestCase):
     @supported_platform
     def test_page_allocation(self):
         n_pages, page_size = 12, 4
-        paged_cache = self.allocate_page_cache(12, 4)
+        paged_cache = self.allocate_page_cache(n_pages, page_size)
 
         num_pages_to_allocate = torch.tensor([2, 6, 4])
         paged_cache.allocate(num_pages_to_allocate)
@@ -2431,7 +2431,7 @@ class TestPagedCache(InductorTestCase):
     @supported_platform
     def test_allocate_until_length(self):
         n_pages, page_size = 12, 4
-        paged_cache = self.allocate_page_cache(12, 4)
+        paged_cache = self.allocate_page_cache(n_pages, page_size)
 
         target_seq_len = torch.tensor([3, 11, 8])
         paged_cache.allocate_until_length(target_seq_len)
@@ -2474,17 +2474,50 @@ class TestPagedCache(InductorTestCase):
     @supported_platform
     def test_flex_attention_causal_mask(self):
         # flex_attention(q, k, v, block_mask=causal_mask) works with paged cache
+        n_pages, page_size, max_batch_size, max_seq_len = 16, 128, 4, 512
+        n_heads, head_dim = 4, 64
 
-        n_pages, page_size = 12, 4
-        paged_cache = self.allocate_page_cache(12, 4)
+        paged_cache = PagedCache(n_pages, page_size, max_batch_size, max_seq_len)
+
+        paged_cache.allocate_until_length(torch.tensor([100, 200, 50, 300], device='cuda'))
+        paged_cache.allocate_until_length(torch.tensor([100, 512, 300, 300], device='cuda'))
+        paged_cache.allocate_until_length(torch.tensor([512, 512, 300, 300], device='cuda'))
+        paged_cache.allocate_until_length(torch.tensor([512, 512, 512, 300], device='cuda'))
+        paged_cache.allocate_until_length(torch.tensor([512, 512, 512, 512], device='cuda'))
 
         def causal_mask(b, h, q, kv):
-            return (q + (offset[b] * 128)) >= kv
+            return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048)
-        mask_mod = functools.partial(flex_attention, block_mask=block_mask)
+        block_mask = create_block_mask(causal_mask, 1, 1, max_seq_len, max_seq_len)
+        compiled_flex_attention = torch.compile(flex_attention)
+
+        # Get q, k, v. Compute expected out, q_grad, k_grad, v_grad
+        q = torch.randn(max_batch_size, n_heads, max_seq_len, head_dim, device="cuda", dtype=torch.float16, requires_grad=True)
+        k = torch.randn(max_batch_size, n_heads, max_seq_len, head_dim, device="cuda", dtype=torch.float16, requires_grad=True)
+        v = torch.randn(max_batch_size, n_heads, max_seq_len, head_dim, device="cuda", dtype=torch.float16, requires_grad=True)
+        out = compiled_flex_attention(q, k, v, block_mask=block_mask)
+        out.sum().backward()
 
         # 
+
+        # write k, v to cache according to the page table
+        k_cache = torch.zeros(1, n_heads, 2048, head_dim, device="cuda", dtype=torch.float16, requires_grad=True)
+        v_cache = torch.zeros(1, n_heads, 2048, head_dim, device="cuda", dtype=torch.float16, requires_grad=True)
+        input_pos = torch.tensor(range(0, max_seq_len), device="cuda", dtype=torch.int32)
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+
+        paged_cache.update(input_pos, k_ref, k_cache)
+        paged_cache.update(input_pos, v_ref, v_cache)
+
+        # Get new block mask with convert_logical_block_mask
+        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        
+        # Compute paged_out, paged_q_grad, paged_k_grad, paged_v_grad based on the new block mask & page table
+        paged_out = compiled_flex_attention(q_ref, k_cache, v_cache, block_mask=new_block_mask)
+        paged_out.sum().backward()
+        breakpoint()
+
+
 
     @supported_platform
     def test_flex_attention_score_mod(self):

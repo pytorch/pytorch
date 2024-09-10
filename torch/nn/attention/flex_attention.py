@@ -879,15 +879,12 @@ class PagedCache:
         self,
         n_pages: int,
         page_size: int,
-        head_dim: int,
         max_batch_size: int,
         max_seq_len: int,
-        n_heads: int,
-        dtype=torch.bfloat16,
+        device: str = "cuda",
     ):
         super().__init__()
         self.page_size = page_size
-        self.n_heads = n_heads
 
         # cache_shape = (n_heads, n_pages * page_size, head_dim)
         # self.cache = torch.zeros(cache_shape, dtype=dtype))
@@ -895,21 +892,44 @@ class PagedCache:
         # page table: [batch, logical_block_idx] -> physical_page_idx
         max_seq_pages = _cdiv(max_seq_len, page_size)
         page_table_shape = (max_batch_size, max_seq_pages)
-        self.page_table = -torch.ones(page_table_shape, dtype=torch.int64)
+        self.page_table = -torch.ones(page_table_shape, dtype=torch.int64, device=device)
 
         # current allocated sequence length for a specific batch index
-        self.allocated_seq_len = torch.zeros(max_batch_size, dtype=torch.int64)
+        self.allocated_seq_len = torch.zeros(max_batch_size, dtype=torch.int64, device=device)
 
         # index of empty pages that is available for allocation
         self.empty_pages = list(range(n_pages - 1, -1, -1))
 
         # Mapping from physical page index to logical page index
-        self.physical_to_logical = -torch.ones(n_pages, dtype=torch.int64)
+        self.physical_to_logical = -torch.ones(n_pages, dtype=torch.int64, device=device)
 
-    def update(self, input_pos: Tensor, val: Tensor):
+    # # @classmethod
+    # def from_page_table(
+    #     self,
+    #     page_table: Tensor,
+    #     n_pages: int,
+    # ):
+    #     max_batch_size, max_seq_pages = page_table.shape
+
+    #     self.page_table = page_table
+        
+    #     self.physical_to_logical = -torch.ones(n_pages, dtype=torch.int64)
+    #     for b in range(max_batch_size):
+    #         for logical_idx in range(max_seq_pages):
+    #             physical_idx = self.page_table[b][logical_idx]
+    #             self.physical_to_logical[physical_idx] = logical_idx
+
+    #     # TODO
+    #     # self.allocated_seq_len = torch.zeros(max_batch_size, dtype=torch.int64)
+    #     # self.empty_pages
+        
+
+    #     return
+
+    def update(self, input_pos: Tensor, val: Tensor, cache: Tensor):
         # input_pos: [S], val: [B, H, S, D]
         B, H, S, D = val.shape
-        assert H == self.n_heads, f"H and n_heads must match. Got H={H} and n_heads={self.n_heads}"
+        assert H == cache.shape[1]
 
         # find address
         logical_block_idx = input_pos // self.page_size  # [S]
@@ -922,8 +942,9 @@ class PagedCache:
         addr = addr.view(-1)  # [B*S]
 
         # update
-        vt = val.transpose(0, 1).view(H, B * S, D)  # [H, B*S, D]
-        self.cache[:, addr] = vt
+        # TODO: view vs reshape
+        vt = val.transpose(0, 1).reshape(H, B * S, D)  # [H, B*S, D]
+        cache[0, :, addr] = vt
 
     def convert_logical_block_mask(self, block_mask: BlockMask) -> BlockMask:
         assert block_mask.BLOCK_SIZE[1] == self.page_size
@@ -977,12 +998,15 @@ class PagedCache:
         (B,) = target_seq_len.shape
         num_tokens_to_allocate = torch.maximum(
             target_seq_len - self.allocated_seq_len[:B],
-            torch.zeros(B, dtype=torch.int64),
+            torch.zeros(B, dtype=torch.int64, device=target_seq_len.device),
         )
         return _cdiv(num_tokens_to_allocate, self.page_size)  # [B]
 
     def allocate_single_seq(self, batch_idx: Tensor, num_pages_to_allocate: Tensor):
         # batch_idx: [1], num_pages_to_allocate: [1]
+        if num_pages_to_allocate == 0:
+            return
+
         assert (
             len(self.empty_pages) >= num_pages_to_allocate
         ), f"requested {num_pages_to_allocate} pages but there are only {len(self.empty_pages)} empty pages"
@@ -990,7 +1014,7 @@ class PagedCache:
         end_page_idx = start_page_idx + num_pages_to_allocate
 
         # find empty physical pages
-        allocated_pages = torch.tensor(self.empty_pages[-num_pages_to_allocate:])
+        allocated_pages = torch.tensor(self.empty_pages[-num_pages_to_allocate:], device=num_pages_to_allocate.device)
         self.empty_pages = self.empty_pages[:-num_pages_to_allocate]
 
         # update page table
@@ -1001,7 +1025,7 @@ class PagedCache:
 
         # update metadata
         self.physical_to_logical[allocated_pages] = torch.tensor(
-            range(start_page_idx, end_page_idx)
+            range(start_page_idx, end_page_idx), device=num_pages_to_allocate.device
         )
         self.allocated_seq_len[batch_idx] += num_pages_to_allocate * self.page_size
 
