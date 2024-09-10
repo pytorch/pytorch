@@ -106,7 +106,24 @@ So calling resize-to-0 in the middle of the graph to free nn.Parameter memory af
 
 Q: Wouldn't the extra resize_ and copy_ ops hurt both memory usage and performance?
 A: Yes it would. As an optimization, we have an Inductor post-grad FX pass to remove those resize_ and copy_ ops
-if the traced FSDP2 graph is full-graph (i.e. no graph breaks).
+for unsharded params that have this pattern: resize_(full) -> copy_ -> resize_(0).
+
+TODO:
+Now that we are maintaining the invariant of "no aliased + mutated graph inputs" in both the forward and backward,
+it is now more feasible to functionalize all of the mutable FSDP ops. Some of the pros and cons are:
+
+Cons (of functionalizing those ops):
+(1) By not functionalizing them as we are today, we are making it more likely that they will run at the "correct" time
+in the generated code. If we start to functionalize them, we will need to make sure that Inductor reinplaces them
+in a way where it properly moves the mutations back to exactly where they should have run, or we risk suffering worse
+peak memory than eager. (We probably already need to do something similar in Inductor's reinplacing for copy_:
+https://github.com/pytorch/pytorch/issues/135305#issuecomment-2334888089)
+
+Pros (of functionalizing):
+(1) Better safety, we don't need to worry about the graph passes in inductor/partitioning handling input mutations
+mid-graph quite as much (to be fair we've already done some amount of auditing, but we might have to do some more).
+(2) Better perf: each mutation midway through the graph prevents Inductor from pattern matching across it.
+But maybe there are few enough mutations induced by FSDP for this to matter.
 """
 
 
@@ -611,7 +628,7 @@ class FSDPParam:
             graph inputs. They are created within the graph and is guaranteed to be freed
             by the end of the graph. They don't leak outside of the graph.
             """
-            free_storage(self._unsharded_param)
+            self._unsharded_param.untyped_storage().resize_(0)
             self.all_gather_outputs = []
             self._unsharded_inner_tensors = []
         else:

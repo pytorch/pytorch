@@ -326,7 +326,7 @@ class OutputGraph:
         ] = collections.defaultdict(list)
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = {}
-        self.side_effects = SideEffects()
+        self.side_effects = SideEffects(self)
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache = VariableTrackerCache()
@@ -1443,8 +1443,7 @@ class OutputGraph:
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-            with torch._dynamo.utils.set_one_graph(self.root_tx.one_graph):
-                compiled_fn = compiler_fn(gm, self.example_inputs())
+            compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except exceptions_allowed_to_be_fallback as e:
@@ -1833,6 +1832,7 @@ class SubgraphTracer(fx.Tracer):
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
         self.prev_inst = None
+        self.ignore_side_effects = False
 
         self._cur_code = None
         self._orig_gm_meta = None

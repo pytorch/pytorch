@@ -77,7 +77,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     The IR here has been normalized and functionalized.
     """
-    remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
 
     if config.dce:
         # has some issues with mutation in inference mode

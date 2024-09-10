@@ -4,6 +4,7 @@ import inspect
 import warnings
 from collections.abc import MutableMapping
 from typing import Any, Dict, List, Optional, Type, Union
+import weakref
 
 import torch.nn
 
@@ -81,6 +82,7 @@ class SideEffects:
 
     def __init__(
         self,
+        output_graph,
         id_to_variable=None,
         store_attr_mutations=None,
         keepalive=None,
@@ -88,6 +90,7 @@ class SideEffects:
         tensor_hooks=None,
     ):
         super().__init__()
+        self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
         self.keepalive = keepalive or []
@@ -132,6 +135,7 @@ class SideEffects:
     def clone(self):
         """Create a shallow copy"""
         return self.__class__(
+            output_graph=self.output_graph_weakref(),
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
@@ -154,12 +158,13 @@ class SideEffects:
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
             return True
-        # TODO(yf225): skip check only if traced FSDP2 and this is FSDP2 pre-forward / post-forward hook.
-        # Look at https://github.com/pytorch/pytorch/pull/134310 for inspiration on how to implement this.
-        # if not is_side_effect_safe(item.mutable_local):
-        #     unimplemented(
-        #         "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
-        #     )
+        output_graph = self.output_graph_weakref()
+        if output_graph and output_graph.current_tx.output.current_tracer.ignore_side_effects:
+            return True
+        if not is_side_effect_safe(item.mutable_local):
+            unimplemented(
+                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+            )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)

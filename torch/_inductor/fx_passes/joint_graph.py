@@ -437,7 +437,6 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     Run FX transformations on the joint forwards+backwards graph.
     """
     lazy_init()
-
     count = 0
     if config.joint_custom_pre_pass is not None:
         with GraphTransformObserver(

@@ -2082,23 +2082,6 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     return ret_val
 
 
-_one_graph_tls = threading.local()
-
-
-def is_one_graph():
-    return getattr(_one_graph_tls, "value", False)
-
-
-@contextmanager
-def set_one_graph(is_one_graph):
-    old = getattr(_one_graph_tls, "value", None)
-    try:
-        _one_graph_tls.value = is_one_graph
-        yield
-    finally:
-        _one_graph_tls.value = old
-
-
 _current_node = threading.local()
 
 

@@ -25,6 +25,7 @@ from ..utils import (
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
+import contextlib
 
 
 try:
@@ -36,6 +37,10 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._guards import Source
+
+
+import logging
+log = logging.getLogger("torch")
 
 
 _F = TypeVar("_F", bound=Callable)
@@ -320,7 +325,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
-
+        if not tx.output.current_tracer.ignore_side_effects:
+            try:
+                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+            except:
+                FSDPState = None
+            if FSDPState is not None and self.fn in [FSDPState._pre_forward, FSDPState._post_forward]:
+                with torch._dynamo.variables.higher_order_ops.dynamo_ignore_side_effects(tx):
+                    return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
 
