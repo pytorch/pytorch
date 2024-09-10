@@ -874,7 +874,7 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
-class PagedCache(torch.nn.Module):
+class PagedCache:
     def __init__(
         self,
         n_pages: int,
@@ -889,8 +889,8 @@ class PagedCache(torch.nn.Module):
         self.page_size = page_size
         self.n_heads = n_heads
 
-        cache_shape = (n_heads, n_pages * page_size, head_dim)
-        self.register_buffer("cache", torch.zeros(cache_shape, dtype=dtype))
+        # cache_shape = (n_heads, n_pages * page_size, head_dim)
+        # self.cache = torch.zeros(cache_shape, dtype=dtype))
 
         # page table: [batch, logical_block_idx] -> physical_page_idx
         max_seq_pages = _cdiv(max_seq_len, page_size)
@@ -909,11 +909,7 @@ class PagedCache(torch.nn.Module):
     def update(self, input_pos: Tensor, val: Tensor):
         # input_pos: [S], val: [B, H, S, D]
         B, H, S, D = val.shape
-
-        if H != self.n_heads:
-            raise RuntimeError(
-                f"H and n_heads must match. Got H={H} and n_heads={self.n_heads}"
-            )
+        assert H == self.n_heads, f"H and n_heads must match. Got H={H} and n_heads={self.n_heads}"
 
         # find address
         logical_block_idx = input_pos // self.page_size  # [S]

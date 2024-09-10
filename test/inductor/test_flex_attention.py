@@ -2471,6 +2471,43 @@ class TestPagedCache(InductorTestCase):
         self.assertEqual(paged_cache.allocated_seq_len, torch.tensor([0, 0, 0]))
         self.assertEqual(len(paged_cache.empty_pages), n_pages)
 
+    @supported_platform
+    def test_flex_attention_causal_mask(self):
+        # flex_attention(q, k, v, block_mask=causal_mask) works with paged cache
+
+        n_pages, page_size = 12, 4
+        paged_cache = self.allocate_page_cache(12, 4)
+
+        def causal_mask(b, h, q, kv):
+            return (q + (offset[b] * 128)) >= kv
+
+        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048)
+        mask_mod = functools.partial(flex_attention, block_mask=block_mask)
+
+        # 
+
+    @supported_platform
+    def test_flex_attention_score_mod(self):
+        # flex_attention(q, k, v, score_mod, block_mask) works with paged cache
+        return
+
+    @supported_platform
+    def test_flex_attention_gqa(self):
+        # flex_attention(q, k, v, block_mask=causal_mask, enable_gqa=True) works with paged cache
+        return
+
+    @supported_platform
+    def test_flex_decoding_causal_mask(self):
+        return
+
+    @supported_platform
+    def test_flex_decoding_score_mod(self):
+        return
+
+    @supported_platform
+    def test_flex_decoding_gqa(self):
+        return
+
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
