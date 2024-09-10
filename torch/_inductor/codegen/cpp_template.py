@@ -111,10 +111,11 @@ class CppTemplate(KernelTemplate):
     def header(self) -> IndentedBuffer:
         res = IndentedBuffer()
         res.writeline(codecache.cpp_prefix())
-        # TODO: add c10::ForcedUnroll test to test_aoti_abi_check
-        res.splice("""#include <c10/util/Unroll.h>""")
-        if config.abi_compatible:
-            res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")
+        res.splice(
+            """
+                #include "c10/util/Unroll.h"
+            """
+        )
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
             "win32",
