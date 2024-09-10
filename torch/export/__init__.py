@@ -88,7 +88,11 @@ def export_for_training(
     flow and data structures (with certain exceptions), and (3) records the set of
     shape constraints needed to show that this normalization and control-flow elimination
     is sound for future inputs. This API is intended for PT2 quantization training use cases
-    and will soon be the default IR of torch.export.export in the near future.
+    and will soon be the default IR of torch.export.export in the near future. To read further about
+    the motivation behind this change, please refer to
+    https://dev-discuss.pytorch.org/t/why-pytorch-does-not-need-a-new-standardized-operator-set/2206
+    With this API, and :func:`run_decompositions()`, you should be able to get inference IR with
+    your custom decomposition behaviour.
 
     **Soundness Guarantee**
 
