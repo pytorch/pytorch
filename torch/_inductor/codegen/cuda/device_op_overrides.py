@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
 
-from ..aoti_hipify_utils import maybe_hipify_code_wrapper
 from ..common import DeviceOpOverrides, register_device_op_overrides
 
 
@@ -39,7 +38,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         #include <c10/cuda/CUDAStream.h>
         #include <ATen/cuda/EmptyTensor.h>
         """
-        return maybe_hipify_code_wrapper(source_codes)
+        return source_codes
 
     def kernel_driver(self):
         source_codes = """
@@ -116,22 +115,22 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             source_codes = source_codes.replace(
                 "32*numWarps", str(prop.warp_size) + "*numWarps"
             )
-        return maybe_hipify_code_wrapper(source_codes)
+        return source_codes
 
     def abi_compatible_header(self):
         return "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
 
     def cpp_stream_type(self):
-        return maybe_hipify_code_wrapper("cudaStream_t")
+        return "cudaStream_t"
 
     def aoti_get_stream(self):
         return "aoti_torch_get_current_cuda_stream"
 
     def cpp_kernel_type(self):
-        return maybe_hipify_code_wrapper("CUfunction")
+        return "CUfunction"
 
     def cpp_device_ptr(self):
-        return maybe_hipify_code_wrapper("CUdeviceptr")
+        return "CUdeviceptr"
 
 
 register_device_op_overrides("cuda", CUDADeviceOpOverrides())

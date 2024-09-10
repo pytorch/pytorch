@@ -14,6 +14,7 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..utils import DeferredLineBase, get_gpu_type
 from ..virtualized import V
+from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
 from .cpp_utils import cexpr, DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
@@ -180,8 +181,12 @@ class CppWrapperGpu(CppWrapperCpu):
         if config.abi_compatible:
             self.header.splice(self.device_codegen.abi_compatible_header())
         else:
-            self.header.splice(self.device_codegen.kernel_header())
-        self.header.splice(self.device_codegen.kernel_driver())
+            self.header.splice(
+                maybe_hipify_code_wrapper(self.device_codegen.kernel_header())
+            )
+        self.header.splice(
+            maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
+        )
 
     def write_get_raw_stream(self, index, graph=None):
         if self.device == "xpu":
@@ -192,7 +197,11 @@ class CppWrapperGpu(CppWrapperCpu):
             return name
 
         name = f"stream{index}"
-        self.writeline(f"{self.device_codegen.cpp_stream_type()} {name};")
+        self.writeline(
+            maybe_hipify_code_wrapper(
+                f"{self.device_codegen.cpp_stream_type()} {name};"
+            )
+        )
         self.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({index}, (void**)&{name}));"
         )
@@ -212,7 +221,9 @@ class CppWrapperGpu(CppWrapperCpu):
                 sorted([entry[0] for entry in self.user_defined_kernel_cache.values()]),
             ):
                 self.prefix.writeline(
-                    f"static {self.device_codegen.cpp_kernel_type()} {kernel} = nullptr;"
+                    maybe_hipify_code_wrapper(
+                        f"static {self.device_codegen.cpp_kernel_type()} {kernel} = nullptr;"
+                    )
                 )
             self.prefix.writeline("\n")
         return super().generate(is_inference)
@@ -315,15 +326,19 @@ class CppWrapperGpu(CppWrapperCpu):
                 else:
                     if config.abi_compatible:
                         self.writeline(
-                            f"{self.device_codegen.cpp_device_ptr()} {var_name};"
+                            maybe_hipify_code_wrapper(
+                                f"{self.device_codegen.cpp_device_ptr()} {var_name};"
+                            )
                         )
                         self.writeline(
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
                         )
                     else:
                         self.writeline(
-                            f"{self.device_codegen.cpp_device_ptr()} {var_name} = \
+                            maybe_hipify_code_wrapper(
+                                f"{self.device_codegen.cpp_device_ptr()} {var_name} = \
                                     reinterpret_cast<{self.device_codegen.cpp_device_ptr()}>({arg}.data_ptr());"
+                            )
                         )
             elif arg_type in (sympy.Integer, int):
                 self.writeline(f"int {var_name} = {self.expr_printer(arg)};")
