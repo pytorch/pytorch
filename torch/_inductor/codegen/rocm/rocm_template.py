@@ -134,6 +134,7 @@ class ROCmTemplate(KernelTemplate):
         res = IndentedBuffer()
         res.splice(
             """
+                #include <cmath>
                 #include <exception>
                 #include <iostream>
                 #include <memory>
