@@ -6218,12 +6218,12 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
+def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
-        for x in itertools.chain(input, input)
+        for x in itertools.chain(xs, xs)
     ]
     lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
@@ -6233,9 +6233,9 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
             *pytree.tree_leaves(rhs),
         )
 
-    kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
-    kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
-    kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
+    kwargs = _make_scan_inner(xs[0], axis=dim, dtype=None)
+    kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
+    kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
     result = ir.Scan.create(
         combine_fn=wrapped_combine_fn,
         can_fallback_to_aten=False,
