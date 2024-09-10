@@ -47,7 +47,7 @@ load_tests = load_tests
 
 class TestLRScheduler(TestCase):
     class SchedulerTestNet(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv1 = torch.nn.Conv2d(1, 1, 1)
             self.conv2 = torch.nn.Conv2d(1, 1, 1)
@@ -1572,7 +1572,7 @@ class TestLRScheduler(TestCase):
 
         # Case 3: Custom `scale_fn`, a callable class
         class ScaleFn:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.x = 0.5
 
             def __call__(self, _):

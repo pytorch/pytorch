@@ -6,7 +6,6 @@ from typing import Optional
 
 import torch
 import torch.distributed as dist
-
 from torch._utils import _get_device_module
 from torch.distributed import distributed_c10d
 from torch.distributed._shard.sharded_tensor import (
@@ -16,7 +15,7 @@ from torch.distributed._shard.sharded_tensor import (
     TensorProperties,
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
 
 
 def _get_remote_device_str(rank, device_type, num_devices_per_node):
@@ -117,12 +116,14 @@ def _create_chunk_dtensor(
 
 def _all_gather_dtensor(
     tensor: DTensor,
-    parent_mesh: Optional[DeviceMesh],
+    root_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
     """
     All gather a DTensor in its sharded dimension and return the local tensor.
     """
-    assert parent_mesh is None
+    assert (
+        root_mesh == tensor.device_mesh
+    ), "The device mesh of a tensor should be a root mesh."
 
     placements = list(copy.deepcopy(tensor.placements))
     # FSDP placements: [Shard(0)] -> [Replicate()]

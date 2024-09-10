@@ -74,7 +74,7 @@ class ModelWithScalarList(torch.nn.Module):
 # upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
 @save_model
 class ModelWithFloatList(torch.nn.Upsample):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             scale_factor=(2.0,),
             mode="linear",
@@ -95,7 +95,7 @@ class ModelWithListOfOptionalTensors(torch.nn.Module):
 # int groups=1) -> Tensor
 @save_model
 class ModelWithArrayOfInt(torch.nn.Conv2d):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(1, 2, (2, 2), stride=(1, 1), padding=(1, 1))
 
 
@@ -120,7 +120,7 @@ class ModelWithStringOptional(torch.nn.Module):
 
 @save_model
 class ModelWithMultipleOps(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.ops = torch.nn.Sequential(
             torch.nn.ReLU(),

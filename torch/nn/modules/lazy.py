@@ -86,7 +86,7 @@ class LazyModuleMixin:
 
     >>> # xdoctest: +SKIP
     >>> class LazyMLP(torch.nn.Module):
-    ...    def __init__(self):
+    ...    def __init__(self) -> None:
     ...        super().__init__()
     ...        self.fc1 = torch.nn.LazyLinear(10)
     ...        self.relu1 = torch.nn.ReLU()

@@ -2,7 +2,6 @@
 import inspect
 import warnings
 from functools import wraps
-
 from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple, TypeVar
 from typing_extensions import ParamSpec
 
@@ -19,6 +18,7 @@ from torch._prims_common import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -185,11 +185,15 @@ def _maybe_resize_out(
         return out
 
 
+def is_cpu_scalar(x: TensorLikeType) -> bool:
+    return x.dim() == 0 and x.device.type == "cpu"
+
+
 def _safe_copy_out(
     *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
 ):
     # Checks same device
-    if copy_from.device != copy_to.device:
+    if not is_cpu_scalar(copy_from) and copy_from.device != copy_to.device:
         msg = (
             f"Attempting to copy from device {copy_from.device} "
             f"to device {copy_to.device}, but cross-device copies are not allowed!"

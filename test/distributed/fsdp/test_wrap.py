@@ -55,7 +55,7 @@ from torch.testing._internal.common_utils import (
 
 
 class BatchNormNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.lin = nn.Linear(10, 10, bias=False)
         self.bn1 = nn.BatchNorm1d(10)
@@ -67,7 +67,7 @@ class BatchNormNet(nn.Module):
 class LoraModel(nn.Module):
     """This is a toy LoRA decoder model."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.embed_tokens = nn.Embedding(100, 32)
         self.layers = nn.ModuleList([LoraDecoder() for _ in range(4)])
@@ -78,7 +78,7 @@ class LoraModel(nn.Module):
 
 
 class LoraDecoder(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.attn = LoraAttention()
         self.mlp = LoraMLP()
@@ -91,7 +91,7 @@ class LoraDecoder(nn.Module):
 
 
 class LoraAttention(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.q_proj = nn.Linear(32, 32, bias=False)
         self.lora_A = nn.Linear(32, 8, bias=False)
@@ -106,7 +106,7 @@ class LoraAttention(nn.Module):
 
 
 class LoraMLP(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.proj1 = nn.Linear(32, 128, bias=False)
         self.proj2 = nn.Linear(128, 32, bias=False)
@@ -252,7 +252,7 @@ class TestFSDPWrap(FSDPTest):
         """
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn_container = BatchNormNet()
 
@@ -324,7 +324,7 @@ class TestFSDPWrap(FSDPTest):
         move_to_cuda = cuda_init_mode == CUDAInitMode.CUDA_BEFORE
 
         class Nested(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.nested_lin = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
 
@@ -332,7 +332,7 @@ class TestFSDPWrap(FSDPTest):
                 return self.nested_lin(input)
 
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin1 = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
                 self.lin2 = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
@@ -411,7 +411,7 @@ class TestAutoWrap(TestCase):
         pg = self.process_group
 
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = wrap(nn.Linear(5, 5), process_group=pg)
 
