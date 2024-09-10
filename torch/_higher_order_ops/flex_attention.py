@@ -192,11 +192,11 @@ def math_attention(
     value = torch.repeat_interleave(value, G, dim=1)
     key = torch.repeat_interleave(key, G, dim=1)
 
-    Bq, Bk = query.size(0), key.size(0)
-    if Bq != Bk:
+    Bq, Bkv = query.size(0), key.size(0)
+    if Bq != Bkv:
         assert (
-            Bq > 1 and Bk == 1
-        ), "Batch dimension must match. Otherwise, Bk should be 1 and Bq should be larger than 1."
+            Bq > 1 and Bkv == 1
+        ), "Batch dimension must match. Otherwise, Bkv should be 1 and Bq should be larger than 1."
         key = key.expand((Bq, *key.size()[1:]))
         value = value.expand((Bq, *value.size()[1:]))
 

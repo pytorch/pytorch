@@ -747,7 +747,7 @@ def flex_attention(
     if Bq != Bkv:
         assert (
             Bq > 1 and Bkv == 1
-        ), "Batch dimension must match. Otherwise, Bk should be 1 and Bq should be larger than 1."
+        ), "Batch dimension must match. Otherwise, Bkv should be 1 and Bq should be larger than 1."
 
     B = Bq
 
@@ -1636,7 +1636,7 @@ def flex_attention_backward(*args, **kwargs):
     if Bq != Bkv:
         assert (
             Bq > 1 and Bkv == 1
-        ), "Batch dimension must match. Otherwise, Bk should be 1 and Bq should be larger than 1."
+        ), "Batch dimension must match. Otherwise, Bkv should be 1 and Bq should be larger than 1."
 
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1679,19 +1679,11 @@ def flex_attention_backward(*args, **kwargs):
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
 
-    broadcasted_grad_key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
-    broadcasted_grad_key_stride = [
-        Hkv * seq_len_kv * qk_head_dim,
-        seq_len_kv * qk_head_dim,
-        qk_head_dim,
-        1,
-    ]
-
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
         key.get_dtype(),
-        broadcasted_grad_key_size,
-        broadcasted_grad_key_stride,
+        (Bq, *key.get_size()[1:]),
+        key.get_stride(),
     )
 
     # Create delta which will is needed for the bwd's kernel
@@ -1707,16 +1699,9 @@ def flex_attention_backward(*args, **kwargs):
     grad_query = empty_strided(
         query.get_size(), query.get_stride(), dtype=dtype, device=device
     )
-    broadcasted_grad_value_shape = (Bq, Hkv, seq_len_kv, v_head_dim)
-    broadcasted_grad_value_stride = (
-        Hkv * seq_len_kv * v_head_dim,
-        seq_len_kv * v_head_dim,
-        v_head_dim,
-        1,
-    )
     broadcasted_grad_value = empty_strided(
-        broadcasted_grad_value_shape,
-        broadcasted_grad_value_stride,
+        (Bq, *value.get_size()[1:]),
+        value.get_stride(),
         dtype=dtype,
         device=device,
     )

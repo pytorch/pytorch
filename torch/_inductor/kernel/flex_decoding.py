@@ -344,7 +344,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     if Bq != Bkv:
         assert (
             Bq > 1 and Bkv == 1
-        ), "Batch dimension must match. Otherwise, Bk should be 1 and Bq should be larger than 1."
+        ), "Batch dimension must match. Otherwise, Bkv should be 1 and Bq should be larger than 1."
 
     B = Bq
     kernel_options = dict(kernel_options)
