@@ -148,6 +148,7 @@ if RUN_CUDA:
         BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_avg_pool2d_backward3"),
         BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32

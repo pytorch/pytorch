@@ -481,7 +481,7 @@ class WrapperCodeGen(CodeGen):
         self.ending = ""
         self.open_bracket = "["
         self.closed_bracket = "]"
-        self.comment = "#"
+        self.comment = " #"
         self.namespace = ""
         self.none_str = "None"
         self.size = "size()"
@@ -494,6 +494,9 @@ class WrapperCodeGen(CodeGen):
         self.allow_stack_allocation: Optional[bool] = None
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
         self.computed_sizes: Set[sympy.Symbol] = set()
+        self.codegen_autotune_only = (
+            config.triton.autotune_at_compile_time and V.graph.cpp_wrapper
+        )
 
         # this is used for tracking which GraphLowering instance---parent graph
         # or (nested) subgraph---is currently codegened; the primary use case is
@@ -516,10 +519,6 @@ class WrapperCodeGen(CodeGen):
 
         # maps from reusing buffer to reused buffer
         self.reuses: Dict[BufferName, BufferName] = {}
-
-        self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
-            self.write_get_raw_stream
-        )
 
         @functools.lru_cache(None)
         def add_import_once(line: str) -> None:
@@ -697,9 +696,17 @@ class WrapperCodeGen(CodeGen):
     # this function (and below) takes a graph as input so
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
+    @functools.lru_cache(None)  # noqa: B019
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
         self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.writeline(
+                f"{name} = get_raw_stream({device_idx})"
+            )
+            if V.graph.cpp_wrapper:
+                # For cpp wrapper, we only need to generate the autotune code block in python
+                return name
         self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
@@ -809,10 +816,11 @@ class WrapperCodeGen(CodeGen):
         grid_fn, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
         )
-        if not (config.triton.autotune_at_compile_time and V.graph.cpp_wrapper):
+        if not self.codegen_autotune_only:
+            # When codegen_autotune_only, not insert Triton kernel code into the main block
+            #
             # Must happen after free symbols are already codegened
             # Emit the grid wrapper function right before the call
-            # For cpp wrapper, we only need to generate Triton kernel code for the autotune block
             for line in code.split("\n"):
                 self.writeline(line)
 
@@ -821,8 +829,15 @@ class WrapperCodeGen(CodeGen):
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args
         ]
-        self.generate_kernel_call_python(
-            kernel_name, args, grid_fn=grid_fn, arg_types=arg_types, raw_args=raw_args
+        # Because generate_kernel_call can be overriden by a subclass, explictly call
+        # WrapperCodeGen.generate_kernel_call here
+        WrapperCodeGen.generate_kernel_call(
+            self,
+            kernel_name,
+            args,
+            grid_fn=grid_fn,
+            arg_types=arg_types,
+            raw_args=raw_args,
         )
 
     def generate_scatter_fallback(
@@ -1266,7 +1281,7 @@ class WrapperCodeGen(CodeGen):
                 ]
             )
 
-    def define_kernel_python(
+    def define_kernel(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -1282,15 +1297,6 @@ class WrapperCodeGen(CodeGen):
                 # For cpp wrapper, we only need to generate the autotune code block in python
                 return
         self.header.splice(body)
-
-    def define_kernel(
-        self,
-        kernel_name: str,
-        kernel_body: str,
-        metadata: Optional[str] = None,
-        cuda=True,
-    ):
-        self.define_kernel_python(kernel_name, kernel_body, metadata, cuda)
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
         from torch.utils._triton import patch_triton_dtype_repr
@@ -1672,7 +1678,7 @@ class WrapperCodeGen(CodeGen):
         else:
             return pexpr(grid_per_dim)
 
-    def generate_kernel_call_python(
+    def generate_kernel_call(
         self,
         kernel_name,
         call_args,
@@ -1701,7 +1707,9 @@ class WrapperCodeGen(CodeGen):
                 device_index, call_args
             )
             call_args_str = ", ".join(call_args_str)
-            stream_name = self.write_get_raw_stream(device_index, V.graph)
+            stream_name = WrapperCodeGen.write_get_raw_stream(
+                self, device_index, V.graph
+            )
             if triton:
                 self.write_triton_header_once()
                 if (
@@ -1763,7 +1771,7 @@ class WrapperCodeGen(CodeGen):
                     )
                     self.kernel_autotune_names.add(kernel_name)
 
-                if config.triton.autotune_at_compile_time and V.graph.cpp_wrapper:
+                if self.codegen_autotune_only:
                     # For cpp wrapper, we only need to generate the autotune code block in python
                     return
 
@@ -1784,36 +1792,6 @@ class WrapperCodeGen(CodeGen):
                 )
         else:
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
-
-    def generate_kernel_call(
-        self,
-        kernel_name,
-        call_args,
-        grid=None,
-        device_index=None,
-        cuda=True,
-        triton=True,
-        arg_types=None,
-        raw_args=None,
-        grid_fn: str = "grid",
-        triton_meta=None,
-        autotune_configs=None,
-        grid_extra_kwargs="",
-    ):
-        self.generate_kernel_call_python(
-            kernel_name,
-            call_args,
-            grid,
-            device_index,
-            cuda,
-            triton,
-            arg_types,
-            raw_args,
-            grid_fn,
-            triton_meta,
-            autotune_configs,
-            grid_extra_kwargs,
-        )
 
     def writeline(self, line):
         self.lines.append(line)
@@ -1883,7 +1861,7 @@ class WrapperCodeGen(CodeGen):
         )
 
     def make_tensor_alias(self, new_name, old_name, comment=""):
-        return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
+        return f"{self.declare}{new_name} = {old_name}{self.ending}{self.comment} {comment}"
 
     def make_buffer_free(self, buffer):
         return f"del {buffer.get_name()}"
@@ -1892,7 +1870,7 @@ class WrapperCodeGen(CodeGen):
         return f"del {', '.join(name for name in names_to_del)}"
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
-        return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
+        return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}{self.comment} reuse"
 
     def make_buffer_reuse(self, old: ir.Buffer, new: ir.Buffer, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
@@ -1912,13 +1890,17 @@ class WrapperCodeGen(CodeGen):
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
-        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        move_end = ")" if V.graph.cpp_wrapper else ""
+        return f"{self.declare_maybe_reference}{new_name} = {move_begin}{reinterpret_view}{move_end}{del_line}{self.comment} reuse"
 
     def codegen_deferred_allocation(self, name, layout):
+        move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        move_end = ")" if V.graph.cpp_wrapper else ""
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_maybe_reference}{name} = {layout.view.codegen_reference()}{self.ending}  "
+                f"{self.declare_maybe_reference}{name} = {move_begin}{layout.view.codegen_reference()}{move_end}{self.ending}"
                 f"{self.comment} alias",
             )
         )

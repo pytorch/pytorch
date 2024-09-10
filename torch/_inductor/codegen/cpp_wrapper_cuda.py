@@ -18,7 +18,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
 from .cpp_utils import cexpr, DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .wrapper import SymbolicCallArg
+from .wrapper import SymbolicCallArg, WrapperCodeGen
 
 
 if TYPE_CHECKING:
@@ -191,7 +191,8 @@ class CppWrapperCuda(CppWrapperCpu):
             self.header.splice(maybe_hipify_code_wrapper(cuda_kernel_header()))
         self.header.splice(maybe_hipify_code_wrapper(cuda_kernel_driver()))
 
-    def write_get_raw_stream(self, index, graph=None):
+    @functools.lru_cache(None)  # noqa: B019
+    def write_get_raw_stream(self, index: int, graph=None) -> str:
         name = f"stream{index}"
         self.writeline(maybe_hipify_code_wrapper(f"cudaStream_t {name};"))
         self.writeline(
@@ -207,8 +208,8 @@ class CppWrapperCuda(CppWrapperCpu):
         cuda=True,
     ):
         if cuda:
-            # Call the Python wrapper codegen to create the autotune code block
-            self.define_kernel_python(kernel_name, kernel_body, metadata, cuda)
+            # Call WrapperCodeGen to create the autotune code block
+            WrapperCodeGen.define_kernel(self, kernel_name, kernel_body, metadata, cuda)
         else:
             super().define_kernel(kernel_name, kernel_body, metadata, cuda)
 
@@ -234,7 +235,7 @@ class CppWrapperCuda(CppWrapperCpu):
         triton_meta,
         constexprs,
     ):
-        # Call the Python wrapper codegen to create the autotune code block
+        # Call WrapperCodeGen to create the autotune code block
         super().generate_user_defined_triton_kernel(
             kernel_name,
             raw_args,
@@ -404,7 +405,8 @@ class CppWrapperCuda(CppWrapperCpu):
             )
 
         # Call the Python wrapper codegen to create the autotune code block
-        self.generate_kernel_call_python(
+        WrapperCodeGen.generate_kernel_call(
+            self,
             kernel_name,
             call_args,
             grid,
