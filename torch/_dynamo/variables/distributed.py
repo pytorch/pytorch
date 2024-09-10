@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import functools
 import inspect
-from typing import Dict, List, TYPE_CHECKING
+from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
@@ -50,7 +50,7 @@ class DistributedVariable(VariableTracker):
 def is_from_local(value):
     if not DistributedVariable.is_available():
         return False
-    from torch.distributed._tensor import DTensor
+    from torch.distributed.tensor import DTensor
 
     return inspect.isfunction(value) and value is DTensor.from_local
 
@@ -108,7 +108,7 @@ class PlacementClassVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
+        from torch.distributed.tensor.placement_types import Placement
 
         return type(value) is type and issubclass(value, Placement)
 
@@ -143,7 +143,7 @@ class PlacementVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
+        from torch.distributed.tensor.placement_types import Placement
 
         return isinstance(value, Placement)
 
@@ -213,6 +213,9 @@ class DeviceMeshVariable(DistributedVariable):
 
     def as_python_constant(self):
         return self.value
+
+    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+        raise NotImplementedError
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "ndim":

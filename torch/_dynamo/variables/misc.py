@@ -8,7 +8,7 @@ import random
 import re
 import sys
 import types
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
@@ -105,7 +105,13 @@ class SuperVariable(VariableTracker):
         resolved_class = None
         resolved_attr = None
         search_mro = type_to_use.__mro__
-        start_index = search_mro.index(search_type) + 1
+
+        try:
+            start_index = search_mro.index(search_type) + 1
+        except ValueError:
+            # Corner case where the typevar is not in the mro of the objvar
+            # https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8843-L8844
+            return getattr(super(search_type, type_to_use), name), None
         # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
         # attribute in the class __dict__
@@ -1619,6 +1625,9 @@ class RandomVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.random
+
+    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+        raise NotImplementedError
 
     @staticmethod
     def is_supported_random_obj(val):
