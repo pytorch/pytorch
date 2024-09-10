@@ -13,6 +13,7 @@ from torch.optim.adagrad import Adagrad as Adagrad
 from torch.optim.adam import Adam as Adam
 from torch.optim.adamax import Adamax as Adamax
 from torch.optim.adamw import AdamW as AdamW
+from torch.optim.ademamix import AdEMAMix as AdEMAMix
 from torch.optim.asgd import ASGD as ASGD
 from torch.optim.lbfgs import LBFGS as LBFGS
 from torch.optim.nadam import NAdam as NAdam
@@ -31,6 +32,7 @@ del adadelta  # type: ignore[name-defined] # noqa: F821
 del adagrad  # type: ignore[name-defined] # noqa: F821
 del adam  # type: ignore[name-defined] # noqa: F821
 del adamw  # type: ignore[name-defined] # noqa: F821
+del ademamix  # type: ignore[name-defined] # noqa: F821
 del sparse_adam  # type: ignore[name-defined] # noqa: F821
 del adamax  # type: ignore[name-defined] # noqa: F821
 del asgd  # type: ignore[name-defined] # noqa: F821
@@ -49,6 +51,7 @@ __all__ = [
     "Adam",
     "Adamax",
     "AdamW",
+    "AdEMAMix",
     "ASGD",
     "LBFGS",
     "lr_scheduler",

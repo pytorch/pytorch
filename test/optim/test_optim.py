@@ -12,7 +12,7 @@ from torch.optim import (
     RAdam,
     RMSprop,
     Rprop,
-    SGD,
+    SGD, AdEMAMix,
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
@@ -88,6 +88,39 @@ class TestDifferentiableOptimizer(TestCase):
                 state,
                 Adam,
                 {"lr": 0.9, "differentiable": True, "amsgrad": True},
+                *state.values(),
+            ),
+        )
+
+    def test_ademamix(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+
+        # AdEMAMix uses two exp_avg tensors
+        state["exp_avg1"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg2"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                AdEMAMix,
+                {
+                    "lr": 0.9,
+                    "differentiable": True,
+                    "betas": (0.9, 0.999, 0.9999),
+                    "alpha": 5.0,
+                    "T_alpha": 1000,
+                    "T_beta3": 1000
+                },
                 *state.values(),
             ),
         )
