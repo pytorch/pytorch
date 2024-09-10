@@ -53,11 +53,11 @@ def _export_forward_backward(
     """
     WARNING: This API is highly unstable and will be subject to change in the future.
     """
-    from torch._decomp import core_aten_decompositions
+    from torch._export.utils import decomp_table_to_core_aten
 
     ep = _decompose_exported_program(
         ep,
-        decomp_table=core_aten_decompositions(),
+        decomp_table=decomp_table_to_core_aten(),
         joint_loss_index=joint_loss_index,
     )
     gm, new_graph_signature = _copy_graph_module_and_signature(ep)

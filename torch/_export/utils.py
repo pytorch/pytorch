@@ -95,6 +95,14 @@ def _assert_valid_to_preserve(op_overload):
     return True
 
 
+def _check_valid_to_preserve(op_overload):
+    try:
+        _assert_valid_to_preserve(op_overload)
+        return True
+    except RuntimeError:
+        return False
+
+
 def _is_cia_op(op: "OpOverload") -> bool:
     return (
         torch._C._dispatch_has_kernel_for_dispatch_key(
@@ -118,12 +126,8 @@ def _collect_all_valid_cia_ops() -> Set["OpOverload"]:
         op_instance = getattr(torch.ops.aten, op)
         for overload in op_instance.overloads():
             op_overload = getattr(op_instance, overload)
-            try:
-                _assert_valid_to_preserve(op_overload)
-                if _is_cia_op(op_overload):
-                    cia_ops.add(op_overload)
-            except RuntimeError:
-                continue
+            if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
+                cia_ops.add(op_overload)
     return cia_ops
 
 
