@@ -4,8 +4,8 @@
 import functools
 import string
 from collections import namedtuple
-from contextlib import nullcontext
-from typing import Callable, Optional
+from contextlib import contextmanager, nullcontext
+from typing import Callable, Optional, Tuple
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -41,11 +41,36 @@ supported_platform = skipUnless(
     "Requires CUDA and Triton",
 )
 
+# Use this decorator only when hitting Triton bugs on H100
+running_on_a100_only = skipUnless(
+    torch.cuda.is_available()
+    and torch.version.hip is None
+    and has_triton()
+    and torch.cuda.get_device_capability() == (8, 0),
+    "Requires A100 and Triton",
+)
+
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
+
+
+@contextmanager
+def temp_float32_matmul_precision(precision: str):
+    """
+    Temporarily set the float32 matmul precision and restore it after the context is exited.
+
+    Args:
+    precision (str): The precision to set ('highest', 'high', or 'medium').
+    """
+    original_precision = torch.get_float32_matmul_precision()
+    try:
+        torch.set_float32_matmul_precision(precision)
+        yield
+    finally:
+        torch.set_float32_matmul_precision(original_precision)
 
 
 def rmse(ref, res):
@@ -186,6 +211,17 @@ B = 4
 H = 8
 S = 2048
 D = 64
+
+test_Hq_Hkv = [
+    (4, 2),
+    (4, 1),
+]
+
+test_Bq_Bkv = [
+    (3, 1),
+    (4, 1),
+    (5, 1),
+]
 
 
 def query_key_value_clones(
@@ -526,7 +562,7 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
-    @supported_platform
+    @running_on_a100_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_default_sparse_block_size(
@@ -540,7 +576,7 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
-    @supported_platform
+    @running_on_a100_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
@@ -589,6 +625,76 @@ class TestFlexAttention(InductorTestCase):
             D,
             B,
             H,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast(
+        self,
+        dtype: torch.dtype,
+        batch_dims: Tuple[int, int],
+        head_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq > 1 and Bkv == 1
+
+        self.run_test(
+            score_mod,
+            dtype,
+            Bq,
+            Hq,
+            S,
+            D,
+            Bkv,
+            Hkv,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast_causal_mask(
+        self,
+        dtype: torch.dtype,
+        batch_dims: Tuple[int, int],
+        head_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq > 1 and Bkv == 1
+
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, enable_gqa=(not Hq == Hkv)
+        )
+
+        self.run_test_with_call(
+            attention,
+            torch.float16,
+            Bq,
+            Hq,
+            S,
+            D,
+            Bkv,
+            Hkv,
             S,
             D,
         )
@@ -1460,6 +1566,37 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(
             v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
         )
+
+    @supported_platform
+    def test_float32_matmul_precision(self):
+        make_tensor = functools.partial(
+            torch.zeros,
+            (2, 2, 128, 32),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query.fill_(0.2)
+        key.fill_(0.3)
+        value.fill_(0.4)
+
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
+
+        def score_mod(score, b, h, q, kv):
+            return score * 2
+
+        with temp_float32_matmul_precision("highest"):
+            out_eager = flex_attention(query, key, value, score_mod)
+            flex_compiled = torch.compile(flex_attention, fullgraph=True)
+            out_compiled = flex_compiled(query, key, value, score_mod)
+
+            grads_eager = torch.autograd.grad(out_eager.sum(), (query, key, value))
+            grads_compile = torch.autograd.grad(out_compiled.sum(), (query, key, value))
+
+        torch.testing.assert_close(grads_eager, grads_compile)
 
     @supported_platform
     @common_utils.parametrize("score_mod_name", ["_head_offset"])

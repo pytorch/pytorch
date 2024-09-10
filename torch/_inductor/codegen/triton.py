@@ -385,6 +385,12 @@ class TritonPrinter(PythonPrinter):
             f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
+    def _print_Float(self, expr):
+        # Use a tensor here to get float64. Otherwise the constant is
+        # truncated to float32.
+        ret = f"tl.full([1], {expr}, tl.float64)"
+        return ret
+
     def _print_ToFloat(self, expr):
         assert len(expr.args) == 1
         return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
@@ -2624,6 +2630,20 @@ class TritonKernel(SIMDKernel):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
+
+        # workspace arguments are mutated, but are not marked as mutations in self.mutations
+        # because their buffers are added during codegen, and aren't tracked during
+        # lowering/scheduling. So we add them as mutated_args explicitly below.
+        #
+        # In the logic below, we only mark the workspaces a mutated if they are marked with
+        # zero_fill: that's because, if we don't expect the buffer to be pre-filled with
+        # zeros, then, although we still mutate the data, we don't care about those
+        # mutations because we don't make any assumptions about the contents of the
+        # workspace buffer.
+        for argname, arg in zip(argdefs, signature):
+            if isinstance(arg, WorkspaceArg) and arg.zero_fill:
+                mutated_args.add(argname)
+
         mutated_args = sorted(mutated_args)
 
         triton_meta_signature = signature_to_meta(

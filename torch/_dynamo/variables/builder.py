@@ -1778,7 +1778,8 @@ class VariableBuilder:
             else:
                 # Apply the updates
                 for sub_state in st.all_states:
-                    update_frame_state(sub_state.input_sizes[name])
+                    if name in sub_state.input_sizes:
+                        update_frame_state(sub_state.input_sizes[name])
                 frame_state_entry = self.tx.output.frame_state[name]
 
             # TODO: This should be dynamic, as we in general do not
@@ -2522,9 +2523,11 @@ def _automatic_dynamic(
     else:
         # Apply the updates
         for sub_state in st.all_states:
-            update_frame_state(
-                sub_state.input_sizes[name], sub_state.input_strides[name]
-            )
+            # Not all inputs are necessarily present on all ranks
+            if name in sub_state.input_sizes and name in sub_state.input_strides:
+                update_frame_state(
+                    sub_state.input_sizes[name], sub_state.input_strides[name]
+                )
         frame_state_entry = tx.output.frame_state[name]
 
     # TODO: index export_constraints ahead of time so we don't have to
