@@ -18,6 +18,7 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.scan import scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
     canonicalize_dim,
@@ -6214,6 +6215,20 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    return list(map(TensorBox.create, result))
+
+
+@register_lowering(scan_op)
+def scan(combine_fn, init, inputs, dim, reverse, additional_inputs):
+    if any(map(is_triton, [init, inputs, *additional_inputs])):
+        msg = "control flow operator: torch.scan."
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.SequentialScan.create(
+        combine_fn, init, inputs, dim, reverse, additional_inputs
+    )
     return list(map(TensorBox.create, result))
 
 

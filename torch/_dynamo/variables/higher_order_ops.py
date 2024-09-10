@@ -1130,16 +1130,27 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._higher_order_ops.scan import make_expanded_output_shape
+        from torch._higher_order_ops.scan import (
+            _extract_carry_and_out,
+            first_slice_copy,
+        )
 
-        from .builder import SourcelessBuilder, wrap_fx_proxy
+        from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, init, xs, dim, reverse):
-            return combine_fn, init, xs, dim, reverse
+        def arg_extractor(combine_fn, init, xs, dim, reverse, additional_inputs):
+            return combine_fn, init, xs, dim, reverse, additional_inputs
 
-        combine_fn, init, xs, dim, reverse = arg_extractor(*args, **kwargs)
+        combine_fn, init, xs, dim, reverse, additional_inputs = arg_extractor(
+            *args, **kwargs
+        )
+
+        # TODO: handle retracing, where additional_inputs could be a list of tensors.
+        assert (
+            isinstance(additional_inputs, ConstantVariable)
+            and additional_inputs.value is None
+        )
 
         if xs.python_type() != list:
             unimplemented(
@@ -1171,56 +1182,12 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         # TODO: Unify handling of sub_args across control flow ops, such as cond, while_loop, etc.
         sub_args_init = [
-            ini.call_method(
-                tx,
-                "new_empty",
-                args=(
-                    SourcelessBuilder.create(
-                        tx,
-                        ini.size
-                        if ini.size is not None
-                        else tuple(
-                            BuiltinVariable(getattr)
-                            .call_function(
-                                tx, [ini, ConstantVariable.create("shape")], {}
-                            )
-                            .items
-                        ),
-                    ),
-                ),
-                kwargs={
-                    "dtype": SourcelessBuilder.create(tx, ini.dtype),
-                    "device": SourcelessBuilder.create(tx, ini.device),
-                    "requires_grad": SourcelessBuilder.create(tx, ini.requires_grad),
-                },
-            )
-            for ini in init.items
+            ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init.items
         ]
-        sub_args_inp_shapes = make_expanded_output_shape(
-            dim_fake,
-            1,
-            [
-                tuple(
-                    BuiltinVariable(getattr)
-                    .call_function(tx, [inp, ConstantVariable.create("shape")], {})
-                    .items
-                )
-                for inp in xs.items
-            ],
-            True,
-        )
+        # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
+        # the sub_args_inp shape will be (4, ).
         sub_args_inp = [
-            inp.call_method(
-                tx,
-                "new_empty",
-                args=(SourcelessBuilder.create(tx, inp_sh),),
-                kwargs={
-                    "dtype": SourcelessBuilder.create(tx, inp.dtype),
-                    "device": SourcelessBuilder.create(tx, inp.device),
-                    "requires_grad": SourcelessBuilder.create(tx, inp.requires_grad),
-                },
-            )
-            for inp, inp_sh in zip(xs.items, sub_args_inp_shapes)
+            _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
         ]
         sub_args = sub_args_init + sub_args_inp
         (
@@ -1237,22 +1204,41 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
 
-        if combine_lifted_freevars:
-            unimplemented(
-                f"Combine fn had unexpected freevars: {combine_lifted_freevars}"
-            )
-
-        if any(cr.python_type() != list for cr in combine_result.items):
+        if combine_result.python_type() != list:
             unimplemented(
                 f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
             )
 
         xs_proxy = xs.as_proxy()
         init_proxy = init.as_proxy()
-        combine_carry_proxy = combine_result.items[0].as_proxy()
+        num_init_leaves = len(init_proxy)
+        # combine_result is a flatten list concated by carry + y, len(carry) is len(init) since they have
+        # same pytree structure.
+        carry_vars, y_vars = _extract_carry_and_out(
+            combine_result.items, num_init_leaves
+        )
+        carry_proxies = [carry_var.as_proxy() for carry_var in carry_vars]
+        y_proxies = [y_var.as_proxy() for y_var in y_vars]
+
+        # key in the combine_lifted_freevars are proxies in the root tracer.
+        # We use root tracer's proxies to create scan op's inputs.
+        def _check_phs_position_match(
+            combine_graph: torch.fx.Graph, lifted_proxies: list[torch.fx.Proxy]
+        ):
+            lifted_phs = [
+                node for node in combine_graph.nodes if node.op == "placeholder"
+            ][-len(lifted_proxies) :]
+            for ph, lifted_proxy in zip(lifted_phs, lifted_proxies):
+                if ph is not lifted_proxy.node:
+                    unimplemented(
+                        "The postion lifted freevars doesn't match the order of placeholders in subgraph."
+                    )
+
+        _check_phs_position_match(combine_graph, list(combine_lifted_freevars.values()))
+        combine_freevars_proxy = list(combine_lifted_freevars.keys())
 
         # Checks for carry and init
-        for ini_proxy, carry in zip(init_proxy, combine_carry_proxy):
+        for ini_proxy, carry in zip(init_proxy, carry_proxies):
             ini_meta = ini_proxy.node.meta["example_value"]
             carry_meta = carry.node.meta["example_value"]
             if (
@@ -1274,32 +1260,26 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             xs_proxy,
             dim.as_proxy(),
             reverse.as_proxy(),
+            combine_freevars_proxy,
         )
 
         with tx.fake_mode:
             # For the fake mode, we need to duplicate the init tensor along the dim
             # to have the same size as the xs arguments
             # We also do a clone with contiguous_format. This is to be consistent with
-            # eager semantic of map, which stacks the outputs. The result is contiguous
+            # eager semantic of scan, which stacks the outputs. The result is contiguous
             # as a result of the stack operation.
-            fake_out_shapes = make_expanded_output_shape(
-                dim_fake,
-                scan_length,
-                [
-                    get_fake_value(o.as_proxy().node, tx).size()
-                    for o in combine_result.items[1].items
-                ],
-            )
-            out_meta = (
-                [init_p.node.meta["example_value"].clone() for init_p in init_proxy],
-                list(  # noqa: C400
-                    t.as_proxy()
-                    .node.meta["example_value"]
-                    .expand(*sh)
-                    .clone(memory_format=torch.contiguous_format)
-                    for t, sh in zip(combine_result.items[1].items, fake_out_shapes)
-                ),
-            )
+            example_carry = [
+                init_p.node.meta["example_value"].clone() for init_p in init_proxy
+            ]
+            example_out = [y.node.meta["example_value"] for y in y_proxies]
+            example_stacked_out = [
+                out.unsqueeze(dim_fake)
+                .repeat(*([1] * dim_fake + [scan_length] + [1] * (out.ndim - dim_fake)))
+                .clone(memory_format=torch.contiguous_format)
+                for out in example_out
+            ]
+            out_meta = [*example_carry, *example_stacked_out]
 
         return wrap_fx_proxy(
             tx=tx,

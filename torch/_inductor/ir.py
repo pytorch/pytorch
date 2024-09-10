@@ -2892,9 +2892,7 @@ class Layout(IRNode):
         stride: Optional[Sequence[Union[Expr, int]]],
         offset: Expr = Integer(0),
     ):
-        assert stride is None or len(size) == len(
-            stride
-        ), f"size={size}, stride={stride}"
+        assert stride is None or len(size) == len(stride)
         self.device = device
         self.dtype = dtype
         assert all(isinstance(s, (Expr, int)) for s in size)
@@ -6629,7 +6627,7 @@ class WhileLoop(ExternKernel):
 
         assert (
             len(all_inputs) > 0
-        ), "torch.while_loop is assumed to have at least one operand."
+        ), "torch.scan is assumed to have at least one operand."
 
         device = all_inputs[0].get_device()
 
@@ -6649,7 +6647,7 @@ class WhileLoop(ExternKernel):
             additional_inputs=additional_inputs,
             cond_subgraph=cond_fn,
             body_subgraph=body_fn,
-            # asserted above that there is at least one operand
+            # asserted above that there is at least one output
             layout=MultiOutputLayout(device),
         )
 
@@ -6682,6 +6680,164 @@ class WhileLoop(ExternKernel):
 
     def codegen(self, wrapper):
         wrapper.codegen_while_loop(self)
+
+
+class SequentialScan(ExternKernel):
+    combine_subgraph: Optional[Subgraph] = None
+    init: Optional[List[TensorBox]] = None
+    xs: Optional[List[TensorBox]] = None
+    dim: int = 0
+    reverse: bool = False
+    additional_inputs: Optional[List[TensorBox]] = None
+    outputs: Optional[List[MultiOutput]] = None
+
+    def __init__(
+        self,
+        combine_subgraph: Subgraph,
+        init: List[TensorBox],
+        xs: List[TensorBox],
+        dim: int,
+        reverse: bool,
+        additional_inputs: List[TensorBox],
+        layout: MultiOutputLayout,
+    ):
+        self.combine_subgraph = combine_subgraph
+        self.init = init
+        self.xs = xs
+        self.dim = dim
+        self.reverse = reverse
+        self.additional_inputs = additional_inputs
+
+        super().__init__(
+            name=None,
+            layout=layout,  # type: ignore[arg-type]
+            inputs=init + xs + additional_inputs,  # type: ignore[list-item]
+        )
+
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    @classmethod
+    def create(
+        cls,
+        combine_subgraph: Subgraph,
+        init: List[TensorBox],
+        xs: List[TensorBox],
+        dim: int,
+        reverse: bool,
+        additional_inputs: List[TensorBox],
+    ):
+        from torch._higher_order_ops.scan import _extract_carry_and_out
+
+        num_init_leaves = len(init)
+        init = [cls.realize_input(x) for x in init]
+        xs = [cls.realize_input(x) for x in xs]
+        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
+        all_inputs = init + xs + additional_inputs
+
+        def extract_scan_args(
+            combine_subraph, init, xs, dim, reverse, additional_inputs
+        ):
+            return combine_subraph, init, xs, dim, reverse, additional_inputs
+
+        _, fx_init, fx_xs, _, _, fx_additional_inputs = extract_scan_args(
+            *V.graph.current_node.args
+        )
+        fx_all_inputs = fx_init + fx_xs + fx_additional_inputs
+
+        if combine_subgraph.graph is None:
+            # create and lower subgraphs
+            combine_subgraph.graph = V.graph.make_subgraph(
+                gm=combine_subgraph.graph_module,
+                example_inputs=fx_all_inputs,  # type: ignore[arg-type]
+                subgraph_name=combine_subgraph.name,
+            )
+            with V.set_graph_handler(combine_subgraph.graph):
+                fake_sliced_inputs = (
+                    [node.meta["val"] for node in fx_init]
+                    + [torch.select_copy(node.meta["val"], dim, 0) for node in fx_xs]
+                    + [node.meta["val"] for node in fx_additional_inputs]
+                )  # type: ignore[union-attr]
+                combine_subgraph.graph.run(*fake_sliced_inputs)
+
+        carry, ys = _extract_carry_and_out(combine_subgraph.graph.graph_outputs, num_init_leaves)  # type: ignore[union-attr]
+
+        if _has_aliased_buffers(carry + ys):
+            raise AssertionError(
+                "Output aliasing is currently not supported in compiled torch.scan. "
+                f"The outputs of the combine_fn subgraph of torch.scan are aliased: {combine_subgraph.graph.graph_outputs}"
+            )
+        device = all_inputs[0].get_device()
+        scan_length = xs[0].get_size()[dim]
+
+        # make sure init and outputs are structurally equivalent
+        assert len(carry) == num_init_leaves, (init, carry)
+        for i, (ini, c) in enumerate(zip(init, carry)):
+            assert ini.get_size() == c.get_size(), (i, ini, c, dim)
+            # assume all init and outputs are on the same device
+            # as the MultiOutputLayout below requires single device
+            assert ini.get_device() == c.get_device() == device, (i, ini, c, device)
+            assert ini.get_dtype() == c.get_dtype(), (i, ini, c)
+
+        sequential_scan = SequentialScan(
+            combine_subgraph=combine_subgraph,
+            init=init,
+            xs=xs,
+            dim=dim,
+            reverse=reverse,
+            additional_inputs=additional_inputs,
+            layout=MultiOutputLayout(device),
+        )
+
+        # last_carry should have the same shape and stride as init
+        # TODO(yidi): figure out what happens when the offset is unkown
+        last_carry_output = [
+            MultiOutput(
+                FixedLayout(
+                    device=ini.get_device(),
+                    dtype=ini.get_dtype(),
+                    size=ini.get_size(),
+                    stride=ini.get_stride(),
+                ),
+                sequential_scan,
+                [(list, i)],
+            )
+            for i, ini in enumerate(init)
+        ]
+
+        def stacked_size_stride(y):
+            tmp = torch.empty_strided(y.get_size(), y.get_stride())
+            # Semantic-wise, scan will torch.stack the intermediates, so
+            # torch.stack will force the output become contingous, which is also what clone does.
+            expanded_tmp = (
+                tmp.unsqueeze(dim)
+                .repeat(*([1] * dim + [scan_length] + [1] * (tmp.ndim - dim)))
+                .clone()
+            )
+            return expanded_tmp.size(), expanded_tmp.stride()
+
+        stacked_y_size_stride = [stacked_size_stride(y) for y in ys]
+
+        stacked_output = [
+            MultiOutput(
+                FixedLayout(
+                    device=y.get_device(),
+                    dtype=y.get_dtype(),
+                    size=stacked_y_size_stride[i][0],
+                    stride=stacked_y_size_stride[i][1],
+                ),
+                sequential_scan,
+                [(list, i + num_init_leaves)],
+            )
+            for i, y in enumerate(ys)
+        ]
+
+        outputs = [*last_carry_output, *stacked_output]
+        sequential_scan.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper):
+        wrapper.codegen_sequential_scan(self)
 
 
 class EffectfulKernel(FallbackKernel):
