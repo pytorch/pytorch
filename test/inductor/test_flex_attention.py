@@ -2399,11 +2399,8 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
 
 class TestPagedCache(InductorTestCase):
-    def allocate_page_cache(
-        self, n_pages: int, page_size: int, n_heads: int, max_batch_size: int = 3
-    ):
-        head_dim = 8
-        max_seq_len = 128
+    def allocate_page_cache(self, n_pages: int, page_size: int):
+        n_heads, head_dim, max_batch_size, max_seq_len = 4, 8, 3, 128
         paged_cache = PagedCache(
             n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads
         )
@@ -2417,14 +2414,14 @@ class TestPagedCache(InductorTestCase):
 
     @supported_platform
     def test_page_allocation(self):
-        n_pages, page_size, n_head = 12, 4, 2
-        paged_cache = self.allocate_page_cache(n_pages, page_size, n_head)
+        n_pages, page_size = 12, 4
+        paged_cache = self.allocate_page_cache(12, 4)
 
         num_pages_to_allocate = torch.tensor([2, 6, 4])
         paged_cache.allocate(num_pages_to_allocate)
 
         with self.assertRaisesRegex(
-            AssertionError, "empty_pages has 0 pages but requested 2 pages"
+            AssertionError, "requested 2 pages but there are only 0 empty pages"
         ):
             paged_cache.allocate(torch.tensor([2]))
 
@@ -2433,13 +2430,13 @@ class TestPagedCache(InductorTestCase):
 
     @supported_platform
     def test_allocate_until_length(self):
-        n_pages, page_size, n_head = 12, 4, 2
-        paged_cache = self.allocate_page_cache(n_pages, page_size, n_head)
+        n_pages, page_size = 12, 4
+        paged_cache = self.allocate_page_cache(12, 4)
 
         target_seq_len = torch.tensor([3, 11, 8])
         paged_cache.allocate_until_length(target_seq_len)
 
-        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum() * n_head
+        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
         self.assertEqual(
             paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
         )
@@ -2450,7 +2447,7 @@ class TestPagedCache(InductorTestCase):
         # deallocate batch 1
         paged_cache.deallocate(batch=torch.tensor([1]))
         target_seq_len = torch.tensor([3, 0, 8])
-        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum() * n_head
+        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
         self.assertEqual(
             paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
         )
@@ -2461,7 +2458,7 @@ class TestPagedCache(InductorTestCase):
         # re-allocate
         target_seq_len = torch.tensor([7, 2, 10])
         paged_cache.allocate_until_length(target_seq_len)
-        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum() * n_head
+        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
         self.assertEqual(
             paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
         )
