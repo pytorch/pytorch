@@ -960,6 +960,62 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 self.assertEqual(res[0], r)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_scalar_missing_source(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            @torch.compile()
+            def f(rank, xs):
+                return torch.tensor(xs[rank], device=self.rank)
+
+            xs = []
+            for i in range(self.world_size):
+                xs.append(10 + i)
+
+            f(self.rank, xs)
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_type_mismatch(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            @torch.compile()
+            def f(x):
+                if isinstance(x, int):
+                    return torch.tensor(x, device=self.rank)
+                else:
+                    return x.sum()
+
+            if self.rank == 0:
+                x = torch.randn(10, device=self.rank)
+            else:
+                x = 12
+            f(x)
+
+            # This deadlocks, I guess we don't support this
+            """
+            if self.rank == 0:
+                x = torch.randn(12, device=self.rank)
+            else:
+                x = 10
+            f(x)
+            """
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", False)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
     def test_asymmetric_compilation(self):

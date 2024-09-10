@@ -63,12 +63,13 @@ class UtilTest(DTensorTestBase):
             itertools.combinations_with_replacement(two_d_placements_options, 2)
         )
 
+        # mesh: 2 * 4
+        mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
+        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
         for placements in two_d_placements:
-            for dim_0_size in (1, 2, 4, 8):
-                # mesh: 2 * 4
-                mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-                device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-                global_tensor = torch.arange(64).view(dim_0_size, -1)
+            for dim_0_size in range(1, 9):
+                nelem = 64 // dim_0_size * dim_0_size
+                global_tensor = torch.arange(nelem).view(dim_0_size, -1)
                 global_shape = global_tensor.size()
 
                 dtensor = distribute_tensor(global_tensor, device_mesh, placements)
