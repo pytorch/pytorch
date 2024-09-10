@@ -1712,7 +1712,10 @@ class WrapperCodeGen(CodeGen):
                             key, arg = arg.split("=")
 
                         if isinstance(arg_type, torch_dtype):
-                            if arg not in tensor_args:
+                            if arg == "workspace":
+                                arg_str = "workspace"
+                                tensor_args[arg] = arg_str
+                            elif arg not in tensor_args:
                                 arg_str = self.generate_example_arg_value(
                                     arg, arg_type, raw_arg, i
                                 )
