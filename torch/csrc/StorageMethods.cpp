@@ -191,7 +191,7 @@ static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
 }
 
 template <typename T>
-static void decode_and_store(
+static void decodeWrapper(
     void* data,
     const uint8_t* src,
     bool do_byte_swap,
@@ -322,16 +322,16 @@ static PyObject* THPStorage_fromBuffer(
       at::ScalarType,
       std::function<void(void*, const uint8_t*, bool, size_t)>>
       decode_map = {
-          {at::kBool, decode_and_store<bool>},
-          {at::kShort, decode_and_store<int16_t>},
-          {at::kInt, decode_and_store<int32_t>},
-          {at::kLong, decode_and_store<int64_t>},
-          {at::kHalf, decode_and_store<c10::Half>},
-          {at::kBFloat16, decode_and_store<c10::BFloat16>},
-          {at::kFloat, decode_and_store<float>},
-          {at::kDouble, decode_and_store<double>},
-          {at::kComplexFloat, decode_and_store<c10::complex<float>>},
-          {at::kComplexDouble, decode_and_store<c10::complex<double>>}};
+          {at::kBool, decodeWrapper<bool>},
+          {at::kShort, decodeWrapper<int16_t>},
+          {at::kInt, decodeWrapper<int32_t>},
+          {at::kLong, decodeWrapper<int64_t>},
+          {at::kHalf, decodeWrapper<c10::Half>},
+          {at::kBFloat16, decodeWrapper<c10::BFloat16>},
+          {at::kFloat, decodeWrapper<float>},
+          {at::kDouble, decodeWrapper<double>},
+          {at::kComplexFloat, decodeWrapper<c10::complex<float>>},
+          {at::kComplexDouble, decodeWrapper<c10::complex<double>>}};
 
   if (is_endian_independent) {
     memcpy(storage->mutable_data(), src + offset, count);

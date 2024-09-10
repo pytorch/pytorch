@@ -118,7 +118,7 @@ THPByteOrder THP_nativeByteOrder() {
 }
 
 template <typename T, typename U>
-TORCH_API void THP_decodeBuffer(
+void THP_decodeBuffer(
     T* dst,
     const uint8_t* src,
     U type,
@@ -126,7 +126,6 @@ TORCH_API void THP_decodeBuffer(
   if constexpr (std::is_same_v<U, THPByteOrder>)
     THP_decodeBuffer(dst, src, type != THP_nativeByteOrder(), len);
   else {
-    static_assert(std::is_same_v<U, bool>);
     auto func = [&](const uint8_t* src_data) {
       if constexpr (std::is_same_v<T, int16_t>) {
         return type ? decodeUInt16ByteSwapped(src_data)
@@ -137,11 +136,6 @@ TORCH_API void THP_decodeBuffer(
       } else if constexpr (std::is_same_v<T, int64_t>) {
         return type ? decodeUInt64ByteSwapped(src_data)
                     : decodeUInt64(src_data);
-      } else {
-        static_assert(
-            std::is_same_v<T, int16_t> || std::is_same_v<T, int32_t> ||
-                std::is_same_v<T, int64_t>,
-            "Unsupported type for decoding");
       }
     };
 
@@ -354,7 +348,7 @@ std::vector<T> complex_to_float(const c10::complex<T>* src, size_t len) {
 }
 
 template <typename T>
-TORCH_API void THP_encodeBuffer(
+void THP_encodeBuffer(
     uint8_t* dst,
     const T* src,
     THPByteOrder order,
@@ -363,13 +357,15 @@ TORCH_API void THP_encodeBuffer(
   if (order != THP_nativeByteOrder()) {
     for (const auto i : c10::irange(len)) {
       (void)i;
-      if constexpr (std::is_same_v<T, int16_t>)
+      if constexpr (std::is_same_v<T, int16_t>) {
         swapBytes16(dst);
-      else if constexpr (std::is_same_v<T, int32_t> || std::is_same_v<T, float>)
+      } else if constexpr (
+          std::is_same_v<T, int32_t> || std::is_same_v<T, float>) {
         swapBytes32(dst);
-      else if constexpr (
-          std::is_same_v<T, int64_t> || std::is_same_v<T, double>)
+      } else if constexpr (
+          std::is_same_v<T, int64_t> || std::is_same_v<T, double>) {
         swapBytes64(dst);
+      }
       dst += sizeof(T);
     }
   }
