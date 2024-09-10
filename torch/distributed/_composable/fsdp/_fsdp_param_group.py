@@ -586,7 +586,7 @@ class FSDPParamGroup:
             raise RuntimeError(
                 "FSDP parameters should be materialized on cpu when enabling cpu offloading. "
                 "For example, load cpu state dict or call module.to_empty(device=\"cpu\"). " 
-                "Found following parameters on non-cpu device: {param_names_not_on_cpu}\n"
+                f"Found following parameters on non-cpu device: {param_names_not_on_cpu}\n"
             )
 
 
