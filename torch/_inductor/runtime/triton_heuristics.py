@@ -1140,10 +1140,10 @@ def _check_max_grid_x(size_hints, x, num_warps):
     while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
         x *= 2  # Scale up XBLOCK if grid exceeds limits
         num_blocks = num_blocks // 2
-        if x >= max_grid_x:
-            raise AssertionError(
-                "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
-            )
+    if (num_blocks * num_warps * warp_size) > max_grid_x:
+        raise AssertionError(
+            "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
+        )
     return x, num_blocks
 
 
