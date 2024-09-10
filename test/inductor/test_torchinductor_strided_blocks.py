@@ -105,7 +105,7 @@ class TritonBlockPointerTest(InductorTestCase):
                 foo, *inputs, expected_num_block_pointers=expected_num_block_pointers
             )
 
-    @parametrize("prefer_nd_tiling", [(False, True)])
+    @parametrize("prefer_nd_tiling", [False, True])
     @parametrize(
         "full_size,view_size,stride,offset,require_block_ptr",
         [
@@ -176,7 +176,7 @@ class TritonBlockPointerTest(InductorTestCase):
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
-    @parametrize("prefer_nd_tiling", [(False, True)])
+    @parametrize("prefer_nd_tiling", [False, True])
     @parametrize(
         "x_size,y_size",
         [
@@ -230,7 +230,58 @@ class TritonBlockPointerTest(InductorTestCase):
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
-    @parametrize("prefer_nd_tiling", [(False, True)])
+    @parametrize("prefer_nd_tiling", [False, True])
+    def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
+        """
+        Test that we emit tl.broadcast_to instead of using strides of 0.
+        """
+
+        shape = (8,8)
+        device = torch.device(GPU_TYPE)
+        full = torch.randn(shape).to(device)
+        row = torch.as_strided(full, (1, shape[1]), full.stride())
+
+        # Expect 3 block pointers: 2 inputs one output
+        result, (triton_code,) = self.run_and_compare(
+            torch.add,
+            full,
+            row,
+            expected_num_block_pointers=3,
+            config_patches={
+                "triton.prefer_nd_tiling": prefer_nd_tiling,
+            },
+        )
+
+        # Check the code for broadcasts.
+        # We shouldn't see any strides of 0.
+        load_lines, store_lines = tuple(
+            [line for line in triton_code.split("\n") if substr in line]
+            for substr in ("tl.load", "tl.store")
+        )
+        if prefer_nd_tiling:
+            self.assertExpectedInline(
+                "\n".join(load_lines),
+                """\
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[8, 8], strides=[1, 8], block_shape=[XBLOCK, YBLOCK], order=[1, 0], offsets=[xoffset, yoffset]), boundary_check=[0, 1])
+    tmp1 = tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), boundary_check=[0], eviction_policy='evict_last')[:, None], [XBLOCK, YBLOCK])"""
+            )
+            self.assertExpectedInline(
+                "\n".join(store_lines),
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[1, 8], block_shape=[XBLOCK, YBLOCK], order=[1, 0], offsets=[xoffset, yoffset]), tmp2.to(tl.float32), boundary_check=[0, 1])"""
+            )
+        else:
+            self.assertExpectedInline(
+                "\n".join(load_lines),
+                """\
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), boundary_check=[0])
+    tmp1 = tl.reshape(tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[1], block_shape=[((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))], order=[0], offsets=[xoffset % 8]), eviction_policy='evict_last')[None, None, :], [((7 + XBLOCK) // 8), ((1) * ((1) <= (((7 + XBLOCK) // 8))) + (((7 + XBLOCK) // 8)) * ((((7 + XBLOCK) // 8)) < (1))), ((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))]), [XBLOCK])"""
+            )
+            self.assertExpectedInline(
+                "\n".join(store_lines),
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), tmp2.to(tl.float32), boundary_check=[0])"""
+            )
+
+    @parametrize("prefer_nd_tiling", [False, True])
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels",
         [
