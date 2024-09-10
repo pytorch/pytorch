@@ -207,7 +207,13 @@ class BlockPtrOptions:
     def offsets(self) -> List[sympy.Expr]:
         return self.params.offsets
 
-    def codegen_broadcast(self, value: str, initial_shape: List[sympy.Expr]) -> str:
+    def codegen_broadcast_and_reshape(
+        self,
+        value: str,
+        initial_shape: List[sympy.Expr],
+        final_shape: List[sympy.Expr],
+        allow_implicit: bool,
+    ) -> str:
         """
         Generate a broadcast and a reshape for the block pointer.
         This restores stride-0 dimensions which were removed from the block pointer.
@@ -222,11 +228,26 @@ class BlockPtrOptions:
         ]
         value = triton_reshape(value, initial_shape, pre_broadcast_shape)
 
-        # Broadcast singletons up to the final shape.
-        if any(self.broadcasting_dims):
-            value = (
-                f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
+        # Broadcast singletons.
+        # For loads, we can often implicitly broadcast singleton dimensions.
+        # We need an explicit broadcast for stores, or if the final reshape does more
+        # than add singletons.
+        sizevars = V.graph.sizevars
+        if any(self.broadcasting_dims) and (
+            not allow_implicit
+            or len(pre_broadcast_shape) != len(final_shape)
+            or any(
+                not (
+                    sizevars.statically_known_equals(pre_dim, 1)
+                    or sizevars.statically_known_equals(pre_dim, post_dim)
+                )
+                for pre_dim, post_dim in zip(pre_broadcast_shape, final_shape)
             )
+        ):
+            value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
+
+        # Reshape to the final shape.
+        value = triton_reshape(value, self.broadcast_shape, final_shape)
 
         return value
 
@@ -1719,8 +1740,9 @@ class TritonKernel(SIMDKernel):
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
         # Broadcast and restore singletons.
-        value = indexing.codegen_broadcast(value, indexing.final_shape)
-        value = triton_reshape(value, indexing.broadcast_shape, indexing.block_shape)
+        value = indexing.codegen_broadcast_and_reshape(
+            value, indexing.final_shape, indexing.block_shape, False
+        )
 
         # workaround https://github.com/openai/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
@@ -1829,12 +1851,8 @@ class TritonKernel(SIMDKernel):
                     name, var, indexing, other
                 )
                 line = f"tl.load({block_ptr}{other}{ep})"
-                line = indexing.codegen_broadcast(line, indexing.block_shape)
-
-                # Reshape to the final shape used in codegen.
-                # This is needed for block pointers with complex indexing expressions.
-                line = triton_reshape(
-                    line, indexing.broadcast_shape, indexing.final_shape
+                line = indexing.codegen_broadcast_and_reshape(
+                    line, indexing.block_shape, indexing.final_shape, True
                 )
 
             elif isinstance(original_index, sympy.Integer):
