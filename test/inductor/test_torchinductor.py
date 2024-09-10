@@ -1935,10 +1935,10 @@ class CommonTemplate:
             return torch.cumprod(a, 0) + torch.cumprod(b, 0)
 
         a = _large_cumprod_input(
-            (8000,), dim=0, dtype=torch.float32, device=self.device
+            (10000,), dim=0, dtype=torch.float32, device=self.device
         )
         b = _large_cumprod_input(
-            (8000,), dim=0, dtype=torch.float64, device=self.device
+            (10000,), dim=0, dtype=torch.float64, device=self.device
         )
         self.common(fn, (a, b), atol=1e-5, rtol=1e-5, check_lowp=False)
 
