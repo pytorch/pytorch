@@ -77,7 +77,7 @@ if sys.version_info >= (3, 10):
             if first:
                 first = False
             else:
-                yield a, b
+                yield a, b  # type: ignore
             a = b
 
     __all__ += ["pairwise"]
