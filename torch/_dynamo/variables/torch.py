@@ -5,6 +5,8 @@ import inspect
 import logging
 import math
 import re
+import textwrap
+import traceback
 from typing import Dict, List, TYPE_CHECKING
 
 import torch._C
@@ -445,6 +447,29 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(input, TensorVariable):
                 # Workaround dynamic shapes issue
                 return input.call_method(tx, "numel", [], {})
+
+        @register(torch.compile)
+        def handle_torch_compile(self, tx: "InstructionTranslator", *args, **kwargs):
+            # torch.compile is a no-op in dynamo
+            user_stack = torch._guards.TracingContext.extract_stack()
+            user_stack_formatted = "".join(traceback.format_list(user_stack))
+            log.warning(
+                textwrap.dedent(
+                    """\
+                        Found a torch.compile wrapper in the compiled frame. Converting the
+                        inner torch.compile into a no-op. As a result, if the backend (or configs)
+                        for the inner compile differs from the outer compile, the inner compile
+                        configs will be completely ignored.
+
+                        The inner torch.compile is encountered at
+
+                        %s
+                    """
+                ),
+                user_stack_formatted,
+            )
+
+            return args[0]
 
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx: "InstructionTranslator", input):
