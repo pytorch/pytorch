@@ -342,29 +342,20 @@ def reorder_compute_and_comm_for_overlap(
     return order
 
 
-# mypy: allow-untyped-defs
-
-import torch
-
-
 def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     """
     This FX graph pass replaces uses of FSDP2 unsharded params with their corresponding
     graph intermediates that were fsdp.copy_ into the unsharded params in the original graph.
 
-    Preconditions:
-    1. FSDP2 must be traced in full-graph mode.
-    2. All FSDP2 unsharded params must be resharded at the end of graph.
+    NOTE: Can only apply this pass to FSDP2 unsharded params that are resharded (i.e. resized to 0)
+    at the end of graph.
     """
-    if not torch._dynamo.utils.is_one_graph():
-        return
-
     node_list = list(graph.nodes)
 
     # Find all graph inputs and their resize counts
-    graph_input_to_resized_to_full_count: Dict[torch.fx.Node, int] = defaultdict(int)
-    graph_input_to_resized_to_0_count: Dict[torch.fx.Node, int] = defaultdict(int)
-    for node in node_list:
+    graph_input_to_resized_to_full_node_idxes = defaultdict(list)
+    graph_input_to_resized_to_0_node_idxes = defaultdict(list)
+    for idx, node in enumerate(node_list):
         if (
             node.op == "call_function"
             and node.target == torch.ops.inductor.resize_storage_bytes_.default
@@ -373,9 +364,9 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             graph_input = node.args[0]
             new_size = node.args[1]
             if new_size > 0:
-                graph_input_to_resized_to_full_count[graph_input] += 1
+                graph_input_to_resized_to_full_node_idxes[graph_input].append(idx)
             else:
-                graph_input_to_resized_to_0_count[graph_input] += 1
+                graph_input_to_resized_to_0_node_idxes[graph_input].append(idx)
 
     # Find all eligible unsharded params and their corresponding graph intermediates.
     unsharded_param_to_fsdp_copy_node_idxes = defaultdict(list)
@@ -386,7 +377,27 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             assert (
                 unsharded_param.op == "placeholder"
             ), "Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!"
-            unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
+            # An unsharded param is eligible for this pass only if it's resized to 0 at the end of graph.
+            num_resize_to_full = len(
+                graph_input_to_resized_to_full_node_idxes[unsharded_param]
+            )
+            num_resize_to_0 = len(
+                graph_input_to_resized_to_0_node_idxes[unsharded_param]
+            )
+            last_resize_to_full_node_idx = (
+                graph_input_to_resized_to_full_node_idxes[unsharded_param][-1]
+                if num_resize_to_full > 0
+                else -1
+            )
+            last_resize_to_0_node_idx = (
+                graph_input_to_resized_to_0_node_idxes[unsharded_param][-1]
+                if num_resize_to_0 > 0
+                else -1
+            )
+            if (
+                num_resize_to_full <= num_resize_to_0
+            ) and last_resize_to_0_node_idx > last_resize_to_full_node_idx:
+                unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
 
     # Check no user mutation on any unsharded_param
     def is_allowed_mutation(node):
