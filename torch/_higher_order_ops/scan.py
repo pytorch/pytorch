@@ -49,7 +49,6 @@ def scan(
     ],
     init: pytree.PyTree,
     xs: pytree.PyTree,
-    /,
     *,
     dim: int = 0,
     reverse: bool = False,
@@ -112,14 +111,9 @@ def scan(
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
 
-    # Dynamo is expecting a callable with "__code__" attribute.
-    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
-    def _scan_op_wrapper(*args, **kwargs):
-        return scan(*args, **kwargs)
-
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(_scan_op_wrapper, backend="eager", fullgraph=True)(
+            return torch.compile(scan, backend="eager", fullgraph=True)(
                 combine_fn, init, xs, dim=dim, reverse=reverse
             )
 
