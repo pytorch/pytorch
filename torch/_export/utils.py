@@ -130,18 +130,6 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> Dict[str, Any]:
             if not isinstance(submodule, torch.fx.GraphModule):
                 params_buffers_to_node_meta[target] = meta
 
-        # If the call_function uses param as input, we also need to update params' meta
-        # with this call_function node's meta.
-        # This is basically the same flow as torch.fx.traceback.preserve_meta()
-        if node.op == "call_function" and not isinstance(
-            node.target, torch._ops.HigherOrderOperator
-        ):
-            for arg in node._input_nodes:
-                if arg.op == "get_attr":
-                    for entry in torch.fx.proxy._COPY_META_FIELDS:
-                        if entry in meta:
-                            params_buffers_to_node_meta[arg.target][entry] = meta[entry]
-
     return params_buffers_to_node_meta
 
 
