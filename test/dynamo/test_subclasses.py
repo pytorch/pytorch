@@ -1799,6 +1799,16 @@ class GraphModule(torch.nn.Module):
 
         fn(torch.ones(4), x, torch.ones(4))
 
+    def test_ephemeral_source_symbol_evaporates_with_slice_view(self):
+        @torch.compile(backend="eager", dynamic=True)
+        def f(t):
+            return t._base + 1
+
+        x_a = torch.randn(4, 4, requires_grad=True)
+        x = TwoTensor(x_a, x_a.clone())
+        out = f(x[3])
+        self.assertEqual(out.shape, x_a.shape)
+
 
 instantiate_parametrized_tests(SubclassTests)
 

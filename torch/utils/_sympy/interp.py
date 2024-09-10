@@ -119,6 +119,20 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
         return analysis.sqrt(args[0])
     if isinstance(expr, ToFloat):
         return analysis.to_dtype(args[0], torch.float64)
+    # s0 ** -1 AKA 1/s0
+    if (
+        isinstance(expr, sympy.Pow)
+        and len(args) == 2
+        and expr.args[0].is_integer
+        and expr.args[0].is_positive
+        and args[1].is_singleton()
+        and args[1].lower == -1
+    ):
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        # NB: This is a loose bound; it'd be more accurate to compute
+        # analysis.reciprocal() but this ensures we keep integer ranges.
+        return ValueRanges(0, 1)
 
     # These handlers are special because they take an extra dtype argument
     # specifying what they should convert to, and we need to appropriately set
