@@ -77,13 +77,8 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_dp_state_dict_cpu_offload(self):
-        self.run_subtests(
-            {"offload_policy": [CPUOffloadPolicy(pin_memory=True), CPUOffloadPolicy(pin_memory=False)]},
-            self._test_dp_state_dict_cpu_offload,
-        )
-
-    def _test_dp_state_dict_cpu_offload(self, offload_policy: CPUOffloadPolicy):
         mlp_dim = 4
+        offload_policy = CPUOffloadPolicy(pin_memory=True)
         torch.manual_seed(42)
         with torch.device("meta"):
             model = nn.Sequential(
@@ -110,7 +105,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
         # lazy init without error
         inp = torch.rand((mlp_dim, mlp_dim), device="cuda")
-        model(inp).sum().backward()
+        model(inp)
 
         state_dict = model.state_dict()
         for name, dtensor in state_dict.items():

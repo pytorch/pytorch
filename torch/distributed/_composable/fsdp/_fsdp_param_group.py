@@ -12,7 +12,7 @@ from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 
-from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy, CPUOffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
@@ -127,6 +127,7 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.mp_policy = mp_policy
+        self.offload_policy = offload_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
         self._sharded_state = ShardedState.SHARDED
@@ -191,16 +192,8 @@ class FSDPParamGroup:
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
         self._reduce_dtype = next(iter(reduce_dtypes))
-
-    def lazy_init(self):
-        # Lazy init should be idempotent
-        # Users may change or register parameters after construction time.
-        # For example, DoRA (https://arxiv.org/abs/2402.09353) initializes linear magnitudes based on
-        # other parameters (e.g. loaded from the state dict).
-        if self.is_sharded and not self._reset_sharded_params:
-            for fsdp_param in self.fsdp_params:
-                fsdp_param.reset_sharded_param(skip_same_param=True)
-            self._reset_sharded_params = True
+    
+    def _validate_no_meta_params(self):
         param_names_on_meta = [
             fsdp_param._param_fqn
             for fsdp_param in self.fsdp_params
@@ -213,6 +206,35 @@ class FSDPParamGroup:
                 "For example, call module.to_empty(device) to materialize to device and "
                 "call module.reset_parameters() on each module to initialize values."
             )
+    
+    def _validate_cpu_offload_params(self):
+        if not isinstance(self.offload_policy, CPUOffloadPolicy):
+            return
+        param_names_not_on_cpu = [
+            fsdp_param._param_fqn
+            for fsdp_param in self.fsdp_params
+            if fsdp_param.offload_to_cpu and fsdp_param.sharded_param.device.type != "cpu"
+        ]
+        if param_names_not_on_cpu:
+            raise RuntimeError(
+                "FSDP parameters should be materialized on cpu when enabling cpu offloading. "
+                "For example, load cpu state dict or call module.to_empty(device=\"cpu\"). " 
+                "Found following parameters on non-cpu device: {param_names_not_on_cpu}\n"
+            )
+
+    def lazy_init(self):
+        # Lazy init should be idempotent
+        # Users may change or register parameters after construction time.
+        # For example, DoRA (https://arxiv.org/abs/2402.09353) initializes linear magnitudes based on
+        # other parameters (e.g. loaded from the state dict).
+        if self.is_sharded and not self._reset_sharded_params:
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.reset_sharded_param()
+            self._reset_sharded_params = True
+        
+        self._validate_no_meta_params()
+        self._validate_cpu_offload_params()
+        
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
