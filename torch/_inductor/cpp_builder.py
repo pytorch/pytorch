@@ -25,7 +25,6 @@ from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.torch_version import TorchVersion
-from torch.utils.cpp_extension import _join_sycl_home
 
 
 if config.is_fbcode():
@@ -1276,6 +1275,8 @@ class CppTorchDeviceOptions(CppTorchOptions):
             extra_flags=extra_flags,
         )
         if device_type == "xpu":
+            from torch.utils.cpp_extension import _join_sycl_home
+
             self._compiler = _join_sycl_home("bin", "icpx")
 
         device_definations: List[str] = []
