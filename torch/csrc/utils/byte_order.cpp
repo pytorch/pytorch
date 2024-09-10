@@ -117,49 +117,48 @@ THPByteOrder THP_nativeByteOrder() {
   return *(uint8_t*)&x ? THP_LITTLE_ENDIAN : THP_BIG_ENDIAN;
 }
 
-void THP_decodeInt16Buffer(
-    int16_t* dst,
+template <typename T, typename U>
+TORCH_API void THP_decodeBuffer(
+    T* dst,
     const uint8_t* src,
-    bool do_byte_swap,
+    U type,
     size_t len) {
-  for (const auto i : c10::irange(len)) {
-    dst[i] = (int16_t)(do_byte_swap ? decodeUInt16ByteSwapped(src)
-                                    : decodeUInt16(src));
-    src += sizeof(int16_t);
+  if constexpr (std::is_same_v<U, THPByteOrder>)
+    THP_decodeBuffer(dst, src, type != THP_nativeByteOrder(), len);
+  else {
+    static_assert(std::is_same_v<U, bool>);
+    auto func = [&](const uint8_t* src_data) {
+      if constexpr (std::is_same_v<T, int16_t>) {
+        return type ? decodeUInt16ByteSwapped(src_data)
+                    : decodeUInt16(src_data);
+      } else if constexpr (std::is_same_v<T, int32_t>) {
+        return type ? decodeUInt32ByteSwapped(src_data)
+                    : decodeUInt32(src_data);
+      } else if constexpr (std::is_same_v<T, int64_t>) {
+        return type ? decodeUInt64ByteSwapped(src_data)
+                    : decodeUInt64(src_data);
+      } else {
+        static_assert(
+            std::is_same_v<T, int16_t> || std::is_same_v<T, int32_t> ||
+                std::is_same_v<T, int64_t>,
+            "Unsupported type for decoding");
+      }
+    };
+
+    for (const auto i : c10::irange(len)) {
+      dst[i] = static_cast<T>(func(src));
+      src += sizeof(T);
+    }
   }
 }
 
-void THP_decodeInt32Buffer(
-    int32_t* dst,
-    const uint8_t* src,
-    bool do_byte_swap,
-    size_t len) {
-  for (const auto i : c10::irange(len)) {
-    dst[i] = (int32_t)(do_byte_swap ? decodeUInt32ByteSwapped(src)
-                                    : decodeUInt32(src));
-    src += sizeof(int32_t);
-  }
-}
-
-void THP_decodeInt64Buffer(
-    int64_t* dst,
-    const uint8_t* src,
-    bool do_byte_swap,
-    size_t len) {
-  for (const auto i : c10::irange(len)) {
-    dst[i] = (int64_t)(do_byte_swap ? decodeUInt64ByteSwapped(src)
-                                    : decodeUInt64(src));
-    src += sizeof(int64_t);
-  }
-}
-
-void THP_decodeHalfBuffer(
+template <>
+TORCH_API void THP_decodeBuffer(
     c10::Half* dst,
     const uint8_t* src,
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint16_t x;
       c10::Half f;
@@ -170,7 +169,8 @@ void THP_decodeHalfBuffer(
   }
 }
 
-void THP_decodeBFloat16Buffer(
+template <>
+TORCH_API void THP_decodeBuffer(
     at::BFloat16* dst,
     const uint8_t* src,
     bool do_byte_swap,
@@ -183,19 +183,24 @@ void THP_decodeBFloat16Buffer(
   }
 }
 
-void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, size_t len) {
+template <>
+TORCH_API void THP_decodeBuffer(
+    bool* dst,
+    const uint8_t* src,
+    bool,
+    size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] = (int)src[i] != 0 ? true : false;
   }
 }
 
-void THP_decodeFloatBuffer(
+template <>
+TORCH_API void THP_decodeBuffer(
     float* dst,
     const uint8_t* src,
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t x;
       float f;
@@ -206,13 +211,13 @@ void THP_decodeFloatBuffer(
   }
 }
 
-void THP_decodeDoubleBuffer(
+template <>
+TORCH_API void THP_decodeBuffer(
     double* dst,
     const uint8_t* src,
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint64_t x;
       double d;
@@ -223,18 +228,17 @@ void THP_decodeDoubleBuffer(
   }
 }
 
-void THP_decodeComplexFloatBuffer(
+template <>
+TORCH_API void THP_decodeBuffer(
     c10::complex<float>* dst,
     const uint8_t* src,
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t x;
       float re;
     };
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t y;
       float im;
@@ -249,18 +253,17 @@ void THP_decodeComplexFloatBuffer(
   }
 }
 
-void THP_decodeComplexDoubleBuffer(
+template <>
+TORCH_API void THP_decodeBuffer(
     c10::complex<double>* dst,
     const uint8_t* src,
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint64_t x;
       double re;
     };
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint64_t y;
       double im;
@@ -276,153 +279,67 @@ void THP_decodeComplexDoubleBuffer(
   }
 }
 
-void THP_decodeInt16Buffer(
+template void THP_decodeBuffer(
     int16_t* dst,
     const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeInt16Buffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeInt32Buffer(
+    THPByteOrder type,
+    size_t len);
+template void THP_decodeBuffer(
     int32_t* dst,
     const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeInt32Buffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeInt64Buffer(
+    THPByteOrder type,
+    size_t len);
+template void THP_decodeBuffer(
     int64_t* dst,
     const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeInt64Buffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeHalfBuffer(
+    THPByteOrder type,
+    size_t len);
+template void THP_decodeBuffer(
     c10::Half* dst,
     const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeHalfBuffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeBFloat16Buffer(
-    at::BFloat16* dst,
-    const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeBFloat16Buffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeFloatBuffer(
+    THPByteOrder type,
+    size_t len);
+template void THP_decodeBuffer(
     float* dst,
     const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeFloatBuffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeDoubleBuffer(
+    THPByteOrder type,
+    size_t len);
+template void THP_decodeBuffer(
     double* dst,
     const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeDoubleBuffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeComplexFloatBuffer(
+    THPByteOrder type,
+    size_t len);
+template void THP_decodeBuffer(
+    c10::BFloat16* dst,
+    const uint8_t* src,
+    THPByteOrder type,
+    size_t len);
+template void THP_decodeBuffer(
     c10::complex<float>* dst,
     const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeComplexFloatBuffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeComplexDoubleBuffer(
+    THPByteOrder type,
+    size_t len);
+template void THP_decodeBuffer(
     c10::complex<double>* dst,
     const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeComplexDoubleBuffer(
-      dst, src, (order != THP_nativeByteOrder()), len);
-}
+    THPByteOrder type,
+    size_t len);
 
-void THP_encodeInt16Buffer(
-    uint8_t* dst,
-    const int16_t* src,
-    THPByteOrder order,
-    size_t len) {
-  memcpy(dst, src, sizeof(int16_t) * len);
-  if (order != THP_nativeByteOrder()) {
-    for (const auto i : c10::irange(len)) {
-      (void)i;
-      swapBytes16(dst);
-      dst += sizeof(int16_t);
-    }
-  }
-}
-
-void THP_encodeInt32Buffer(
-    uint8_t* dst,
-    const int32_t* src,
-    THPByteOrder order,
-    size_t len) {
-  memcpy(dst, src, sizeof(int32_t) * len);
-  if (order != THP_nativeByteOrder()) {
-    for (const auto i : c10::irange(len)) {
-      (void)i;
-      swapBytes32(dst);
-      dst += sizeof(int32_t);
-    }
-  }
-}
-
-void THP_encodeInt64Buffer(
-    uint8_t* dst,
-    const int64_t* src,
-    THPByteOrder order,
-    size_t len) {
-  memcpy(dst, src, sizeof(int64_t) * len);
-  if (order != THP_nativeByteOrder()) {
-    for (const auto i : c10::irange(len)) {
-      (void)i;
-      swapBytes64(dst);
-      dst += sizeof(int64_t);
-    }
-  }
-}
-
-void THP_encodeFloatBuffer(
-    uint8_t* dst,
-    const float* src,
-    THPByteOrder order,
-    size_t len) {
-  memcpy(dst, src, sizeof(float) * len);
-  if (order != THP_nativeByteOrder()) {
-    for (const auto i : c10::irange(len)) {
-      (void)i;
-      swapBytes32(dst);
-      dst += sizeof(float);
-    }
-  }
-}
-
-void THP_encodeDoubleBuffer(
-    uint8_t* dst,
-    const double* src,
-    THPByteOrder order,
-    size_t len) {
-  memcpy(dst, src, sizeof(double) * len);
-  if (order != THP_nativeByteOrder()) {
-    for (const auto i : c10::irange(len)) {
-      (void)i;
-      swapBytes64(dst);
-      dst += sizeof(double);
-    }
-  }
-}
+template void THP_decodeBuffer(
+    int16_t* dst,
+    const uint8_t* src,
+    bool type,
+    size_t len);
+template void THP_decodeBuffer(
+    int32_t* dst,
+    const uint8_t* src,
+    bool type,
+    size_t len);
+template void THP_decodeBuffer(
+    int64_t* dst,
+    const uint8_t* src,
+    bool type,
+    size_t len);
 
 template <typename T>
 std::vector<T> complex_to_float(const c10::complex<T>* src, size_t len) {
@@ -436,7 +353,30 @@ std::vector<T> complex_to_float(const c10::complex<T>* src, size_t len) {
   return new_src;
 }
 
-void THP_encodeComplexFloatBuffer(
+template <typename T>
+TORCH_API void THP_encodeBuffer(
+    uint8_t* dst,
+    const T* src,
+    THPByteOrder order,
+    size_t len) {
+  memcpy(dst, src, sizeof(T) * len);
+  if (order != THP_nativeByteOrder()) {
+    for (const auto i : c10::irange(len)) {
+      (void)i;
+      if constexpr (std::is_same_v<T, int16_t>)
+        swapBytes16(dst);
+      else if constexpr (std::is_same_v<T, int32_t> || std::is_same_v<T, float>)
+        swapBytes32(dst);
+      else if constexpr (
+          std::is_same_v<T, int64_t> || std::is_same_v<T, double>)
+        swapBytes64(dst);
+      dst += sizeof(T);
+    }
+  }
+}
+
+template <>
+TORCH_API void THP_encodeBuffer(
     uint8_t* dst,
     const c10::complex<float>* src,
     THPByteOrder order,
@@ -452,7 +392,8 @@ void THP_encodeComplexFloatBuffer(
   }
 }
 
-void THP_encodeComplexDoubleBuffer(
+template <>
+TORCH_API void THP_encodeBuffer(
     uint8_t* dst,
     const c10::complex<double>* src,
     THPByteOrder order,
@@ -467,5 +408,31 @@ void THP_encodeComplexDoubleBuffer(
     }
   }
 }
+
+template void THP_encodeBuffer(
+    uint8_t* dst,
+    const int16_t* src,
+    THPByteOrder order,
+    size_t len);
+template void THP_encodeBuffer(
+    uint8_t* dst,
+    const int32_t* src,
+    THPByteOrder order,
+    size_t len);
+template void THP_encodeBuffer(
+    uint8_t* dst,
+    const int64_t* src,
+    THPByteOrder order,
+    size_t len);
+template void THP_encodeBuffer(
+    uint8_t* dst,
+    const float* src,
+    THPByteOrder order,
+    size_t len);
+template void THP_encodeBuffer(
+    uint8_t* dst,
+    const double* src,
+    THPByteOrder order,
+    size_t len);
 
 } // namespace torch::utils
