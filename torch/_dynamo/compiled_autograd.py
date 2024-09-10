@@ -155,14 +155,13 @@ class AutogradCompilerInstance:
         self,
         idx,
         inputs,
-        output_metadatas,
+        output_metadatas: List[Optional[Any]],
     ):
         with disable_proxy_modes_tracing():
             # create fake Tensors
             grad_ins: List[Optional[torch.Tensor]] = []
             for output_metadata in output_metadatas:
                 if output_metadata is None:
-                    grad_ins.append(None)
                     continue
 
                 layout, device, dtype, size = output_metadata
@@ -170,21 +169,21 @@ class AutogradCompilerInstance:
                     torch.empty(size=size, dtype=dtype, layout=layout, device=device)
                 )
 
+            tagged_tensor = torch.tensor(0)
+            tagged_tensor._compiled_autograd_is_none = True
             global next_op
             @torch.library.custom_op(f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=())
             def cpp_node_op_i(inputs: List[torch.Tensor], idx: int) -> List[torch.Tensor]:
-                breakpoint()
                 outs = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
-                return [out.clone() for out in outs]
-            
-            op_outs = [x.clone().detach() for x in grad_ins]
+                return [out.clone() if out is not None else tagged_tensor.clone() for out in outs]
 
             @cpp_node_op_i.register_fake
             def _(inputs, idx):
                 grad_ins: List[Optional[torch.Tensor]] = []
                 for output_metadata in output_metadatas:
                     if output_metadata is None:
-                        grad_ins.append(None)
+                        # grad_ins.append(None)
+                        # eager semantics is to not return grads for tensors not requiring them
                         continue
 
                     layout, device, dtype, size = output_metadata
@@ -400,7 +399,6 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
-            breakpoint()
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True

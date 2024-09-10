@@ -196,7 +196,7 @@ struct CppNode : public Node {
       std::function<variable_list(variable_list)> lambda = [&](variable_list&& inputs) {
         return apply(std::move(inputs));
       };
-      args.collect(this, std::move(lambda), input_info_);
+      args.collect(this, std::move(lambda), is_variable_input_, input_info_);
       // TODO: when guards?
       return;
     }
@@ -224,9 +224,12 @@ struct CppNode : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
     if (!T::is_traceable) {
-      return saved.lift(variable_list(inputs));
+      auto res = saved.lift(variable_list(inputs));
+      std::cout << "DONE APPLY WITH SAVED" << std::endl;
+      return res;
     }
     
+    TORCH_INTERNAL_ASSERT(false);
     saved.before(ctx_.saved_data);
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
     TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
@@ -470,6 +473,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     }
     results.emplace_back(outputs[i]);
   }
+  std::cout << "CppNode::apply returning " << results.size() << " results" << std::endl;
   return results;
 }
 

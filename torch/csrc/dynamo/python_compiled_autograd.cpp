@@ -369,23 +369,33 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
 // figure out clean up policy
 static std::vector<std::function<variable_list(variable_list)>> lambdas;
 static std::vector<at::IValue> lambda_idxs;
-static std::vector<std::vector<VariableInfo>> lambda_output_infos;
+static std::vector<std::vector<std::optional<VariableInfo>>> lambda_output_infos;
 static size_t next_lambdas_idx = 0;
 static size_t offset_lambdas_idx = 0;
 
-static at::IValue* lambda_collect(CompiledNodeArgs& args, Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<VariableInfo>& output_info) {
+static at::IValue* lambda_collect(CompiledNodeArgs& args, Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<bool>& is_variable_input, const std::vector<VariableInfo>& output_info) {
   std::cout << "storing lambdas[" << lambdas.size() << "], should output " << output_info.size() << " grads" << std::endl;
   lambdas.emplace_back(std::move(lambda));
-  lambda_output_infos.emplace_back(output_info);
+  std::vector<std::optional<VariableInfo>> output_info_for_vars;
+  for (auto i : c10::irange(is_variable_input.size())) {
+    if (!is_variable_input[i]) {
+      output_info_for_vars.emplace_back(std::nullopt);
+    } else {
+      output_info_for_vars.emplace_back(output_info[i]);
+    }
+  }
+  lambda_output_infos.emplace_back(std::move(output_info_for_vars));
   std::cout << "inserted lambda_output_infos at idx=" << (lambda_output_infos.size()-1) << std::endl;
   // _compiler.lifted_lambdas.emplace_back(lambda);
   size_t idx = lambdas.size() - 1;
   lambda_idxs.emplace_back(at::IValue(static_cast<int64_t>(idx)));
   for (auto i : c10::irange(output_info.size())) {
-    args.collect(output_info[i].layout);
-    args.collect(output_info[i].device);
-    args.collect(output_info[i].scalar_type);
-    args.collect(output_info[i].size);
+    if (is_variable_input[i]) {
+      args.collect(output_info[i].layout);
+      args.collect(output_info[i].device);
+      args.collect(output_info[i].scalar_type);
+      args.collect(output_info[i].size);
+    }
   }
   std::cout << "done storing lambdas[" << idx << "]" << std::endl;
   return &lambda_idxs[idx];
@@ -425,13 +435,17 @@ static variable_list lambda_lift(SwapSavedVariables& ssv, PyObject* py_compiler,
   THPObjectPtr pyoutputmetas(
       PyTuple_New(static_cast<Py_ssize_t>(lambda_output_info.size())));
   for (auto i : c10::irange(lambda_output_info.size())) {
+    if (!lambda_output_info[i].has_value()) {
+      PyTuple_SET_ITEM(pyoutputmetas.get(), i, Py_None);
+      continue;
+    }
     THPObjectPtr pyoutputmeta(
       PyTuple_Pack(
         4,
-        autograd::utils::wrap(lambda_output_info[i].layout),
-        THPDevice_New(lambda_output_info[i].device),
-        autograd::utils::wrap(lambda_output_info[i].scalar_type),
-        to_py_size(lambda_output_info[i].size)
+        autograd::utils::wrap(lambda_output_info[i]->layout),
+        THPDevice_New(lambda_output_info[i]->device),
+        autograd::utils::wrap(lambda_output_info[i]->scalar_type),
+        to_py_size(lambda_output_info[i]->size)
       )
     );
     if (!pyoutputmeta) throw python_error();
@@ -730,6 +744,7 @@ CacheNode* _compiled_autograd_impl(
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       std::cout << "apply_with_saved on " << call.node->name() << std::endl;
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
+      std::cout << call.node->name() << " returned " << outputs.size() << " outputs" << std::endl;
 
       saved.debug_asserts();
       saved.before(call.node->next_edges());

@@ -206,7 +206,7 @@ struct AutogradCompilerCall {
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
   std::vector<std::function<variable_list(variable_list)>> lifted_lambdas;
   // still need to get py::cpp_function here, cuz need it alive at runtime
-  std::function<at::IValue*(CompiledNodeArgs&, Node*, std::function<variable_list(variable_list)>, const std::vector<VariableInfo>&)> collect;
+  std::function<at::IValue*(CompiledNodeArgs&, Node*, std::function<variable_list(variable_list)>, const std::vector<bool>&, const std::vector<VariableInfo>&)> collect;
   std::function<variable_list(SwapSavedVariables&, PyObject*, variable_list)> lift;
 };
 
@@ -297,8 +297,8 @@ class CompiledNodeArgs {
       collect(m.at(k));
     }
   }
-  void collect(Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<VariableInfo>& output_metas) {
-    at::IValue* ptr = _compiler.collect(*this, fn, std::move(lambda), output_metas);
+  void collect(Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<bool>& is_variable_input, const std::vector<VariableInfo>& output_metas) {
+    at::IValue* ptr = _compiler.collect(*this, fn, std::move(lambda), is_variable_input, output_metas);
     _compiler.lifted_ivalue_args.args.emplace_back(ptr);
   }
   void collect(const at::IValue& iv, bool nested = false) {
