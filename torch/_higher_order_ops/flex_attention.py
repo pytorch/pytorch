@@ -789,9 +789,10 @@ def sdpa_dense_backward(
     grad_key = torch.sum(grad_key, 2, keepdim=False)
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
-    # Reduce DK, DV along broadcasted batches.
-    grad_key = torch.sum(grad_key, 0, keepdim=True) / kv_shared_batch
-    grad_value = torch.sum(grad_value, 0, keepdim=True) / kv_shared_batch
+    if Bq != Bkv:
+        # Reduce DK, DV along broadcasted batches.
+        grad_key = torch.sum(grad_key, 0, keepdim=True) / kv_shared_batch
+        grad_value = torch.sum(grad_value, 0, keepdim=True) / kv_shared_batch
 
     actual_grad_query.copy_(grad_query)
     actual_grad_key.copy_(grad_key)
