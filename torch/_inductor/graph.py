@@ -854,6 +854,7 @@ class GraphLowering(torch.fx.Interpreter):
     def allocate_non_dup_const_name(
         self, name: Optional[str], data: Union[Tensor]
     ) -> str:
+        orig_name = name
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
                 if (
@@ -870,7 +871,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if name is None:
             name = f"constant{len(self.constants)}"
-        orig_name = name
+        assert name is not None
         if name[0].isdigit():
             name = f"constant_{name}"
         name = self.qualify_name(name)
