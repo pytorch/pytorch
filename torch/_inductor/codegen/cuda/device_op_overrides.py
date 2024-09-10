@@ -116,7 +116,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             source_codes = source_codes.replace(
                 "32*numWarps", str(prop.warp_size) + "*numWarps"
             )
-        return source_codes
+        return maybe_hipify_code_wrapper(source_codes)
 
     def abi_compatible_header(self):
         return "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
