@@ -78,7 +78,9 @@ kernel void im2col<DTYPE>(                                                 \
 
 INSTANTIATE_IM2COL(bool);
 INSTANTIATE_IM2COL(float);
+INSTANTIATE_IM2COL(float2);
 INSTANTIATE_IM2COL(half);
+INSTANTIATE_IM2COL(half2);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_IM2COL(bfloat);
 #endif
