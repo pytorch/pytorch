@@ -24,6 +24,8 @@ def decompose_with_registry(
     for op in can_preserve:
         if op in decomp_table:
             del decomp_table[op]
+    # We shouldn't put HOPs into the decomp table, because it is undefined behavior
+    decomp_table = {k: v for k, v in decomp_table.items() if hasattr(k, "_schema")}
     return exported_program.run_decompositions(decomp_table)
 
 
@@ -42,10 +44,7 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
     """Remove all assertion and check nodes from the FX graph"""
     aten_assertion_targets = {
         torch.ops.aten.sym_constrain_range_for_size.default,
-        torch.ops.aten._assert_async.default,
         torch.ops.aten._assert_async.msg,
-        torch.ops.aten._assert_scalar.default,
-        torch.ops.aten._assert_tensor_metadata.default,
     }
     for node in graph_module.graph.nodes:
         if node.op == "call_function" and node.target in aten_assertion_targets:

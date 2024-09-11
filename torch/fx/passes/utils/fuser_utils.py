@@ -92,7 +92,6 @@ def validate_partition(partition: NodeList) -> bool:
 @compatibility(is_backward_compatible=False)
 def fuse_as_graphmodule(gm: GraphModule,
                         nodes: NodeList,
-                        partition: Dict[Node, None],
                         module_name: str) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
 
     """
@@ -119,7 +118,7 @@ def fuse_as_graphmodule(gm: GraphModule,
     for node in nodes:
         assert node.graph.owning_module is gm, f"{node} doesn't belong to passed in graph module {gm._get_name()}"
         assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph._find_nodes_lookup_table, f"{node} is not found in graph module {gm._get_name()}"
+        assert node in gm.graph.nodes, f"{node} is not found in graph module {gm._get_name()}"
 
     # validates partition doesn't introduce dependency circles in the graph
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"
@@ -136,7 +135,7 @@ def fuse_as_graphmodule(gm: GraphModule,
             # do something here
             pass
 
-        if x in partition:
+        if x in nodes:
             # x is inside subgraph, return the copied node
             # the node should have been copied aleady, as we are copying graph in the topological order
             return node_map[x]
@@ -160,7 +159,7 @@ def fuse_as_graphmodule(gm: GraphModule,
 
     for node in nodes:
         for user_node in node.users:
-            if user_node not in partition:
+            if user_node not in nodes:
                 # external user node, need to expose as an output
                 output_mapping[node] = node_map[node]
 
@@ -220,12 +219,12 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
 
 
 @compatibility(is_backward_compatible=False)
-def fuse_by_partitions(gm: GraphModule, partitions: List[Dict[Node, None]], prefix: str = "fused_") -> GraphModule:
-    for partition_id, partition in enumerate(partitions):
-        sorted_nodes = topo_sort(list(partition))
+def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList], prefix: str = "fused_") -> GraphModule:
+    for partition_id, nodes in enumerate(partitions):
+        sorted_nodes = topo_sort(nodes)
 
         submodule_name = prefix + str(partition_id)
-        sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(gm, sorted_nodes, partition, submodule_name)
+        sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(gm, sorted_nodes, submodule_name)
 
         insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)
 

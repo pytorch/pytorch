@@ -19,8 +19,8 @@ load(
     "PROD_AVX512F_MICROKERNEL_SRCS",
     "PROD_AVX512SKX_MICROKERNEL_SRCS",
     "PROD_AVX512VBMI_MICROKERNEL_SRCS",
-    "PROD_AVX512VNNIGFNI_MICROKERNEL_SRCS",
     "PROD_AVX512VNNI_MICROKERNEL_SRCS",
+    "PROD_AVX512VNNIGFNI_MICROKERNEL_SRCS",
     "PROD_AVXVNNI_MICROKERNEL_SRCS",
     "PROD_AVX_MICROKERNEL_SRCS",
     "PROD_F16C_MICROKERNEL_SRCS",
@@ -45,12 +45,6 @@ load(
     "PROD_SSSE3_MICROKERNEL_SRCS",
     "PROD_XOP_MICROKERNEL_SRCS",
 )
-
-XNN_COMMON_PREPROCESSOR_FLAGS = [
-    "-DXNN_PRIVATE=",
-    "-DXNN_INTERNAL=",
-    "-DXNN_LOG_LEVEL=0"
-]
 
 # This defines XNNPACK targets for both fbsource BUCK and OSS BUCK
 # Note that the file path is relative to the BUCK file that called from, not to this bzl file.
@@ -84,7 +78,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         },
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         labels = labels,
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         exported_deps = [
             # Dependency only on pthreadpool interface
@@ -103,10 +99,14 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS + [
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
             "-DXNN_ENABLE_SPARSE=0",
             "-DXNN_ENABLE_MEMOPT",
         ],
@@ -132,10 +132,15 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -162,10 +167,15 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-fno-math-errno",
             "-ffp-contract=off",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -188,6 +198,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -203,9 +217,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_SSE_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse"],
@@ -225,6 +240,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -234,9 +253,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse"],
@@ -258,6 +278,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -273,9 +297,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_SSE2_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse2"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse2"],
@@ -296,6 +321,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -305,9 +334,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse2"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse2"],
@@ -330,6 +360,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -345,9 +379,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_SSSE3_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mssse3"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mssse3"],
@@ -368,6 +403,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -377,9 +416,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mssse3"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mssse3"],
@@ -402,6 +442,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -417,9 +461,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_SSE41_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse4.1"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse4.1"],
@@ -440,6 +485,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -449,9 +498,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse4.1"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse4.1"],
@@ -482,6 +532,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mavx",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -497,9 +551,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_AVX_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx"],
@@ -520,6 +575,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-O2",
             "-mavx",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -529,9 +588,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx"],
@@ -571,6 +631,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mavx512dq",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -593,7 +657,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ] if not is_arvr_mode() else []),
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx"],
@@ -613,6 +679,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -629,7 +699,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ],
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx"],
@@ -653,22 +725,16 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         ] + select({
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": [
-                "-mavx512f",
-                "-mavx512cd",
-                "-mavx512bw",
-                "-mavx512dq",
-                "-mavx512vl",
-                "-mavx512vnni",
+                "-mavx",
             ],
             "ovr_config//cpu:x86_64": [
-                "-mavx512f",
-                "-mavx512cd",
-                "-mavx512bw",
-                "-mavx512dq",
-                "-mavx512vl",
-                "-mavx512vnni",
+                "-mavx",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -690,7 +756,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ] if not is_arvr_mode() else []),
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         exported_preprocessor_flags = [
             "-DXNN_ENABLE_AVX512VNNI"
         ],
@@ -713,6 +781,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -728,7 +800,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ],
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         exported_preprocessor_flags = [
             "-DXNN_ENABLE_AVX512VNNI"
         ],
@@ -756,6 +830,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-mf16c",
             "-mfma",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -775,7 +853,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ] if not is_arvr_mode() else []),
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx"],
@@ -795,6 +875,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -806,7 +890,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ],
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx"],
@@ -836,6 +922,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mf16c",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -852,9 +942,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ] if not is_arvr_mode() else []),
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mf16c"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mf16c"],
@@ -875,6 +966,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-O2",
             "-mf16c",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -885,9 +980,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mf16c"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mf16c"],
@@ -919,6 +1015,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mf16c",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -935,9 +1035,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_FMA3_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
             "-mfma",
@@ -965,6 +1066,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-mfma",
             "-mf16c",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -975,9 +1080,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
             "-mfma",
@@ -1017,6 +1123,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mf16c",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1034,9 +1144,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_AVX2_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
             "-mavx2",
@@ -1067,6 +1178,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-mfma",
             "-mf16c",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1078,9 +1193,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
             "-mavx2",
@@ -1119,6 +1235,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mavx512f",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1134,9 +1254,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_AVX512F_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx512f"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx512f"],
@@ -1175,6 +1296,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mavx512vbmi",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1195,9 +1320,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_AVX512VBMI_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
             "-mavx512f",
@@ -1232,6 +1358,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-O2",
             "-mavx512f",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1241,9 +1371,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx512f"],
         windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx512f"],
@@ -1281,6 +1412,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mavx512vl",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1300,9 +1435,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_AVX512SKX_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else []),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
             "-mavx512f",
@@ -1317,7 +1453,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-mavx512bw",
             "-mavx512dq",
             "-mavx512vl",
-
+            
         ],
         deps = [
             ":interface",
@@ -1340,6 +1476,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-mavx512dq",
             "-mavx512vl",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1353,9 +1493,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
             "-mavx512f",
@@ -1392,6 +1533,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-fno-fast-math",
             "-fno-math-errno",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1404,9 +1549,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1438,6 +1584,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mfpu=neon",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1455,9 +1605,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_NEON_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else [],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1482,6 +1633,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         platform_srcs = [
             (
                 "(aarch64|arm64)",
@@ -1489,9 +1644,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ] if not is_arvr_mode() else [],
         labels = labels,
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1523,6 +1679,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mfpu=neon-vfpv4",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1547,9 +1707,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_NEONFMA_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else [],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1574,6 +1735,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_srcs = [
             (
@@ -1582,9 +1747,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ] if not is_arvr_mode() else [],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1621,6 +1787,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-ffinite-math-only",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1637,9 +1807,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1667,6 +1838,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mfpu=neon-fp16",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1678,9 +1853,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1704,6 +1880,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:arm64": ["-march=armv8-a"],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1728,9 +1908,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1762,6 +1943,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mfloat-abi=softfp",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1779,9 +1964,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_NEONDOT_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else [],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1809,6 +1995,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:arm64": ["-march=armv8.2-a+dotprod"],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1824,9 +2014,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_NEONDOT_MICROKERNEL_SRCS + PROD_NEONDOT_AARCH64_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else [],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1874,10 +2065,15 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_NEONDOTFP16ARITH_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else [],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1907,6 +2103,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-march=armv8.2-a+dotprod+fp16",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         platform_compiler_flags = [
             (
                 "(aarch64|arm64)",
@@ -1922,9 +2122,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ] if not is_arvr_mode() else [],
         labels = labels,
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -1956,6 +2157,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mfpu=neon-fp-armv8",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -1973,9 +2178,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_NEONFP16ARITH_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else [],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -2003,6 +2209,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:arm64": ["-march=armv8.2-a+fp16"],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -2018,9 +2228,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 PROD_NEONFP16ARITH_MICROKERNEL_SRCS + PROD_NEONFP16ARITH_AARCH64_MICROKERNEL_SRCS,
             ),
         ] if not is_arvr_mode() else [],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -2052,6 +2263,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-march=armv8.2-a+i8mm+fp16",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -2070,9 +2285,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -2101,6 +2317,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-mfpu=neon-fp-armv8",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -2113,9 +2333,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ),
         ],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -2142,6 +2363,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-march=armv8.2-a+fp16+dotprod",
             ],
         }),
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         labels = labels,
         platform_compiler_flags = [
             (
@@ -2151,9 +2376,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
@@ -2167,7 +2393,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "arm64_lib",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         labels = labels,
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
         deps = [
@@ -2270,7 +2495,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "armv7_lib",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         labels = labels,
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
         deps = [
@@ -2286,7 +2510,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "prod_ukernels",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         labels = labels,
-        fbandroid_link_whole = True,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
         deps = [
@@ -2320,13 +2543,19 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         exported_headers = {
             "xnnpack.h": "XNNPACK/include/xnnpack.h",
         },
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
         header_namespace = "",
         headers = subdir_glob([
             ("XNNPACK/src", "**/*.h"),
             ("XNNPACK/include", "**/*.h"),
         ]),
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
-        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS + [
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
             "-DXNN_NO_Q8_OPERATORS",
             "-DXNN_NO_F16_OPERATORS",
             "-DXNN_NO_NCHW_OPERATORS",

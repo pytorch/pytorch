@@ -73,8 +73,8 @@ class AssociativeScanOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("associative_scan")
 
-    def __call__(self, combine_fn, xs, dim):
-        return super().__call__(combine_fn, xs, dim)
+    def __call__(self, combine_fn, input, dim):
+        return super().__call__(combine_fn, input, dim)
 
 
 associative_scan_op = AssociativeScanOp()
@@ -82,13 +82,13 @@ associative_scan_op = AssociativeScanOp()
 
 def associative_scan(
     combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
-    xs: pytree.PyTree,
+    input: pytree.PyTree,
     dim: int,
     reverse: bool = False,
     combine_mode: str = "pointwise",
 ) -> torch.Tensor:
     r"""
-    Performs an inclusive scan with an associative combine function.
+    Performs an inclusive scan with an associative pointwise combine function.
 
     .. warning::
         `torch.associative_scan` is a prototype feature in PyTorch. It currently
@@ -102,15 +102,14 @@ def associative_scan(
     Args:
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
-            This function must be pure, i.e., no lifted arguments are supported at the moment,
-            satisfy the associative property and have no side-effects.
-        xs (torch.Tensor): The input tensor, or nested pytree of tensors.
+            This function must be pure, pointwise, and satisfy the associative property.
+        input (torch.Tensor): The input tensor, or nested pytree of tensors.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
-        reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
-        combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``, default ``pointwise``.
+        reverse (bool): A boolean stating if the scan should be reversed with respect to the dimension.
+        combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``.
             If ``combine_mode=pointwise``, ``combine_fn`` must be pure, may only contain pointwise operations
-            and ``xs`` must be CUDA tensors.
+            and ``input`` must be CUDA tensors.
             In all other cases ``combine_mode=generic`` should be used.
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
 
@@ -123,32 +122,27 @@ def associative_scan(
         cumsum = associative_scan(add, x, dim)
 
     """
-    if not callable(combine_fn):
-        raise RuntimeError("Combine_fn must be a callable, but got {combine_fn}")
-    if not isinstance(dim, int):
-        raise RuntimeError("Dim must be an int, but got " + str(type(dim)))
-    if combine_mode not in ["pointwise", "generic"]:
-        raise RuntimeError(
-            "Combine_mode must either 'pointwise' or 'generic', but got {combine_mode}"
-        )
+    assert callable(combine_fn), "combine_fn must be a callable, but got {combine_fn}"
+    assert isinstance(dim, int), "dim must be an int, but got {type(dim)}"
+    assert combine_mode in ["pointwise", "generic"]
 
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
             return torch.compile(associative_scan, fullgraph=True)(
-                combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
+                combine_fn, input, dim, reverse=reverse, combine_mode=combine_mode
             )
 
-    leaves, spec = pytree.tree_flatten(xs)
+    leaves, spec = pytree.tree_flatten(input)
 
     if combine_mode == "pointwise" and not all(l.device.type == "cuda" for l in leaves):
         raise ValueError(
             "For combine_mode='pointwise', all input tensors need to be on CUDA"
         )
 
-    if len(leaves) == 0:
-        raise RuntimeError("Expected at least 1 xs leaf")
-    if any(not isinstance(x, torch.Tensor) for x in leaves):
-        raise RuntimeError("xs leaves must be a Tensor")
+    assert len(leaves) >= 1, "expected at least 1 input leaf"
+    assert all(
+        isinstance(x, torch.Tensor) for x in leaves
+    ), "input leaves must be a Tensor"
 
     if reverse:
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
@@ -158,21 +152,20 @@ def associative_scan(
     dim = utils.canonicalize_dim(ndim, dim)
 
     for x in leaves[1:]:
-        assert x.shape == shape, "All xs tensors must have the same shape"
+        assert x.shape == shape, "All input tensors must have the same shape"
 
     out = combine_fn(
         pytree.tree_unflatten(leaves, spec),
         pytree.tree_unflatten(leaves, spec),
     )
     out_leaves, tree_out = pytree.tree_flatten(out)
-    if len(leaves) != len(out_leaves):
-        raise RuntimeError(
-            "The number of leaves of the pytree of the output of the operator needs to match the length of the pytree of the input"
-        )
-    if any(x.shape != shape for x in out_leaves):
-        raise RuntimeError(
-            "The pytree of the output of the operator needs to match the xs pytree"
-        )
+    assert len(leaves) == len(
+        out_leaves
+    ), "The pytree of the output of the operator needs to match the input pytree"
+    for x in out_leaves:
+        assert (
+            x.shape == shape
+        ), "The pytree of the output of the operator needs to match the input pytree"
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
@@ -201,7 +194,7 @@ def generic_associative_scan(operator, elems_flat, dim=0):
             or if input is a pytree ``(pytree, pytree) -> pytree``.
             This function must be pure, pointwise, and satisfy the associative property.
         elems_flat (torch.Tensor): A list of torch.Tensors converted from the pytree of
-            ``xs`` provided to ``associative_scan``.
+            ``input`` provided to ``associative_scan``.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
 
@@ -286,19 +279,19 @@ def generic_associative_scan(operator, elems_flat, dim=0):
 
 
 def trace_associative_scan(
-    proxy_mode, func_overload, combine_fn: Callable, xs: List[torch.Tensor], dim: int
+    proxy_mode, func_overload, combine_fn: Callable, input: List[torch.Tensor], dim: int
 ):
     with disable_proxy_modes_tracing():
-        sample_xs = [
+        sample_inputs = [
             torch.empty_like(
                 x,
                 dtype=x.dtype,
                 device=x.device,
                 requires_grad=x.requires_grad,
             )
-            for x in itertools.chain(xs, xs)
+            for x in itertools.chain(input, input)
         ]
-        combine_graph = reenter_make_fx(combine_fn)(*sample_xs)
+        combine_graph = reenter_make_fx(combine_fn)(*sample_inputs)
 
     outputs = None
     for node in combine_graph.graph.nodes:
@@ -314,10 +307,10 @@ def trace_associative_scan(
 
     assert outputs is not None
     assert len(outputs) == len(
-        xs
-    ), f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+        input
+    ), f"expected combine_fn to return {len(input)} results but got {len(outputs)}"
 
-    for i, o in zip(xs, outputs):
+    for i, o in zip(input, outputs):
         o_meta = o.meta["tensor_meta"]
         assert o_meta.dtype == i.dtype, (
             f"combine_fn output type mismatch, expected {i.dtype} "
@@ -328,20 +321,20 @@ def trace_associative_scan(
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, xs, dim)
+    args = (combine_graph, input, dim)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="associative_scan"
     )
 
     with disable_proxy_modes_tracing():
-        out = [aten.clone(x) for x in xs]
+        out = [aten.clone(x) for x in input]
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def associative_scan_op_dense(combine_fn, xs, dim):
+def associative_scan_op_dense(combine_fn, input, dim):
     raise NotImplementedError("associative_scan is not implemented for eager")
 
 
@@ -351,22 +344,22 @@ associative_scan_op.py_impl(DispatchKey.Autograd)(
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
-def associative_scan_proxy_mode(mode, combine_fn, xs, dim):
-    return trace_associative_scan(mode, associative_scan_op, combine_fn, xs, dim)
+def associative_scan_proxy_mode(mode, combine_fn, input, dim):
+    return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim)
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, dim):
+def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim):
     with mode:
-        return [x.clone() for x in xs]
+        return [x.clone() for x in input]
 
 
 @associative_scan_op.py_functionalize_impl
-def associative_scan_functionalize(ctx, combine_fn, xs, dim):
-    unwrapped_xs = ctx.unwrap_tensors(xs)
+def associative_scan_functionalize(ctx, combine_fn, input, dim):
+    unwrapped_input = ctx.unwrap_tensors(input)
     with ctx.redispatch_to_next() as m:
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
-        ret = associative_scan_op(functional_combine_fn, unwrapped_xs, dim)
+        ret = associative_scan_op(functional_combine_fn, unwrapped_input, dim)
     return ctx.wrap_tensors(ret)
