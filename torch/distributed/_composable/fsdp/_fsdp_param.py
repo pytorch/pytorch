@@ -665,7 +665,10 @@ class FSDPParam:
                 # (i.e. to avoid both self._sharded_param_data and self.sharded_param._local_tensor being
                 # captured as compiled autograd bwd graph inputs - they are aliases and share the same storage,
                 # so we don't want them to both be captured).
-                local_tensor = self._create_padded_local_tensor(self.sharded_param)
+                # Note that this has small performance penalty: re-creation of padded local_tensor
+                # involves copying the local_tensor into the bigger (padded) buffer. We will explore ways to
+                # optimize it if it becomes an issue in the future.
+                local_tensor = self._create_maybe_padded_local_tensor(self.sharded_param)
                 sharded_param_data = local_tensor.view(-1)
             else:
                 sharded_param_data = self._sharded_param_data
@@ -726,7 +729,7 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
-    def _create_padded_local_tensor(self, sharded_param):
+    def _create_maybe_padded_local_tensor(self, sharded_param):
         local_tensor = sharded_param._local_tensor
         if local_tensor.is_meta:
             return
@@ -752,7 +755,7 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
-        local_tensor = self._create_padded_local_tensor(new_param)
+        local_tensor = self._create_maybe_padded_local_tensor(new_param)
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         # Detach since we don't need gradients of `self.sharded_param` to flow back to the padded local_tensor.
