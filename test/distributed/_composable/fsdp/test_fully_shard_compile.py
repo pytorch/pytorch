@@ -799,6 +799,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
                     self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                    # NOTE: For the root unsharded params, we don't reshard after forward since for training,
+                    # the parameters would be freed and all-gathered immediately. Hence we still have
+                    # their resize and copy ops in the graph.
                     fwd_copy_count=4,
                     fwd_resize_count=4,
                     bwd_copy_count=0,
