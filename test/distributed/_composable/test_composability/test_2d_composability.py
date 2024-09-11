@@ -818,26 +818,5 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
 
-
-class TestDummyModel(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        torch.manual_seed(0)
-        self.net1 = nn.Linear(8, 16)
-        # self.net2 = nn.Linear(16, 32)
-        # self.net3 = nn.Linear(32, 64)
-        # self.net4 = nn.Linear(64, 8)
-
-    def forward(self, x):
-        x = F.relu(self.net1(x))
-        # x = F.relu(self.net2(x))
-        # x = F.relu(self.net3(x))
-        # x = F.relu(self.net4(x))
-        return x
-
-    def get_input(self):
-        return torch.rand(8, 8, device="cuda")
-
-
 if __name__ == "__main__":
     run_tests()
