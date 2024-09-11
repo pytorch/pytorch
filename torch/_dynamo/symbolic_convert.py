@@ -641,6 +641,11 @@ def break_graph_if_unsupported(*, push):
                 # Don't exit any modes we have entered,
                 # output bytecode will mutate the tf mode stack accordingly
                 if isinstance(b.with_context, TorchFunctionModeVariable):
+                    cg.extend_output(
+                        b.resume_fn().try_except_torch_function_mode(
+                            cg.code_options, cleanup
+                        )
+                    )
                     continue
                 assert b.with_context is not None
                 assert isinstance(b.with_context, (ContextWrappingVariable))
