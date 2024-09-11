@@ -76,7 +76,7 @@ class ReenterWith:
                 exn_tab_begin,
                 exn_tab_end,
                 except_jump_target,
-                self.stack_index + 1,
+                self.stack_index,
                 False,
             )
             setup_finally.append(exn_tab_begin)
@@ -127,13 +127,13 @@ class ReenterWith:
                 cleanup_complete_jump_target,
             ]
         else:
-            finally_exn_tab_end = create_instruction("RERAISE", arg=1)
+            finally_exn_tab_end = create_instruction("RAISE_VARARGS", argval=0)
             finally_exn_tab_target = create_instruction("COPY", arg=3)
             except_jump_target.exn_tab_entry = InstructionExnTabEntry(
                 except_jump_target,
-                finally_exn_tab_target,
                 finally_exn_tab_end,
-                self.stack_index + 2,
+                finally_exn_tab_target,
+                self.stack_index + 1,
                 True,
             )
             epilogue = [
@@ -142,10 +142,10 @@ class ReenterWith:
                 except_jump_target,  # PUSH_EXC_INFO
                 create_instruction("POP_TOP"),
                 *create_reset(),
-                create_instruction("RAISE_VARARGS", argval=0),
+                finally_exn_tab_end,
                 finally_exn_tab_target,  # COPY 3
                 create_instruction("POP_EXCEPT"),
-                finally_exn_tab_end,  # RERAISE 1
+                create_instruction("RERAISE", arg=1),  # RERAISE 1
                 cleanup_complete_jump_target,
             ]
 
