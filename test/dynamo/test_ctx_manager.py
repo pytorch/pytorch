@@ -1534,7 +1534,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_sdpa_kernel_ctx_manager1(self):
-        modified_backend_state = [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
+        modified_backend_state = [torch.nn.attention.SDPBackend.MATH]
 
         @torch._dynamo.allow_in_graph
         def check_backend_state_is_modified():
@@ -1545,7 +1545,7 @@ class GraphModule(torch.nn.Module):
         def f(x):
             with torch.nn.attention.sdpa_kernel(
                 # pyre-fixme[16]: Module `torch.nn.attention` has no attribute `SDPBackend`.
-                [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
+                [torch.nn.attention.SDPBackend.MATH]
             ):
                 output = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
                     torch.float32
@@ -1558,13 +1558,14 @@ class GraphModule(torch.nn.Module):
         opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
 
     def test_sdpa_kernel_ctx_manager2(self):
-        original_backend_state = torch.nn.attention._cur_sdpa_kernel_backends()
-        modified_backend_state = [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
+        original_backend_state = set(torch.nn.attention._cur_sdpa_kernel_backends())
+        modified_backend_state = [torch.nn.attention.SDPBackend.MATH]
 
         @torch._dynamo.allow_in_graph
         def check_backend_state_is_original():
             self.assertEqual(
-                torch.nn.attention._cur_sdpa_kernel_backends(), original_backend_state
+                set(torch.nn.attention._cur_sdpa_kernel_backends()),
+                original_backend_state,
             )
 
         @torch._dynamo.allow_in_graph
@@ -1585,7 +1586,7 @@ class GraphModule(torch.nn.Module):
             check_backend_state_is_original()
             with torch.nn.attention.sdpa_kernel(
                 # pyre-fixme[16]: Module `torch.nn.attention` has no attribute `SDPBackend`.
-                [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
+                [torch.nn.attention.SDPBackend.MATH]
             ):
                 output1 = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
                     torch.float32
@@ -1608,6 +1609,40 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend=cnts)
         opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
         self.assertEqual(cnts.frame_count, 3)
+
+    # test sdpa_kernel graph break with 2 arguments
+    def test_sdpa_kernel_ctx_manager3(self):
+        modified_backend_state = {
+            torch.nn.attention.SDPBackend.MATH,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+        }
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_modified():
+            self.assertEqual(
+                set(torch.nn.attention._cur_sdpa_kernel_backends()),
+                modified_backend_state,
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(
+                # pyre-fixme[16]: Module `torch.nn.attention` has no attribute `SDPBackend`.
+                [
+                    torch.nn.attention.SDPBackend.MATH,
+                    torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                ]
+            ):
+                # FLASH_ATTENTION may not be supported, but we're not actually
+                # doing any sdpa
+                x = x + 1
+                torch._dynamo.graph_break()
+                check_backend_state_is_modified()
+                x = x + 1
+
+            return x
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f(torch.randn(2, 2))
 
 
 if __name__ == "__main__":

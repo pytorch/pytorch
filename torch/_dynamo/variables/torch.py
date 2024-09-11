@@ -90,6 +90,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
         torch.nn.attention.sdpa_kernel,
+        torch.nn.attention._sdpa_kernel_variadic,
     ]
 )
 
@@ -335,6 +336,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 1 or (len(kwargs) == 1 and "backends" in kwargs)
             backends = args[0] if len(args) == 1 else kwargs["backends"]
             return SDPAKernelVariable.create(tx, backends.as_python_constant())
+        elif self.value is torch.nn.attention._sdpa_kernel_variadic:
+            return SDPAKernelVariable.create(
+                tx, [arg.as_python_constant() for arg in args]
+            )
 
         return super().call_function(tx, args, kwargs)
 

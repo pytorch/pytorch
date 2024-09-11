@@ -998,7 +998,12 @@ class SDPAKernelVariable(ContextWrappingVariable):
         )
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+    def __init__(
+        self,
+        target_values: List[torch.nn.attention.SDPBackend],
+        initial_values=None,
+        **kwargs,
+    ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -1008,14 +1013,11 @@ class SDPAKernelVariable(ContextWrappingVariable):
         nodes = []
         for backend in backends:
             # convert to/from string in order to bake the backend into FX graph
-            backend_name = torch.nn.attention._backend_name(backend)
-            if backend_name is None:
-                unimplemented(f"{backend} backend not found")
             nodes.append(
                 tx.output.create_node(
                     "call_function",
                     torch.nn.attention._backend_from_string,
-                    (backend_name,),
+                    (backend.name,),
                     {},
                 )
             )
@@ -1050,8 +1052,10 @@ class SDPAKernelVariable(ContextWrappingVariable):
     def module_name(self):
         return "torch.nn.attention"
 
+    # use a private version of sdpa_kernel that accepts variadic arguments
+    # since dynamo reconstructs the contents of target_values one-by-one
     def fn_name(self):
-        return "sdpa_kernel"
+        return "_sdpa_kernel_variadic"
 
 
 class StreamVariable(VariableTracker):

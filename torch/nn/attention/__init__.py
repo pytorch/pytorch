@@ -72,13 +72,6 @@ def _backend_from_string(name: str):
     return getattr(SDPBackend, name)
 
 
-def _backend_name(backend: SDPBackend):
-    for name in _backend_names.values():
-        if backend is getattr(SDPBackend, name):
-            return name
-    return None
-
-
 def _cur_sdpa_kernel_backends():
     backends: List[SDPBackend] = []
     for name, val in _backend_names.items():
@@ -134,6 +127,13 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
         yield {}
     finally:
         _sdpa_kernel(previous_backends)
+
+
+# variadic version of sdpa_kernel for dynamo to use while reconstructing
+@contextlib.contextmanager
+def _sdpa_kernel_variadic(*backends: SDPBackend):
+    with sdpa_kernel(list(backends)):
+        yield
 
 
 def _get_flash_version() -> str:
