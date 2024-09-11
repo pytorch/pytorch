@@ -172,7 +172,7 @@ class CachingAutotuner(KernelInterface):
         triton_meta,  # passed directly to triton
         configs,
         save_cache_hook,
-        mutated_arg_names,
+        mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
         heuristic_type,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
@@ -408,7 +408,7 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
-            if self.device_props.type != "hip":
+            if self.device_props.type == "hip":
                 if "waves_per_eu" in compile_meta:
                     options["waves_per_eu"] = compile_meta["waves_per_eu"]
                 if "matrix_instr_nonkdim" in compile_meta:
@@ -677,6 +677,7 @@ class CachingAutotuner(KernelInterface):
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
 
+        # [Note: clone mutated buffers]
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
         # it leads to increase memory use
@@ -1139,10 +1140,10 @@ def _check_max_grid_x(size_hints, x, num_warps):
     while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
         x *= 2  # Scale up XBLOCK if grid exceeds limits
         num_blocks = num_blocks // 2
-        if x >= max_grid_x:
-            raise AssertionError(
-                "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
-            )
+    if (num_blocks * num_warps * warp_size) > max_grid_x:
+        raise AssertionError(
+            "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
+        )
     return x, num_blocks
 
 
