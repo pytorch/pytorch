@@ -544,6 +544,123 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (8,))
+    @parametrize("in_features", (128,))
+    @parametrize("size_0", (4,))
+    @parametrize("size_1", (14,))
+    @parametrize("out_features", (512,))
+    @parametrize("out_features_conv", (256,))
+    @parametrize(
+        "bias",
+        (
+            False,
+            True,
+        ),
+    )
+    @dtypes(torch.float32)
+    def test_linear_unsupported_epilogue_fusion(
+        self,
+        batch_size,
+        in_features,
+        size_0,
+        size_1,
+        out_features,
+        out_features_conv,
+        bias,
+        dtype,
+    ):
+        img_size_0 = int(size_0 * size_0)
+        img_size_1 = int(size_1 * size_1)
+        conv_shape = int(size_0 * size_1)
+        flatten_BS = int(batch_size * size_0 * size_0 * size_1 * size_1)
+
+        # Reproducer from the jx_nest_base model in timm
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(in_features, in_features, bias=bias)
+                self.linear2 = torch.nn.Linear(out_features, in_features, bias=bias)
+                self.conv = torch.nn.Conv2d(
+                    in_features,
+                    out_features_conv,
+                    kernel_size=3,
+                    padding=1,
+                    stride=1,
+                    dilation=1,
+                    groups=1,
+                )
+
+            def forward(self, mul_239, view_425, add_184):
+                _mkl_linear_91 = self.linear1(view_425)
+                view_426 = torch.ops.aten.reshape.default(
+                    _mkl_linear_91, [batch_size, img_size_0, img_size_1, in_features]
+                )
+                _mkl_linear_91 = None
+                add_187 = torch.ops.aten.add.Tensor(add_184, view_426)
+                add_184 = view_426 = None
+                view_429 = torch.ops.aten.reshape.default(
+                    mul_239, [flatten_BS, out_features]
+                )
+                mul_239 = None
+
+                _mkl_linear_89 = self.linear2(view_429)
+
+                view_430 = torch.ops.aten.reshape.default(
+                    _mkl_linear_89, [batch_size, img_size_0, img_size_1, in_features]
+                )
+                _mkl_linear_89 = None
+
+                add_191 = torch.ops.aten.add.Tensor(add_187, view_430)
+                add_187 = view_430 = None
+
+                view_431 = torch.ops.aten.reshape.default(
+                    add_191, [batch_size, size_0, size_0, size_1, size_1, in_features]
+                )
+                add_191 = None
+                permute_203 = torch.ops.aten.permute.default(
+                    view_431, [0, 1, 3, 2, 4, 5]
+                )
+                view_431 = None
+                clone_188 = torch.ops.aten.clone.default(
+                    permute_203, memory_format=torch.contiguous_format
+                )
+                permute_203 = None
+                view_432 = torch.ops.aten.reshape.default(
+                    clone_188, [batch_size, conv_shape, conv_shape, in_features]
+                )
+                clone_188 = None
+                permute_204 = torch.ops.aten.permute.default(view_432, [0, 3, 1, 2])
+                view_432 = None
+
+                _convolution_pointwise_default_1 = self.conv(permute_204)
+
+                return _convolution_pointwise_default_1
+
+        mul_239 = torch.randn(batch_size, img_size_0, img_size_1, out_features)
+        view_425 = torch.randn(flatten_BS, in_features)
+        add_184 = torch.randn(batch_size, img_size_0, img_size_1, in_features)
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast(
+            enabled=dtype == torch.bfloat16
+        ):
+            self.common(
+                mod,
+                (
+                    mul_239,
+                    view_425,
+                    add_184,
+                ),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        # TODO: change cpp_epilogue_fusion_counter to 1 once supported
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (384, 385))

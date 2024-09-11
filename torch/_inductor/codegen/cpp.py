@@ -4146,11 +4146,42 @@ class CppScheduling(BaseScheduling):
             return 0
 
     def can_fuse_vertical(self, node1, node2):
+        # TODO: Add support of fusion when the read of template buffer and
+        # the write of epilogue output in the epilogue node don't have the same index.
+        def same_index_for_template_read_and_epilogue_write_in_epilogue(
+            template, epilogue
+        ):
+            assert template.is_template()
+            template_buf_name = template.node.get_name()
+
+            epilogue_reads = epilogue.node.get_reads()
+            indexes_of_template_buf_read_in_epilogue = [
+                read.index for read in epilogue_reads if read.name == template_buf_name
+            ]
+
+            if len(list(set(indexes_of_template_buf_read_in_epilogue))) != 1:
+                return False
+
+            index_of_template_buf_read_in_epilogue = (
+                indexes_of_template_buf_read_in_epilogue[0]
+            )
+
+            epilogue_writes = epilogue.node.get_read_writes().writes
+            return all(
+                epilogue_write.index == index_of_template_buf_read_in_epilogue
+                for epilogue_write in epilogue_writes
+            )
+
         if node2.is_template():
             # TODO(jgong5): support pre-op fusion with template
             return False
         if node1.is_template():
-            return not node2.is_reduction()
+            return (
+                not node2.is_reduction()
+                and same_index_for_template_read_and_epilogue_write_in_epilogue(
+                    node1, node2
+                )
+            )
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
