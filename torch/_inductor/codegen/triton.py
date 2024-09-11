@@ -2641,7 +2641,7 @@ class TritonKernel(SIMDKernel):
         mutated_args = sorted(mutated_args)
 
         triton_meta_signature = signature_to_meta(
-            signature, size_dtype=self.index_dtype
+            signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
         triton_meta = {
             "signature": triton_meta_signature,

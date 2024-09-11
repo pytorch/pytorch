@@ -662,6 +662,7 @@ class ComboKernel(Kernel):
         selected_kernel: TritonKernel,
         pointwise_with_reduce: bool = False,
         signature: Optional[List[Any]] = None,
+        argdefs: Optional[List[str]] = None,
     ) -> str:
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
@@ -850,6 +851,7 @@ class ComboKernel(Kernel):
                 selected_kernel,
                 pointwise_with_reduce=pointwise_with_reduction,
                 signature=signature,
+                argdefs=argdefs,
             )
         )
         code.writeline(

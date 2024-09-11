@@ -214,7 +214,9 @@ class TritonTemplateKernel(TritonKernel):
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
+            "signature": signature_to_meta(
+                signature, size_dtype=self.index_dtype, argdefs=argdefs
+            ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
         }

@@ -1312,6 +1312,7 @@ class WrapperCodeGen(CodeGen):
                 signature,
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
+                argdefs=kernel.arg_names,
             ),
             "device": DeviceProperties.create(
                 V.graph.scheduler.get_current_device_or_throw()

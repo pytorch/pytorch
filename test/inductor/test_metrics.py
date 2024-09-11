@@ -14,7 +14,7 @@ example_kernel = """
     reduction_hint=ReductionHint.INNER,
     filename=__file__,
     triton_meta={
-        'signature': {0: '*fp32', 1: '*fp32', 2: 'i32', 3: 'i32'},
+        'signature': {'in_out_ptr0': '*fp32', 'in_ptr0': '*fp32', 'xnumel': 'i32', 'rnumel': 'i32'},
         'device': 0,
         'device_type': 'GPU_TYPE',
         'constants': {},
