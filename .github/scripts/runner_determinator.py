@@ -362,7 +362,7 @@ def get_runner_prefix(
             enabled = True
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
-            if random.uniform(0,100) <= experiment_settings.rollout_perc:
+            if random.uniform(0, 100) <= experiment_settings.rollout_perc:
                 log.info(
                     f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."
                 )
