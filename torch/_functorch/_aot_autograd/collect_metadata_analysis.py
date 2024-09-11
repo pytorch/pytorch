@@ -46,7 +46,7 @@ from .schemas import (
     OutputType,
     ViewAndMutationMeta,
 )
-from .subclass_utils import create_subclass_meta
+from .subclass_utils import create_subclass_meta, subclass_setattr
 from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
 
 
@@ -107,7 +107,7 @@ def coerce_tangent(x, memory_format=torch.contiguous_format):
             elem = getattr(out, attr)
             new_elem = coerce_tangent(elem, memory_format[1 + i])
             if new_elem is not elem:
-                setattr(out, attr, new_elem)
+                subclass_setattr(out, attr, new_elem)
 
     return out
 
@@ -145,7 +145,7 @@ def coerce_tangent_and_suggest_memory_format(
             out_memory_format.append(new_elem_memory_format)
 
             if new_elem is not elem:
-                setattr(out, attr, new_elem)
+                subclass_setattr(out, attr, new_elem)
 
     return out, out_memory_format
 

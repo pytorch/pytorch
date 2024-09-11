@@ -347,3 +347,11 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
         for i, inp in enumerate(updated_input_info)
         if inp.mutation_type == MutationType.MUTATED_OUT_GRAPH
     ]
+
+
+def subclass_setattr(s, attr, value):
+    # setattr on Subclass could fail with AttributeError e.g. NestedTensor for _min_seqlen_tensor
+    try:
+        setattr(s, attr, value)
+    except AttributeError:
+        s.__dict__[attr] = value

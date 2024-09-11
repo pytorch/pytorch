@@ -55,6 +55,7 @@ from .schemas import (
 from .subclass_utils import (
     get_types_for_subclass,
     requires_subclass_dispatch,
+    subclass_setattr,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
@@ -1456,7 +1457,8 @@ class AOTDispatchAutograd:
             new_elem = AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
                 elem, memory_format[1 + i]
             )
-            setattr(x, attr, new_elem)
+            if new_elem is not elem:
+                subclass_setattr(x, attr, new_elem)
 
         return x
 
