@@ -6,14 +6,15 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/col2im_native.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/im2col_native.h>
 #endif
 
 namespace at::native {
 using namespace mps;
 static MetalShaderLibrary lib(R"IM2COL_METAL(
+// Heavily inspired by https://github.com/pytorch/pytorch/blob/09519eb19/aten/src/ATen/native/cuda/im2col.cuh#L51
 template<typename T>
 void im2col_kernel(
      constant T  * input,
@@ -87,32 +88,19 @@ INSTANTIATE_IM2COL(bfloat);
 )IM2COL_METAL");
 
 namespace {
-static void im2col_out_mps_template(
-    Tensor& output,
-    const Tensor& input_,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  TORCH_CHECK(
-      kernel_size.size() == 2,
-      "It is expected kernel_size equals to 2, but got size ",
-      kernel_size.size());
+static void im2col_out_mps_template(Tensor& output,
+                                    const Tensor& input_,
+                                    IntArrayRef kernel_size,
+                                    IntArrayRef dilation,
+                                    IntArrayRef padding,
+                                    IntArrayRef stride) {
+  TORCH_CHECK(kernel_size.size() == 2, "It is expected kernel_size equals to 2, but got size ", kernel_size.size());
 
-  TORCH_CHECK(
-      dilation.size() == 2,
-      "It is expected dilation equals to 2, but got size ",
-      dilation.size());
+  TORCH_CHECK(dilation.size() == 2, "It is expected dilation equals to 2, but got size ", dilation.size());
 
-  TORCH_CHECK(
-      padding.size() == 2,
-      "It is expected padding equals to 2, but got size ",
-      padding.size());
+  TORCH_CHECK(padding.size() == 2, "It is expected padding equals to 2, but got size ", padding.size());
 
-  TORCH_CHECK(
-      stride.size() == 2,
-      "It is expected stride equals to 2, but got size ",
-      stride.size());
+  TORCH_CHECK(stride.size() == 2, "It is expected stride equals to 2, but got size ", stride.size());
 
   const auto kernel_height = kernel_size[0];
   int64_t kernel_width = kernel_size[1];
@@ -137,12 +125,9 @@ static void im2col_out_mps_template(
   int64_t input_height = input.size(2);
   int64_t input_width = input.size(3);
 
-  int64_t output_height = (input_height + 2 * pad_height -
-                           (dilation_height * (kernel_height - 1) + 1)) /
-          stride_height + 1;
-  int64_t output_width = (input_width + 2 * pad_width -
-                          (dilation_width * (kernel_width - 1) + 1)) /
-          stride_width + 1;
+  int64_t output_height =
+      (input_height + 2 * pad_height - (dilation_height * (kernel_height - 1) + 1)) / stride_height + 1;
+  int64_t output_width = (input_width + 2 * pad_width - (dilation_width * (kernel_width - 1) + 1)) / stride_width + 1;
   int64_t n_output_plane = n_input_plane * kernel_width * kernel_height;
   int64_t output_length = output_height * output_width;
 
@@ -152,8 +137,14 @@ static void im2col_out_mps_template(
   auto im2colPSO = lib.getPipelineStateForFunc("im2col_" + mps::scalarToMetalTypeString(input));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      std::array<int32_t, 4> kernel_dilation = {static_cast<int32_t>(kernel_width), static_cast<int32_t>(kernel_height), static_cast<int32_t>(dilation_width), static_cast<int32_t>(dilation_height)};
-      std::array<int32_t, 4> padding_stride = {static_cast<int32_t>(pad_width), static_cast<int32_t>(pad_height), static_cast<int32_t>(stride_width), static_cast<int32_t>(stride_height)};
+      std::array<int32_t, 4> kernel_dilation = {static_cast<int32_t>(kernel_width),
+                                                static_cast<int32_t>(kernel_height),
+                                                static_cast<int32_t>(dilation_width),
+                                                static_cast<int32_t>(dilation_height)};
+      std::array<int32_t, 4> padding_stride = {static_cast<int32_t>(pad_width),
+                                               static_cast<int32_t>(pad_height),
+                                               static_cast<int32_t>(stride_width),
+                                               static_cast<int32_t>(stride_height)};
       std::array<int64_t, 4> input_sizes = {input_width, input_height, n_input_plane, batch_size};
       std::array<int64_t, 4> input_strides = {input.stride(3), input.stride(2), input.stride(1), input.stride(0)};
       std::array<int64_t, 4> output_strides = {output.stride(2), output.stride(1), output.stride(0), output_width};
@@ -172,7 +163,7 @@ static void im2col_out_mps_template(
       mtl_setBytes(computeEncoder, output_strides, 5);
       mtl_setBytes(computeEncoder, input_sizes, 6);
       [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_input_plane, batch_size)
-                      threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+                threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(stream);
       }
@@ -186,25 +177,22 @@ static void im2col_out_mps_template(
 
 } // anonymous namespace
 Tensor& im2col_out_mps(const Tensor& input,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    Tensor& output) {
-  im2col_out_mps_template(
-      output, input, kernel_size, dilation, padding, stride);
+                       IntArrayRef kernel_size,
+                       IntArrayRef dilation,
+                       IntArrayRef padding,
+                       IntArrayRef stride,
+                       Tensor& output) {
+  im2col_out_mps_template(output, input, kernel_size, dilation, padding, stride);
   return output;
 }
 
-Tensor im2col_mps(
-    const Tensor& input,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
+Tensor im2col_mps(const Tensor& input,
+                  IntArrayRef kernel_size,
+                  IntArrayRef dilation,
+                  IntArrayRef padding,
+                  IntArrayRef stride) {
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  im2col_out_mps_template(
-      output, input, kernel_size, dilation, padding, stride);
+  im2col_out_mps_template(output, input, kernel_size, dilation, padding, stride);
   return output;
 }
 } // namespace at::native
