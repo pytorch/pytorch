@@ -18,7 +18,7 @@ template<typename T>
 void im2col_kernel(
      constant T  * input,
      device   T * output,
-     ulong2 kernel_size,
+     uint2 kernel_size,
      long2 input_offset,
      long2 input_size,
      long2 dilation,
@@ -46,6 +46,7 @@ kernel void im2col(
     constant int4            & padding_stride  [[buffer(3)]],
     constant ulong4          & input_strides   [[buffer(4)]],
     constant ulong4          & output_strides  [[buffer(5)]],
+    constant long4           & input_sizes     [[buffer(6)]],
     uint3                      thread_index    [[thread_position_in_grid]]) {
     // thread_index is (output_length, input_channels, input_batch)
     const auto N = thread_index.z;
@@ -59,7 +60,7 @@ kernel void im2col(
     ulong kernel_size = kernel_dilation.x * kernel_dilation.y;
     outputData += N * output_strides.z + C * kernel_size * output_strides.y + L * output_strides.x;
     inputData += N * input_strides.w + C * input_strides.z;
-    im2col_kernel(inputData, outputData, kernel_size, long2(i_x, i_y), long2(4, 4), long2(kernel_dilation.zw), input_strides.xy, output_strides.y);
+    im2col_kernel(inputData, outputData, kernel_dilation.xy, long2(i_x, i_y), input_sizes.xy, long2(kernel_dilation.zw), input_strides.xy, output_strides.y);
 }
 
 #define INSTANTIATE_IM2COL(DTYPE)                                          \
@@ -72,9 +73,15 @@ kernel void im2col<DTYPE>(                                                 \
     constant int4            & padding_stride  [[buffer(3)]],              \
     constant ulong4          & input_strides   [[buffer(4)]],              \
     constant ulong4          & output_strides  [[buffer(5)]],              \
+    constant long4           & input_sizes     [[buffer(6)]],              \
     uint3                      thread_index  [[thread_position_in_grid]])
 
+INSTANTIATE_IM2COL(bool);
 INSTANTIATE_IM2COL(float);
+INSTANTIATE_IM2COL(half);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_IM2COL(bfloat);
+#endif
 )IM2COL_METAL");
 
 namespace {
@@ -145,6 +152,7 @@ static void im2col_out_mps_template(
     @autoreleasepool {
       std::array<int32_t, 4> kernel_dilation = {static_cast<int32_t>(kernel_width), static_cast<int32_t>(kernel_height), static_cast<int32_t>(dilation_width), static_cast<int32_t>(dilation_height)};
       std::array<int32_t, 4> padding_stride = {static_cast<int32_t>(pad_width), static_cast<int32_t>(pad_height), static_cast<int32_t>(stride_width), static_cast<int32_t>(stride_height)};
+      std::array<int64_t, 4> input_sizes = {input_width, input_height, n_input_plane, batch_size};
       std::array<int64_t, 4> input_strides = {input.stride(3), input.stride(2), input.stride(1), input.stride(0)};
       std::array<int64_t, 4> output_strides = {output.stride(2), output.stride(1), output.stride(0), output_width};
       getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input});
@@ -160,6 +168,7 @@ static void im2col_out_mps_template(
       mtl_setBytes(computeEncoder, padding_stride, 3);
       mtl_setBytes(computeEncoder, input_strides, 4);
       mtl_setBytes(computeEncoder, output_strides, 5);
+      mtl_setBytes(computeEncoder, input_sizes, 6);
       [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_input_plane, batch_size)
                       threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
       if (getMPSProfiler().isCapturing()) {
