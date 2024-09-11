@@ -120,7 +120,7 @@ test_failures = {
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
-    "test_to_device_constant_dynamic_shapes": TestFailure("cpu"),
+    "test_to_device_constant_dynamic_shapes": TestFailure(("cpu",)),
     "test_upsample_nearest2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
