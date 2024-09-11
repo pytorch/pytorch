@@ -37,11 +37,6 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._guards import Source
 
-import logging
-
-
-log = logging.getLogger("torch")
-
 
 _F = TypeVar("_F", bound=Callable)
 

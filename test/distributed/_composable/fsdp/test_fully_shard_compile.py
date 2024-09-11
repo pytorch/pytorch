@@ -675,9 +675,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         file_check, **bwd_rs_block_info
                     )
                 file_check.run(bwd_code)
-            elif fullgraph:
-                # TODO(yf225): fix the graph check above!
-                pass
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.
