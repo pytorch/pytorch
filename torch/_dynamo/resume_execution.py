@@ -6,7 +6,6 @@ import types
 from typing import Any, cast, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
-    add_push_null,
     create_call_function,
     create_call_method,
     create_dup_top,
@@ -63,7 +62,6 @@ class ReenterWith:
         cleanup_complete_jump_target = create_instruction("NOP")
 
         setup_finally: List[Instruction] = []
-        _initial_push_null(setup_finally)
 
         if sys.version_info < (3, 11):
             setup_finally.append(
@@ -76,7 +74,7 @@ class ReenterWith:
                 exn_tab_begin,
                 exn_tab_end,
                 except_jump_target,
-                self.stack_index,
+                self.stack_index + 1,
                 False,
             )
             setup_finally.append(exn_tab_begin)
@@ -88,13 +86,12 @@ class ReenterWith:
                 ),
                 create_instruction("LOAD_ATTR", argval="set_torch_function_mode_stack"),
             ]
-            add_push_null(insts)
             return [
                 *insts,
                 create_instruction(
                     "LOAD_FAST", argval="___prev_torch_function_mode_stack"
                 ),
-                *create_call_function(1, False),
+                *create_call_function(1, True),
                 create_instruction("POP_TOP"),
             ]
 
@@ -133,7 +130,7 @@ class ReenterWith:
                 except_jump_target,
                 finally_exn_tab_end,
                 finally_exn_tab_target,
-                self.stack_index + 1,
+                self.stack_index + 2,
                 True,
             )
             epilogue = [
