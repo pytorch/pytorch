@@ -152,6 +152,7 @@ class OptimizedModule(torch.nn.Module):
         "_orig_mod",
         "dynamo_ctx",
         "_torchdynamo_orig_callable",
+        "_torchdynamo_backend",
         "get_compiler_config",
         "forward",
         "_forward",
@@ -383,6 +384,9 @@ class _TorchDynamoContext:
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod.forward
 
+            # Attach the backend with which this module was compiled.
+            new_mod._torchdynamo_backend = innermost_fn(self.callback)
+
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
@@ -479,6 +483,8 @@ class _TorchDynamoContext:
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+
+        _fn._torchdynamo_backend = innermost_fn(self.callback)  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
@@ -605,6 +611,7 @@ class DisableContext(_TorchDynamoContext):
             mod = fn
             new_mod = OptimizedModule(mod, self)
             new_mod._torchdynamo_orig_callable = mod.forward
+            new_mod._torchdynamo_backend = self.callback
             return new_mod
 
         if inspect.isclass(fn):
@@ -638,6 +645,7 @@ class DisableContext(_TorchDynamoContext):
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_backend = None  # type: ignore[attr-defined]
 
         return _fn
 
