@@ -133,6 +133,7 @@ class PrefixedSymbol(sympy.Symbol):
 def make_symbol(
     prefix: SymT,
     idx: int,
+    *,
     integer: Optional[bool] = None,
     nonnegative: Optional[bool] = None,
     positive: Optional[bool] = None,
