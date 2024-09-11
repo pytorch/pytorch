@@ -404,7 +404,7 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
         t = type(expr)
 
     def is_neg(t):
-        return t.is_negative or (isinstance(t, sympy.Mul) and t.args[0].is_negative)
+        return (t.is_Number and t.is_negative) or (isinstance(t, sympy.Mul) and t.args[0].is_Number and t.args[0].is_negative)
 
     lhs = 0
     rhs = _reduce_to_lowest_terms(rhs)
@@ -416,12 +416,14 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
                 neg.append(-term)
             else:
                 pos.append(term)
-        lhs = sympy.Add(*neg)
-        rhs = sympy.Add(*pos)
+        lhs = sympy.Add._from_args(neg)
+        rhs = sympy.Add._from_args(pos)
     elif is_neg(rhs):
         # lhs == 0
         lhs, rhs = -rhs, 0
-    return t(lhs, rhs)
+    # We don't have to evaluate here because lhs, rhs came from a Boolean
+    # and it was already simplified
+    return t(lhs, rhs, evaluate=False)
 
 
 def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
@@ -432,20 +434,33 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     Useful when an expression is == or != to 0.
     """
     def integer_coefficient(x):
-        if isinstance(x, sympy.Integer):
+        if x.is_Integer:
             return abs(int(x))
-        elif isinstance(x, sympy.Mul):
-            return math.prod([abs(int(arg)) for arg in x.args if isinstance(arg, sympy.Integer)])
+        elif x.is_Mul:
+            # If one of the args of a Mul is an Integer, it is the
+            # first arg. eg: args(2*x*3*y) == (6, x, y)
+            return abs(int(x.args[0])) if x.args[0].is_Integer else 1
         else:
             return 1
 
-    if isinstance(expr, sympy.Add):
+    def div_by_factor(x, factor):
+        if x.is_Integer:
+            return x / factor
+        elif x.is_Mul:
+            return sympy.Mul._from_args((x.args[0] / factor, *x.args[1:]), is_commutative=x.is_commutative)
+
+    if expr.is_Add:
         atoms = expr.args
         factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
+        if factor == 1:
+            return expr
         atoms = [x / factor for x in atoms]
-        return sympy.Add(*atoms)
-    else:
-        return expr / integer_coefficient(expr)
+        return sympy.Add._from_args(atoms)
+    elif expr.is_Integer:
+        return sympy.One
+    elif expr.is_Mul:
+        return div_by_factor(expr, integer_coefficient(expr))
+    return expr
 
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
@@ -4462,7 +4477,7 @@ class ShapeEnv:
         subst = {}
         for e in axioms:
             if e.free_symbols.issubset(expr.free_symbols):
-                subst.update(dict(self.get_implications(e)))
+                subst.update(dict(self.get_implications(self.simplify(e))))
 
         expr = expr.xreplace(subst)
 
@@ -4569,7 +4584,14 @@ class ShapeEnv:
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
         """Apply symbol replacements to any symbols in the given expression
         """
-        replacements = {s: self._find(cast(sympy.Symbol, s)) for s in expr.free_symbols}
+        replacements = {}
+        for s in expr.free_symbols:
+            r = self._find(cast(sympy.Symbol, s))
+            # Micro-optimization: only do replacements if r and s are different
+            # Otherwise, xreplace is not a no-op and will trigger expensive
+            # assumption queries if expr has a relational node.
+            if not r.is_Symbol or r != s:
+                replacements[s] = r
         return safe_expand(expr.xreplace(replacements))
 
     @_lru_cache

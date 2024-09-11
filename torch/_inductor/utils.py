@@ -1054,7 +1054,9 @@ def is_big_gpu(index) -> bool:
 
 
 def use_max_autotune() -> bool:
-    return config.max_autotune or config.max_autotune_gemm
+    return (
+        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
+    )
 
 
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:

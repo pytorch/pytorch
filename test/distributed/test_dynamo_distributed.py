@@ -127,6 +127,24 @@ def get_mutating_model(
     return m, inputs, outputs
 
 
+class ForcedGetAttrMod(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.linear = torch.nn.Linear(1, 1)
+        self.__dict__["forced_linear"] = torch.nn.Linear(1, 1).to(device=device)
+        self.counter = 0
+
+    def forward(self, x):
+        self.counter += 1
+        return x * self.linear(x) * self.forced_linear.weight
+
+
+def get_forced_getattr_module(device):
+    mod = ForcedGetAttrMod(device).to(device=device)
+    x = torch.randn(1, 1, device=device)
+    return mod, x, mod(x)
+
+
 class ToyInnerModel(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -626,6 +644,35 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertEqual(len(counters["graph_break"]), 1)
             first_graph_break = list(counters["graph_break"].keys())[0]  # noqa: RUF015
             self.assertTrue("setattr" not in first_graph_break)
+
+    @config.patch(inline_inbuilt_nn_modules=False)
+    @config.patch(enable_compiler_collectives=True)
+    @skip_if_lt_x_gpu(1)
+    def test_fsdp_unspecialized_forced_getattr_no_inline(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            from torch._dynamo.utils import counters
+
+            counters.clear()
+            m, inputs, correct_outputs = get_forced_getattr_module(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+    @config.patch(enable_compiler_collectives=True)
+    @skip_if_lt_x_gpu(1)
+    def test_fsdp_unspecialized_forced_getattr_inline(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            from torch._dynamo.utils import counters
+
+            counters.clear()
+            m, inputs, correct_outputs = get_forced_getattr_module(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
 
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
