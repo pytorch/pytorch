@@ -144,6 +144,12 @@
 #define TORCH_HIP_API C10_IMPORT
 #endif
 
+#if defined(TORCH_MTIA_BUILD_MAIN_LIB)
+#define TORCH_MTIA_API C10_EXPORT
+#else
+#define TORCH_MTIA_API C10_IMPORT
+#endif
+
 #if defined(TORCH_XPU_BUILD_MAIN_LIB)
 #define TORCH_XPU_API C10_EXPORT
 #else

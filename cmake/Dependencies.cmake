@@ -88,6 +88,17 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ MTIA
+if(USE_MTIA)
+  include(${CMAKE_CURRENT_LIST_DIR}/public/mtia.cmake)
+  if(NOT PYTORCH_FOUND_MTIA)
+    message(WARNING
+      "Not compiling with MTIA. Suppress this warning with "
+      "-DUSE_CUDA=OFF.")
+    caffe2_update_option(USE_MTIA OFF)
+  endif()
+endif()
+
 # ---[ XPU
 if(USE_XPU)
   include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)

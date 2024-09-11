@@ -153,6 +153,10 @@ if(USE_ROCM)
   add_subdirectory(hip)
 endif()
 
+if(USE_MTIA)
+  add_subdirectory(mtia)
+endif()
+
 if(USE_XPU)
   add_subdirectory(xpu)
 endif()
