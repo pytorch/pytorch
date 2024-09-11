@@ -1054,7 +1054,9 @@ def is_big_gpu(index) -> bool:
 
 
 def use_max_autotune() -> bool:
-    return config.max_autotune or config.max_autotune_gemm
+    return (
+        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
+    )
 
 
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
@@ -1251,10 +1253,14 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
         num_threads=parallel_num_threads(),
     )
 
+    def is_last_dim_stride1(x):
+        x.freeze_layout()
+        return x.get_stride()[-1] == 1
+
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
+        and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
     )

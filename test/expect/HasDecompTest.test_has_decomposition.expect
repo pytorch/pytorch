@@ -1301,8 +1301,6 @@ aten::to_padded_tensor.out
 aten::topk
 aten::topk.values
 aten::transpose_
-aten::transpose_copy.int
-aten::transpose_copy.int_out
 aten::triangular_solve
 aten::triangular_solve.X
 aten::unbind_copy.int
