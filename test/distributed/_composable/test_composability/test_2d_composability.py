@@ -357,8 +357,8 @@ class TestFullyShard2DTraining(FSDPTest):
         model(model.get_input()).sum().backward()
         optim.step()
         # ref_msd, ref_osd are both the default sharded state dict
-        ref_msd = copy.deepcopy(model.state_dict())
-        ref_osd = copy.deepcopy(optim.state_dict())
+        ref_msd = copy.deepcopy(get_model_state_dict(model))
+        ref_osd = copy.deepcopy(get_optimizer_state_dict(model, optimizers=optim))
 
         options = StateDictOptions(
             full_state_dict=True, cpu_offload=True, broadcast_from_rank0=True
@@ -371,8 +371,11 @@ class TestFullyShard2DTraining(FSDPTest):
         set_optimizer_state_dict(
             model, optimizers=optim, optim_state_dict=full_osd, options=options
         )
-        new_msd = model.state_dict()
-        new_osd = optim.state_dict()
+    
+        # check after setting full state dict, the model and optim default sharded state dict
+        # are the same as the initial default sharded state dict.
+        new_msd = get_model_state_dict(model)
+        new_osd = get_optimizer_state_dict(model, optimizers=optim)
         self.assertEqual(ref_msd, new_msd)
         self.assertEqual(ref_osd, new_osd)
 
