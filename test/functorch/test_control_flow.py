@@ -5374,6 +5374,7 @@ def forward(self, l_inp_, l_tmp_):
         ):
             functional_f(example_init, example_inputs)
 
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     def test_scan_pytree_closure(self):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
