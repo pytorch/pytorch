@@ -386,7 +386,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     CONDA_CMAKE=yes
-    TRITON=yes
     TRITON_CPU=yes
     ;;
   pytorch-linux-focal-linter)
