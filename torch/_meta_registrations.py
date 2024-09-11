@@ -1,9 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
-import operator
 from enum import Enum
-from functools import reduce
 from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -6536,7 +6534,7 @@ def meta_split_with_sizes(
         new_shape[dim] = split_size
         # We mimic narrow which calls _slice_in_dim_meta which in turn calls _slice_meta
         # By doing that we avoid a lot of checks in slice_in_dim and slice
-        offset = reduce(operator.mul, self.stride()[dim + 1 :]) * start_idx
+        offset = self.stride()[dim] * start_idx
         result.append(
             self.as_strided(new_shape, self.stride(), self.storage_offset() + offset)
         )
