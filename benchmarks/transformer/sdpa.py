@@ -4,6 +4,7 @@ from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Callable, List, Tuple
+from enum import Enum
 
 from tabulate import tabulate
 from tqdm import tqdm
@@ -15,23 +16,7 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention
 
 
-class ExperimentName(Enum):
-    SDPA = 1
-    GQA = 2
-
-
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
-    # warmup
-    for _ in range(5):
-        func(*args, **kwargs)
-    t0 = benchmark.Timer(
-        stmt="func(*args, **kwargs)",
-        globals={"args": args, "kwargs": kwargs, "func": func},
-    )
-    return t0.adaptive_autorange(min_run_time=0.1).median * 1e6
-
-
-def benchmark_torch_function_in_microseconds_(func: Callable, *args, **kwargs) -> float:
     # warmup
     for _ in range(5):
         func(*args, **kwargs)
@@ -115,18 +100,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         sdpa_kernel(config.backend) if config.backend is not None else nullcontext()
     )
     with context:
-        # To compare enable gqa with repeat_interleave case
-        kv_repeat_time = 0
-        if config.tensor_repeat_interleave:
-            kv_repeat_time = benchmark_torch_function_in_microseconds_(
-                torch.repeat_interleave,
-                k,
-                config.q_num_heads // config.kv_num_heads,
-                dim=1,
-            )
-            k = k.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
-            v = v.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
-        forward_time = benchmark_torch_function_in_microseconds_(
+        forward_time = benchmark_torch_function_in_microseconds(
             scaled_dot_product_attention,
             q,
             k,
