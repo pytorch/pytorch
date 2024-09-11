@@ -27,9 +27,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   build-wheel:
     name: "Build Triton Wheel"
-    runs-on: [self-hosted, linux.4xlarge]
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     strategy:
       fail-fast: false
       matrix:
@@ -199,7 +209,8 @@ jobs:
 
   build-conda:
     name: "Build Triton Conda"
-    runs-on: [self-hosted, linux.2xlarge]
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
     strategy:
       fail-fast: false
       matrix:
