@@ -536,6 +536,24 @@ std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& att
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
 }
+
+// alternate version to workaround -inf issue with cuDNN
+// TODO(eqy): delete this when cuDNN -inf issue is resolved
+std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+  // Pass through
+  if(!attn_mask.has_value()){
+    return std::nullopt;
+  }
+  // Convert boolean mask to additive mask; need to invert mask to indicate what
+  // to mask *out*.
+  if (attn_mask->dtype() == at::kBool) {
+    // TODO Use the max type of the input and output
+    return at::where(attn_mask->logical_not(), -65504.0, at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype)));
+  }
+  // Otherwise, attn_mask represents an additive attention tensor
+  return attn_mask;
+}
+
 // Memory Efficient Attention requires a padded attn mask bias
 // This function pads the attn_mask bias to be a multiple of 16
 // Then slices the padded bias to the original size
@@ -698,15 +716,16 @@ Tensor scaled_dot_product_attention(
           query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
-  std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case sdp::SDPBackend::cudnn_attention: {
+      std::optional<Tensor> attn_mask = convert_boolean_attn_mask_cudnn(attn_mask_, query_.dtype());
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
-          query_, key, value, attn_mask_, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::flash_attention: {
+      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
       if(query_.device().type() == DeviceType::CUDA){
         c10::SymInt og_size = query_.sym_size(-1);
         Tensor query_padded = pad_last_dim<8, false>(query_);
@@ -723,6 +742,7 @@ Tensor scaled_dot_product_attention(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case sdp::SDPBackend::efficient_attention: {
+      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       if (attn_mask.has_value()) {
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
@@ -732,11 +752,13 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::overrideable: {
+      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
           query_, key, value, attn_mask, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
-    case sdp::SDPBackend::math:
+    case sdp::SDPBackend::math: {
+      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
       if ((!GradMode::is_enabled() || (!query_.requires_grad() && !key.requires_grad() && !value.requires_grad()))
           && query_.device().type() == DeviceType::MPS && dropout_p == 0.0
           && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()
@@ -761,6 +783,7 @@ Tensor scaled_dot_product_attention(
           std::nullopt, /*dropout_mask*/
           scale,
           enable_gqa));
+    }
     default:
       TORCH_CHECK(
           false,
