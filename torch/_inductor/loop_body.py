@@ -466,15 +466,30 @@ class LoopBodyBlock:
                 self,
                 values,
                 offsets_name: str,
+                num_bucket_boundaries: sympy.Expr,
                 offsets_size: sympy.Expr,
                 indexing_dtype: torch.dtype,
                 right: bool,
+                offsets_indices,
+                sorter_name: Optional[str] = None,
             ):
+                num_bucket_boundaries = add_index(
+                    num_bucket_boundaries,
+                    MemoryUsageType.BUCKETIZE,
+                    buffer_name=offsets_name,
+                )
                 offsets_size = add_index(
                     offsets_size, MemoryUsageType.BUCKETIZE, buffer_name=offsets_name
                 )
                 return self._inner.bucketize(
-                    values, offsets_name, offsets_size, indexing_dtype, right
+                    values,
+                    offsets_name,
+                    num_bucket_boundaries,
+                    offsets_size,
+                    indexing_dtype,
+                    right,
+                    offsets_indices,
+                    sorter_name,
                 )
 
             @staticmethod

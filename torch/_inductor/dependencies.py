@@ -508,12 +508,17 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self,
         values,
         offsets_name: str,
+        num_bucket_boundaries: sympy.Expr,
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
+        offsets_indices,
+        sorter_name: Optional[str] = None,
     ):
         self._reads.add(StarDep(offsets_name))
-        return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
+        if sorter_name is not None:
+            self._reads.add(StarDep(sorter_name))
+        return f"bucketize({values}, {offsets_name}, {sympy_str(num_bucket_boundaries)}, {sympy_str(offsets_size)}, {indexing_dtype}, {right}, {offsets_indices}, {sorter_name})"  # noqa: B950 line too long
 
 
 class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
@@ -591,9 +596,25 @@ def extract_read_writes(
             )
         for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
             inner.index_expr(name_to_index[entry.index_name], None)
-        for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
+
+        # At Python 3.12, this can be replaced by itertools.batched.  We need this
+        # because every bucketize call has two index variables.
+        def iter_by_pairs(iterable):
+            iterator = iter(iterable)
+            while batch := tuple(itertools.islice(iterator, 2)):
+                yield batch
+
+        for entry_0, entry_1 in iter_by_pairs(
+            fn.memory_usage[MemoryUsageType.BUCKETIZE]
+        ):
             inner.bucketize(
-                None, entry.buffer_name, name_to_index[entry.index_name], None, None
+                None,
+                entry_0.buffer_name,
+                name_to_index[entry_0.index_name],
+                name_to_index[entry_1.index_name],
+                None,
+                None,
+                None,
             )
         # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     else:
