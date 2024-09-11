@@ -1745,7 +1745,7 @@ class AOTInductorTestsTemplate:
             torch._export.aot_compile(Model(), example_inputs)
 
         supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
-            torch.float32, self.device == "cuda"
+            torch.float32, self.device
         )
 
     def test_consecutive_compiles(self):
@@ -2958,29 +2958,24 @@ class AOTInductorTestsTemplate:
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(self, x0, x1, x2, x3):
-                t = (
-                    x0.to(torch.float)
-                    + x1.to(torch.float)
-                    + x2.to(torch.float)
-                    + x3.to(torch.float)
-                )
+            def forward(self, x0, x1):
+                t = x0.to(torch.float) + x1.to(torch.float)
                 return t
 
         inputs = []
         for dtype in (
             torch.float8_e4m3fn,
             torch.float8_e5m2,
-            torch.float8_e4m3fnuz,
-            torch.float8_e5m2fnuz,
+            # FP8 funz are for AMD
+            # see https://github.com/pytorch/pytorch/issues/126734
+            # torch.float8_e4m3fnuz,
+            # torch.float8_e5m2fnuz,
         ):
             inputs.append(torch.ones(8, 8, 8, dtype=dtype, device=self.device))
         dim0 = Dim("s0", min=2, max=1024)
         dynamic_shapes = {
             "x0": {0: dim0},
             "x1": {0: dim0},
-            "x2": {0: dim0},
-            "x3": {0: dim0},
         }
         with torch.no_grad(), config.patch(
             {
@@ -3378,6 +3373,59 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
 
+    def test_aoti_debug_printer_user_defined_triton_kernel(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                add_kernel[(4,)](x, y, out, n_elements=4, BLOCK_SIZE=16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        )
+
+        kernel_calls = [
+            ("add_kernel_0", 3),
+        ]
+
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            # check the c shim print_tensor_handle call is triggered by the config and injected the cpp output code as expected
+            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+            # check the codegen for debug printing around the actual kernel call is expected
+            for kernel_call, count in kernel_calls:
+                FileCheck().check_count(
+                    f"before_launch - {kernel_call}",
+                    count,
+                ).run(code)
+                FileCheck().check_count(
+                    f"after_launch - {kernel_call}",
+                    count,
+                ).run(code)
+
+    def test_size_from_multi_output(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                _x, _i = torch.unique(x, sorted=True, return_inverse=True)
+                _x = _x.clone().detach()
+                return self.relu(_x), _i
+
+        example_inputs = (torch.randn(8, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -3566,6 +3614,7 @@ CPU_TEST_FAILURES = {
     "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(
         is_skip=True
     ),
+    "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
@@ -3584,8 +3633,6 @@ CUDA_TEST_FAILURES = {
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
     # fp8 to be re-enabled for AOTI
     "test_fp8": fail_cuda(is_skip=True),
-    # non-abi compatible mode debug printer is not supported yet
-    "test_aoti_debug_printer_codegen": fail_non_abi_compatible_cuda(is_skip=True),
     "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
     "test_custom_op_missing_arg_with_default_value": fail_non_abi_compatible_cuda(
         is_skip=True
@@ -3595,6 +3642,11 @@ CUDA_TEST_FAILURES = {
         is_skip=True
     ),
     "test_custom_op_with_multiple_outputs": fail_non_abi_compatible_cuda(is_skip=True),
+    # non-abi compatible mode aoti debug printer is not supported yet
+    "test_aoti_debug_printer_codegen": fail_non_abi_compatible_cuda(is_skip=True),
+    "test_aoti_debug_printer_user_defined_triton_kernel": fail_non_abi_compatible_cuda(
+        is_skip=True
+    ),
 }
 
 
@@ -3651,6 +3703,9 @@ if not IS_FBCODE:
     CUDA_TEST_FAILURES.update(
         {
             "test_aoti_debug_printer_codegen": fail_cuda(is_skip=True),
+            "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(
+                is_skip=True
+            ),
         }
     )
 

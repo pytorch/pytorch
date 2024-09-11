@@ -21,7 +21,7 @@ def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
     """
     unique_id = 0
     for node in graph_module.graph.nodes:
-        if node.op in ["output", "placehodler"]:
+        if node.op in ["output", "placeholder"]:
             continue
 
         if CUSTOM_KEY not in node.meta:

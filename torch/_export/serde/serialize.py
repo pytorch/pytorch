@@ -1394,6 +1394,7 @@ class ExportedProgramSerializer(metaclass=Final):
                 minor=SCHEMA_VERSION[1],
             ),
             verifiers=[v.dialect for v in exported_program.verifiers],
+            torch_version=torch.__version__,
         )
 
         # Test canonical form is well defined.
@@ -2905,6 +2906,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         range_constraints=range_constraints,
         schema_version=ep.schema_version,
         verifiers=ep.verifiers,
+        torch_version=ep.torch_version,
     )
 
 

@@ -626,9 +626,6 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
-    def python_type(self):
-        return type(self.value)
-
     def as_python_constant(self):
         return self.value
 
@@ -928,7 +925,7 @@ class FunctoolsPartialVariable(VariableTracker):
         )
 
 
-class PolyfilledFunctionVariable(VariableTracker):
+class PolyfilledFunctionVariable(UserFunctionVariable):
     _nonvar_fields = {
         "fn",
         "wrapped_fn",
@@ -969,6 +966,8 @@ class PolyfilledFunctionVariable(VariableTracker):
 
         self.wrapped_fn: _F = handler
         self.traceable_fn: _F = traceable_fn
+
+        self.is_constant = self.can_constant_fold_through()
 
     @property
     def polyfill_fn(self) -> _F:
