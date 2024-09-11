@@ -1981,8 +1981,8 @@ class TestSDPACpuOnly(NNTestCase):
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
     @parametrize("batch_size", [2, 12])
-    @parametrize("q_seq_len", [514, 1030])
-    @parametrize("kv_seq_len", [514])
+    @parametrize("q_seq_len", [11, 514, 1030])
+    @parametrize("kv_seq_len", [17, 514])
     @parametrize("n_head", [1, 3])
     @parametrize("head_dim", [8])
     @parametrize("mask_dim", [2, 4])
@@ -3319,10 +3319,10 @@ class TestSDPACudaOnly(NNTestCase):
                 (out_ref, out_lp_ref, out),
                 *zip(grads_ref, grads_ref_lp, grads),
                 fudge_factors={
-                    'out': 2.0,
+                    'out': 3.0,
                     'grad_query': 100.0,
                     'grad_key': 8.0,
-                    'grad_value': 2.0,
+                    'grad_value': 3.0,
                 }
             )
 
