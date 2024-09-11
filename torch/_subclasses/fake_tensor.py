@@ -1701,6 +1701,7 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object],
     ) -> Optional[FakeTensor]:
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+        print("_dispatch_impl", func)
 
         # DO NOT PUT LOGIC BEFORE UNRECOGNIZED TYPE CHECKING
         # We must throw NotImplemented in case of unrecognized types to handle subclasses.
@@ -1877,10 +1878,15 @@ class FakeTensorMode(TorchDispatchMode):
                 for a in flat_args
             )
         ):
+            print("did prop")
+            # breakpoint()
+            log.debug("propagate_real_tensors %s", func)
             real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
             real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
             real_out = func(*real_args, **real_kwargs)
         elif self.propagate_real_tensors:
+            print("did not prop")
+            # breakpoint()
             # This can happen occasionally legitimately, specifically when you
             # are inside the meta of a data dependent operation and you create
             # a tensor on an unbacked SymInt; at this point in time we don't
@@ -1888,7 +1894,7 @@ class FakeTensorMode(TorchDispatchMode):
             # However, if there's a bug in the condition above, this condition
             # will also trigger.
             log.debug(
-                "propagate_real_tensors skipped %s(%s, %s) %s",
+                "SKIPPED propagate_real_tensors %s(%s, %s) %s",
                 func,
                 flat_arg_fake_tensors,
                 flat_args,
@@ -1896,24 +1902,37 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
         def maybe_propagate_real_tensors(fake_out: T) -> T:
+            print("maybe_propagate")
             import sympy
+            log.debug("maybe_propagate_real_tensors %s", func)
 
             def go(t: object, real_t: Tensor) -> None:
                 if isinstance(t, FakeTensor):
                     # NB: unconditionally overwrite
+                    log.debug("maybe_propagate_real_tensors %s -> %s", id(t), id(real_t))
                     t.real_tensor = real_t
+                    for s, real_s in zip(t.size(), real_t.size()):
+                        go(s, real_s)
+                    for s, real_s in zip(t.stride(), real_t.stride()):
+                        go(s, real_s)
                 elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
                     if isinstance(t.node.expr, sympy.Symbol):
                         assert self.shape_env is not None
                         self.shape_env.set_unbacked_var_to_val(t.node.expr, real_t)
 
             if real_out is not nil:
-                tree_map_(go, fake_out, real_out)
+                if (
+                    isinstance(fake_out, tuple)
+                    and isinstance(real_out, list)
+                ):
+                    tree_map_(go, tuple(fake_out), real_out)
+                else:
+                    tree_map_(go, fake_out, real_out)
 
                 # If a data-dependent op is used in a decomposition, we
                 # may need to get the unbacked settings "early"
                 # TODO: Is this really needed?
-                compute_unbacked_bindings(self.shape_env, fake_out, peek=True)
+                compute_unbacked_bindings(self.shape_env, fake_out, peek=True, real_value=real_out)
 
             return fake_out
 
@@ -1940,13 +1959,14 @@ class FakeTensorMode(TorchDispatchMode):
                 )
             ):
                 with self:
-                    return decomposition_table[func](*args, **kwargs)
+                    out = decomposition_table[func](*args, **kwargs)
+                    return maybe_propagate_real_tensors(out)
 
             with self:
                 # Decomposes CompositeImplicitAutograd ops
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
-                    return r
+                    return maybe_propagate_real_tensors(r)
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them

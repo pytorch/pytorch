@@ -581,7 +581,7 @@ class DivideByKey:
         return o // self.divisor
 
 
-def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, peek=False):
+def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, peek=False, real_value=None):
     """
     After having run fake tensor propagation and producing example_value
     result, traverse example_value looking for freshly bound unbacked
@@ -691,7 +691,7 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
 
             return r
 
-        symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
+        symbol_to_path = free_unbacked_symbols_with_path(example_value, (), real=real_value)
         if not peek and pending:
             extra = (
                 repr((example_value.stride(), example_value.storage_offset()))
@@ -2711,6 +2711,7 @@ class ShapeEnv:
     def set_unbacked_var_to_val(self, k: sympy.Symbol, v: int) -> None:
         """Used only when propagate_real_tensors; registers a value for an
         unbacked symbol, which can be used last resort to resolve hints."""
+        log.info("set_unbacked_var_to_val %s = %s", k, v)
         self.unbacked_var_to_val[k] = sympy.sympify(v)
 
     # Unlike set_replacement, this records a shapeenv event
