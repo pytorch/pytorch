@@ -3422,7 +3422,6 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
-    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
