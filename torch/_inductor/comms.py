@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import heapq
+import logging
 import operator
 import sys
 from collections import defaultdict
@@ -23,6 +24,7 @@ from .utils import (
 )
 
 
+log = logging.getLogger(__name__)
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 if TYPE_CHECKING:
@@ -347,8 +349,10 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     This FX graph pass replaces uses of FSDP2 unsharded params with their corresponding
     graph intermediates that were fsdp.copy_ into the unsharded params in the original graph.
 
-    NOTE: Can only apply this pass to FSDP2 unsharded params that are resharded (i.e. resized to 0)
-    at the end of graph.
+    NOTE: Can only apply this pass to FSDP2 unsharded params that have this pattern:
+    `resize_(full) -> copy_ -> resize_(0)`. Because of this, for partial-graph case where
+    `resize_(full) -> copy_` is in one graph and `resize_(0)` is in another graph, we can't
+    remove these resize and copy ops and thus we will have worse performance there.
     """
     node_list = list(graph.nodes)
 
@@ -368,6 +372,40 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             else:
                 graph_input_to_resized_to_0_node_idxes[graph_input].append(idx)
 
+    def check_resize_pattern(graph_input):
+        # Check the number of resize-to-full and resize-to-0 nodes are equal,
+        # and that for each (resize-to-full, resize-to-0) pair, the resize-to-full node
+        # always happens before the resize-to-0 node.
+        resized_to_full_idxes = graph_input_to_resized_to_full_node_idxes.get(
+            graph_input, []
+        )
+        resized_to_0_idxes = graph_input_to_resized_to_0_node_idxes.get(graph_input, [])
+
+        if not len(resized_to_full_idxes) == len(resized_to_0_idxes):
+            log.warning(
+                f"""
+Unequal number of resize-to-full and resize-to-0 nodes for graph input {graph_input}:
+{len(resized_to_full_idxes)} vs. {len(resized_to_0_idxes)}.
+Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass.
+"""  # noqa: G004
+            )
+            return False
+
+        # Check the sequence: (resize_to_full -> resize_to_0)+
+        for resize_to_full_idx, resize_to_0_idx in zip(
+            resized_to_full_idxes, resized_to_0_idxes
+        ):
+            if resize_to_full_idx >= resize_to_0_idx:
+                log.warning(
+                    f"""
+For graph input {graph_input}: resize-to-full node {node_list[resize_to_full_idx]} at index {resize_to_full_idx}
+happens after resize-to-0 node {node_list[resize_to_0_idx]} at index {resize_to_0_idx}.
+Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass.
+"""  # noqa: G004
+                )
+                return False
+        return True
+
     # Find all eligible unsharded params and their corresponding graph intermediates.
     unsharded_param_to_fsdp_copy_node_idxes = defaultdict(list)
     for idx, node in enumerate(node_list):
@@ -376,27 +414,11 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             unsharded_param = node.args[0]
             assert (
                 unsharded_param.op == "placeholder"
-            ), "Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!"
-            # An unsharded param is eligible for this pass only if it's resized to 0 at the end of graph.
-            num_resize_to_full = len(
-                graph_input_to_resized_to_full_node_idxes[unsharded_param]
-            )
-            num_resize_to_0 = len(
-                graph_input_to_resized_to_0_node_idxes[unsharded_param]
-            )
-            last_resize_to_full_node_idx = (
-                graph_input_to_resized_to_full_node_idxes[unsharded_param][-1]
-                if num_resize_to_full > 0
-                else -1
-            )
-            last_resize_to_0_node_idx = (
-                graph_input_to_resized_to_0_node_idxes[unsharded_param][-1]
-                if num_resize_to_0 > 0
-                else -1
-            )
-            if (
-                num_resize_to_full <= num_resize_to_0
-            ) and last_resize_to_0_node_idx > last_resize_to_full_node_idx:
+            ), f"""
+Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!
+Offending node: {unsharded_param}. Graph: {graph}
+"""
+            if check_resize_pattern(unsharded_param):
                 unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
 
     # Check no user mutation on any unsharded_param

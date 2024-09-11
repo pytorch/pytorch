@@ -483,8 +483,10 @@ class FSDPParam:
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
                 self._unsharded_param
             ):
-                # NOTE: Under compile, we will remove the resize_ and copy_ ops in
-                # a compiler graph pass to recover performance.
+                # NOTE: Under compile, if an unsharded param goes through
+                # resize_(full) -> copy_ -> resize_(0) pattern, we will remove those
+                # resize_ and copy_ ops in a compiler graph pass
+                # `remove_fsdp2_unsharded_param_graph_input_usage` to recover performance.
                 alloc_storage(self._unsharded_param)
                 torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
         else:
