@@ -36,7 +36,10 @@ Now we have all the required packages installed and environment activated. Use t
 
 .. code-block::
 
+    ## Linux
     pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
+    ## Windows: for torchvision/torchaudio, build it from source
+    pip3 install torch --index-url https://download.pytorch.org/whl/xpu
 
 
 From Source
@@ -102,10 +105,8 @@ Inference with FP32
    model.eval()
    data = torch.rand(1, 3, 224, 224)
 
-   ######## code changes #######
    model = model.to("xpu")
    data = data.to("xpu")
-   ######## code changes #######
 
    with torch.no_grad():
        model(data)
@@ -124,18 +125,14 @@ Inference with AMP
    model.eval()
    data = torch.rand(1, 3, 224, 224)
 
-   #################### code changes #################
    model = model.to("xpu")
    data = data.to("xpu")
-   #################### code changes #################
 
    with torch.no_grad():
        d = torch.rand(1, 3, 224, 224)
-       ############################# code changes #####################
        d = d.to("xpu")
        # set dtype=torch.bfloat16 for BF16
        with torch.autocast(device_type="xpu", dtype=torch.float16, enabled=True):
-       ############################# code changes #####################
            model(data)
 
    print("Execution finished")
@@ -154,10 +151,8 @@ Inference with ``torch.compile``
    data = torch.rand(1, 3, 224, 224)
    ITERS = 10
 
-   ######## code changes #######
    model = model.to("xpu")
    data = data.to("xpu")
-   ######## code changes #######
 
     for i in range(ITERS):
         start = time.time()
@@ -215,17 +210,13 @@ Train with FP32
    criterion = torch.nn.CrossEntropyLoss()
    optimizer = torch.optim.SGD(model.parameters(), lr=LR, momentum=0.9)
    model.train()
-   ######################## code changes #######################
    model = model.to("xpu")
    criterion = criterion.to("xpu")
-   ######################## code changes #######################
 
    print(f"Initiating training")
    for batch_idx, (data, target) in enumerate(train_loader):
-       ########## code changes ##########
        data = data.to("xpu")
        target = target.to("xpu")
-       ########## code changes ##########
        optimizer.zero_grad()
        output = model(data)
        loss = criterion(output, target)
@@ -280,17 +271,13 @@ Train with AMP
    scaler = torch.amp.GradScaler(enabled=use_amp)
 
    model.train()
-   ######################## code changes #######################
    model = model.to("xpu")
    criterion = criterion.to("xpu")
-   ######################## code changes #######################
 
    print(f"Initiating training")
    for batch_idx, (data, target) in enumerate(train_loader):
-       ########## code changes ##########
        data = data.to("xpu")
        target = target.to("xpu")
-       ########## code changes ##########
        # set dtype=torch.bfloat16 for BF16
        with torch.autocast(device_type="xpu", dtype=torch.float16, enabled=use_amp):
            output = model(data)
@@ -303,6 +290,64 @@ Train with AMP
             iteration_loss = loss.item()
             print(f"Iteration [{batch_idx+1}/{train_len}], Loss: {iteration_loss:.4f}")
 
+   torch.save(
+       {
+           "model_state_dict": model.state_dict(),
+           "optimizer_state_dict": optimizer.state_dict(),
+       },
+       "checkpoint.pth",
+   )
+
+   print("Execution finished")
+
+Train with ``torch.compile``
+""""""""""""""""""""""""""""
+
+.. code-block::
+
+   import torch
+   import torchvision
+
+   LR = 0.001
+   DOWNLOAD = True
+   DATA = "datasets/cifar10/"
+
+   transform = torchvision.transforms.Compose(
+       [
+           torchvision.transforms.Resize((224, 224)),
+           torchvision.transforms.ToTensor(),
+           torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+       ]
+   )
+   train_dataset = torchvision.datasets.CIFAR10(
+       root=DATA,
+       train=True,
+       transform=transform,
+       download=DOWNLOAD,
+   )
+   train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=128)
+   train_len = len(train_loader)
+
+   model = torchvision.models.resnet50()
+   criterion = torch.nn.CrossEntropyLoss()
+   optimizer = torch.optim.SGD(model.parameters(), lr=LR, momentum=0.9)
+   model.train()
+   model = model.to("xpu")
+   criterion = criterion.to("xpu")
+   model = torch.compile(model)
+
+   print(f"Initiating training with torch compile")
+   for batch_idx, (data, target) in enumerate(train_loader):
+       data = data.to("xpu")
+       target = target.to("xpu")
+       optimizer.zero_grad()
+       output = model(data)
+       loss = criterion(output, target)
+       loss.backward()
+       optimizer.step()
+       if (batch_idx + 1) % 10 == 0:
+            iteration_loss = loss.item()
+            print(f"Iteration [{batch_idx+1}/{train_len}], Loss: {iteration_loss:.4f}")
    torch.save(
        {
            "model_state_dict": model.state_dict(),
