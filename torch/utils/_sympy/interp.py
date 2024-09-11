@@ -112,6 +112,8 @@ ASSOCIATIVE_OPS = {"minimum", "maximum", "mul", "add", "and_", "or_"}
 
 
 def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
+    from torch.utils._sympy.value_ranges import ValueRanges
+
     # Special cases
     if isinstance(expr, sympy.Pow) and isinstance(
         expr.args[1], sympy.core.numbers.Half
@@ -125,8 +127,12 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
         and len(args) == 2
         and expr.args[0].is_integer
         and expr.args[0].is_positive
-        and args[1].is_singleton()
-        and args[1].lower == -1
+        and (
+            args[1].lower
+            if isinstance(args[1], ValueRanges) and args[1].is_singleton()
+            else args[1]
+        )
+        == -1
     ):
         from torch.utils._sympy.value_ranges import ValueRanges
 
