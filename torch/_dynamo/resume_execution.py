@@ -6,6 +6,7 @@ import types
 from typing import Any, cast, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
+    add_push_null,
     create_call_function,
     create_call_method,
     create_dup_top,
@@ -53,9 +54,12 @@ class ReenterWith:
         Codegen based off of:
         try:
             (rest)
-        finally:
+        except:
+            (restore previous stack)
 
         """
+        from .variables.torch_function import get_prev_stack_var_name
+
         except_jump_target = create_instruction(
             "NOP" if sys.version_info < (3, 11) else "PUSH_EXC_INFO"
         )
@@ -86,12 +90,11 @@ class ReenterWith:
                 ),
                 create_instruction("LOAD_ATTR", argval="set_torch_function_mode_stack"),
             ]
+            add_push_null(insts)
             return [
                 *insts,
-                create_instruction(
-                    "LOAD_FAST", argval="___prev_torch_function_mode_stack"
-                ),
-                *create_call_function(1, True),
+                create_instruction("LOAD_FAST", argval=get_prev_stack_var_name()),
+                *create_call_function(1, False),
                 create_instruction("POP_TOP"),
             ]
 
