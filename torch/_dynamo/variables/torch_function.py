@@ -21,9 +21,11 @@ from ..polyfills import NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
 from ..utils import (
     class_has_getattribute,
+    clear_torch_function_mode_stack,
     get_safe_global_name,
     has_torch_function,
     is_tensor_base_attr_getter,
+    set_torch_function_mode_stack,
 )
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -65,6 +67,32 @@ banned_attrs = [
     for fn in get_default_nowrap_functions()
     if is_tensor_base_attr_getter(fn)
 ]
+
+
+# Used to clear/restore the python torch function mode stack and temporarily restore it as needed
+class TorchFunctionModeStackStateManager:
+    def __init__(self):
+        self.stack = []
+
+    def __enter__(self):
+        self.stack = torch.overrides._get_current_function_mode_stack()
+        clear_torch_function_mode_stack()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        set_torch_function_mode_stack(self.stack)
+        self.stack = []
+
+    @contextlib.contextmanager
+    def temp_restore_stack(self):
+        prev = torch.overrides._get_current_function_mode_stack()
+        set_torch_function_mode_stack(self.stack)
+        try:
+            yield
+        finally:
+            set_torch_function_mode_stack(prev)
+
+
+torch_function_mode_stack_state_mgr = TorchFunctionModeStackStateManager()
 
 
 class SymbolicTorchFunctionState:
@@ -204,7 +232,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         # that are now affected by executing the funtion across two frames instead of one
         # Today we support the enter/exit of the default TorchFunctionMode as well as
         # DeviceContext (which is used for set_default_device)
-        return issubclass(ty, NoEnterTorchFunctionMode) or (
+        return issubclass(ty, (NoEnterTorchFunctionMode, DeviceContext)) or (
             not class_has_getattribute(ty)
             and inspect.getattr_static(ty, "__enter__") == TorchFunctionMode.__enter__
             and inspect.getattr_static(ty, "__exit__") == TorchFunctionMode.__exit__
