@@ -762,7 +762,6 @@ def flex_attention(
     q_strides = query.get_stride()
     assert q_strides[-1] == 1, "Query must be contiguous in the last dimension"
 
-    out_size = [B, Hq, seq_len_q, v_head_dim]
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
