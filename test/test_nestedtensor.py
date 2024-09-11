@@ -6296,7 +6296,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # Compute tolerances
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(grads_ref[0], grads_lp_ref[0])
+        # fudge factor of 1.7 for smaller GPUs e.g., A2, A16
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(grads_ref[0], grads_lp_ref[0], 1.7)
         grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(grads_ref[1], grads_lp_ref[1])
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(grads_ref[2], grads_lp_ref[2])
         grad_atols = [grad_q_ref_atol, grad_k_ref_atol, grad_v_ref_atol]
