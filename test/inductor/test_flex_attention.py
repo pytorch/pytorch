@@ -411,7 +411,11 @@ class TestFlexAttention(InductorTestCase):
         S: int = S,
         D: int = D,
     ):
-        sdpa_partial = create_attention(score_mod)
+        # If the seqlen becomes smaller than the seqlen of the previous batch,
+        # we can still reuse the block_mask created from a larger seqlen.
+        MAX_S = S
+        block_mask = create_block_mask(noop_mask, 1, 1, MAX_S, MAX_S)
+        sdpa_partial = create_attention(score_mod, block_mask=block_mask)
         # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
@@ -485,6 +489,17 @@ class TestFlexAttention(InductorTestCase):
         )
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
+        # The third iteration, shape (B * 2, H, S * 2, D)
+        # Since seqlen is larger than the seqlen in block_mask, throw errors.
+        S = int(S * 4)
+        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed, "Q seqlen must be smaller than"
+        ):
+            compiled_sdpa(q3, k3, v3)
+
     def run_automatic_dynamic_test(
         self,
         score_mod: Callable,
@@ -494,7 +509,9 @@ class TestFlexAttention(InductorTestCase):
         S: int = S,
         D: int = D,
     ):
-        sdpa_partial = create_attention(score_mod)
+        MAX_S = S
+        block_mask = create_block_mask(noop_mask, 1, 1, MAX_S, MAX_S)
+        sdpa_partial = create_attention(score_mod, block_mask=block_mask)
         # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
@@ -594,16 +611,14 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
-    @expectedFailure  # TODO: supports block sparsity with dynamic shapes
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
         self.run_dynamic_test(score_mod, dtype)
 
-    @expectedFailure  # TODO: supports block sparsity with dynamic shapes
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_automatic_dynamic(
         self, dtype: torch.dtype, score_mod: Callable
