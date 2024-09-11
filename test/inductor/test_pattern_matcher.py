@@ -748,6 +748,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 8, device="cuda"),
             torch.randn(2, 16, device="cuda"),
         ]
+        torch._dynamo.reset()
         counters.clear()
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
