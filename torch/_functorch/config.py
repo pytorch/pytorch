@@ -100,6 +100,10 @@ ban_recompute_reductions = True
 recompute_views = False
 # Must save the output from the activation checkpoint region
 # (to avoid recomputing it during backward).
+# This is to work around circular dependencies in FSDP2+AC:
+# 1. output_grad is dependent on output.
+# 2. output depends on backward hook in order to be recomputed.
+# 3. backward hook depends on output_grad.
 must_save_ac_output = False
 
 # By default, the partitioner is purely trying to optimize for runtime (although
