@@ -88,7 +88,7 @@ def scan(
         final_carry (torch.Tensor or pytree with tensor leaves),
             the final carry of the scan operation with same pytree structure as init.
         out (torch.Tensor or pytree with tensor leaves),
-            each tensor leaf is a stacked output along dim, where each slice is the output of a scan iteration.
+            each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
 
     Example::
 
@@ -97,8 +97,8 @@ def scan(
             return next_carry, y
 
         i0 = torch.zeros(1)
-        xs = torch.arange(1, 5)
-        # returns torch.tensor([10]), torch.tensor([1., 3., 6., 10.])
+        xs = torch.arange(5)
+        # returns torch.tensor([10.]), torch.tensor([[0], [1.], [3.], [6.], [10.]])
         last_carry, cumsum = scan(add, init=i0, xs=xs)
 
 
