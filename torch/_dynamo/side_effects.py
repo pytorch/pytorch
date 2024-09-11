@@ -593,16 +593,19 @@ class SideEffects:
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
             ):
-                cg.add_push_null(
-                    lambda: cg.load_import_from(
-                        utils.__name__, "set_torch_function_mode_stack"
-                    )
-                )
+                # Needed in the finally block for stack restoration
+                cg.load_import_from(utils.__name__, "get_torch_function_mode_stack")
+                cg.call_function(0, True)
+                name = "___prev_torch_function_mode_stack"
+                cg.code_options["co_varnames"] += (name,)
+                cg.append_output(create_instruction("STORE_FAST", argval=name))
+                cg.load_import_from(utils.__name__, "set_torch_function_mode_stack")
+
                 cg.foreach(var.symbolic_stack)
                 cg.append_output(
                     create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))
                 )
-                cg.call_function(1, False)
+                cg.call_function(1, True)
                 cg.append_output(create_instruction("POP_TOP"))
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
