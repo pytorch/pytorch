@@ -61,9 +61,6 @@ test_failures_cuda_wrapper = {
     "test_mm_plus_mm2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",), is_skip=True
     ),
-    "test_consecutive_split_cumprod_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",), is_skip=True
-    ),
 }
 
 

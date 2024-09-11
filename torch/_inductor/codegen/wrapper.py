@@ -1490,6 +1490,8 @@ class WrapperCodeGen(CodeGen):
         return SymbolicCallArg(expr, tree.numel)
 
     def generate_workspace_allocation(self, nbytes, device, zero_fill):
+        if isinstance(nbytes, sympy.Expr):
+            nbytes = V.graph.sizevars.size_hint(nbytes)
         line = self.make_allocation(
             "workspace", device, torch.uint8, shape=(nbytes,), stride=(1,)
         )
