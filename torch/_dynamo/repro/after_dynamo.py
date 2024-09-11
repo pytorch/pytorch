@@ -272,7 +272,7 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-@register_debug_backend
+@register_debug_backend  # type: ignore[arg-type]
 def dynamo_minifier_backend(
     gm: fx.GraphModule, example_inputs: List[torch.Tensor], compiler_name: CompiledFn
 ):
@@ -314,7 +314,7 @@ def dynamo_minifier_backend(
     return gm
 
 
-@register_debug_backend
+@register_debug_backend  # type: ignore[arg-type]
 def dynamo_accuracy_minifier_backend(
     gm: fx.GraphModule, example_inputs: list[torch.Tensor], compiler_name: CompiledFn
 ):

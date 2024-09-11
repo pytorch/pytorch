@@ -7,6 +7,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
+from typing_extensions import Self
 
 import torch
 import torch._C as _C
@@ -1353,7 +1354,7 @@ class Tensor(torch._C.TensorBase):
             [name for name in names if not is_ellipsis(name)], ellipsis_idx
         )
 
-    def unflatten(self, dim, sizes):
+    def unflatten(self, dim, sizes) -> Self:  # typing: ignore[override]
         r"""
         unflatten(dim, sizes) -> Tensor
 
