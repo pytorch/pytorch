@@ -416,12 +416,14 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
                 neg.append(-term)
             else:
                 pos.append(term)
-        lhs = sympy.Add(*neg)
-        rhs = sympy.Add(*pos)
+        lhs = sympy.Add._from_args(neg)
+        rhs = sympy.Add._from_args(pos)
     elif is_neg(rhs):
         # lhs == 0
         lhs, rhs = -rhs, 0
-    return t(lhs, rhs)
+    # We don't have to evaluate here because lhs, rhs came from a Boolean
+    # and it was already simplified
+    return t(lhs, rhs, evaluate=False)
 
 
 def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
@@ -451,7 +453,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         if factor == 1:
             return expr
         atoms = [x / factor for x in atoms]
-        return sympy.Add._from_args(*atoms)
+        return sympy.Add._from_args(atoms)
     elif expr.is_Integer:
         return sympy.One
     elif expr.is_Mul:
