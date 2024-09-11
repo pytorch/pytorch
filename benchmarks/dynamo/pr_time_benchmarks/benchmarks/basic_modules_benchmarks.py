@@ -171,7 +171,7 @@ def main():
 
         Benchmark(ModuleForwardHasGraphBreak, "inductor"),
         Benchmark(ModuleForwardHasGraphBreak, "eager"),
-        
+
         Benchmark(SequentialWithDuplicatedModule, "inductor"),
         Benchmark(SequentialWithDuplicatedModule, "eager"),
         Benchmark(SequentialWithDuplicatedModule, "inductor", dynamic=True),
@@ -180,6 +180,7 @@ def main():
         Benchmark(
             SequentialWithDuplicatedModule, "inductor", is_gpu=True, dynamic=True
         ),
+        
         Benchmark(ModuleComparison, "inductor"),
         Benchmark(ModuleComparison, "eager"),
         Benchmark(ModuleComparison, "inductor", dynamic=True),
