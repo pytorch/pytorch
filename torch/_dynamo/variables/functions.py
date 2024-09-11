@@ -928,6 +928,7 @@ class FunctoolsPartialVariable(VariableTracker):
 class PolyfilledFunctionVariable(UserFunctionVariable):
     _nonvar_fields = {
         "fn",
+        "is_constant",
         "wrapped_fn",
         "traceable_fn",
         *VariableTracker._nonvar_fields,
@@ -944,7 +945,7 @@ class PolyfilledFunctionVariable(UserFunctionVariable):
 
         return cls(value, source=source)
 
-    def __init__(self, fn: _F, **kwargs) -> None:
+    def __init__(self, fn: _F, is_constant: bool = False, **kwargs) -> None:
         super(UserFunctionVariable, self).__init__(**kwargs)
         self.fn: _F = fn
 
@@ -967,16 +968,18 @@ class PolyfilledFunctionVariable(UserFunctionVariable):
         self.wrapped_fn: _F = handler
         self.traceable_fn: _F = traceable_fn
 
-        self.is_constant = self.can_constant_fold_through()
+        self.is_constant = is_constant or getattr(
+            self.wrapped_fn,
+            "__torch_dynamo_can_constant_fold_through__",
+            False,
+        )
 
     @property
     def polyfill_fn(self) -> _F:
         return self.traceable_fn
 
     def can_constant_fold_through(self):
-        return getattr(
-            self.wrapped_fn, "__torch_dynamo_can_constant_fold_through__", False
-        )
+        return self.is_constant
 
     def get_function(self):
         return self.as_python_constant()
