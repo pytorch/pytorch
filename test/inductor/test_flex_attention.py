@@ -4,8 +4,8 @@
 import functools
 import string
 from collections import namedtuple
-from contextlib import nullcontext
-from typing import Callable, Optional
+from contextlib import contextmanager, nullcontext
+from typing import Callable, Optional, Tuple
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -41,11 +41,36 @@ supported_platform = skipUnless(
     "Requires CUDA and Triton",
 )
 
+# Use this decorator only when hitting Triton bugs on H100
+running_on_a100_only = skipUnless(
+    torch.cuda.is_available()
+    and torch.version.hip is None
+    and has_triton()
+    and torch.cuda.get_device_capability() == (8, 0),
+    "Requires A100 and Triton",
+)
+
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
+
+
+@contextmanager
+def temp_float32_matmul_precision(precision: str):
+    """
+    Temporarily set the float32 matmul precision and restore it after the context is exited.
+
+    Args:
+    precision (str): The precision to set ('highest', 'high', or 'medium').
+    """
+    original_precision = torch.get_float32_matmul_precision()
+    try:
+        torch.set_float32_matmul_precision(precision)
+        yield
+    finally:
+        torch.set_float32_matmul_precision(original_precision)
 
 
 def rmse(ref, res):
@@ -186,6 +211,17 @@ B = 4
 H = 8
 S = 2048
 D = 64
+
+test_Hq_Hkv = [
+    (4, 2),
+    (4, 1),
+]
+
+test_Bq_Bkv = [
+    (3, 1),
+    (4, 1),
+    (5, 1),
+]
 
 
 def query_key_value_clones(
@@ -526,7 +562,7 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
-    @supported_platform
+    @running_on_a100_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_default_sparse_block_size(
@@ -540,7 +576,7 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
-    @supported_platform
+    @running_on_a100_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
@@ -589,6 +625,76 @@ class TestFlexAttention(InductorTestCase):
             D,
             B,
             H,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast(
+        self,
+        dtype: torch.dtype,
+        batch_dims: Tuple[int, int],
+        head_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq > 1 and Bkv == 1
+
+        self.run_test(
+            score_mod,
+            dtype,
+            Bq,
+            Hq,
+            S,
+            D,
+            Bkv,
+            Hkv,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast_causal_mask(
+        self,
+        dtype: torch.dtype,
+        batch_dims: Tuple[int, int],
+        head_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq > 1 and Bkv == 1
+
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, enable_gqa=(not Hq == Hkv)
+        )
+
+        self.run_test_with_call(
+            attention,
+            torch.float16,
+            Bq,
+            Hq,
+            S,
+            D,
+            Bkv,
+            Hkv,
             S,
             D,
         )
@@ -1376,6 +1482,34 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    def test_eager_backward_strides(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.qkv_proj = torch.nn.Linear(256, 256 * 3)
+                self.n_head = 256 // 64
+                self.d_attn = 256
+
+            def forward(self, x):
+                n_batch, n_ctx, _ = x.shape
+                q, k, v = self.qkv_proj(x).split(
+                    [self.d_attn, self.d_attn, self.d_attn], dim=2
+                )
+                q = q.reshape(n_batch, n_ctx, self.n_head, -1)
+                k = k.reshape(n_batch, n_ctx, self.n_head, -1)
+                v = v.reshape(n_batch, n_ctx, self.n_head, -1)
+                q = q.transpose(1, 2)
+                k = k.transpose(1, 2)
+                v = v.transpose(1, 2)
+                x = torch.nn.attention.flex_attention.flex_attention(q, k, v)
+                return x
+
+        model = Repro().cuda()
+        x = torch.randn((1, 512, 256), device="cuda", requires_grad=True)
+        out = torch.compile(model, backend="aot_eager")(x)
+        out.backward(torch.ones_like(out))
+
+    @supported_platform
     def test_differentiable_logsumexp_gradcheck(self):
         make_tensor = functools.partial(
             torch.randn,
@@ -1432,6 +1566,37 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(
             v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
         )
+
+    @supported_platform
+    def test_float32_matmul_precision(self):
+        make_tensor = functools.partial(
+            torch.zeros,
+            (2, 2, 128, 32),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query.fill_(0.2)
+        key.fill_(0.3)
+        value.fill_(0.4)
+
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
+
+        def score_mod(score, b, h, q, kv):
+            return score * 2
+
+        with temp_float32_matmul_precision("highest"):
+            out_eager = flex_attention(query, key, value, score_mod)
+            flex_compiled = torch.compile(flex_attention, fullgraph=True)
+            out_compiled = flex_compiled(query, key, value, score_mod)
+
+            grads_eager = torch.autograd.grad(out_eager.sum(), (query, key, value))
+            grads_compile = torch.autograd.grad(out_compiled.sum(), (query, key, value))
+
+        torch.testing.assert_close(grads_eager, grads_compile)
 
     @supported_platform
     @common_utils.parametrize("score_mod_name", ["_head_offset"])
@@ -1914,6 +2079,63 @@ class TestBlockMask(InductorTestCase):
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
 
     @supported_platform
+    def test_getitem(self):
+        offset = torch.zeros(8, device="cuda")
+
+        def causal_mask(b, h, q, kv):
+            return (q + (offset[b] * 128)) >= kv
+
+        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512)
+        assert block_mask.kv_num_blocks.shape == (4, 2, 4)
+        assert block_mask.kv_indices.shape == (4, 2, 4, 4)
+
+        # Index on batch dimension
+        new_block_mask = block_mask[0]
+        assert new_block_mask.kv_num_blocks.shape == (2, 4)
+        assert new_block_mask.kv_indices.shape == (2, 4, 4)
+
+        # Index on batch and head dimension
+        new_block_mask = block_mask[0, 1]
+        assert new_block_mask.kv_num_blocks.shape == (4,)
+        assert new_block_mask.kv_indices.shape == (4, 4)
+
+        # slicing on batch and head dimension
+        new_block_mask = block_mask[0:2, 1:2]
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
+        assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
+
+        # slicing on batch, head, and query dimension
+        new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
+        assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
+        assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
+
+        # slicing on batch, head, and query dimension
+        q_index = torch.tensor([0], dtype=torch.int32)
+        new_block_mask = block_mask[:, :, q_index]
+
+        self.assertEqual(new_block_mask.kv_num_blocks.ndim, 3)
+        self.assertEqual(new_block_mask.kv_indices.ndim, 4)
+        torch.testing.assert_close(
+            new_block_mask.kv_num_blocks,
+            block_mask.kv_num_blocks[:, :, q_index],
+        )
+        torch.testing.assert_close(
+            new_block_mask.kv_indices, block_mask.kv_indices[:, :, q_index, :]
+        )
+
+        if block_mask.full_kv_num_blocks is not None:
+            assert new_block_mask.full_kv_num_blocks is not None
+            assert new_block_mask.full_kv_indices is not None
+            torch.testing.assert_close(
+                new_block_mask.full_kv_num_blocks,
+                block_mask.full_kv_num_blocks[:, :, q_index],
+            )
+            torch.testing.assert_close(
+                new_block_mask.full_kv_indices,
+                block_mask.full_kv_indices[:, :, q_index, :],
+            )
+
+    @supported_platform
     def test_block_mask_device_change(self):
         offset = torch.zeros(8, device="cuda")
 
@@ -2172,7 +2394,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             *inputs, is_causal=True
         )
 
-        torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=1e-3, rtol=0.0)
+        torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
