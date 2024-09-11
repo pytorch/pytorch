@@ -83,7 +83,7 @@ from torch._inductor.cpp_builder import (
     _transform_cuda_paths,
     CppBuilder,
     CppOptions,
-    CppTorchDeviceOptions,
+    CppTorchCudaOptions,
     get_compiler_version_info,
     get_cpp_compiler,
     get_name_and_dir_from_output_file_path,
@@ -1512,6 +1512,7 @@ class CudaKernelParamCache:
                 config.aot_inductor.output_path
             )[0],
         )
+
         params[get_cpp_wrapper_cubin_path_name()] = path
 
         cls.cache[key] = params
@@ -1532,7 +1533,7 @@ class AotCodeCompiler:
         graph: GraphLowering,
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
-        device_type: str,
+        cuda: bool,
     ) -> str:
         if sys.platform == "win32":
             raise RuntimeError("AotCodeCompiler not yet supported for inductor")
@@ -1543,9 +1544,9 @@ class AotCodeCompiler:
         vec_isa_cmd_gen = CppBuilder(
             name="o",
             sources="i",
-            BuildOption=CppTorchDeviceOptions(
+            BuildOption=CppTorchCudaOptions(
                 vec_isa=picked_vec_isa,
-                device_type=device_type,
+                cuda=cuda,
                 aot_mode=graph.aot_mode,
             ),
         )
@@ -1560,7 +1561,7 @@ class AotCodeCompiler:
         use_absolute_path = False
         if config.is_fbcode():
             ld_command = build_paths.ld()
-            if device_type == "cpu" and graph.aot_mode:  # Meta internal AOTInductor CPU
+            if not cuda and graph.aot_mode:  # Meta internal AOTInductor CPU
                 objcopy_command = build_paths.objcopy_fallback()
                 fbcode_aot_cpu_re = True
                 use_absolute_path = True
@@ -1760,9 +1761,9 @@ class AotCodeCompiler:
                     object_output_name,
                     object_output_dir,
                 ) = get_name_and_dir_from_output_file_path(input_path)
-                object_build_options = CppTorchDeviceOptions(
+                object_build_options = CppTorchCudaOptions(
                     vec_isa=picked_vec_isa,
-                    device_type=device_type,
+                    cuda=cuda,
                     aot_mode=graph.aot_mode,
                     compile_only=True,
                     use_absolute_path=use_absolute_path,
@@ -1785,9 +1786,9 @@ class AotCodeCompiler:
                     object_output_name,
                     object_output_dir,
                 ) = get_name_and_dir_from_output_file_path(input_path)
-                object_build_options = CppTorchDeviceOptions(
+                object_build_options = CppTorchCudaOptions(
                     vec_isa=picked_vec_isa,
-                    device_type=device_type,
+                    cuda=cuda,
                     aot_mode=graph.aot_mode,
                     compile_only=True,
                     use_absolute_path=use_absolute_path,
@@ -1863,9 +1864,9 @@ class AotCodeCompiler:
                 output_name, output_dir = get_name_and_dir_from_output_file_path(
                     output_so
                 )
-                so_build_options = CppTorchDeviceOptions(
+                so_build_options = CppTorchCudaOptions(
                     vec_isa=picked_vec_isa,
-                    device_type=device_type,
+                    cuda=cuda,
                     aot_mode=graph.aot_mode,
                     use_absolute_path=use_absolute_path,
                 )
@@ -1897,9 +1898,9 @@ class AotCodeCompiler:
                 output_name, output_dir = get_name_and_dir_from_output_file_path(
                     output_so
                 )
-                so_build_options = CppTorchDeviceOptions(
+                so_build_options = CppTorchCudaOptions(
                     vec_isa=picked_vec_isa,
-                    device_type=device_type,
+                    cuda=cuda,
                     aot_mode=graph.aot_mode,
                     use_absolute_path=use_absolute_path,
                 )
@@ -2110,13 +2111,13 @@ class CppCodeCache:
     def load_async(
         cls,
         source_code: str,
-        device_type: str = "cpu",
+        cuda: bool = False,
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
     ) -> Any:
         compile_command = {
             **cls.cpp_compile_command_flags,
-            "device_type": device_type,
+            "cuda": cuda,
             "vec_isa": pick_vec_isa(),
             "extra_flags": extra_flags,
         }
@@ -2124,7 +2125,7 @@ class CppCodeCache:
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
         command_gen = CppBuilder(
-            name="o", sources="i", BuildOption=CppTorchDeviceOptions(**compile_command)
+            name="o", sources="i", BuildOption=CppTorchCudaOptions(**compile_command)
         )
         # write function will calc source_code hash, the same source code with different
         # ISA level should be generate different hash.
@@ -2147,7 +2148,7 @@ class CppCodeCache:
             future: Optional[Future[Any]] = None
             lib = None
 
-            cpp_build_option = CppTorchDeviceOptions(**compile_command)
+            cpp_build_option = CppTorchCudaOptions(**compile_command)
             cpp_builder = CppBuilder(
                 name=output_name,
                 sources=input_path,
@@ -2190,8 +2191,8 @@ class CppCodeCache:
         return cls.cache[key]
 
     @classmethod
-    def load(cls, source_code: str, device_type: str = "cpu") -> Any:
-        return cls.load_async(source_code, device_type)()
+    def load(cls, source_code: str, cuda: bool = False) -> Any:
+        return cls.load_async(source_code, cuda)()
 
 
 def _worker_compile_cpp(
@@ -2334,7 +2335,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         cls,
         argtypes: List[str],
         source_code: str,
-        device_type: str = "cpu",
+        cuda: bool = False,
         num_outputs: int = -1,
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
@@ -2366,10 +2367,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             cls.entry_function,
         )
         get_result = cls.load_async(
-            source_code + suffix,
-            device_type,
-            submit_fn=submit_fn,
-            extra_flags=extra_flags,
+            source_code + suffix, cuda, submit_fn=submit_fn, extra_flags=extra_flags
         )
         result = None
 
@@ -2720,7 +2718,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             cls._codegen_glue(meta, headerfile),
             extra_flags=(libfile, cls.build_standalone_runtime()),
             submit_fn=jobs.append if need_compile else None,
-            device_type="cuda" if meta.is_cuda() else "cpu",
+            cuda=meta.is_cuda(),
         )
 
         if need_compile:
@@ -2748,9 +2746,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             cls._standalone_runtime_path
         ):
             return cls._standalone_runtime_path
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        is_cuda = torch.cuda.is_available()
         libname = "libStandaloneHalideRuntime.so"
-        target = "host-cuda" if device_type == "cuda" else "host"
+        target = "host-cuda" if is_cuda else "host"
         if cls._standalone_runtime_path:
             assert not os.path.exists(cls._standalone_runtime_path)
             # We hit this case in unittests when we run with fresh_inductor_cache()
@@ -2774,7 +2772,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             with filelock.FileLock(lockfile, LOCK_TIMEOUT):
                 if not os.path.exists(donefile):
                     with open(hookfile, "w") as f:
-                        if device_type == "cuda":
+                        if is_cuda:
                             f.write(
                                 cls.standalone_runtime_cuda_init.format(
                                     cls.find_header("HalideRuntimeCuda.h")
@@ -2787,8 +2785,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                         name=name,
                         sources=[hookfile, afile],
                         output_dir=output_dir,
-                        BuildOption=CppTorchDeviceOptions(
-                            device_type=device_type,
+                        BuildOption=CppTorchCudaOptions(
+                            cuda=is_cuda,
                         ),
                     )
 
@@ -2960,7 +2958,7 @@ def _cuda_lib_options() -> List[str]:
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
-    lpaths = cpp_extension.library_paths(device_type="cuda") + [
+    lpaths = cpp_extension.library_paths(cuda=True) + [
         sysconfig.get_config_var("LIBDIR")
     ]
     extra_ldflags: List[str] = []

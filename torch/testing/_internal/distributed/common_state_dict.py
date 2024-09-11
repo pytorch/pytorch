@@ -43,12 +43,7 @@ class VerifyStateDictMixin:
             dist_param = dist_msd.get(fqn, None)
             if not options.ignore_frozen_params:
                 self.assertIsNotNone(dist_param, f"{fqn=}")
-                try:
-                    self._compare_tensor(param, dist_param, offload_to_cpu)
-                except AssertionError as e:
-                    raise AssertionError(
-                        f"{fqn} has mismatched value {param} {dist_param}"
-                    ) from e
+                self._compare_tensor(param, dist_param, offload_to_cpu)
             elif dist_param is None:
                 self.assertFalse(param.requires_grad, f"{fqn=}")
 
