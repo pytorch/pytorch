@@ -145,13 +145,15 @@ _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
     num_rows = col_indices.shape[-2]
-    num_cols = col_indices.shape[-1] # TODO: update here
+    num_cols = col_indices.shape[-1]  # TODO: update here
     batch_dims = num_blocks_in_row.shape[:-1]
     device = num_blocks_in_row.device
 
     def create_dense_one(kv_num_blocks, kv_indices):
-        extended_num_cols = 16 # TODO: a good way to specify the value here
-        dense_mask = kv_indices.new_zeros(num_rows, extended_num_cols + 1, dtype=torch.int32)
+        extended_num_cols = 16  # TODO: a good way to specify the value here
+        dense_mask = kv_indices.new_zeros(
+            num_rows, extended_num_cols + 1, dtype=torch.int32
+        )
 
         row_indices = torch.arange(num_rows, dtype=torch.int, device=device).unsqueeze(
             -1
@@ -893,16 +895,22 @@ class PagedCache:
         # page table: [batch, logical_block_idx] -> physical_page_idx
         max_seq_pages = _cdiv(max_seq_len, page_size)
         page_table_shape = (max_batch_size, max_seq_pages)
-        self.page_table = -torch.ones(page_table_shape, dtype=torch.int64, device=device)
+        self.page_table = -torch.ones(
+            page_table_shape, dtype=torch.int64, device=device
+        )
 
         # current allocated sequence length for a specific batch index
-        self.allocated_seq_len = torch.zeros(max_batch_size, dtype=torch.int64, device=device)
+        self.allocated_seq_len = torch.zeros(
+            max_batch_size, dtype=torch.int64, device=device
+        )
 
         # index of empty pages that is available for allocation
         self.empty_pages = list(range(n_pages - 1, -1, -1))
 
         # Mapping from physical page index to logical page index
-        self.physical_to_logical = -torch.ones(n_pages, dtype=torch.int64, device=device)
+        self.physical_to_logical = -torch.ones(
+            n_pages, dtype=torch.int64, device=device
+        )
 
     def update(self, input_pos: Tensor, val: Tensor, cache: Tensor):
         # input_pos: [S], val: [B, H, S, D], cache: [1, H, MAX_S, D]
@@ -931,17 +939,27 @@ class PagedCache:
         assert B == self.page_table.size(0)
 
         new_kv_num_blocks = block_mask.kv_num_blocks.clone()
-        new_kv_indices = torch.gather(
-            self.page_table, 1, block_mask.kv_indices.view(B, -1).to(torch.int64)
-        ).view(block_mask.kv_indices.shape).to(torch.int32)
+        new_kv_indices = (
+            torch.gather(
+                self.page_table, 1, block_mask.kv_indices.view(B, -1).to(torch.int64)
+            )
+            .view(block_mask.kv_indices.shape)
+            .to(torch.int32)
+        )
 
         new_full_kv_indices, new_full_kv_num_blocks = None, None
         if block_mask.full_kv_num_blocks is not None:
             assert block_mask.full_kv_indices is not None
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
-            new_full_kv_indices = torch.gather(
-                self.page_table, 1, block_mask.full_kv_indices.view(B, -1).to(torch.int64)
-            ).view(block_mask.full_kv_indices.shape).to(torch.int32)
+            new_full_kv_indices = (
+                torch.gather(
+                    self.page_table,
+                    1,
+                    block_mask.full_kv_indices.view(B, -1).to(torch.int64),
+                )
+                .view(block_mask.full_kv_indices.shape)
+                .to(torch.int32)
+            )
 
         return BlockMask.from_kv_blocks(
             new_kv_num_blocks,
@@ -994,7 +1012,10 @@ class PagedCache:
         end_page_idx = start_page_idx + num_pages_to_allocate
 
         # find empty physical pages
-        allocated_pages = torch.tensor(self.empty_pages[-num_pages_to_allocate:], device=num_pages_to_allocate.device)
+        allocated_pages = torch.tensor(
+            self.empty_pages[-num_pages_to_allocate:],
+            device=num_pages_to_allocate.device,
+        )
         self.empty_pages = self.empty_pages[:-num_pages_to_allocate]
 
         # update page table
