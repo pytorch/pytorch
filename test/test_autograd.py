@@ -4332,6 +4332,7 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_node_ordering_when_none_returned(self):
         class Matmul(torch.autograd.Function):
             @staticmethod
@@ -4366,11 +4367,11 @@ class TestAutograd(TestCase):
             executed.append("B")
 
         x = torch.randn(
-            (1024, 1024), dtype=torch.bfloat16, device="cuda", requires_grad=True
+            (3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True
         )
         x = HookFunction.apply(x)
         w = torch.randn(
-            (1024, 1024), dtype=torch.bfloat16, device="cuda", requires_grad=True
+            (3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True
         )
         w.register_hook(hook)
         o = Matmul.apply(x, w)
