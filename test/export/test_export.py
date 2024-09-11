@@ -1426,6 +1426,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
 
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/135759")
     def test_keep_composite_ops_invalid(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -1628,6 +1629,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/135759")
     def test_error_when_passing_mutating_primitive_op(self):
         class Foo(torch.nn.Module):
             def forward(self, x):

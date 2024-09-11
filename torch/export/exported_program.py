@@ -245,38 +245,22 @@ def _split_decomp_table_to_cia_and_python_decomp(
     decomp_table: Dict[torch._ops.OperatorBase, Callable], is_joint: bool
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
     from torch._decomp import (
-        _check_valid_to_preserve,
         _collect_all_valid_cia_ops,
         _core_aten_decompositions_after_cia,
-        _is_special_op_to_preserve,
-        core_aten_decompositions,
+        _is_special_op_to_preserve
     )
 
     if is_joint:
-        return {}, _core_aten_decompositions_after_cia(_collect_all_valid_cia_ops())
+        return {}, _core_aten_decompositions_after_cia()
 
     all_preservable_cia_ops = _collect_all_valid_cia_ops()
     cia_ops_to_callable = {}
 
-    core_aten_decomp = core_aten_decompositions()
-
     for op in list(decomp_table.keys()):
-        # In the user specified decomp table, we want to assert that it is something
-        # we can customize.
-        # TODO We should fix the core aten decomp table to filter out mutating/aliasing ops
-        # One example is: aten.addcdiv.out
-        # TODO Some existing internal users are passing in mutating ops into decomp table,
-        # we should hard error
-        if not _check_valid_to_preserve(op):
-            if not (
-                op in core_aten_decomp and decomp_table[op] is core_aten_decomp[op]
-            ):
-                # TODO We should fix the core aten decomp table to filter out mutating/aliasing ops
-                # One example is: aten.addcdiv.out
-                warnings.warn(
-                    f"The op {op} that is specified in the decomp table is unsafe to be customized. "
-                    f"Therefore, we will ignore this custom decomposition "
-                )
+        # TODO we are silently allowing non-safe(non-functional) ops through a crack
+        # due to core aten decomp table having non-functional entries. Once we have 
+        # a tigher check around core aten decomp, we should warn users about them.
+        # Tracking issue: (https://github.com/pytorch/pytorch/issues/135759)
 
         # if it is a valid CIA op we can mess with in export, we check if it is:
         #  1. Has been marked as to be decomposed. Example:
@@ -294,7 +278,9 @@ def _split_decomp_table_to_cia_and_python_decomp(
             cia_ops_to_callable[op] = decomp_table[op]
             all_preservable_cia_ops.remove(op)
             del decomp_table[op]
-
+    
+    # If we reached here, it means user intentionally deleted these CIA ops from 
+    # decomp table.
     for k in all_preservable_cia_ops:
         cia_ops_to_callable[k] = _is_special_op_to_preserve
 

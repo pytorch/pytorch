@@ -332,30 +332,25 @@ def _collect_all_valid_cia_ops():
     )
     # Ignore quantized namespace ops
     cia_ops = [name[6:] for name in cia_ops if name.startswith("aten::")]
-    op_list = []
+    # Materialize all CIA ops first
     for op in cia_ops:
-        if "." not in op:
-            op_list.append(op + ".default")
-        else:
-            op_list.append(op)
+        split_list = op.split(".")
+        assert len(split_list) == 1 or len(split_list) == 2
+        op_name = split_list[0]
+        op_overload_name = "default"
+        if len(split_list) == 2:
+            op_overload_name = split_list[1]
+        
+        _ = getattr(getattr(torch.ops.aten, op_name), op_overload_name)
+    
 
-    # materialize the ops
     cia_ops = set()
-    for op in op_list:
-        op_name, overload_name = op.split(".")
-        op_overload = getattr(getattr(torch.ops.aten, op_name), overload_name)
-        if _check_valid_to_preserve(op_overload):
-            cia_ops.add(op_overload)
-
-    ops_that_dont_showup = {
-        torch.ops.aten._upsample_nearest_exact1d.default,
-        torch.ops.aten._upsample_nearest_exact2d.default,
-        torch.ops.aten._upsample_nearest_exact3d.default,
-        torch.ops.aten.upsample_nearest1d.default,
-        torch.ops.aten.upsample_nearest2d.default,
-        torch.ops.aten._upsample_nearest_exact3d.default,
-    }
-    cia_ops.update(ops_that_dont_showup)
+    for op in torch.ops.aten:
+        op_packet = getattr(torch.ops.aten, op)
+        for overload in op_packet.overloads():
+            op_overload = getattr(op_packet, overload)
+            if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
+                cia_ops.add(op_overload)
     return cia_ops
 
 
@@ -366,7 +361,7 @@ def _collect_all_valid_cia_ops():
 # Resulting opset of decomposition is core aten ops
 def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     all_preservable_cia_ops = _collect_all_valid_cia_ops()
-    decomp_table = _core_aten_decompositions_after_cia(all_preservable_cia_ops)
+    decomp_table = _core_aten_decompositions_after_cia()
 
     for op in all_preservable_cia_ops:
         # [NOTE] Seperating out func.decompose
@@ -375,7 +370,11 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
         # As a result it will infinitely recurse. So we first check if the op
         # has py_impl entry for CIA and if it is we use that first. If not,
         # we register C++ query to py_impl.
-        if torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels:
+        if (
+            (torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels) and 
+            not isinstance(op.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd], torch._C.DispatchKey) 
+
+        ):
             decomp_table[op] = op.py_kernels[
                 torch._C.DispatchKey.CompositeImplicitAutograd
             ]
@@ -396,9 +395,7 @@ def decomp_table_to_post_autograd_aten():
     return decomp_table
 
 
-def _core_aten_decompositions_after_cia(
-    all_preservable_cia_ops,
-) -> Dict[torch._ops.OperatorBase, Callable]:
+def _core_aten_decompositions_after_cia() -> Dict[torch._ops.OperatorBase, Callable]:
     aten = torch.ops.aten
     # TODO Delete all mutating or CIA ops from this list
     decomp = get_decompositions(
@@ -632,8 +629,29 @@ def _core_aten_decompositions_after_cia(
     # because this table is only meant to be used in export context
     # in which we really carefully control the decomp behaviour
     # In any case, C++ decomps should be preferred
+    cia_ops_that_should_be_removed = [
+        aten.all.dimname,
+        aten.index_add.dimname,
+        aten.index_copy.dimname,
+        aten.index_fill.Dimname_Scalar,
+        aten.index_fill.Dimname_Tensor,
+        aten.norm.names_ScalarOpt_dim_dtype,
+        aten.norm.names_ScalarOpt_dim,
+        aten.silu_backward.default,
+        aten.std.default,
+        aten.std.dim,
+        aten.std.names_dim,
+        aten.std.correction_names,
+        aten.std_mean.default,
+        aten.std_mean.dim,
+        aten.std_mean.names_dim,
+        aten.std_mean.correction_names,
+        aten.upsample_bilinear2d.vec,
+        aten.upsample_trilinear3d.vec,
+    ]
+
     for k in list(decomp.keys()):
-        if k in all_preservable_cia_ops:
+        if k in cia_ops_that_should_be_removed:
             del decomp[k]
 
     return decomp
