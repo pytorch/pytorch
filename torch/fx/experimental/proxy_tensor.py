@@ -596,6 +596,19 @@ def track_tensor_tree(
     constant: Optional[_NestedTensors],
     tracer: _ProxyTracer,
 ) -> T:
+    # NB: We call set_unbacked_bindings only on the *topmost* call to
+    # track_tensor_tree, not recursive calls.  This is because there must
+    # be only ONE unbacked_binding proxy call, and it should be the one
+    # where all of the unbacked SymInts actually first come into existence.
+    # If you call this again on the inner proxies for the tuple projections,
+    # you will have multiple unbacked_bindings for the same symbol, but
+    # they're not going to show up anywhere.
+    #
+    # I was briefly deceived into setting unbacked bindings recursively when
+    # working on https://github.com/pytorch/pytorch/pull/133585 because I
+    # observed that some extra unbacked bindings were needed to handle some
+    # higher order operator code.  But actually it looks like this was
+    # just an unrelated bug that needed to be fixed separately.
     _set_unbacked_bindings(inner_res, proxy_res)
 
     def wrap_with_proxy(
@@ -1566,6 +1579,9 @@ class _ModuleStackTracer(PythonKeyTracer):
                     )
                 return tracer.attr_proxy_map[attr_val]
 
+            def get_base(self) -> Module:
+                return tracer.proxy_modules[self]
+
             @property
             def _modules(self) -> Dict[str, AttrProxy]:
                 assert "_modules" in self.__dict__
@@ -2195,5 +2211,5 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
-            assert isinstance(out_proxy, Proxy)
+            assert isinstance(out_proxy, Proxy), out_proxy
             out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
