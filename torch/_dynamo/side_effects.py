@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 import inspect
 import warnings
+import weakref
 from collections.abc import MutableMapping
 from typing import Any, Dict, List, Optional, Type, Union
 
@@ -79,6 +81,7 @@ class SideEffects:
 
     def __init__(
         self,
+        output_graph,
         id_to_variable=None,
         store_attr_mutations=None,
         keepalive=None,
@@ -86,6 +89,7 @@ class SideEffects:
         tensor_hooks=None,
     ):
         super().__init__()
+        self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
         self.keepalive = keepalive or []
@@ -130,6 +134,7 @@ class SideEffects:
     def clone(self):
         """Create a shallow copy"""
         return self.__class__(
+            output_graph=self.output_graph_weakref(),
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
@@ -151,6 +156,12 @@ class SideEffects:
         # People do things like self.dim = dim inside autograd.Function.
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
+            return True
+        output_graph = self.output_graph_weakref()
+        if (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.ignore_side_effects
+        ):
             return True
         if not is_side_effect_safe(item.mutable_local):
             unimplemented(
@@ -699,3 +710,13 @@ class SideEffects:
     def clear(self):
         self.keepalive.clear()
         self.id_to_variable.clear()
+
+
+@contextlib.contextmanager
+def ignore_side_effects(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
+    orig_val = tx.output.current_tracer.ignore_side_effects
+    try:
+        tx.output.current_tracer.ignore_side_effects = True
+        yield
+    finally:
+        tx.output.current_tracer.ignore_side_effects = orig_val
