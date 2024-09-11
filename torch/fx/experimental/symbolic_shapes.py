@@ -437,6 +437,8 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         if x.is_Integer:
             return abs(int(x))
         elif x.is_Mul:
+            # If one of the args of a Mul is an Integer, it is the
+            # first arg. eg: args(2*x*3*y) == (6, x, y)
             return abs(int(x.args[0])) if x.args[0].is_Integer else 1
         else:
             return 1
