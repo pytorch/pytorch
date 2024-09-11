@@ -100,7 +100,8 @@ ban_recompute_reductions = True
 recompute_views = False
 # Must save the output from the activation checkpoint region
 # (to avoid recomputing it during backward).
-# This is to work around circular dependencies in FSDP2+AC,
+# This is to work around circular dependencies in FSDP2+AC.
+#
 # Example:
 # ```
 # out = fully_shard(utils.checkpoint(module))(x)
@@ -109,6 +110,8 @@ recompute_views = False
 # 1. `out_grad` is dependent on `out`.
 # 2. `out` depends on FSDP2 backward hook in order to be recomputed.
 # 3. FSDP2 backward hook depends on `out_grad`.
+#
+# By saving `out` in forward graph, we will be able to break the circular dependency.
 must_save_ac_output = False
 
 # By default, the partitioner is purely trying to optimize for runtime (although
