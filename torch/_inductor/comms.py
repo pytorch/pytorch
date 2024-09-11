@@ -531,7 +531,7 @@ Graph: {graph}
             fsdp_copy_node = node_list[fsdp_copy_node_idx]
             graph.erase_node(fsdp_copy_node)
 
-    # Delete resize nodes
+    # Delete `resize_(unsharded_param, ...)` nodes
     for node in node_list:
         if (
             node.op == "call_function"
