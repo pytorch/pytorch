@@ -4152,15 +4152,27 @@ class CppScheduling(BaseScheduling):
             template, epilogue
         ):
             assert template.is_template()
-            template_buf_name = template.node.get_name()
+            template_node = template.get_template_node()
+            assert template_node is not None
+            template_buf_name = template_node.get_name()
 
             epilogue_reads = epilogue.node.get_reads()
             indexes_of_template_buf_read_in_epilogue = [
                 read.index for read in epilogue_reads if read.name == template_buf_name
             ]
 
-            if len(list(set(indexes_of_template_buf_read_in_epilogue))) != 1:
+            num_indexes_of_template_buf_read_in_epilogue = len(
+                list(set(indexes_of_template_buf_read_in_epilogue))
+            )
+
+            # We don't support different read indexes of template buffer for now.
+            if num_indexes_of_template_buf_read_in_epilogue > 1:
                 return False
+
+            # No read of template_buffer in the epilogue, thus no need to check if
+            # it's the same as the write index of the epilogue output
+            if num_indexes_of_template_buf_read_in_epilogue == 0:
+                return True
 
             index_of_template_buf_read_in_epilogue = (
                 indexes_of_template_buf_read_in_epilogue[0]
