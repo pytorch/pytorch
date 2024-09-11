@@ -92,12 +92,27 @@ struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
     auto it = find(function.get());
     if (it == end()) {
       it = emplace(function.get(), NodeCall(_next_id++, function)).first;
+      nodes.emplace_back(function.get());
     }
     return it->second;
   }
 
+  const NodeCall& lookup(uint32_t id) const {
+    TORCH_INTERNAL_ASSERT(id < nodes.size());
+    auto it = find(nodes[id]);
+    TORCH_INTERNAL_ASSERT(it != end());
+    return it->second;
+  }
+
+  void clear() {
+    _next_id = 0;
+    std::unordered_map<Node*, NodeCall>::clear(); 
+    nodes.clear();
+  }
+
  private:
   uint32_t _next_id = 0;
+  std::vector<Node*> nodes;
 };
 
 struct TensorArg {
@@ -118,6 +133,7 @@ struct TensorArgs {
   // Manages a collection of TensorArgs and mappings from Tensors/SavedVariables
   // to them.  This also allows us to unpack SavedVariable exactly once and
   // store the unpacked Tensor.
+  TensorArgs(const std::optional<const NodeCall*>& active_node_call) : active_node_call(active_node_call) {}
 
   TensorArg& lookup(const at::Tensor& tensor, bool create = false) {
     if (!tensor.defined()) {
@@ -129,6 +145,9 @@ struct TensorArgs {
       TORCH_INTERNAL_ASSERT(create && inputs.size() == _next_id - 1);
       it = _args.emplace(impl, TensorArg(_next_id++)).first;
       inputs.emplace_back(tensor);
+      if (active_node_call.has_value()) {
+        input_origins.emplace_back(active_node_call.value()->id);
+      }
     }
     return it->second;
   }
@@ -155,8 +174,10 @@ struct TensorArgs {
 
   // the concrete tensors that will get passed into the graph as inputs
   std::vector<at::Tensor> inputs;
-
+  // NodeCall id of each input, only when verbose logging is enabled
+  std::vector<uint32_t> input_origins;
  private:
+  const std::optional<const NodeCall*>& active_node_call;
   std::unordered_map<const c10::TensorImpl*, TensorArg> _args;
   // Every TensorArg from this is actually owned by _args (or _undefined) and
   // that's why we have an un-owned pointer here.
@@ -175,6 +196,8 @@ struct LiftedIValueArg {
 };
 
 struct LiftedIValueArgs {
+  LiftedIValueArgs(const std::optional<const NodeCall*>& active_node_call) : active_node_call(active_node_call) {}
+
   at::IValue& next_proxy(const at::IValue* actual_ptr) {
     TORCH_INTERNAL_ASSERT(next < args.size());
     auto& iv_arg = args.at(next++);
@@ -182,19 +205,38 @@ struct LiftedIValueArgs {
     return iv_arg.proxy;
   }
 
+  void add(const at::IValue* iv) {
+    args.emplace_back(iv);
+    if (active_node_call.has_value()) {
+      args_origins.emplace_back(active_node_call.value()->id);
+    }
+  }
+
   std::vector<LiftedIValueArg> args;
   size_t next = 0;
+  // NodeCall id of each arg, only when verbose logging is enabled
+  std::vector<uint32_t> args_origins;
+private:
+  const std::optional<const NodeCall*>& active_node_call;
 };
 
 struct AutogradCompilerCall {
+  AutogradCompilerCall() : tensor_args(active_node_call), lifted_ivalue_args(active_node_call) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
+    if (active_node_call.has_value()) {
+      size_input_origins.emplace_back(active_node_call.value()->id);
+    }
   }
 
   size_t emplace_hook(c10::SafePyObject&& fn) {
     hooks.emplace_back(std::move(fn));
     return hooks.size() - 1;
+  }
+
+  void set_active_node_call(const NodeCall& node_call) {
+    active_node_call = &node_call;
   }
 
   TensorArgs tensor_args;
@@ -204,6 +246,9 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+  // NodeCall id of each size, only when verbose logging is enabled
+  std::vector<uint32_t> size_input_origins;
+  std::optional<const NodeCall*> active_node_call;
 };
 
 class CompiledNodeArgs {
@@ -315,7 +360,7 @@ class CompiledNodeArgs {
         !nested &&
         (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat())) {
       // can't lift ivalues nested in collections
-      _compiler.lifted_ivalue_args.args.emplace_back(&iv);
+      _compiler.lifted_ivalue_args.add(&iv);
     } else {
       try {
         collect(static_cast<uint64_t>(at::IValue::hash(iv)));
@@ -380,10 +425,13 @@ class CompiledNodeArgs {
     // nodes and the actual details of the node itself must be handled by
     // a seperate call to `node->compiled_args()`.
     if (cond((bool)t)) {
-      collect(_compiler.node_calls.lookup(t));
+      collect(_compiler.node_calls.lookup(t), false);
     }
   }
-  void collect(const NodeCall& t) {
+  void collect(const NodeCall& t, bool set_active_node) {
+    if (set_active_node) {
+      _compiler.set_active_node_call(t);
+    }
     collect_size(t.id);
     collect(t.graph_output);
     collect_hooks_from(t.node.get());
