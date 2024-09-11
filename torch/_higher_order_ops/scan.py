@@ -395,9 +395,6 @@ def trace_scan(
         out = (
             *fake_carry,
             *tuple(
-                # t.unsqueeze(dim)
-                # .repeat(*([1] * dim + [scan_length] + [1] * (t.ndim - dim)))
-                # .clone()
                 expand_tensor(t, dim, scan_length)
                 for t in fake_outputs
             ),

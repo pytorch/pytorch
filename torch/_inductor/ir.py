@@ -6745,7 +6745,7 @@ class SequentialScan(ExternKernel):
         _, fx_init, fx_xs, _, _, fx_additional_inputs = extract_scan_args(
             *V.graph.current_node.args
         )
-        fx_all_inputs = fx_init + fx_xs + tuple(fx_additional_inputs) if type(fx_init) == tuple else fx_additional_inputs
+        fx_all_inputs = fx_init + fx_xs + fx_additional_inputs
 
         if combine_subgraph.graph is None:
             # create and lower subgraphs
@@ -6764,7 +6764,6 @@ class SequentialScan(ExternKernel):
 
         carry, ys = _extract_carry_and_out(combine_subgraph.graph.graph_outputs, num_init_leaves)  # type: ignore[union-attr]
 
-        # if _has_aliased_buffers(carry) or _has_aliased_buffers(ys):
         if _has_aliased_buffers(carry + ys):
             raise AssertionError(
                 "Output aliasing is currently not supported in compiled torch.scan. "
