@@ -6764,7 +6764,8 @@ class SequentialScan(ExternKernel):
 
         carry, ys = _extract_carry_and_out(combine_subgraph.graph.graph_outputs, num_init_leaves)  # type: ignore[union-attr]
 
-        if _has_aliased_buffers(carry) or _has_aliased_buffers(ys):
+        # if _has_aliased_buffers(carry) or _has_aliased_buffers(ys):
+        if _has_aliased_buffers(carry + ys):
             raise AssertionError(
                 "Output aliasing is currently not supported in compiled torch.scan. "
                 f"The outputs of the combine_fn subgraph of torch.scan are aliased: {combine_subgraph.graph.graph_outputs}"

@@ -64,9 +64,11 @@ def create_fw_bw_graph_combinefn(combine_fn, init, input, dim):
     # Helper wrapper for the autograd forward.
     # This wrapper ensures that the forward returns all carries
     # instead of only the last one
+    # The gradients of the carries forwarded to the output are 
+    # detached in order not to raise problems with the function aliasing outputs
     def wrapper_combine_fn(*args):
         new_carry, y = _extract_carry_and_out(combine_fn(*args), len(init))
-        return [*new_carry, *new_carry, *y]
+        return [*new_carry, *[n_c.clone().detach() for n_c in new_carry], *y]
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
