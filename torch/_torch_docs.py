@@ -1696,22 +1696,21 @@ Example::
     >>> x
     tensor([[ 0.3367,  0.1288,  0.2345],
             [ 0.2303, -1.1229, -0.1863]])
-    >>> x = torch.stack((x, x)) # same as torch.stack((x, x), dim=0)
-    >>> x
+    >>> torch.stack((x, x)) # same as torch.stack((x, x), dim=0)
     tensor([[[ 0.3367,  0.1288,  0.2345],
              [ 0.2303, -1.1229, -0.1863]],
 
             [[ 0.3367,  0.1288,  0.2345],
              [ 0.2303, -1.1229, -0.1863]]])
-    >>> x.size()
+    >>> torch.stack((x, x)).size()
     torch.Size([2, 2, 3])
-    >>> x = torch.stack((x, x), dim=1)
+    >>> torch.stack((x, x), dim=1)
     tensor([[[ 0.3367,  0.1288,  0.2345],
              [ 0.3367,  0.1288,  0.2345]],
 
             [[ 0.2303, -1.1229, -0.1863],
              [ 0.2303, -1.1229, -0.1863]]])
-    >>> x = torch.stack((x, x), dim=2)
+    >>> torch.stack((x, x), dim=2)
     tensor([[[ 0.3367,  0.3367],
              [ 0.1288,  0.1288],
              [ 0.2345,  0.2345]],
@@ -1719,7 +1718,7 @@ Example::
             [[ 0.2303,  0.2303],
              [-1.1229, -1.1229],
              [-0.1863, -0.1863]]])
-    >>> x = torch.stack((x, x), dim=-1)
+    >>> torch.stack((x, x), dim=-1)
     tensor([[[ 0.3367,  0.3367],
              [ 0.1288,  0.1288],
              [ 0.2345,  0.2345]],
@@ -2277,7 +2276,7 @@ add_docstr(
     r"""
 cat(tensors, dim=0, *, out=None) -> Tensor
 
-Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
+Concatenates the given sequence of tensors in :attr:`tensors` in the given dimension.
 All tensors must either have the same shape (except in the concatenating
 dimension) or be a 1-D empty tensor with size ``(0,)``.
 
@@ -10666,7 +10665,7 @@ Keyword args:
 Example::
 
     >>> torch.nansum(torch.tensor([1., float("nan")]))
-    1.0
+    tensor(1.)
     >>> a = torch.tensor([[1, 2], [3., float("nan")]])
     >>> torch.nansum(a)
     tensor(6.)

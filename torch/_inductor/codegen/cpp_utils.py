@@ -11,10 +11,12 @@ from unittest.mock import patch
 import sympy
 
 import torch
+from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import ir
+from ..loop_body import LoopBody
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import (
@@ -681,6 +683,33 @@ def unify_mask_base_type(
     return new_vars
 
 
+def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
+    assert is_integer_dtype(offset.dtype)
+    code.writeline("[&]()")
+    with code.indent():
+        code.writeline(
+            f"{DTYPE_TO_CPP[offset.dtype]} offset[{V.kernel.tiling_factor}];"
+        )
+        code.writeline(f"{DTYPE_TO_CPP[dst_dtype]} result[{V.kernel.tiling_factor}];")
+        code.writeline(f"{offset}.store(offset);")
+        code.writeline(
+            f"for( {DTYPE_TO_CPP[offset.dtype]} offset_idx = 0; offset_idx < {V.kernel.tiling_factor}; offset_idx++ )"
+        )
+        with code.indent():
+            code.writeline(rand_function)
+        num_vectors = V.kernel._get_num_vectors(dtype=dst_dtype)
+        if num_vectors == 1:
+            code.writeline(
+                f"return at::vec::Vectorized<{DTYPE_TO_CPP[dst_dtype]}>::loadu(result);"
+            )
+        else:
+            code.writeline(
+                f"return at::vec::VectorizedN<{DTYPE_TO_CPP[dst_dtype]}, {num_vectors}>::loadu(result);"
+            )
+    code.writeline("()")
+    return code
+
+
 def get_gemm_template_output_and_compute_dtype(input_dtype):
     if input_dtype == torch.uint8:
         return (torch.int32, torch.int32)
@@ -852,3 +881,36 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
         inner_fn=inner_fn,
         ranges=input_buffer.get_size(),
     )
+
+
+def _get_loop_body(fn_list):
+    if all(isinstance(fn, LoopBody) for fn in fn_list):
+        loop_bodies = fn_list
+    else:
+        if hasattr(fn_list[0], "original_fn"):
+            # For the case of local buffer, we wrap the fn with localize_function
+            assert all(hasattr(fn, "original_fn") for fn in fn_list)
+            assert all(
+                isinstance(fn.original_fn.args[0]._body, LoopBody) for fn in fn_list
+            )
+            loop_bodies = [fn.original_fn.args[0]._body for fn in fn_list]
+        else:
+            assert all(isinstance(fn, functools.partial) for fn in fn_list)
+            assert all(isinstance(fn.args[0]._body, LoopBody) for fn in fn_list)
+            loop_bodies = [fn.args[0]._body for fn in fn_list]
+    assert loop_bodies is not None
+    return loop_bodies
+
+
+def _get_dtype_from_loopbodies(loop_bodies):
+    dtypes = set()
+    for loop_body in loop_bodies:
+        graphs = [loop_body.root_block.graph] + [
+            body.graph for body in list(loop_body.subblocks.values())
+        ]
+        for graph in graphs:
+            for node in graph.nodes:
+                if node.op != "call_method":
+                    continue
+                dtypes.add(node.meta[OptimizationContext.key].dtype)
+    return dtypes

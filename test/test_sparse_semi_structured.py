@@ -21,7 +21,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -29,7 +29,6 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_dtype import all_types_and_complex
 import torch._dynamo.test_case
-
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
@@ -43,24 +42,24 @@ import pytest
 
 from torch.utils._triton import has_triton
 
-SEMI_STRUCTURED_SUPPORTED_DTYPES = [torch.float16, torch.bfloat16, torch.float32, torch.int8]
-SEMI_STRUCTURED_SUPPORTED_BACKENDS = {}
+SEMI_STRUCTURED_SUPPORTED_BACKENDS = dict()
 
 _IS_SM8X = False
+_IS_SM9X = False
 
 if torch.cuda.is_available():
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-    SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
+    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
 
-    # check if cslt is available for now using this:
-    # TODO when we add cusparselt as a backend, we can update this to be use torch.cusparselt.is_available()
-    try:
-        torch._cslt_compress(torch.ones(128, 256).cuda())
+    # CUTLASS kernels only work for Ampere
+    if _IS_SM8X:
+        SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
+
+    # add cuSPASRELt tests if available
+    if torch.backends.cusparselt.is_available() and (_IS_SM8X or _IS_SM9X):
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = SparseSemiStructuredTensorCUSPARSELT
-    except Exception:
-        pass
 
-inference_dtypes = dtypes(torch.float16, torch.bfloat16, torch.float32, torch.int8)
+inference_dtypes = dtypes(torch.float16, torch.bfloat16, torch.int8)
 training_dtypes = dtypes(torch.float16, torch.bfloat16)
 parametrize_backends = parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
 
@@ -173,8 +172,8 @@ def rand_sparse_semi_structured_all_patterns(r, c, dtype, device):
 class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 
     def setUp(self):
-        if not _IS_SM8X:
-            self.skipTest('Only runs on SM80')
+        if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) == 0:
+            self.skipTest('semi-structured sparsity has no available backend!')
         super().setUp()
 
     def tearDown(self):
@@ -230,6 +229,8 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cusparselt", dense_input_shape)
 
+
+    @unittest.skipIf("cutlass" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cutlass not supported on this machine")
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     def test_mlp_contiguous_relu_compile_cutlass(self):
         """
@@ -260,8 +261,8 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 class TestSparseSemiStructured(TestCase):
 
     def setUp(self):
-        if not _IS_SM8X:
-            self.skipTest('Only runs on SM80')
+        if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) == 0:
+            self.skipTest('semi-structured sparsity has no available backend!')
         if IS_WINDOWS:
             self.skipTest("torch.compile not supported on windows")
 
@@ -524,7 +525,7 @@ class TestSparseSemiStructured(TestCase):
             self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype, device=device)
 
-        if dtype not in SEMI_STRUCTURED_SUPPORTED_DTYPES:
+        if dtype not in SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend]._DTYPE_SHAPE_CONSTRAINTS:
             with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dtype"):
                 A_sparse = to_sparse_semi_structured(A)
         else:
@@ -563,7 +564,8 @@ class TestSparseSemiStructuredTraining(TestCase):
 
     def setUp(self):
         if not _IS_SM8X:
-            self.skipTest('Only runs on SM80')
+            self.skipTest("SparseSemiStructuredTensor training only supported on SM8x (Ampere)")
+
         if IS_WINDOWS:
             self.skipTest('CUTLASS not supported on windows')
 
@@ -851,8 +853,6 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
          - torch._sparse_semi_structured_linear
     """
     def setUp(self):
-        if not _IS_SM8X:
-            self.skipTest('Only runs on SM80')
         if "cutlass" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('CUTLASS not enabled')
 
@@ -916,7 +916,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS")
     @parametrize("backend", ["cutlass"])
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @inference_dtypes
     def test_sparse_semi_structured_ops_cutlass(self, device, dtype, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         if backend == "cutlass" and IS_WINDOWS:
@@ -1034,8 +1034,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch._cslt_sparse_mm
     """
     def setUp(self):
-        if not _IS_SM8X:
-            self.skipTest('Only runs on SM80')
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('cuSPARSELt not enabled')
 
@@ -1051,14 +1049,16 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), out_dtype=out_dtype)
         torch.testing.assert_close(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
+    @unittest.skip("cuSPARSELt v0.6.x does not support bfloat/float16 alpha scaling")
     @training_dtypes
     def test_cslt_sparse_mm_alpha(self, dtype, device):
         A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
         B = torch.ones((256, 128), device=device).to(dtype)
         alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
+        bias = torch.ones(128, device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha, bias=bias)
 
         alpha_scaled = torch.stack([alpha] * 128).t()
         dense_result = alpha_scaled * torch.mm(A.to(torch.float32), B.to(torch.float32))
@@ -1111,12 +1111,32 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # for cuSPARSELt v0.4.0 there is a bug where although there are 5 alg_ids, we run into an error
         # when setting using the last one (4)
         # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
+        # TODO Move this into the cuSPARSELt backendk
         assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
 
-instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
-instantiate_device_type_tests(TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda")
-instantiate_device_type_tests(TestSparseSemiStructuredCUSPARSELT, globals(), only_for="cuda")
-instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_for="cuda")
+    def test_cusparselt_backend(self):
+        version = _get_torch_cuda_version()
+        assert torch.backends.cusparselt.is_available()
+
+        # CUDA 11.8 has cuSPARSELt v0.4.0 support
+        if version == (11, 8):
+            assert torch.backends.cusparselt.version() == 400
+        # CUDA 12.1 has cuSPARSELt v0.5.2 support
+        elif version == (12, 1):
+            assert torch.backends.cusparselt.version() == 502
+        # CUDA 12.4+ has cuSPARSELt v0.6.2 support
+        elif version >= (12, 4):
+            assert torch.backends.cusparselt.version() == 602
+        else:
+            assert torch.backends.cusparselt.version() is None
+
+if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
+    instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
+if "cutlass" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
+    instantiate_device_type_tests(TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda")
+    instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_for="cuda")
+if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
+    instantiate_device_type_tests(TestSparseSemiStructuredCUSPARSELT, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()

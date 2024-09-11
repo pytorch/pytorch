@@ -54,8 +54,10 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
+    from torch import version as _version
+
     try:
-        if not torch.version.hip:
+        if not _version.hip:
             import pynvml  # type: ignore[import]
         else:
             import amdsmi  # type: ignore[import]
@@ -63,6 +65,8 @@ try:
         _HAS_PYNVML = True
     except ModuleNotFoundError:
         pass
+    finally:
+        del _version
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
 
@@ -1118,7 +1122,8 @@ def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)["cur_clk"]
+    clk_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
+    return clk_info["clk"] if "clk" in clk_info else clk_info["cur_clk"]
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
@@ -1624,6 +1629,7 @@ __all__ = [
     "memory_usage",
     "MemPool",
     "MemPoolContext",
+    "use_mem_pool",
     "temperature",
     "power_draw",
     "clock_rate",
