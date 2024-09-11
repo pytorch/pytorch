@@ -163,12 +163,15 @@ def main():
             "inductor",
         ),
         Benchmark(ListOfLinears, "eager"),
+        Benchmark(ListOfLinears, "inductor"),
         Benchmark(ListOfLinears, "eager", dynamic=True),
         Benchmark(ListOfLinears, "inductor", dynamic=True),
         Benchmark(ListOfLinears, "inductor", is_gpu=True),
         Benchmark(ListOfLinears, "inductor", is_gpu=True, dynamic=True),
+
         Benchmark(ModuleForwardHasGraphBreak, "inductor"),
         Benchmark(ModuleForwardHasGraphBreak, "eager"),
+        
         Benchmark(SequentialWithDuplicatedModule, "inductor"),
         Benchmark(SequentialWithDuplicatedModule, "eager"),
         Benchmark(SequentialWithDuplicatedModule, "inductor", dynamic=True),
