@@ -15,6 +15,30 @@ namespace at::native {
 using namespace mps;
 static MetalShaderLibrary lib(R"IM2COL_METAL(
 template<typename T>
+void im2col_kernel(
+     constant T  * input,
+     device   T * output,
+     ulong2 kernel_size,
+     long2 input_offset,
+     long2 input_size,
+     long2 dilation,
+     ulong2 input_strides,
+     ulong output_stride) {
+    for (ulong i = 0; i < kernel_size.y; ++i) {
+      for (ulong j = 0; j < kernel_size.x; ++j) {
+        auto input_pos = input_offset + long2(j, i) * dilation;
+        if (input_pos.x < 0 || input_pos.y < 0 || input_pos.x >= input_size.x || input_pos.y >= input_size.y) {
+          *output = T(0);
+        } else {
+          auto offset = input_pos.x * input_strides.x + input_pos.y * input_strides.y;
+          *output = input[offset];
+        }
+        output += output_stride;
+      }
+    }
+}
+
+template<typename T>
 kernel void im2col(
     constant T               * inputData       [[buffer(0)]],
     device   T               * outputData      [[buffer(1)]],
@@ -23,6 +47,7 @@ kernel void im2col(
     constant ulong4          & input_strides   [[buffer(4)]],
     constant ulong4          & output_strides  [[buffer(5)]],
     uint3                      thread_index    [[thread_position_in_grid]]) {
+    // thread_index is (output_length, input_channels, input_batch)
     const auto N = thread_index.z;
     const auto C = thread_index.y;
     const auto L = thread_index.x;
@@ -32,14 +57,9 @@ kernel void im2col(
     auto i_x = o_x * padding_stride.z - padding_stride.x;
     auto i_y = o_y * padding_stride.w - padding_stride.y;
     ulong kernel_size = kernel_dilation.x * kernel_dilation.y;
-    ulong I_C = C / (kernel_size);
-    ulong inp_offs = C % kernel_size;
-    const auto i = inp_offs / kernel_dilation.x;
-    const auto j = inp_offs % kernel_dilation.x;
-    i_x += i * kernel_dilation.z;
-    i_y += j * kernel_dilation.w;
-    const auto val = inputData[N*input_strides.w + I_C*input_strides.z + i_y * input_strides.y + i_x * input_strides.x];
-    outputData[L * output_strides.x + C * output_strides.y + N * output_strides.z ] = val;
+    outputData += N * output_strides.z + C * kernel_size * output_strides.y + L * output_strides.x;
+    inputData += N * input_strides.w + C * input_strides.z;
+    im2col_kernel(inputData, outputData, kernel_size, long2(i_x, i_y), long2(4, 4), long2(kernel_dilation.zw), input_strides.xy, output_strides.y);
 }
 
 #define INSTANTIATE_IM2COL(DTYPE)                                          \
@@ -140,7 +160,7 @@ static void im2col_out_mps_template(
       mtl_setBytes(computeEncoder, padding_stride, 3);
       mtl_setBytes(computeEncoder, input_strides, 4);
       mtl_setBytes(computeEncoder, output_strides, 5);
-      [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_output_plane, batch_size)
+      [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_input_plane, batch_size)
                       threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(stream);
