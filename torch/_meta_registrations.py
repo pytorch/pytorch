@@ -1,7 +1,9 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
+import operator
 from enum import Enum
+from functools import reduce
 from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -6528,12 +6530,17 @@ def meta_split_with_sizes(
         lambda: f"Split sizes add up to {sum(split_sizes)} but got the tensor's size of {self.shape[dim]}",
     )
     result = []
+    start_idx = 0
     for split_size in split_sizes:
         new_shape = list(self.shape)
         new_shape[dim] = split_size
         # We mimic narrow which calls _slice_in_dim_meta which in turn calls _slice_meta
         # By doing that we avoid a lot of checks in slice_in_dim and slice
-        result.append(self.as_strided(new_shape, self.stride(), self.storage_offset()))
+        offset = reduce(operator.mul, self.stride()[dim + 1 :]) * start_idx
+        result.append(
+            self.as_strided(new_shape, self.stride(), self.storage_offset() + offset)
+        )
+        start_idx += split_size
     return result
 
 
