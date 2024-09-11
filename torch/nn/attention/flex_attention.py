@@ -907,11 +907,6 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
             f"NYI: Currently non power of 2 embedding dimension are not supported. "
             f"Got E={query.size(-1)} and Ev={value.size(-1)}."
         )
-    if value.size(-1) > query.size(-1):
-        raise ValueError(
-            f"NYI: Currently value embedding dimension must be less than or equal to query embedding dimension. "
-            f"Got Ev={value.size(-1)} and E={query.size(-1)}."
-        )
 
 
 def flex_attention(
