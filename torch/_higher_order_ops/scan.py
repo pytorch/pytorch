@@ -337,20 +337,18 @@ def trace_scan(
 
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[dim]
-        fake_out_shapes = make_expanded_output_shape(
-            dim, scan_length, [o.meta["val"].size() for o in output]
+        fake_carry, fake_outputs = _extract_carry_and_out(
+            [o.meta["val"] for o in outputs], len(init)
         )
-
-        def expand_tensor(t, sh):
-            if isinstance(t, torch.Tensor):
-                return t.expand(*sh)
-            return t
-
-        expanded_outs = [
-            pytree.tree_map(expand_tensor, t.meta["val"], sh)
-            for t, sh in zip(output, fake_out_shapes)
-        ]
-        out = [*init, *expanded_outs]
+        out = (
+            *fake_carry,
+            *tuple(
+                t.unsqueeze(dim)
+                .repeat(*([1] * dim + [scan_length] + [1] * (t.ndim - dim)))
+                .clone()
+                for t in fake_outputs
+            ),
+        )
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 

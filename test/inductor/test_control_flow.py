@@ -803,6 +803,31 @@ class AssociativeScanTests(TestCase):
 
 
 class ScanModels:
+    class SimpleWithPytreeInOuts(torch.nn.Module):
+        def __init__(self, reverse):
+            super().__init__()
+            self.reverse = reverse
+
+        def forward(self, scan_op, _input, weight, bias):
+            def combine_fn(carry, x):
+                from torch.utils import _pytree as pytree
+
+                new_carry = {
+                    "param": carry["param"] @ x + carry["bias"],
+                    "bias": carry["bias"].sin(),
+                }
+                return new_carry, (
+                    pytree.tree_map(lambda x: x.clone(), new_carry),
+                    {"dummy": x.sin()},
+                )
+
+            return scan_op(
+                combine_fn,
+                {"param": weight, "bias": bias},
+                _input,
+                reverse=self.reverse,
+            )
+
     class ChunkedCE(torch.nn.Module):
         def __init__(self, chunk_size):
             super().__init__()
@@ -857,7 +882,57 @@ class ScanModels:
                 grad_weight / chunks,
                 grad_bias / chunks,
                 loss_acc / chunks,
-                grad_inputs / chunks,
+                grad_inputs.view(-1, *_input.shape[1:]) / chunks,
+            )
+
+    class ChunkedCENoScan(torch.nn.Module):
+        def __init__(self, chunk_size):
+            super().__init__()
+            self.chunk_size = chunk_size
+            self.ce = lambda logits, target: torch.abs(target - logits).sum()
+
+        def forward(self, scan_op, _input, weight, target, bias):
+            CHUNK_SIZE = self.chunk_size
+
+            def compute_loss(input_chunk, weight, bias, target):
+                logits = torch.addmm(bias, input_chunk, weight.t())
+                logits = logits.float()
+                loss = self.ce(logits, target)
+                return loss
+
+            grad_weight = torch.zeros_like(weight)
+            grad_inputs = []
+            grad_bias = torch.zeros_like(bias)
+            loss_acc = torch.zeros((), device=_input.device)
+
+            chunks = _input.shape[0] // CHUNK_SIZE
+
+            def accumulate_chunk(input_chunk, target_chunk):
+                (
+                    chunk_grad_input,
+                    chunk_grad_weight,
+                    chunk_grad_bias,
+                ), chunk_loss = torch.func.grad_and_value(
+                    compute_loss, argnums=(0, 1, 2)
+                )(
+                    input_chunk, weight, bias, target_chunk
+                )
+                grad_weight.add_(chunk_grad_weight)
+                grad_bias.add_(chunk_grad_bias)
+                loss_acc.add_(chunk_loss)
+                return chunk_grad_input
+
+            accumulate_chunk = torch.compile(accumulate_chunk)
+
+            input_chunks = torch.chunk(_input, chunks=chunks, dim=0)
+            target_chunks = torch.chunk(target, chunks=chunks, dim=0)
+            for input_chunk, target_chunk in zip(input_chunks, target_chunks):
+                grad_inputs.append(accumulate_chunk(input_chunk, target_chunk))
+            return (
+                grad_weight / chunks,
+                grad_bias / chunks,
+                loss_acc / chunks,
+                torch.cat(grad_inputs, dim=0) / chunks,
             )
 
 
@@ -867,31 +942,57 @@ class ScanTests(TestCase):
         model,
         inputs,
         device,
-        dynamic=False,
-        num_predicates=1,
+        dynamic,
     ):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
-        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+        compiled_model = torch.compile(backend=cnt, fullgraph=True, dynamic=dynamic)(
+            model
+        )
 
         inputs = [inp.to(device=device) for inp in inputs]
-        input_sets = [inputs]
+        cloned_inputs = [inp.clone() for inp in inputs]
+        result = model(scan, *cloned_inputs)
+        result_exp = model(_fake_scan, *cloned_inputs)
 
-        for inputs in input_sets:
-            cloned_inputs = [inp.clone() for inp in inputs]
-            result = model(scan, *cloned_inputs)
-            result_exp = model(_fake_scan, *cloned_inputs)
+        result_compiled = compiled_model(scan, *cloned_inputs)
+        result_compiled_exp = compiled_model(_fake_scan, *cloned_inputs)
 
-            result_compiled = compiled_model(scan, *cloned_inputs)
-            result_compiled_exp = compiled_model(_fake_scan, *cloned_inputs)
+        self.assertEqual(result, result_exp)
+        self.assertEqual(result_compiled, result_compiled_exp)
 
-            self.assertEqual(result, result_exp)
-            self.assertEqual(result_compiled, result_compiled_exp)
+    def _compare_result(
+        self,
+        model1,
+        model2,
+        inputs,
+        device,
+    ):
+        inp_on_device = [elem.to(device=device) for elem in inputs]
+        cloned_inputs = [arg.clone() for arg in inp_on_device]
+        model1_out = model1(scan, *cloned_inputs)
+        model2_out = model2(scan, *cloned_inputs)
+        self.assertEqual(model1_out, model2_out)
 
     @requires_gpu
     @parametrize("device", [GPU_TYPE])
-    @parametrize("dynamic", [False])
+    @parametrize("dynamic", [True, False])
+    @parametrize("reverse", [True, False])
+    def test_scan_pytree_in_out(self, device, dynamic, reverse):
+        self._run_test(
+            model=ScanModels.SimpleWithPytreeInOuts(reverse=reverse),
+            inputs=(
+                torch.randn(4, 3, 3),
+                torch.randn(4, 3),
+                torch.randn(3),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", [GPU_TYPE])
+    @parametrize("dynamic", [True, False])
     def test_scan_chunked_ce(self, device, dynamic):
-        # while_loop control flow with nesting
         self._run_test(
             model=ScanModels.ChunkedCE(10),
             inputs=(
@@ -903,6 +1004,23 @@ class ScanTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    @requires_gpu
+    @parametrize("device", [GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_compare_scan_chunked_ce_with_no_scan(self, device, dynamic):
+        for trunk_size, B, T in zip([10, 20], [10, 100], [20, 40]):
+            self._compare_result(
+                model1=torch.compile(ScanModels.ChunkedCE(trunk_size), dynamic=dynamic),
+                model2=ScanModels.ChunkedCENoScan(trunk_size),
+                inputs=(
+                    torch.randn(B, T),
+                    torch.randn(T, T),
+                    torch.randn(B, T),
+                    torch.randn(T),
+                ),
+                device=device,
+            )
 
 
 instantiate_parametrized_tests(CondTests)
