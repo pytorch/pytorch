@@ -757,7 +757,7 @@ class FSDPParam:
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
-        local_tensor = self._create_maybe_padded_local_tensor(new_param._local_tensor)
+        local_tensor = self._create_maybe_padded_local_tensor(local_tensor)
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         # Detach since we don't need gradients of `self.sharded_param` to flow back to the padded local_tensor.
