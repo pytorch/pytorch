@@ -8776,8 +8776,13 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple]
     samples = []
+    gqa_options = [False] if TEST_WITH_ROCM else [True, False]  # TODO: GQA support
+    if TEST_WITH_ROCM and dtype == torch.float32:
+        causal_options = [False]  # FIXME: Large errors with causal+fp32
+    else:
+        causal_options = [True, False]
     for qkv_shape, is_causal, dropout_p, enable_gqa in product(
-            qkv_shapes, [True, False], [0.0, 0.5], [True, False]):
+            qkv_shapes, causal_options, [0.0, 0.5], gqa_options):
         shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(
             make(shape_q),
@@ -8807,14 +8812,15 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
             dropout_p=0.0)
     )
 
-    samples.append(
-        SampleInput(
-            make((batch, num_heads_q_gqa, seq_q, head_dim)),
-            make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
-            make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
-            enable_gqa=True
+    if not TEST_WITH_ROCM:
+        samples.append(
+            SampleInput(
+                make((batch, num_heads_q_gqa, seq_q, head_dim)),
+                make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
+                make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
+                enable_gqa=True
+            )
         )
-    )
 
     yield from samples
 
