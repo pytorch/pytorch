@@ -2700,8 +2700,7 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context = parent_context.inner_contexts[inner_context_name]
 
         log.debug(
-            "wrap_to_fake, sid: %s, %s, shape: %s, %s %s",
-            id(e.untyped_storage()),
+            "wrap_to_fake %s %s %s %s",
             source.name(),
             tuple(e.shape),
             symbolic_context,
