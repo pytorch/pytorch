@@ -102,6 +102,15 @@ IR {
 
         self.assertEqual(run("cpu"), run("lazy"))
 
+    def test_storage_offset_after_two_slices(self):
+        def run(device):
+            base = torch.rand(10).to(device)
+            view0 = base[2:]
+            view1 = view0[:5]
+            return (view0.storage_offset(), view1.storage_offset())
+
+        self.assertEqual(run("cpu"), run("lazy"))
+
 
 if __name__ == "__main__":
     run_tests()
