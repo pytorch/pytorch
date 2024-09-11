@@ -817,6 +817,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 len(tx.symbolic_torch_function_state.mode_stack)
             )
 
+        @register(torch._C._get_function_stack_at)
+        def handle_get_stack_at(self, tx: "InstructionTranslator", *args, **kwargs):
+            assert len(args) == 1 and not kwargs
+            ind = args[0].as_python_constant()
+            assert ind >= 0 and ind < len(tx.symbolic_torch_function_state.mode_stack)
+            return tx.symbolic_torch_function_state.mode_stack[ind]
+
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
