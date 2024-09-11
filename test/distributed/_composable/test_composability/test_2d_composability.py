@@ -17,7 +17,9 @@ from torch.distributed._tensor import DTensor, init_device_mesh, Replicate, Shar
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
     get_optimizer_state_dict,
+    set_model_state_dict,
     set_optimizer_state_dict,
+    StateDictOptions,
 )
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -333,6 +335,46 @@ class TestFullyShard2DTraining(FSDPTest):
 
         loss_cp2 = train_step(model_cp, optim_cp, inp)
         self.assertEqual(loss_no_cp2, loss_cp2)
+
+    @skip_if_lt_x_gpu(4)
+    def test_2d_set_full_state_dict(self):
+        dummy_model = SimpleModel().cuda()
+        mesh_2d = init_device_mesh(
+            "cuda",
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+            "net3": ColwiseParallel(),
+        }
+        model = parallelize_module(dummy_model, tp_mesh, parallelize_plan)
+        fully_shard(model, mesh=dp_mesh)
+        optim = torch.optim.Adam(model.parameters(), lr=0.01)
+        model(model.get_input()).sum().backward()
+        optim.step()
+        # ref_msd, ref_osd are both the default sharded state dict
+        ref_msd = copy.deepcopy(model.state_dict())
+        ref_osd = copy.deepcopy(optim.state_dict())
+
+        options = StateDictOptions(
+            full_state_dict=True, cpu_offload=True, broadcast_from_rank0=True
+        )
+        full_msd = get_model_state_dict(model, options=options)
+        full_osd = get_optimizer_state_dict(model, optimizers=optim, options=options)
+        # load full_msd and full_osd into model and optim.
+        # this loads the slice of full tensor into each rank's local DTensor.
+        set_model_state_dict(model, full_msd, options=options)
+        set_optimizer_state_dict(
+            model, optimizers=optim, optim_state_dict=full_osd, options=options
+        )
+        new_msd = model.state_dict()
+        new_osd = optim.state_dict()
+        self.assertEqual(ref_msd, new_msd)
+        self.assertEqual(ref_osd, new_osd)
 
 
 class Test2dFSDP1ParallelIntegration(DTensorTestBase):
@@ -772,6 +814,27 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
+
+
+class TestDummyModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        torch.manual_seed(0)
+        self.net1 = nn.Linear(8, 16)
+        # self.net2 = nn.Linear(16, 32)
+        # self.net3 = nn.Linear(32, 64)
+        # self.net4 = nn.Linear(64, 8)
+
+    def forward(self, x):
+        x = F.relu(self.net1(x))
+        # x = F.relu(self.net2(x))
+        # x = F.relu(self.net3(x))
+        # x = F.relu(self.net4(x))
+        return x
+
+    def get_input(self):
+        return torch.rand(8, 8, device="cuda")
+
 
 if __name__ == "__main__":
     run_tests()
