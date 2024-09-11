@@ -1888,8 +1888,8 @@ def native_dropout(x, p, train):
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
 def bernoulli_(x, *args):
-    assert config.fallback_random or x.get_device() == torch.device(
-        "cpu"
+    assert (
+        config.fallback_random or x.get_device() == torch.device("cpu")
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
     op_overload = (
@@ -1903,8 +1903,8 @@ def bernoulli_(x, *args):
 
 @register_lowering(aten.bernoulli.p, type_promotion_kind=None)
 def bernoulli_p(x, *args):
-    assert config.fallback_random or x.get_device() == torch.device(
-        "cpu"
+    assert (
+        config.fallback_random or x.get_device() == torch.device("cpu")
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     return bernoulli_(clone(x), *args)
 
@@ -2050,13 +2050,14 @@ def _searchsorted_with_positional_sorter(
     right: bool = False,
     side: Optional[str] = None,
 ) -> TensorBox:
+    validate_bucketize = lambda tb: V.graph.has_feature(tb, BackendFeature.BUCKETIZE)
+    validate_strides = lambda tb: tb.get_stride()[-1] == 1
+    # sorted_sequence and sorter must both be contiguous in the last dimension for our
+    # assumptions in ops.bucketize to work.
     if (
-        not V.graph.has_feature(sorted_sequence, BackendFeature.BUCKETIZE)
-        or not V.graph.has_feature(values, BackendFeature.BUCKETIZE)
-        or (
-            sorter is not None
-            and not V.graph.has_feature(sorter, BackendFeature.BUCKETIZE)
-        )
+        not (validate_strides(sorted_sequence) and validate_bucketize(sorted_sequence))
+        or not validate_bucketize(values)
+        or (sorter is not None and not (validate_strides(sorter) and validate_bucketize(sorter)))
     ):
         return fallback_handler(aten.searchsorted.Tensor, add_to_fallback_set=False)(
             sorted_sequence,

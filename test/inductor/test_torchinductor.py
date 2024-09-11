@@ -10315,7 +10315,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
-    def test_searchsorted_one_dimensional(self):
+    def test_searchsorted(self):
         def fn(sorted_sequence, values, out_int32, right, side, sorter):
             return torch.searchsorted(
                 sorted_sequence,
@@ -10326,103 +10326,40 @@ class CommonTemplate:
                 sorter=sorter,
             )
 
-        unsorted_sequence = torch.rand(32)
-        sorted_sequence, sorting_indices = torch.sort(unsorted_sequence)
-        values = torch.rand(16, 16)
+        shapes = (
+            ((1,), (16, 16)),  # scalar sorted_sequence
+            ((16,), ()),  # scalar values
+            ((32,), (16, 16)),  # 1-D sorted_sequence
+            ((16, 32), (16, 16)),  # N-D sorted_sequence
+            ((3, 5), (3, 7)),  # prime dimensioned sequence, to flush out indexing bugs
+        )
+        booleans = (False, True)
 
-        for out_int32 in (False, True):
-            for right in (False, True):
-                side = "right" if right else "left"
-                self.common(
-                    fn,
-                    (sorted_sequence, values, out_int32, right, side, None),
-                    check_lowp=False,
-                )
-                self.common(
-                    fn,
-                    (
-                        unsorted_sequence,
-                        values,
-                        out_int32,
-                        right,
-                        side,
-                        sorting_indices,
-                    ),
-                    check_lowp=False,
-                )
+        for (seq_shape, value_shape), out_int32, right in itertools.product(
+            shapes, booleans, booleans
+        ):
+            unsorted_sequence = torch.rand(seq_shape)
+            sorted_sequence, sorting_indices = torch.sort(unsorted_sequence)
+            values = torch.rand(value_shape)
 
-    def test_searchsorted_multi_dimensional(self):
-        def fn(sorted_sequence, values, out_int32, right, side, sorter):
-            return torch.searchsorted(
-                sorted_sequence,
-                values,
-                out_int32=out_int32,
-                right=right,
-                side=side,
-                sorter=sorter,
+            side = "right" if right else "left"
+            self.common(
+                fn,
+                (sorted_sequence, values, out_int32, right, side, None),
+                check_lowp=False,
             )
-
-        unsorted_sequence = torch.rand(16, 32)
-        sorted_sequence, sorting_indices = torch.sort(unsorted_sequence)
-        values = torch.rand(16, 16)
-
-        for out_int32 in (False, True):
-            for right in (False, True):
-                side = "right" if right else "left"
-                self.common(
-                    fn,
-                    (sorted_sequence, values, out_int32, right, side, None),
-                    check_lowp=False,
-                )
-                self.common(
-                    fn,
-                    (
-                        unsorted_sequence,
-                        values,
-                        out_int32,
-                        right,
-                        side,
-                        sorting_indices,
-                    ),
-                    check_lowp=False,
-                )
-
-    # This test is intended to expose any bugs in the underlying bucketize ops' masking operations.
-    def test_searchsorted_prime_dimensions(self):
-        def fn(sorted_sequence, values, out_int32, right, side, sorter):
-            return torch.searchsorted(
-                sorted_sequence,
-                values,
-                out_int32=out_int32,
-                right=right,
-                side=side,
-                sorter=sorter,
+            self.common(
+                fn,
+                (
+                    unsorted_sequence,
+                    values,
+                    out_int32,
+                    right,
+                    side,
+                    sorting_indices,
+                ),
+                check_lowp=False,
             )
-
-        unsorted_sequence = torch.rand(3, 5)
-        sorted_sequence, sorting_indices = torch.sort(unsorted_sequence)
-        values = torch.rand(3, 7)
-
-        for out_int32 in (False, True):
-            for right in (False, True):
-                side = "right" if right else "left"
-                self.common(
-                    fn,
-                    (sorted_sequence, values, out_int32, right, side, None),
-                    check_lowp=False,
-                )
-                self.common(
-                    fn,
-                    (
-                        unsorted_sequence,
-                        values,
-                        out_int32,
-                        right,
-                        side,
-                        sorting_indices,
-                    ),
-                    check_lowp=False,
-                )
 
     def test_bucketize(self):
         def fn(input, boundaries, out_int32, right):

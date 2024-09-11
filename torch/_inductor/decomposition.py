@@ -1038,9 +1038,9 @@ def searchsorted_scalar(
 ) -> torch.Tensor:
     return searchsorted(
         sorted_sequence,
-        torch.Tensor([self]),
+        torch.tensor([self], device=sorted_sequence.device),
         out_int32=out_int32,
         right=right,
         side=side,
         sorter=sorter,
-    )
+    )[0]
