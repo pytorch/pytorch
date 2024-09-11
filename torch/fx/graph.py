@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
@@ -1552,6 +1551,8 @@ class Graph:
 
         # Check targets are legit
         if self.owning_module:
+            num_warnings = 0
+            MAX_WARNINGS = 5
             for node in self.nodes:
                 if node.op == 'call_function':
                     if not callable(node.target):
@@ -1578,11 +1579,21 @@ class Graph:
                               and not isinstance(new_m_itr, torch.nn.Module)
                               and not isinstance(new_m_itr, torch.nn.Parameter)
                               and atom not in m_itr._buffers):
-                            warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
-                                          'not reference an nn.Module, nn.Parameter, or buffer, which is '
-                                          'what \'get_attr\' Nodes typically target')
+                            if num_warnings < MAX_WARNINGS:
+                                # Don't emit this warning too frequently,
+                                # for very large graphs this can become very expensive
+                                # from a performance perspective.
+                                warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                              'not reference an nn.Module, nn.Parameter, or buffer, which is '
+                                              'what \'get_attr\' Nodes typically target')
+                            num_warnings += 1
                         else:
                             m_itr = new_m_itr
+            if num_warnings > MAX_WARNINGS:
+                warnings.warn(
+                    f'Additional {num_warnings - MAX_WARNINGS} warnings '
+                    'suppressed about get_attr references'
+                )
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(self, is_impure_node: Optional[Callable[[Node], bool]] = None):

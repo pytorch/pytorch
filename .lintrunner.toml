@@ -138,7 +138,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'numpy==1.24.3 ; python_version == "3.8"',
     'numpy==1.26.0 ; python_version >= "3.9"',
-    'expecttest==0.1.6',
+    'expecttest==0.2.1',
     'mypy==1.10.0',
     'sympy==1.12.1 ; python_version == "3.8"',
     'sympy==1.13.0 ; python_version >= "3.9"',
@@ -1222,7 +1222,6 @@ exclude_patterns = [
     'torch/_export/trace.py',
     'torch/_export/verifier.py',
     'torch/_vendor/**',
-    'torch/compiler/__init__.py',
     'torch/contrib/__init__.py',
     'torch/contrib/_tensorboard_vis.py',
     "torch/cuda/_gpu_trace.py",
@@ -1483,7 +1482,7 @@ init_command = [
     'black==23.12.1',
     'usort==1.0.8.post1',
     'isort==5.13.2',
-    'ruff==0.6.0',  # sync with RUFF
+    'ruff==0.6.3',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1568,7 +1567,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.6.0',  # sync with PYFMT
+    'ruff==0.6.3',  # sync with PYFMT
 ]
 is_formatter = true
 

@@ -1108,7 +1108,7 @@ class EQUALS_MATCH : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Fast path - pointer equality check. Pointer equality checks are ok
     // because objects guarded with EQUALS_MATCH are immutable.
-    if (value != _value.ptr() && value != _first_passing_value.ptr()) {
+    if (value != _value.ptr()) {
       // Check type
       if (Py_TYPE(value) != _value_type) {
         return false;
@@ -1118,11 +1118,6 @@ class EQUALS_MATCH : public LeafGuard {
       if (result == -1) {
         PyErr_Clear();
         return false;
-      }
-
-      // Cache the value here.
-      if (!_first_passing_value && result) {
-        _first_passing_value = py::cast<py::object>(value);
       }
       return result;
     }
@@ -1135,11 +1130,6 @@ class EQUALS_MATCH : public LeafGuard {
   // selected objects which do not have high memory footprint, so holding on to
   // these objects is ok.
   py::object _value;
-
-  // Cache the first value whose pointer is not equal to value.ptr(). This is
-  // useful in nn module guards where getattr name is a string, which is same as
-  // a key in the __dict__ but the pointer is different.
-  py::object _first_passing_value;
 
   // Type of the value
   PyTypeObject* _value_type;
@@ -3449,6 +3439,69 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Implements function call no args - e.g, torch.cuda.current_device()
+ */
+class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
+ public:
+  CallFunctionNoArgsGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    if (!PyCallable_Check(obj)) {
+      return false;
+    }
+
+    PyObject* x = PyObject_CallNoArgs(obj);
+    if (x == nullptr) {
+      // Call failed, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    if (!PyCallable_Check(obj)) {
+      return GuardDebugInfo(
+          false, std::string("Not a callable obj ") + get_source(), 0);
+    }
+
+    PyObject* x = PyObject_CallNoArgs(obj);
+    if (x == nullptr) {
+      // Call failed, clear the exception and return debug info.
+      std::string exc_message = get_exception_message();
+      PyErr_Clear();
+      return GuardDebugInfo(false, exc_message, 0);
+    }
+
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "CallFunctionNoArgsGuardAccessor()";
+  }
+};
+
+/**
  * Similar to PythonLambdaLeafGuard, this class is a way to allow developers to
  * supply accessor as a python function. This is useful for from_numpy source.
  */
@@ -3793,6 +3846,12 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "WeakRefCallGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
+      CallFunctionNoArgsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<CallFunctionNoArgsGuardAccessor>>(
+      py_m, "CallFunctionNoArgsGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
       TupleIteratorGetItemAccessor,
       GuardAccessor,
       std::unique_ptr<TupleIteratorGetItemAccessor>>(
@@ -4100,6 +4159,26 @@ PyObject* torch_c_dynamo_guards_init() {
             // A unique key is used to save as the accessor key.
             py::str unique_key("__weakref_call_accessor__");
             return self.get_child_manager<WeakRefCallGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "call_function_no_args_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__call_function_no_args_accessor__");
+            return self.get_child_manager<CallFunctionNoArgsGuardAccessor>(
                 std::move(unique_key),
                 std::move(source),
                 example_value,

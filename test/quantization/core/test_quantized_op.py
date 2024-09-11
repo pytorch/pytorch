@@ -4184,6 +4184,87 @@ class TestQuantizedLinear(TestCase):
             np.testing.assert_equal(
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
+    """Tests the correctness of the _quantized::wrapped_quantized_linear op."""
+    @skipIfNoFBGEMM
+    @given(
+        m=st.integers(2, 6),
+        k=st.integers(2, 6),
+        n=st.integers(2, 6),
+    )
+    def test_wrapped_quantized_linear(self, m, n, k):
+        input = torch.randn(m, k, dtype=torch.float32)
+        input_scale = torch.tensor(0.1)
+        input_zero_point = torch.tensor(0)
+        weight = torch.randn(n, k, dtype=torch.float32)
+        weight_scale = torch.tensor(0.1)
+        weight_zero_point = torch.tensor(0)
+        bias = torch.randn(n, dtype=torch.float32)
+        output_scale = torch.tensor(0.1)
+        output_zero_point = torch.tensor(0)
+        out_channel = n
+
+        ret = torch.ops._quantized.wrapped_quantized_linear(
+            input,
+            input_scale,
+            input_zero_point,
+            weight,
+            weight_scale,
+            weight_zero_point,
+            bias,
+            output_scale,
+            output_zero_point,
+            out_channel,
+        )
+
+        qinput = torch.quantize_per_tensor(input, input_scale, input_zero_point, torch.quint8)
+        qweight = torch.quantize_per_tensor(weight, weight_scale, weight_zero_point, torch.qint8)
+        qlinear_prepack = torch.ops.quantized.linear_prepack(qweight, bias)
+        qlinear = torch.ops.quantized.linear(qinput, qlinear_prepack, output_scale, output_zero_point)
+        ret_ref = qlinear.dequantize()
+        self.assertEqual(ret, ret_ref)
+
+    """Tests the correctness of the _quantized::_wrapped_linear_prepack and
+    _quantized::_wrapped_quantized_linear_prepacked ops."""
+    @skipIfNoFBGEMM
+    @given(
+        m=st.integers(2, 6),
+        k=st.integers(2, 6),
+        n=st.integers(2, 6),
+    )
+    def test_wrapped_quantized_linear_prepacked(self, m, n, k):
+        input = torch.randn(m, k, dtype=torch.float32)
+        input_scale = torch.tensor(0.1)
+        input_zero_point = torch.tensor(0)
+        weight = torch.randn(n, k, dtype=torch.float32)
+        weight_scale = torch.tensor(0.1)
+        weight_zero_point = torch.tensor(0)
+        bias = torch.randn(n, dtype=torch.float32)
+        output_scale = torch.tensor(0.1)
+        output_zero_point = torch.tensor(0)
+        out_channel = n
+
+        ret_1 = torch.ops._quantized._wrapped_linear_prepack(
+            weight,
+            weight_scale,
+            weight_zero_point,
+            bias
+        )
+        ret_2 = torch.ops._quantized._wrapped_quantized_linear_prepacked(
+            input,
+            input_scale,
+            input_zero_point,
+            ret_1,
+            output_scale,
+            output_zero_point,
+            out_channel
+        )
+        qinput = torch.quantize_per_tensor(input, input_scale, input_zero_point, torch.quint8)
+        qweight = torch.quantize_per_tensor(weight, weight_scale, weight_zero_point, torch.qint8)
+        qlinear_prepack = torch.ops.quantized.linear_prepack(qweight, bias)
+        qlinear = torch.ops.quantized.linear(qinput, qlinear_prepack, output_scale, output_zero_point)
+        ret_ref = qlinear.dequantize()
+        self.assertEqual(ret_2, ret_ref)
+
     """Tests the correctness of the quantized::linear_unpack after freeing original tensor op."""
     @skipIfNoQNNPACK
     @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
