@@ -97,22 +97,15 @@ def _unwrap_shared_qspec(
         return _unwrap_shared_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
     return qspec
 
-
-def _has_same_dtype(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase):
+def _has_same_attr(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase, attr_name: str):
     return (
-        hasattr(qspec_a, "dtype")
-        and hasattr(qspec_b, "dtype")
-        and qspec_a.dtype == qspec_b.dtype
+        hasattr(qspec_a, attr_name)
+        and hasattr(qspec_b, attr_name)
+        and getattr(qspec_a, attr_name) == getattr(qspec_b, attr_name)
+    ) or (
+        not hasattr(qspec_a, attr_name) and
+        not hasattr(qspec_b, attr_name)
     )
-
-
-def _has_same_is_dynamic(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase):
-    return (
-        hasattr(qspec_a, "is_dynamic")
-        and hasattr(qspec_b, "is_dynamic")
-        and qspec_a.is_dynamic == qspec_b.is_dynamic
-    )
-
 
 def _get_edge_or_node_to_qspec(
     model: torch.fx.GraphModule,
@@ -150,8 +143,7 @@ def _union_input_edge_with(
     # TODO: add assertions for types of root qspecs
     if (
         root_qspec is not None
-        and _has_same_dtype(root_qspec, input_edge_root_qspec)
-        and _has_same_is_dynamic(root_qspec, input_edge_root_qspec)
+        and all(_has_same_attr(root_qspec, input_edge_root_qspec, attr) for attr in ["dtype", "is_dynamic", "quant_min", "quant_max", "qscheme", "ch_axis", "scale", "zero_point"])
     ):
         # the input arg to the node should reuse the existing output observer for arg
         # since dtype is the same (we may want to extend this to be a more strict check
