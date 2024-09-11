@@ -1464,7 +1464,6 @@ class CppWrapperCpu(WrapperCodeGen):
     def can_stack_allocate_buffer(self, buffer):
         return (
             self.allow_stack_allocation
-            is not False  # self.allow_stack_allocation may be uninitialized
             and buffer.get_device().type == "cpu"
             and self.can_prove_buffer_has_static_shape(buffer)
             and ir.is_contiguous_strides_for_shape(
