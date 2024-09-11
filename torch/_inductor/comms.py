@@ -385,6 +385,8 @@ Resize can only operate on graph inputs, but got {node} which is resizing non-gr
         # Check the number of resize-to-full and resize-to-0 nodes are equal,
         # and that for each (resize-to-full, resize-to-0) pair, the resize-to-full node
         # always happens before the resize-to-0 node.
+        # This is the precondition for being able to remove all the resize and copy nodes
+        # for this specific unsharded param.
         resized_to_full_idxes = graph_input_to_resized_to_full_node_idxes.get(
             graph_input, []
         )
@@ -484,7 +486,6 @@ User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is us
     #     ... (use of unsharded_param_1)                     -> Subgraph 3
     # ```
     # We must do the replacement only within each subgraph.
-    replacement_nodes = set()
     for (
         unsharded_param,
         fsdp_copy_node_idxes,
@@ -493,7 +494,6 @@ User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is us
             fsdp_copy_node = node_list[fsdp_copy_node_idx]
             assert fsdp_copy_node.args[0] is unsharded_param
             _, replacement = fsdp_copy_node.args
-            replacement_nodes.add(replacement)
             # subgraph_start_idx is exclusive
             subgraph_start_idx = fsdp_copy_node_idx + 1
             # subgraph_end_idx is exclusive (also intentionally don't replace args in return op)
@@ -512,7 +512,9 @@ Graph: {graph}
 """
             for node in subgraph_nodes:
                 if (
-                    node.op == "call_function" and unsharded_param in node.args
+                    node.op == "call_function"
+                    and unsharded_param in node.args
+                    and node.target != torch.ops.inductor.resize_storage_bytes_.default
                 ):  # TODO(yf225): implement replacement in kwargs
                     new_args = tuple(
                         replacement if arg is unsharded_param else arg
@@ -529,17 +531,12 @@ Graph: {graph}
             fsdp_copy_node = node_list[fsdp_copy_node_idx]
             graph.erase_node(fsdp_copy_node)
 
-    # Delete resize nodes, including:
-    # 1. `resize_storage_bytes_(unsharded_param, ...)` nodes
-    # 2. `resize_storage_bytes_(Y, 0)` nodes
+    # Delete resize nodes
     for node in node_list:
         if (
             node.op == "call_function"
             and node.target == torch.ops.inductor.resize_storage_bytes_.default
-            and (
-                node.args[0] in unsharded_param_to_fsdp_copy_node_idxes
-                or node.args[0] in replacement_nodes
-            )
+            and node.args[0] in unsharded_param_to_fsdp_copy_node_idxes
         ):
             graph.erase_node(node)
 
