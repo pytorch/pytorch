@@ -359,7 +359,12 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         return file_check
 
     def _test_traceable_fsdp(
-        self, model_init_fn, input_creation_fn, backend, fullgraph, activation_checkpoint=False
+        self,
+        model_init_fn,
+        input_creation_fn,
+        backend,
+        fullgraph,
+        activation_checkpoint=False,
     ):
         def compiler_fn(compiled_autograd_backend):
             def _fn(gm):
@@ -604,8 +609,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         fullgraph=fullgraph,
                     )
                 )
-            # if fullgraph:
-            if False:
+            if fullgraph:
                 self.assertTrue(
                     len(triton_codes) == 2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
@@ -682,9 +686,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
-    def _create_transformer_factory_fns(self, all_requires_grad, *, activation_checkpoint=False):
+    def _create_transformer_factory_fns(
+        self, all_requires_grad, *, activation_checkpoint=False
+    ):
         seq_len = 16
-        vocab_size = 128
+        vocab_size = 8
         n_layers = 3
 
         def model_init_fn():
@@ -695,10 +701,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 vocab_size=vocab_size,
                 n_layers=n_layers,
                 checkpoint_activations=activation_checkpoint,
-                dim=1280,
             )
             model = Transformer(model_args)
-            print(f"model: {model}")
             if not all_requires_grad:
                 requires_grad_params = ["attention.wq", "attention.wv"]
                 requires_grad_param_count = 0
@@ -786,7 +790,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         for fullgraph, all_requires_grad, activation_checkpoint in itertools.product(
             [True], [True, False], [True, False]
         ):
-            log.warn(f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}")  # noqa: G004, G001
+            log.warning(
+                f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
+            )
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
@@ -815,7 +821,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         activation_checkpoint=activation_checkpoint,
                     )
                 )
-            if False:
+            if fullgraph:
                 self.assertTrue(
                     len(triton_codes) == 2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
@@ -877,12 +883,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             file_check, **bwd_rs_block_info
                         )
                 file_check.run(bwd_code)
-            elif fullgraph and not activation_checkpoint:
-                # TODO(yf225): fix the graph check above
-                pass
-            elif fullgraph and activation_checkpoint:
-                # TODO(yf225): add graph check activation_checkpoint=True case
-                pass
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.

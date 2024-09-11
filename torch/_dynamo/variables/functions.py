@@ -25,7 +25,6 @@ from ..utils import (
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
-import contextlib
 
 
 try:
@@ -38,8 +37,9 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._guards import Source
 
-
 import logging
+
+
 log = logging.getLogger("torch")
 
 
@@ -328,9 +328,12 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if not tx.output.current_tracer.ignore_side_effects:
             try:
                 from torch.distributed._composable.fsdp._fsdp_state import FSDPState
-            except:
+            except Exception:
                 FSDPState = None
-            if FSDPState is not None and self.fn in [FSDPState._pre_forward, FSDPState._post_forward]:
+            if FSDPState is not None and self.fn in [
+                FSDPState._pre_forward,
+                FSDPState._post_forward,
+            ]:
                 with torch._dynamo.side_effects.ignore_side_effects(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)

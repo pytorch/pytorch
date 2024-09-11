@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 import inspect
 import warnings
+import weakref
 from collections.abc import MutableMapping
 from typing import Any, Dict, List, Optional, Type, Union
-import weakref
-import contextlib
 
 import torch.nn
 
@@ -27,8 +27,6 @@ from .variables.base import (
     VariableTracker,
 )
 from .variables.user_defined import FrozenDataClassVariable
-from .utils import nn_module_new, object_new
-from .variables.base import MutableLocalBase, MutableLocalSource, VariableTracker
 
 
 class MutableSideEffects(MutableLocalBase):
@@ -160,7 +158,10 @@ class SideEffects:
         if isinstance(item, AutogradFunctionContextVariable):
             return True
         output_graph = self.output_graph_weakref()
-        if output_graph and output_graph.current_tx.output.current_tracer.ignore_side_effects:
+        if (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.ignore_side_effects
+        ):
             return True
         if not is_side_effect_safe(item.mutable_local):
             unimplemented(
@@ -712,7 +713,9 @@ class SideEffects:
 
 
 @contextlib.contextmanager
-def ignore_side_effects(tx: "InstructionTranslator"):
+def ignore_side_effects(
+    tx: torch._dynamo.symbolic_convert.InstructionTranslator,
+):
     try:
         tx.output.current_tracer.ignore_side_effects = True
         yield
