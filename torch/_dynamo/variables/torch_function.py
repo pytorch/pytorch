@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import functools
 import inspect
 from typing import Deque, Dict, List, TYPE_CHECKING
 
@@ -67,6 +68,13 @@ banned_attrs = [
     for fn in get_default_nowrap_functions()
     if is_tensor_base_attr_getter(fn)
 ]
+
+
+@functools.lru_cache(None)
+def get_prev_stack_var_name():
+    from ..bytecode_transformation import unique_id
+
+    return unique_id("___prev_torch_function_mode_stack")
 
 
 # Used to clear/restore the python torch function mode stack and temporarily restore it as needed
