@@ -96,6 +96,7 @@
   - EasyCLA
   - Lint
   - pull
+  - slow
 
 - name: OSS CI /pytorchbot / Executorch
   patterns:
