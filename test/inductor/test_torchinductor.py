@@ -4385,7 +4385,7 @@ class CommonTemplate:
             thread.join()
 
     @unittest.skipIf(config.is_fbcode(), "fbcode triton error, needs debugging")
-    @xfail_if_triton_cpu
+    @skip_if_triton_cpu  # flaky
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
@@ -8230,7 +8230,7 @@ class CommonTemplate:
         self.assertFalse(torch.allclose(a0, a1))
 
     @requires_gpu()
-    @xfail_if_triton_cpu
+    @skip_if_triton_cpu  # flaky
     def test_like_rands3(self):
         # rand_like with `device` which is different from `x.device`
         def test_like_rands_on_different_device(device1, device2):
