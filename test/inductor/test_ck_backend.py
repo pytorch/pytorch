@@ -101,7 +101,7 @@ class TestCKBackend(TestCase):
                 Y_compiled = AOTIRunnerUtil.run(
                     device="cuda",
                     model=mm,
-                    list_example_inputs=(a, b),
+                    example_inputs=(a, b),
                 )
             else:
                 @torch.compile(dynamic=False)

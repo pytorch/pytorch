@@ -41,7 +41,7 @@ class CKGemmTemplate(CKTemplate):
     {{globals}}
     {{instance_definition}}
     extern "C" {
-    {{kernel_definition}} {
+    PT_EXPORT {{kernel_definition}} {
         auto gemm = {{instance_type}} {};
         auto invoker = gemm.MakeInvoker();
 
@@ -307,7 +307,7 @@ class CKGemmTemplate(CKTemplate):
                 names_str="X, W, Bias, Y",
                 input_reorder=self.input_reorder,
                 size_args=[
-                    f"ck::index_t {arg}"
+                    f"int32_t {arg}"
                     for arg in ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
                 ],
             ),
