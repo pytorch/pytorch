@@ -170,7 +170,9 @@ def scan(
         )
 
         result_carry, result_flat = _extract_carry_and_out(
-            scan_op(combine_fn, leaves_init, leaves_xs, dim, reverse),
+            scan_op(
+                combine_fn, leaves_init, leaves_xs, dim, reverse, additional_inputs=[]
+            ),
             len(leaves_init),
         )
 
@@ -186,14 +188,16 @@ class ScanOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("scan")
 
-    def __call__(self, combine_fn, init, xs, dim, reverse):
-        return super().__call__(combine_fn, init, xs, dim, reverse)
+    def __call__(self, combine_fn, init, xs, dim, reverse, additional_inputs):
+        return super().__call__(combine_fn, init, xs, dim, reverse, additional_inputs)
 
 
 scan_op = ScanOp()
 
 
-def generic_scan(operator, init, xs, dim=0, reverse=False):
+def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=None):
+    additional_inputs = additional_inputs if additional_inputs is not None else []
+
     def _scan(init, xs):
         """Perform scan on `elems` using `elems_init."""
         carry = init
@@ -212,6 +216,7 @@ def generic_scan(operator, init, xs, dim=0, reverse=False):
             operator(
                 *carry,
                 *[first_slice_copy(elem, dim) for elem in xs],
+                *additional_inputs,
             ),
             num_init_leaves,
         )
@@ -250,6 +255,7 @@ def generic_scan(operator, init, xs, dim=0, reverse=False):
                 operator(
                     *carry,
                     *[elem.select(dim, ind) for elem in xs],
+                    *additional_inputs,
                 ),
                 num_init_leaves,
             )
@@ -286,11 +292,15 @@ def trace_scan(
     xs: List[torch.Tensor],
     dim: int,
     reverse: bool,
+    additional_inputs: List[torch.Tensor],
 ):
     with disable_proxy_modes_tracing():
         sample_inits = [x_init.clone() for x_init in init]
         sample_inputs = [first_slice_copy(x, dim) for x in xs]
-        combine_graph = reenter_make_fx(combine_fn)(*sample_inits, *sample_inputs)
+        sample_additional_inputs = [x.clone() for x in additional_inputs]
+        combine_graph = reenter_make_fx(combine_fn)(
+            *sample_inits, *sample_inputs, *sample_additional_inputs
+        )
 
     outputs = None
     for node in combine_graph.graph.nodes:
@@ -321,7 +331,7 @@ def trace_scan(
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, init, xs, dim, reverse)
+    args = (combine_graph, init, xs, dim, reverse, additional_inputs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="scan"
@@ -341,10 +351,10 @@ def trace_scan(
 
 
 @scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_op_dense(combine_fn, init, xs, dim, reverse):
+def scan_op_dense(combine_fn, init, xs, dim, reverse, additional_inputs):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
-    return generic_scan(combine_fn, init, xs, dim, reverse)
+    return generic_scan(combine_fn, init, xs, dim, reverse, additional_inputs)
 
 
 scan_op.py_impl(DispatchKey.Autograd)(
@@ -353,18 +363,21 @@ scan_op.py_impl(DispatchKey.Autograd)(
 
 
 @scan_op.py_impl(ProxyTorchDispatchMode)
-def scan_proxy_mode(mode, combine_fn, init, xs, dim, reverse):
-    return trace_scan(mode, scan_op, combine_fn, init, xs, dim, reverse)
+def scan_proxy_mode(mode, combine_fn, init, xs, dim, reverse, additional_inputs):
+    return trace_scan(
+        mode, scan_op, combine_fn, init, xs, dim, reverse, additional_inputs
+    )
 
 
 @scan_op.py_impl(FakeTensorMode)
-def scan_fake_tensor_mode(mode, combine_fn, init, xs, dim, reverse):
+def scan_fake_tensor_mode(mode, combine_fn, init, xs, dim, reverse, additional_inputs):
     with mode:
         scan_length = xs[0].shape[dim]
         carry, outputs = _extract_carry_and_out(
             combine_fn(
                 *init,
                 *[first_slice_copy(inp, dim) for inp in xs],
+                *additional_inputs,
             ),
             len(init),
         )
@@ -376,9 +389,10 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, dim, reverse):
 
 
 @scan_op.py_functionalize_impl
-def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse):
+def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse, additional_inputs):
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
+    unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next() as m:
         functional_combine_fn = ctx.functionalize(combine_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
@@ -389,6 +403,7 @@ def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse):
             itertools.chain(
                 unwrapped_init,
                 sample_unwrapped_xs_sliced,
+                unwrapped_additional_inputs,
             )
         )
         if _has_potential_branch_input_mutation(
@@ -403,7 +418,14 @@ def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse):
             raise UnsupportedAliasMutationException(
                 "Combine_fn might be aliasing the input!"
             )
-        ret = scan_op(functional_combine_fn, unwrapped_init, unwrapped_xs, dim, reverse)
+        ret = scan_op(
+            functional_combine_fn,
+            unwrapped_init,
+            unwrapped_xs,
+            dim,
+            reverse,
+            unwrapped_additional_inputs,
+        )
     return ctx.wrap_tensors(ret)
 
 
