@@ -77,9 +77,16 @@ prefix_str = {
 
 
 class PrefixedSymbol(sympy.Symbol):
-    def __new__(cls, name, prefix, *, integer=None, nonnegative=None, positive=None):
+    def __new__(
+        cls, name, prefix, *, integer=None, nonnegative=None, positive=None, real=None
+    ):
         obj = sympy.Symbol.__new__(
-            cls, name, integer=integer, nonnegative=nonnegative, positive=positive
+            cls,
+            name,
+            integer=integer,
+            nonnegative=nonnegative,
+            positive=positive,
+            real=real,
         )
         obj.prefix = prefix
         return obj
@@ -87,27 +94,70 @@ class PrefixedSymbol(sympy.Symbol):
     def _hashable_content(self):
         # since we use only 3 assumptions, we only check on those three instead of the
         # full set of assumptions to avoid an expensive caching operation
-        return (self.name, self.is_integer, self.is_nonnegative, self.is_positive)
+        return (
+            self.name,
+            self.prefix,
+            self.is_integer,
+            self.is_nonnegative,
+            self.is_positive,
+            self.is_real,
+        )
+
+    def __copy__(self):
+        cls = self.__class__
+        return cls.__new__(
+            cls,
+            name=self.name,
+            prefix=self.prefix,
+            integer=self.is_integer,
+            nonnegative=self.is_nonnegative,
+            positive=self.is_positive,
+            real=self.is_real,
+        )
+
+    def __deepcopy__(self, memo):
+        result = self.__copy__()
+        memo[id(self)] = result
+        return result
 
 
-def make_symbol(prefix: SymT, idx: int, **kwargs) -> sympy.Symbol:
-    # TODO: maybe put the assumptions here directly
-    return PrefixedSymbol(f"{prefix_str[prefix]}{idx}", prefix=prefix, **kwargs)
+def make_symbol(
+    prefix: SymT, idx: int, integer=None, nonnegative=None, positive=None, real=None
+) -> sympy.Symbol:
+    return PrefixedSymbol(
+        f"{prefix_str[prefix]}{idx}",
+        prefix=prefix,
+        integer=integer,
+        nonnegative=nonnegative,
+        positive=positive,
+        real=real,
+    )
 
 
 # This type is a little wider than it should be, because free_symbols says
 # that it contains Basic, rather than Symbol
 def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Tuple[SymT, ...]]) -> bool:
-    assert isinstance(sym, PrefixedSymbol)
-    # This function is called a *lot* of times, so it needs to be fast
-    if type(prefix) == tuple:
-        # a list comprehension with any is slow
-        for p in prefix:
-            if sym.prefix == p:
-                return True
-        return False
+    if isinstance(sym, PrefixedSymbol):
+        # This function is called a *lot* of times, so it needs to be fast
+        if type(prefix) == tuple:
+            # a list comprehension with any is slow
+            for p in prefix:
+                if sym.prefix == p:
+                    return True
+            return False
+        else:
+            return sym.prefix == prefix
     else:
-        return sym.prefix == prefix
+        assert isinstance(sym, sympy.Symbol)
+        # TODO: remove all these Symbols and use PrefixedSymbol
+        sym_name = sym.name.lower()
+        if type(prefix) == tuple:
+            for p in prefix:
+                if sym_name.startswith(prefix_str[p]):
+                    return True
+            return False
+        else:
+            return sym_name.startswith(prefix_str[prefix])
 
 
 def free_symbol_is_type(e: sympy.Expr, prefix: SymT) -> bool:
