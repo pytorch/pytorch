@@ -2994,7 +2994,6 @@ class TestPagedAttention(InductorTestCase):
         block_mask = create_block_mask(
             causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
         )
-
         q = torch.randn(
             max_batch_size,
             n_heads,
@@ -3022,7 +3021,6 @@ class TestPagedAttention(InductorTestCase):
             dtype=torch.float16,
             requires_grad=True,
         )
-
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
