@@ -88,7 +88,6 @@ if TEST_WITH_ROCM:
     )
 if config.abi_compatible:
     xfail_list = [
-        "test_lstm_packed_change_input_sizes_cpu",
         *[
             func
             for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())

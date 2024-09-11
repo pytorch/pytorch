@@ -46,7 +46,6 @@ def removeExceptions(graph):
         n.destroy()
 
 
-@skipIfTorchDynamo("somehow causing hanging during python shutdown")
 class TestFreezing(JitTestCase):
     def test_freeze_module(self):
         class M(nn.Module):
