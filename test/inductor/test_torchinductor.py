@@ -4385,6 +4385,7 @@ class CommonTemplate:
             thread.join()
 
     @unittest.skipIf(config.is_fbcode(), "fbcode triton error, needs debugging")
+    @xfail_if_triton_cpu
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
