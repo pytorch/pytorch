@@ -2078,10 +2078,10 @@ class WrapperCodeGen(CodeGen):
         for i, outer_ys in enumerate(outer_ys_out):
             if sequential_scan.reverse:
                 self.writeline(
-                    f"{outer_ys} = torch.stack(tuple(reversed(intermediate_outs[{i}])), dim)"
+                    f"{outer_ys} = torch.stack(tuple(reversed(intermediate_outs[{i}])))"
                 )
             else:
-                self.writeline(f"{outer_ys} = torch.stack(intermediate_outs[{i}], dim)")
+                self.writeline(f"{outer_ys} = torch.stack(intermediate_outs[{i}])")
 
     @staticmethod
     def statically_known_int_or_none(x):

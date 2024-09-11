@@ -33,6 +33,15 @@ from torch.testing._internal.common_utils import (
 )
 
 
+# say we have a tensor of shape [3, 4, 5, 6]
+# shift_first_dim_to(t, 3) -> [4, 5, 6, 3]
+def shift_first_dim_to(t, to_dim: int):
+    assert to_dim >= 0 and to_dim < t.ndim
+    sz_list = list(t.size())
+    dims = list(range(1, to_dim + 1)) + [0] + list(range(to_dim + 1, t.ndim))
+    return t.permute(*dims)
+
+
 # TODO: pull these helpers from AOTAutograd later
 def to_fun(t):
     if isinstance(t, torch.Tensor):
@@ -1576,7 +1585,9 @@ def forward(self, pred_1, x_1):
                 self.assertEqual(result, result_exp)
                 if not reverse:
                     result_exp_PT = op_pt(x, rnd_scan_dim)
-                    self.assertEqual(result[1], result_exp_PT)
+                    res_list = list(result)
+                    res_list[1] = shift_first_dim_to(res_list[1], rnd_scan_dim)
+                    self.assertEqual(res_list[1], result_exp_PT)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -2037,51 +2048,6 @@ def forward(self, pred_1, x_1):
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_downstream_scan_scan(self, compile_mode, reverse, device):
-        inp = torch.randn(3, 10, 2, device=device)
-        init = torch.randn(3, 2, device=device)
-
-        # Chain with scan
-        def chain_fct_same_dim(inp):
-            o1 = scan(
-                get_scan_combine_fn("add", False),
-                init,
-                inp,
-                dim=1,
-                reverse=reverse,
-            )
-            o2 = scan(
-                get_scan_combine_fn("add", False),
-                init,
-                o1[1],
-                dim=1,
-                reverse=reverse,
-            )
-            return o2
-
-        fct_cmp = compile_mode_helper(chain_fct_same_dim, compile_mode)
-
-        expected_result = _fake_scan(
-            get_scan_combine_fn("add", False),
-            init=init,
-            xs=_fake_scan(
-                get_scan_combine_fn("add", False),
-                init=init,
-                xs=inp,
-                dim=1,
-                reverse=reverse,
-            )[1],
-            dim=1,
-            reverse=reverse,
-        )
-        result1 = fct_cmp(inp)
-        self.assertEqual(result1, expected_result)
-
-    # TODO: provide an implementation for all compile modes and re-enable all test
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_downstream_scan_scan_dim(self, compile_mode, reverse, device):
         inp = torch.randn(3, 10, 2, device=device)
         init = torch.randn(3, 2, device=device)
@@ -2097,6 +2063,7 @@ def forward(self, pred_1, x_1):
                 dim=1,
                 reverse=reverse,
             )
+            o1 = pytree.tree_map(lambda t: shift_first_dim_to(t, 1), o1)
             o2 = scan(
                 get_scan_combine_fn("add", False),
                 init2,
@@ -2108,16 +2075,18 @@ def forward(self, pred_1, x_1):
 
         fct_cmp = compile_mode_helper(chain_fct_different_dim, compile_mode)
 
+        xs = _fake_scan(
+            get_scan_combine_fn("add", False),
+            init=init,
+            xs=inp,
+            dim=1,
+            reverse=reverse,
+        )[1]
+        xs = pytree.tree_map(lambda t: shift_first_dim_to(t, 1), xs)
         expected_result = _fake_scan(
             get_scan_combine_fn("add", False),
             init=init2,
-            xs=_fake_scan(
-                get_scan_combine_fn("add", False),
-                init=init,
-                xs=inp,
-                dim=1,
-                reverse=reverse,
-            )[1],
+            xs=xs,
             dim=0,
             reverse=reverse,
         )
@@ -2531,6 +2500,8 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result, result_exp)
         if not reverse:
             result_exp_PT = op_pt(x, dim)
+            result = list(result)
+            result[1] = pytree.tree_map(lambda t: shift_first_dim_to(t, dim), result[1])
             self.assertEqual(result[1], result_exp_PT)
 
     @requires_cuda
@@ -2767,11 +2738,10 @@ def forward(self, pred_1, x_1):
         expected_result = rnn(
             torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
         )
-        expected_result_out = torch.permute(expected_result[0], (1, 0, 2))
         expected_result_state = torch.permute(expected_result[1], (1, 0, 2))
         result = scan(RNN, init=torch.select_copy(h, dim, 0), xs=x, dim=dim)
         self.assertEqual(result[0].unsqueeze(0), expected_result_state)
-        self.assertEqual(result[1], expected_result_out)
+        self.assertEqual(result[1], expected_result[0])
 
     @skipIfNoDynamoSupport
     def test_scan_simple_graph_no_carry(self):

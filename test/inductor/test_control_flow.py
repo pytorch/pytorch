@@ -804,9 +804,10 @@ class AssociativeScanTests(TestCase):
 
 class ScanModels:
     class SimpleWithPytreeInOuts(torch.nn.Module):
-        def __init__(self, reverse):
+        def __init__(self, reverse, dim):
             super().__init__()
             self.reverse = reverse
+            self.dim = dim
 
         def forward(self, scan_op, _input, weight, bias):
             def combine_fn(carry, x):
@@ -826,6 +827,7 @@ class ScanModels:
                 {"param": weight, "bias": bias},
                 _input,
                 reverse=self.reverse,
+                dim=self.dim,
             )
 
     class ChunkedCE(torch.nn.Module):
@@ -977,11 +979,12 @@ class ScanTests(TestCase):
     @parametrize("device", [GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("reverse", [True, False])
-    def test_scan_pytree_in_out(self, device, dynamic, reverse):
+    @parametrize("dim", [0, 1, 2])
+    def test_scan_pytree_in_out(self, device, dynamic, reverse, dim):
         self._run_test(
-            model=ScanModels.SimpleWithPytreeInOuts(reverse=reverse),
+            model=ScanModels.SimpleWithPytreeInOuts(reverse=reverse, dim=dim),
             inputs=(
-                torch.randn(4, 3, 3),
+                torch.randn(3, 3, 3),
                 torch.randn(4, 3),
                 torch.randn(3),
             ),
