@@ -32,20 +32,34 @@ Installation
 Binaries
 ^^^^^^^^
 
-Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio``.
+Platform Linux
+""""""""""""""
+
+
+Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
 
 .. code-block::
 
-    ## Linux
     pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
-    ## Windows: for torchvision/torchaudio, build it from source
-    pip3 install torch --index-url https://download.pytorch.org/whl/xpu
 
+
+Platform Windows
+""""""""""""""""
+
+Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch`` on Windows, build from source for ``torchvision`` and ``torchaudio``.
+
+.. code-block::
+
+    pip3 install torch --index-url https://download.pytorch.org/whl/xpu
 
 From Source
 ^^^^^^^^^^^
 
-Build from source refer to `PyTorch Installation Build from source <https://github.com/pytorch/pytorch?tab=readme-ov-file#from-source>`_.
+Build from source for ``torch`` refer to `PyTorch Installation Build from source <https://github.com/pytorch/pytorch?tab=readme-ov-file#from-source>`_.
+
+Build from source for ``torchvision`` refer to `Torchvision Installation Build from source <https://github.com/pytorch/vision/blob/main/CONTRIBUTING.md#development-installation>`_.
+
+Build from source for ``torchaudio`` refert to `Torchaudio Installation Build from source <https://github.com/pytorch/audio/blob/main/CONTRIBUTING.md#building-torchaudio-from-source>`_.
 
 Check availability for Intel GPU
 --------------------------------
