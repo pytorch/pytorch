@@ -73,6 +73,7 @@ void check_fp32_prec_backend_and_op(
   }
 
   C10_ALWAYS_INLINE void warn_deprecated_fp32_precision_api(){
+    return;
     TORCH_WARN_ONCE(
       "This API is going to be deprecated, please see "
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices"
