@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import functools
 import inspect
 from typing import Deque, Dict, List, TYPE_CHECKING
 
@@ -73,6 +74,13 @@ banned_attrs = [
 # mode tracing is implemented and not put in the graph, but this is more
 # of a BE project and can be evaluated later
 IGNORED_MODES = {DeviceContext}
+
+
+@functools.lru_cache(None)
+def get_prev_stack_var_name():
+    from ..bytecode_transformation import unique_id
+
+    return unique_id("___prev_torch_function_mode_stack")
 
 
 # Used to clear/restore the python torch function mode stack and temporarily restore it as needed
