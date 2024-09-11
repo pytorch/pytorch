@@ -1048,7 +1048,7 @@ def flex_attention(
                     else:
                         backend = "eager"
                     out, lse = torch.compile(
-                        _flex_attention_hop_wrapper, backend="eager", fullgraph=True
+                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
                     )(
                         query,
                         key,
