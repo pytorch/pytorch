@@ -350,10 +350,14 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     This FX graph pass replaces uses of FSDP2 unsharded params with their corresponding
     graph intermediates that were fsdp.copy_ into the unsharded params in the original graph.
 
-    NOTE: Can only apply this pass to FSDP2 unsharded params that have this pattern:
-    `resize_(full) -> copy_ -> resize_(0)`. Because of this, for partial-graph case where
-    `resize_(full) -> copy_` is in one graph and `resize_(0)` is in another graph, we can't
+    NOTE: Can only apply this pass to any of the FSDP2 unsharded params that have this pattern
+    (or repetition of): `resize_(full) -> copy_ -> resize_(0)`. Because of this, for partial-graph case
+    where `resize_(full) -> copy_` is in one graph and `resize_(0)` is in another graph, we can't
     remove these resize and copy ops and thus we will have worse performance there.
+
+    In other words, "do we try to remove all the resize_(full) -> copy_ -> resize_(0) nodes for this unsharded param"
+    is actually a per-unsharded-param decision, since for each unsharded param, we look at its resize sequence pattern
+    (in `check_resize_pattern()`) to determine if its set of resize and copy nodes can be removed.
     """
     node_list = list(graph.nodes)
 
