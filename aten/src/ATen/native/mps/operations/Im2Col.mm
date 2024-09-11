@@ -11,6 +11,8 @@
 #include <ATen/ops/im2col_native.h>
 #endif
 
+// #define _CAPTURE_KERNEL 1
+
 namespace at::native {
 using namespace mps;
 static MetalShaderLibrary lib(R"IM2COL_METAL(
@@ -150,9 +152,11 @@ static void im2col_out_mps_template(Tensor& output,
       std::array<int64_t, 4> output_strides = {output.stride(2), output.stride(1), output.stride(0), output_width};
       getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input});
 
+#if _CAPTURE_KERNEL
       if (getMPSProfiler().isCaptureEnabled()) {
         getMPSProfiler().startCapture("im2col", stream);
       }
+#endif
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:im2colPSO];
       mtl_setBuffer(computeEncoder, input, 0);
@@ -164,9 +168,11 @@ static void im2col_out_mps_template(Tensor& output,
       mtl_setBytes(computeEncoder, input_sizes, 6);
       [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_input_plane, batch_size)
                 threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+#if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(stream);
       }
+#endif
       getMPSProfiler().endProfileKernel(im2colPSO);
     }
   });
