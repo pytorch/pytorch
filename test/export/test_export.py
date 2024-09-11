@@ -1426,9 +1426,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
 
-    @unittest.skipIf(
-        IS_FBCODE, "In fbcode, we just warn users that some ops are unsafe"
-    )
     def test_keep_composite_ops_invalid(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -1442,25 +1439,21 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         def _(*args, **kwargs):
             return NotImplemented
 
-        with self.assertRaisesRegex(
-            RuntimeError, "aten.chunk.default is a mutating/aliasing op"
-        ):
+        with self.assertWarnsRegex(UserWarning, "The op aten.chunk.default"):
             _ = torch.export.export(
                 Foo(),
                 (torch.randn(3, 3),),
             ).run_decompositions({torch.ops.aten.chunk.default: _})
 
-        with self.assertRaisesRegex(
-            RuntimeError, "aten.sym_size.default is a metadata query function"
-        ):
+        with self.assertWarnsRegex(UserWarning, "The op aten.sym_size.default"):
             _ = torch.export.export(
                 Foo(),
                 (torch.randn(3, 3),),
             ).run_decompositions({torch.ops.aten.sym_size.default: _})
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "We can't detect aten.native_batch_norm.default as a functional op statically",
+        with self.assertWarnsRegex(
+            UserWarning,
+            "The op aten.native_batch_norm.default",
         ):
             _ = torch.export.export(
                 Foo(),
@@ -1635,16 +1628,15 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-    @unittest.skipIf(IS_FBCODE, "In fbcode, we just warn about mutating ops")
     def test_error_when_passing_mutating_primitive_op(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 return x.sin()
 
         ep = export(Foo(), (torch.ones(3, 3),))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "aten.index_put_.default is a mutating/aliasing op, we can't preserve it as is",
+        with self.assertWarnsRegex(
+            UserWarning,
+            "The op aten.index_put_.default",
         ):
             ep.run_decompositions({torch.ops.aten.index_put_.default: None})
 

@@ -208,7 +208,6 @@ def forward(self, arg0_1, arg1_1):
         example_inputs = (torch.randn(3),)
         m(*example_inputs)
         ep = torch.export._trace._export(m, example_inputs, pre_dispatch=True)
-        print("MODULE", ep.graph_module)
         joint_ep = _export_forward_backward(ep)
         self.assertExpectedInline(
             str(joint_ep.graph_module.code).strip(),

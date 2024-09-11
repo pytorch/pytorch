@@ -50,7 +50,6 @@ from torch._export.utils import (
     _overwrite_signature_for_non_persistent_buffers,
     _populate_param_buffer_metadata_to_new_gm,
     _rename_without_collisions,
-    is_fbcode,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
@@ -242,18 +241,72 @@ def _override_decomp_aten_to_variants():
         yield
 
 
+def _split_decomp_table_to_cia_and_python_decomp(
+    decomp_table: Dict[torch._ops.OperatorBase, Callable], is_joint: bool
+) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
+    from torch._decomp import (
+        _check_valid_to_preserve,
+        _collect_all_valid_cia_ops,
+        _core_aten_decompositions_after_cia,
+        _is_special_op_to_preserve,
+        core_aten_decompositions,
+    )
+
+    if is_joint:
+        return {}, _core_aten_decompositions_after_cia(_collect_all_valid_cia_ops())
+
+    all_preservable_cia_ops = _collect_all_valid_cia_ops()
+    cia_ops_to_callable = {}
+
+    core_aten_decomp = core_aten_decompositions()
+
+    for op in list(decomp_table.keys()):
+        # In the user specified decomp table, we want to assert that it is something
+        # we can customize.
+        # TODO We should fix the core aten decomp table to filter out mutating/aliasing ops
+        # One example is: aten.addcdiv.out
+        # TODO Some existing internal users are passing in mutating ops into decomp table,
+        # we should hard error
+        if not _check_valid_to_preserve(op):
+            if not (
+                op in core_aten_decomp and decomp_table[op] is core_aten_decomp[op]
+            ):
+                # TODO We should fix the core aten decomp table to filter out mutating/aliasing ops
+                # One example is: aten.addcdiv.out
+                warnings.warn(
+                    f"The op {op} that is specified in the decomp table is unsafe to be customized. "
+                    f"Therefore, we will ignore this custom decomposition "
+                )
+
+        # if it is a valid CIA op we can mess with in export, we check if it is:
+        #  1. Has been marked as to be decomposed. Example:
+        #        decomp_table = decomp_table_to_core_aten()
+        #        del decomp_table[aten.linear]
+        #     In this case, user says decompose everything except for aten.linear
+        #  2. Has been marked with custom decomp behavour. Example:
+        #        decomp_table = {aten.linear: some_op}
+        # For (1), we want to remove all the CIA ops that weren't handled by user as
+        # it suggests they are safe to decompose, so we should remove from preservable_list.
+        # for (2), we just plumb the custom decomp to AOTDIspatcher.
+        # In both cases, we want to remove this CIA op from the decomp_table as it is special
+        # handled.
+        if op in all_preservable_cia_ops:
+            cia_ops_to_callable[op] = decomp_table[op]
+            all_preservable_cia_ops.remove(op)
+            del decomp_table[op]
+
+    for k in all_preservable_cia_ops:
+        cia_ops_to_callable[k] = _is_special_op_to_preserve
+
+    return cia_ops_to_callable, decomp_table
+
+
 def _decompose_and_get_gm_with_new_signature_constants(
     ep,
     *,
     decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
 ):
-    from torch._decomp import (
-        _check_valid_to_preserve,
-        _collect_all_valid_cia_ops,
-        _is_special_op_to_preserve,
-        core_aten_decompositions,
-    )
     from torch._functorch.aot_autograd import aot_export_module
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.export._trace import (
@@ -275,55 +328,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
     #    context manager to plumb it through AOTDispatcher
     # 2. Non-CIA op: These ops are only relevant after AOTDIspatcher runs, so just
     #    checking if they are statically functional is enough.
-
-    all_preservable_cia_ops = _collect_all_valid_cia_ops()
-    cia_ops_to_callable = {}
-
-    core_aten_decomp = core_aten_decompositions()
-
-    for op in list(decomp_table.keys()):
-        # In the user specified decomp table, we want to assert that it is something
-        # we can customize.
-        # TODO We should fix the core aten decomp table to filter out mutating/aliasing ops
-        # One example is: aten.addcdiv.out
-        # TODO Some existing internal users are passing in mutating ops into decomp table,
-        # we should hard error
-        if not _check_valid_to_preserve(op):
-            if not (
-                op in core_aten_decomp and decomp_table[op] is core_aten_decomp[op]
-            ):
-                # TODO We should fix the core aten decomp table to filter out mutating/aliasing ops
-                # One example is: aten.addcdiv.out
-                if is_fbcode():
-                    warnings.warn(
-                        f"The op {op} that is specified in the decomp table is unsafe to be customized. "
-                        f"Therefore, we will ignore this custom decomposition "
-                    )
-                else:
-                    raise RuntimeError(
-                        f"The op {op} that is specified in the decomp table is unsafe to be customized. "
-                        f"Therefore, we will ignore this custom decomposition "
-                    )
-
-        # if it is a valid CIA op we can mess with in export, we check if it is:
-        #  1. Has been marked as to be decomposed. Example:
-        #        decomp_table = decomp_table_to_core_aten()
-        #        del decomp_table[aten.linear]
-        #     In this case, user says decompose everything except for aten.linear
-        #  2. Has been marked with custom decomp behavour. Example:
-        #        decomp_table = {aten.linear: some_op}
-        # For (1), we want to remove all the CIA ops that weren't handled by user as
-        # it suggests they are safe to decompose, so we should remove from preservable_list.
-        # for (2), we just plumb the custom decomp to AOTDIspatcher.
-        # In both cases, we want to remove this CIA op from the decomp_table as it is special
-        # handled.
-        if op in all_preservable_cia_ops:
-            cia_ops_to_callable[op] = decomp_table[op]
-            all_preservable_cia_ops.remove(op)
-            del decomp_table[op]
-
-    for k in all_preservable_cia_ops:
-        cia_ops_to_callable[k] = _is_special_op_to_preserve
+    # For joint IR case tho, we need to use the old path because we can't register
+    # custom decomps this way because we can't use context manager as it installs
+    # autograd_error node.
+    cia_to_decomp, python_decomp = _split_decomp_table_to_cia_and_python_decomp(
+        decomp_table, joint_loss_index is not None
+    )
 
     # TODO Merge this path with inference IR decomp, but it will require some additional work
     # so I will leave it for now. T200307782
@@ -374,7 +384,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         with _ignore_backend_decomps(), (
             fake_mode
         ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
-            cia_ops_to_callable,
+            cia_to_decomp,
         ):
             aten_export_artifact = _export_to_aten_ir(
                 mod,
@@ -386,7 +396,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 {},
                 fake_params_buffers,
                 constant_attrs,
-                decomp_table=decomp_table,
+                decomp_table=python_decomp,
                 _check_autograd_state=False,
             )
 
@@ -421,12 +431,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
-        cia_ops_to_callable
+        cia_to_decomp
     ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
-            decompositions=decomp_table,
+            decompositions=python_decomp,
             trace_joint=True if joint_loss_index is not None else False,
             output_loss_index=joint_loss_index
             if joint_loss_index is not None
