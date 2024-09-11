@@ -2896,9 +2896,6 @@ class TestPagedAttention(InductorTestCase):
         # Equivalent to: causal_mask(1, 0, 64, 14)
         self.assertEqual(converted_causal_mask(1, 0, 64, 270), True)
 
-        # from torch.nn.attention.flex_attention import create_mask
-        # mask_tensor = create_mask(converted_causal_mask, max_batch_size, 1, max_seq_len, page_size*n_pages)
-        # breakpoint()
 
     @supported_platform
     def test_update(self):
@@ -2988,6 +2985,7 @@ class TestPagedAttention(InductorTestCase):
         n_pages, page_size, max_batch_size, max_seq_len = 32, 128, 4, 512
         n_heads, head_dim = 4, 16
 
+
         def causal_mask(b, h, q, kv):
             return q >= kv
 
@@ -3021,6 +3019,7 @@ class TestPagedAttention(InductorTestCase):
             dtype=torch.float16,
             requires_grad=True,
         )
+
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
