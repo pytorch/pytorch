@@ -3,8 +3,8 @@
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -445,7 +445,7 @@ class DistTensorOpsTest(DTensorTestBase):
         # case 2 input sharding: input sharded, index replicated, output mask partial
         # only works when index has size 1 on the gather dimension and
         # input is sharded on the gather dimension
-        from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
+        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
 
         gather_dim = 1
         global_input = torch.randn(12, 8, 16)
@@ -614,19 +614,46 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(bf16_sharded_dtensor1.dtype, torch.bfloat16)
         self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
 
-        from torch.distributed._tensor.debug import get_sharding_prop_cache_info
+        from torch.distributed.tensor.debug import _get_sharding_prop_cache_info
 
         # by this point we only have cache misses
-        hits, misses, _, _ = get_sharding_prop_cache_info()
+        hits, misses, _, _ = _get_sharding_prop_cache_info()
         self.assertEqual(hits, 0)
         self.assertEqual(misses, 2)
 
         # convert to fp32 again and see if there's cache hit
         fp32_sharded_dtensor1 = bf16_sharded_dtensor1.float()
-        hits, misses, _, _ = get_sharding_prop_cache_info()
+        hits, misses, _, _ = _get_sharding_prop_cache_info()
         # by now we should have cache hit
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)
+
+    @with_comms
+    def test_slice(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
+        comm_mode = CommDebugMode()
+
+        shard_spec = [Shard(1)]
+        global_tensor = torch.randn(8, 16, requires_grad=True)
+        sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec)
+
+        global_out = global_tensor[:, 8:]
+        with comm_mode:
+            sharded_out = sharded_dtensor[:, 8:]
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        global_out.backward(gradient=torch.ones_like(global_out))
+        with comm_mode:
+            sharded_out_grad = torch.distributed._tensor.ones(
+                sharded_out.shape, device_mesh=mesh, placements=[Shard(1)]
+            )
+            sharded_out.backward(gradient=sharded_out_grad)
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        self.assertEqual(sharded_out.full_tensor(), global_out)
+        self.assertEqual(sharded_dtensor.grad.full_tensor(), global_tensor.grad)
 
 
 if __name__ == "__main__":

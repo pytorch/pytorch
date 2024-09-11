@@ -21,34 +21,44 @@ namespace at::native {
 
 // convenience helper for converting tensors to cpu
 
-static std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
+template<typename T, std::enable_if_t<std::is_same_v<T, at::Tensor> || std::is_same_v<T, std::optional<at::Tensor>>, int> = 1>
+static std::vector<T> to_cpu(const std::vector<T>& tensors) {
     // We can't just call at::to_cpu() on the entire list of Tensors
     // Because it will break on undefined tensors. Separate out undefined tensors first.
-    std::vector<at::Tensor> cpu_tensors(tensors.size());
+    const int num = tensors.size();
+    std::vector<T> cpu_tensors(num);
     std::vector<at::Tensor> valid_tensors;
-    std::vector<bool> to_translate(tensors.size());
-    for (const auto i : c10::irange(tensors.size())) {
-        const at::Tensor& tensor = tensors[i];
-        // Explicitly handling undefined tensors here instead of letting `at::_to_cpu` handle it.
-        // Otherwise, we'd need to require all backends with their own implementation of _to_cpu
-        // to properly handle undefined tensors.
-        if (tensor.defined()) {
-            to_translate[i] = true;
-            valid_tensors.push_back(tensor);
+    std::vector<bool> to_translate(num);
+    for (const auto i : c10::irange(num)) {
+      // Explicitly handling undefined tensors here instead of letting `at::_to_cpu` handle it.
+      // Otherwise, we'd need to require all backends with their own implementation of _to_cpu
+      // to properly handle undefined tensors.
+      if constexpr(std::is_same_v<T, std::optional<at::Tensor>>) {
+        if (tensors[i].has_value() && tensors[i].value().defined()) {
+          to_translate[i] = true;
+          valid_tensors.push_back(tensors[i].value());
         } else {
-            cpu_tensors[i] = tensor;
+          cpu_tensors[i] = tensors[i];
         }
+      } else {
+        if (tensors[i].defined()) {
+          to_translate[i] = true;
+          valid_tensors.push_back(tensors[i]);
+        } else {
+          cpu_tensors[i] = tensors[i];
+        }
+      }
     }
     auto cpu_valid_tensors = at::_to_cpu(valid_tensors);
-    for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
-        if (to_translate[i]) {
-            cpu_tensors[i] = std::move(cpu_valid_tensors[defined_pos++]);
-        }
+    for (int i = 0, defined_pos = 0; i < num; ++i) {
+      if (to_translate[i]) {
+        cpu_tensors[i] = std::move(cpu_valid_tensors[defined_pos++]);
+      }
     }
   return cpu_tensors;
 }
 
-static std::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
+static std::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, const std::vector<c10::List<at::Tensor>>& tlist_args) {
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the device
   // Barring that, we take the first tensor from a TensorList arg.
@@ -77,7 +87,11 @@ static bool validate_tensor_list(const c10::List<at::Tensor>& tensorlist) {
   return flag;
 }
 
-void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views) {
+void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views,
+                  c10::DispatchKey cpu_dispatch_key) {
+  TORCH_CHECK(c10::BackendComponent::CPUBit == c10::toBackendComponent(cpu_dispatch_key),
+              "Expected CPU backend DispatchKey but got ",
+              c10::toString(cpu_dispatch_key));
   auto& schema_args = op.schema().arguments();
   const auto num_arguments = schema_args.size();
   auto arguments = torch::jit::last(stack, num_arguments);
@@ -89,9 +103,13 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
   std::vector<int> tensorlist_args_indices;
 
+  std::vector<c10::List<std::optional<at::Tensor>>> optional_tensorlist_args;
+  std::vector<int> optional_tensorlist_args_indices;
+
   std::optional<c10::Device> tgt_device = std::nullopt;
-  // save converted cpu tensor for TensorList
+  // save converted cpu tensor for TensorList and optional TensorList
   std::vector<c10::IValue> tensorlist_cpu_args;
+  std::vector<c10::IValue> optional_tensorlist_cpu_args;
 
   // Step 1: Convert all non-CPU tensor inputs into CPU tensors
   // and put them on the stack at the correct indices.
@@ -106,25 +124,15 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
       // We can improve this if we need better perf for XLA's CPU fallbacks.
       tensorlist_args.push_back(ivalue.toTensorList());
       tensorlist_args_indices.push_back(idx);
-      auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorList().vec())));
+      auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorVector())));
       tensorlist_cpu_args.push_back(cpu_ivalue);
       (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
-      tensorlist_args.push_back(ivalue.toTensorList());
     } else if (ivalue.isOptionalTensorList()) {
-      auto opt_tensors = ivalue.toOptionalTensorList().vec();
-      std::vector<at::Tensor> need_convert_tensors;
-      std::vector<int> need_convert_tensors_index;
-      for (auto i : c10::irange(opt_tensors.size())) {
-        if (!opt_tensors[i].has_value() || !opt_tensors[i]->defined()) continue;
-        need_convert_tensors.push_back(opt_tensors[i].value());
-        need_convert_tensors_index.push_back(i);
-      }
-      auto cpu_tensors = to_cpu(need_convert_tensors);
-      for (const auto i : c10::irange(need_convert_tensors_index.size())) {
-        auto idx = need_convert_tensors_index[i];
-        opt_tensors[idx] = cpu_tensors[i];
-      }
-      (*stack)[arguments_begin + idx] = c10::IValue(opt_tensors);
+      optional_tensorlist_args.push_back(ivalue.toOptionalTensorList());
+      optional_tensorlist_args_indices.push_back(idx);
+      auto cpu_ivalue = c10::IValue(c10::List<std::optional<at::Tensor>>(to_cpu(ivalue.toOptionalTensorVector())));
+      optional_tensorlist_cpu_args.push_back(cpu_ivalue);
+      (*stack)[arguments_begin + idx] = c10::IValue(cpu_ivalue);
     } else if (ivalue.isDevice()) {
       tgt_device = ivalue.toDevice();
       (*stack)[arguments_begin + idx] = c10::IValue(c10::Device(kCPU));
@@ -139,7 +147,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   }
 
   // Step 2: Call the underlying CPU implementation of the operator
-  op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKey::CPU), stack);
+  op.redispatchBoxed(c10::DispatchKeySet(cpu_dispatch_key), stack);
 
   // Step 3: We need to take special care to handle mutable aliases properly:
   // If any input tensors are mutable aliases, we need to
@@ -148,6 +156,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
     auto tensor_idx = tensor_args_indices[i];
     const AliasInfo* alias_info = schema_args[tensor_idx].alias_info();
     if (alias_info != nullptr && alias_info->isWrite()) {
+      if (!tensor_args[i].defined()) continue;
       at::_copy_from_and_resize(cpu_tensors[i], tensor_args[i]);
     }
   }
@@ -158,9 +167,26 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
     auto tensorlist_idx = tensorlist_args_indices[i];
     const AliasInfo* alias_info = schema_args[tensorlist_idx].alias_info();
     if (alias_info != nullptr && alias_info->isWrite()) {
-      const auto& cpu_tensors = tensorlist_cpu_args[i].toTensorList().vec();
+      const auto& cpu_tensors = tensorlist_cpu_args[i].toTensorVector();
       for (const auto idx : c10::irange(tensorlist_args[i].size())) {
+        if (!cpu_tensors[idx].defined()) continue;
         at::_copy_from_and_resize(cpu_tensors[idx], tensorlist_args[i][idx]);
+      }
+    }
+  }
+
+  // We also need to explicit reapply input mutations to inputs that are lists
+  // of optional tensors
+  for (const auto i : c10::irange(optional_tensorlist_args_indices.size())) {
+    auto tensorlist_idx = optional_tensorlist_args_indices[i];
+    const AliasInfo* alias_info = schema_args[tensorlist_idx].alias_info();
+    if (alias_info != nullptr && alias_info->isWrite()) {
+      const auto& cpu_tensors = optional_tensorlist_cpu_args[i].toOptionalTensorList();
+      for (const auto idx : c10::irange(optional_tensorlist_args[i].size())) {
+        if (cpu_tensors[idx].has_value() && cpu_tensors[idx].value().defined()) {
+          const std::optional<at::Tensor>& optional_tensor = optional_tensorlist_args[i][idx];
+          at::_copy_from_and_resize(cpu_tensors[idx].value(), optional_tensor.value());
+        }
       }
     }
   }

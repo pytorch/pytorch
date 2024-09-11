@@ -274,7 +274,7 @@ const Tensor& resize__symint(
   return _resize_(self, size, optional_memory_format);
 }
 
-void resize_bytes_nocuda(const Storage& storage, c10::SymInt newsize) {
+void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
   // handles all devices except cuda (which needs to be in a different .so)
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCPU) {
@@ -282,9 +282,9 @@ void resize_bytes_nocuda(const Storage& storage, c10::SymInt newsize) {
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
   } else if (device_type == at::kPrivateUse1) {
-    at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(
+    at::detail::getPrivateUse1Hooks().resizePrivateUse1Bytes(
         storage, newsize.expect_int());
-  } else if (device_type == at::kXPU || device_type == at::kHPU) {
+  } else if (device_type == at::kXPU || device_type == at::kHPU || device_type == at::kMTIA) {
     ptrdiff_t size_bytes_i = newsize.expect_int();
     TORCH_CHECK(
         !c10::overflows<int64_t>(size_bytes_i),

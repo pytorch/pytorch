@@ -132,9 +132,9 @@ inline bool pinned_memory_or_default(std::optional<bool> pinned_memory) {
 /// resolution is done before template resolution, our problem is solved.
 
 DispatchKey computeDispatchKey(
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device);
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device);
 
 struct C10_API TensorOptions {
   TensorOptions()

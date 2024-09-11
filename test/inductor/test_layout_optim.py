@@ -11,6 +11,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
 
 
@@ -153,7 +154,7 @@ class TestLayoutOptim(TestCase):
     @torch.no_grad()
     def test_keep_output_layout_infer(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False

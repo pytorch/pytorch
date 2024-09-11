@@ -11,6 +11,8 @@
 
 namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
+using namespace c10::CachingDeviceAllocator;
+
 #if CUDA_VERSION >= 11040
 // CUDA device allocator that uses cudaMallocAsync to implement
 // the same interface as CUDACachingAllocator.cpp.
@@ -33,13 +35,9 @@ struct UsageStream {
   UsageStream() = default;
   UsageStream(cudaStream_t s, c10::DeviceIndex d) : stream(s), device(d) {}
   UsageStream(const UsageStream& us) = default;
-  UsageStream(const UsageStream&& us) noexcept
-      : stream(us.stream), device(us.device) {}
-  UsageStream& operator=(UsageStream other) {
-    stream = other.stream;
-    device = other.device;
-    return *this;
-  }
+  UsageStream(UsageStream&& us) noexcept = default;
+  UsageStream& operator=(const UsageStream& other) = default;
+  UsageStream& operator=(UsageStream&& other) noexcept = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
@@ -607,6 +605,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     } else {
       it->second.recorded_streams.insert(to_record);
     }
+  }
+
+  ShareableHandle shareIpcHandle(void* handle) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support shareIpcHandle. "
+        "If you need it, please file an issue describing your use case.");
   }
 
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override {

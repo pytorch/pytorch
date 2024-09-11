@@ -2,30 +2,29 @@
 from __future__ import annotations
 
 import abc
-
 import contextlib
 import dataclasses
 import difflib
-
 import io
 import logging
 import sys
-
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch._subclasses import fake_tensor
-from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
-from torch.onnx._internal import _beartype
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
+
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
 
 
 @dataclasses.dataclass
 class PackageInfo:
     package_name: str
-    version: Optional[str]
-    commit_hash: Optional[str]
+    version: str | None
+    commit_hash: str | None
 
     def to_onnx_domain_string(self) -> str:
         return ".".join(
@@ -33,7 +32,7 @@ class PackageInfo:
         )
 
     @classmethod
-    def from_python_class(cls, python_class_name: Union[type, str]) -> PackageInfo:
+    def from_python_class(cls, python_class_name: type | str) -> PackageInfo:
         if isinstance(python_class_name, type):
             python_class_name = python_class_name.__module__
         package_name = python_class_name.split(".")[0]
@@ -128,7 +127,6 @@ def _unified_diff(a: str, b: str) -> str:
     return diff
 
 
-@_beartype.beartype
 def _transform_diagnose_call_message_formatter(
     run: Callable,
     self: Transform,
@@ -138,7 +136,7 @@ def _transform_diagnose_call_message_formatter(
     return f"Running {self.__class__.__name__} pass. "
 
 
-def maybe_fx_graph_tabular(graph: torch.fx.Graph) -> Optional[str]:
+def maybe_fx_graph_tabular(graph: torch.fx.Graph) -> str | None:
     """Return the Graph nodes in tabular format. Equivalent to stdout of `graph.print_tabular()`.
     If `tabulate` is not installed, return `None`.
 
@@ -178,7 +176,7 @@ class Transform(abc.ABC):
 
     One important aspect to note is that if the transformation modifies the model input and/or output signature,
     (e.g. additional inputs/outputs are added to the model), :class:`InputAdaptStep` and/or :class:`OutputAdaptStep`
-    are needed to reconcile :attr:`ONNXProgram.model_signature` and :attr:`ONNXProgram.model_proto`.
+    are needed to reconcile :attr:`ONNXProgram.model_proto`.
     That is, the model signature and the model representation must match.
 
     As an additional feature, this class provides builtin support for transformation recording using the diagnostics.
@@ -198,7 +196,7 @@ class Transform(abc.ABC):
     module: torch.fx.GraphModule
     """The module to be transformed."""
 
-    fake_mode: Optional[fake_tensor.FakeTensorMode]
+    fake_mode: fake_tensor.FakeTensorMode | None
     """The existing fake mode detected from `self.module`."""
 
     def __init__(
@@ -216,18 +214,18 @@ class Transform(abc.ABC):
         self.module = module
         self.fake_mode = self._detect_fake_mode()
 
-    def _detect_fake_mode(self) -> Optional[fake_tensor.FakeTensorMode]:
+    def _detect_fake_mode(self) -> fake_tensor.FakeTensorMode | None:
         """Detect fake mode from the graph.
 
         Scan through all nodes in graph and their meta['val'] to detect fake mode.
         """
         fake_tensors = [node.meta.get("val") for node in self.module.graph.nodes]
-        with maybe_disable_fake_tensor_mode():
+        with unset_fake_temporarily():
             return torch._dynamo.utils.detect_fake_mode(fake_tensors)
 
     def _maybe_fakefy_args(
-        self, fake_mode: Optional[fake_tensor.FakeTensorMode], *args: Any
-    ) -> Tuple[Any, ...]:
+        self, fake_mode: fake_tensor.FakeTensorMode | None, *args: Any
+    ) -> tuple[Any, ...]:
         if fake_mode is None:
             return args
         # NB: This should hit the cache if tensors were fakefied before.
@@ -237,8 +235,7 @@ class Transform(abc.ABC):
         )
 
     @abc.abstractmethod
-    def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
-        ...
+    def _run(self, *args, **kwargs) -> torch.fx.GraphModule: ...
 
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_pass,
@@ -312,7 +309,6 @@ class AnalysisResult(abc.ABC):  # noqa: B024
 
 
 class Analysis(abc.ABC):
-    @_beartype.beartype
     def __init__(
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -324,5 +320,4 @@ class Analysis(abc.ABC):
         self.onnxfunction_dispatcher = onnxfunction_dispatcher
 
     @abc.abstractmethod
-    def analyze(self, diagnostic_level: diagnostics.infra.Level) -> AnalysisResult:
-        ...
+    def analyze(self, diagnostic_level: diagnostics.infra.Level) -> AnalysisResult: ...

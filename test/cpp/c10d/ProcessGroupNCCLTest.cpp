@@ -43,7 +43,7 @@ class NCCLTestBase {
       int rank,
       int size,
       std::optional<::std::shared_ptr<::c10d::ProcessGroupNCCL>> split_from =
-          c10::nullopt) {
+          std::nullopt) {
     store_ = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts =

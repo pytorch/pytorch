@@ -292,9 +292,9 @@ static void upsample_bilinear2d_out_cuda_template(
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       TORCH_CHECK(input.numel() < std::numeric_limits<int>::max(),
-        "upsample_bilinear2d_nhwc only supports input tensors with less than INT_MAX elements");
+        "upsample_bilinear2d_nhwc only supports input tensors with less than INT_MAX elements, but got ", input.sizes());
       TORCH_CHECK(output.numel() < std::numeric_limits<int>::max(),
-        "upsample_bilinear2d_nhwc only supports output tensors with less than INT_MAX elements");
+        "upsample_bilinear2d_nhwc only supports output tensors with less than INT_MAX elements, but got ", output.sizes());
 
       const int channels = input.size(1);
       const int height1 = input.size(2);

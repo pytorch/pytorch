@@ -8,8 +8,8 @@ from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, Scheduler
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
-
 from .rocm_template_buffer import ROCmTemplateBuffer
+
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class ROCmCPPScheduling(BaseScheduling):
     It handles fusion decisions and ROCm C++ specific template code generation.
     """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: Scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
 

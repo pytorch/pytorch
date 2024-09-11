@@ -12,6 +12,7 @@ from torch.fx.graph import map_arg
 from torch.fx.proxy import Proxy
 from torch.nn.utils import fuse_conv_bn_weights
 
+
 # can be a
 #  module type, a builtin function, or a string to match target
 
