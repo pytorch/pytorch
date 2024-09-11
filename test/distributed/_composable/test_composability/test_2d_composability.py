@@ -337,7 +337,7 @@ class TestFullyShard2DTraining(FSDPTest):
         self.assertEqual(loss_no_cp2, loss_cp2)
 
     @skip_if_lt_x_gpu(4)
-    def test_2d_set_full_state_dict(self):
+    def test_fully_shard_tp_2d_set_full_state_dict(self):
         dummy_model = SimpleModel().cuda()
         mesh_2d = init_device_mesh(
             "cuda",
@@ -371,7 +371,7 @@ class TestFullyShard2DTraining(FSDPTest):
         set_optimizer_state_dict(
             model, optimizers=optim, optim_state_dict=full_osd, options=options
         )
-    
+
         # check after setting full state dict, the model and optim default sharded state dict
         # are the same as the initial default sharded state dict.
         new_msd = get_model_state_dict(model)
