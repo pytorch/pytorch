@@ -139,25 +139,30 @@ def make_symbol(
 def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Tuple[SymT, ...]]) -> bool:
     if isinstance(sym, PrefixedSymbol):
         # This function is called a *lot* of times, so it needs to be fast
-        if type(prefix) == tuple:
+        if type(prefix) is tuple:
             # a list comprehension with any is slow
             for p in prefix:
                 if sym.prefix == p:
                     return True
             return False
-        else:
+        elif type(prefix) is SymT:
             return sym.prefix == prefix
+        else:
+            raise ValueError(f"Unknown type for prefix: {type(prefix)}")
     else:
         assert isinstance(sym, sympy.Symbol)
         # TODO: remove all these Symbols and use PrefixedSymbol
+        #       Hint: they are created by sympy_index_symbol
         sym_name = sym.name.lower()
-        if type(prefix) == tuple:
+        if type(prefix) is tuple:
             for p in prefix:
                 if sym_name.startswith(prefix_str[p]):
                     return True
             return False
-        else:
+        elif type(prefix) is SymT:
             return sym_name.startswith(prefix_str[prefix])
+        else:
+            raise ValueError(f"Unknown type for prefix: {type(prefix)}")
 
 
 def free_symbol_is_type(e: sympy.Expr, prefix: SymT) -> bool:
