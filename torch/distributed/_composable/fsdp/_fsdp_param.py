@@ -663,7 +663,8 @@ class FSDPParam:
                 # Under compile, we always re-create the padded local_tensor instead of
                 # reading it from self._sharded_param_data. This is to avoid duplicated graph inputs
                 # (i.e. to avoid both self._sharded_param_data and self.sharded_param._local_tensor being
-                # captured as compiled autograd bwd graph inputs).
+                # captured as compiled autograd bwd graph inputs - they are aliases and share the same storage,
+                # so we don't want them to both be captured).
                 local_tensor = self._create_padded_local_tensor(self.sharded_param)
                 sharded_param_data = local_tensor.view(-1)
             else:
