@@ -186,6 +186,11 @@ class WeakRefCallSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class CallFunctionNoArgsSource(WeakRefCallSource):
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 
@@ -380,6 +385,17 @@ class ScriptObjectQualifiedNameSource(ChainedSource):
 
     def name(self):
         return f"{self.base.name()}._type().qualified_name()"
+
+
+class AttrProxySource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.get_base()"
 
 
 @dataclasses.dataclass(frozen=True)
