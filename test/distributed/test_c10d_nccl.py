@@ -355,12 +355,19 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
         device = self.rank_to_GPU[self.rank][0]
-        size = (10, 10)
-        nan_tensor = torch.full(size, self.rank, dtype=type, device=device)
+        # Cover different buffer sizes
+        if type == torch.float64:
+            size = (1024,)  # 1K elements
+        elif type == torch.float32:
+            size = (1024, 1024)  # 1M elements
+        elif type == torch.float16:
+            size = (1024, 1024, 1024)  # 1G elements
+        else:
+            size = (1,)  # 1 element
+        nan_tensor = torch.zeros(*size, dtype=type, device=device)
         # randomly pick an nan element
-        i = random.randint(0, nan_tensor.size(0) - 1)
-        j = random.randint(0, nan_tensor.size(1) - 1)
-        nan_tensor[i, j] = float("nan")
+        index = tuple([random.randrange(size[i]) for i in range(len(size))])
+        nan_tensor[index] = float("nan")
         with self.assertRaises(RuntimeError):
             pg.allreduce(nan_tensor)
         dist.destroy_process_group()
