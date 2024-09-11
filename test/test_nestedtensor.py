@@ -6050,6 +6050,30 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
+    def test_index_put_(self, device):
+        offsets = torch.tensor([0, 2, 5, 7], device=device)
+        a = torch.nested.nested_tensor_from_jagged(
+            torch.zeros(7, 3, device=device), offsets
+        )
+        indices = [
+            torch.tensor([0, 1, 2], device=a.device),
+            torch.tensor([0, 2, 1], device=a.device),
+            torch.tensor([0, 0, 0], device=a.device),
+        ]
+        a[indices] = 1.0
+
+        sentences = a.unbind()
+        self.assertEqual(sentences[0][0], torch.tensor([1.0, 0.0, 0.0]))
+        self.assertEqual(sentences[0][1], torch.tensor([0.0, 0.0, 0.0]))
+        self.assertEqual(sentences[1][2], torch.tensor([1.0, 0.0, 0.0]))
+
+        lengths = torch.tensor([2, 2, 2], device=device)
+        b = torch.nested.nested_tensor_from_jagged(
+            torch.zeros(7, 3, device=device), offsets, lengths
+        )
+        with self.assertRaises(IndexError):
+            b[indices] = 1.0
+
     @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):
         with torch.profiler.profile() as prof:

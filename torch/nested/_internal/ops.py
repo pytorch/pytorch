@@ -1398,6 +1398,46 @@ def slice_tensor(func, *args, **kwargs):
 
 
 @register_jagged_func(
+    torch.ops.aten.index_put_.default,
+    "input: jt_all, indices: any, values: t, accumulate: any?",
+)
+def index_put_(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp: NestedTensor = new_kwargs.pop("input")
+
+    # For index_put_ to work, we add together the indices of the ragged dimension
+    # and the batch dimension right before it, changing the batch indices by
+    # the offsets of each ragged dimension
+
+    indices = new_kwargs.pop("indices")
+
+    # Validate indices
+    if inp.lengths() is None:
+        lengths = inp.offsets().diff()
+    else:
+        lengths = inp.lengths()
+    if not torch.all(indices[inp._ragged_idx] < lengths):
+        raise IndexError("Some indices in the ragged dimension are out of bounds!")
+
+    # Recompute indices for _values
+    ragged_indices = (
+        inp.offsets()[indices[inp._ragged_idx - 1]] + indices[inp._ragged_idx]
+    )
+    func_indices = (
+        indices[: inp._ragged_idx - 1]
+        + [ragged_indices]
+        + indices[inp._ragged_idx + 1 :]
+    )
+
+    return NestedTensor(
+        func(inp._values, func_indices, **new_kwargs), **extract_kwargs(inp)
+    )
+
+
+@register_jagged_func(
     torch.ops.aten.convolution.default,
     "input: jt, weight: t, bias: t?, stride: any, padding: any, "
     "dilation: any, transposed: any, output_padding: any, groups: any",
