@@ -1,0 +1,26 @@
+value {
+  tag: "tag"
+  tensor {
+    dtype: DT_FLOAT
+    tensor_shape {
+      dim {
+        size: 6
+      }
+      dim {
+        size: 1
+      }
+    }
+    float_val: 57.0
+    float_val: 43.0
+    float_val: 0.0
+    float_val: 0.0
+    float_val: 0.57
+    float_val: 1.0
+  }
+  metadata {
+    plugin_data {
+      plugin_name: "pr_curves"
+      content: "\020\001"
+    }
+  }
+}
