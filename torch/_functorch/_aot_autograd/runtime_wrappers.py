@@ -13,6 +13,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
+import logging
 
 import torch
 import torch.utils.dlpack
@@ -67,6 +68,8 @@ from .utils import (
 
 
 zip = strict_zip
+
+log = logging.getLogger(__name__)
 
 
 class CompilerWrapper:
@@ -1545,8 +1548,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(
                     *(
-                        # x.detach() if x._is_view() else x
-                        x
+                        x.detach() if x._is_view() else x
                         for x in tensors_saved_for_backwards
                     )
                 )
