@@ -509,11 +509,9 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(exported_program.module()(*args), m(*args))
 
-        from torch._export import capture_pre_autograd_graph
-
-        gm: torch.fx.GraphModule = capture_pre_autograd_graph(
+        gm: torch.fx.GraphModule = torch.export.export_for_training(
             m, args=example_args, dynamic_shapes=dynamic_shapes
-        )
+        ).module()
 
         args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
@@ -2486,6 +2484,36 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             export(
                 cf_stacklist(),
+                ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+                strict=strict,
+            )
+
+        class Box:
+            def __init__(self, content):
+                self.content = content
+
+        from torch.utils._pytree import register_pytree_node
+
+        register_pytree_node(
+            Box,
+            lambda box: ([box.content], None),  # flatten_fn
+            lambda contents, _context: Box(*contents),  # unflatten_fn
+            flatten_with_keys_fn=None,  # unflatten_fn
+            serialized_type_name="test_no_suggested_fixes_for_data_dependent_errors.Box",
+        )
+
+        class cf_stacklist_udd(torch.nn.Module):
+            def forward(self, xs, y):
+                box = Box(y.item())
+                # box.content is not a local, so we can't suggest a fix
+                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+
+        with self.assertRaisesRegex(
+            error_type,
+            "Could not guard on data-dependent expression u0 < 0",
+        ):
+            export(
+                cf_stacklist_udd(),
                 ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
                 strict=strict,
             )
