@@ -4,6 +4,7 @@ import os
 import sys
 
 import torch
+from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
@@ -183,6 +184,37 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         device = "cuda"
 
     copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionCudaTest, "cuda")
+
+    class BenchmarkingTest(TestCase):
+        @unittest.skipIf(
+            torch.cuda.device_count() < 2, "The test need at least 2 devices"
+        )
+        def test_benchmark_on_non_zero_device(self):
+            hit_count = 0
+            with torch.cuda.device("cuda:0"):
+
+                @torch.compile
+                def relu(x):
+                    return realize(x.relu()) + x
+
+                x = torch.randn(int(16e6), device="cuda:1")
+
+                orig_benchmark_fused_nodes = TritonScheduling.benchmark_fused_nodes
+
+                def mock_benchmark_fused_nodes(*args, **kwargs):
+                    nonlocal hit_count
+                    hit_count += 1
+                    ms, path = orig_benchmark_fused_nodes(*args, **kwargs)
+                    self.assertTrue(ms > 0)
+                    return ms, path
+
+                with unittest.mock.patch.object(
+                    TritonScheduling,
+                    "benchmark_fused_nodes",
+                    mock_benchmark_fused_nodes,
+                ):
+                    relu(x)
+                self.assertTrue(hit_count > 0)
 
     class BenchmarkMultiTemplateFusionCudaTest(InductorTestCase):
         @classmethod
