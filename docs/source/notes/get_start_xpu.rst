@@ -15,6 +15,7 @@ Hardware Prerequisite
    * - Intel Client GPU
      - Windows/Linux
 
+Intel GPUs support enhancement is ready in PyTorch* 2.5 to provide Beta quality for Intel® Data Center GPU Max Series and Intel® Client GPUs on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios, especially in AIPC scene. 
 
 Software Prerequisite
 ---------------------
