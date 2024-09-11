@@ -50,7 +50,7 @@ pushd /var/lib/jenkins/
 as_jenkins git clone --recursive ${TRITON_REPO} triton
 cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
-git submodule update --init --recursive
+as_jenkins git submodule update --init --recursive
 cd python
 
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
