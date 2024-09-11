@@ -597,8 +597,6 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
     """
     if shape_env is None:
         return
-    if shape_env._ignore_fresh_unbacked_symbols_tls():
-        return
     fs = shape_env.pending_fresh_unbacked_symbols
     pending = set(fs)
     if pending:
@@ -2722,8 +2720,6 @@ class ShapeEnv:
         assert isinstance(new_s, sympy.Symbol), new_s
         assert free_unbacked_symbols(new_s), new_s
         assert free_unbacked_symbols(orig_s), orig_s
-        if self._ignore_fresh_unbacked_symbols_tls():
-            return
         dest = self.replacements.get(orig_s)
         assert not free_unbacked_symbols(dest), f"{orig_s} -> {dest}"
         self._set_replacement(orig_s, new_s, "rename_unbacked_to")
@@ -5592,8 +5588,17 @@ def _suggest_fixes_for_data_dependent_error_non_strict(e):
         # map symbol names reachable via frame locals to their source-level names
         src_map = defaultdict(list)
         for var, val in frame.f_locals.items():
+            try:
+                tree_leaves_with_path = pytree.tree_leaves_with_path(val)
+            except ValueError:
+                log.warning(
+                    "pytree.tree_leaves_with_path failed for value of type {%s} in local variable {%s}",
+                    type(val),
+                    var,
+                )
+                continue
             # figure out how to access any symbol inside `val` through `var`
-            for path, leaf in pytree.tree_leaves_with_path(val):
+            for path, leaf in tree_leaves_with_path:
                 name = var + pytree.keystr(path)
                 if isinstance(leaf, torch.SymInt):
                     src_map[str(leaf.node.expr)].append(name)
