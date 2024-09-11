@@ -2146,9 +2146,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if V.graph.aot_mode:
-            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
-            # compared with JIT Inductor which uses TORCH_CHECK
+        if config.abi_compatible:
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -4184,7 +4182,6 @@ class CppScheduling(BaseScheduling):
 
         split_var = None
         split_number = None
-        divide_index_name = None
         num_div = 0
         match_div = False
         matched_node = None
@@ -4198,19 +4195,18 @@ class CppScheduling(BaseScheduling):
                         num_div += 1
                     if num_div > 1:
                         return nodes
-                    split_var = div_expr.args[0]
-                    split_number = div_expr.args[1]
-                    divide_index_name = name
                     if (
-                        isinstance(split_number, sympy.core.numbers.Integer)
-                        and split_var in original_body.iter_vars
-                        and divide_index_name is not None
+                        isinstance(div_expr.args[1], sympy.core.numbers.Integer)
+                        and div_expr.args[0] in original_body.iter_vars
+                        and name is not None
                         and all(
-                            stride_at_vec_range(expr, split_var) in (0, 1)
-                            for name, expr in original_body.indexing_exprs.items()
-                            if name != divide_index_name
+                            stride_at_vec_range(expr_, div_expr.args[0]) in (0, 1)
+                            for name_, expr_ in original_body.indexing_exprs.items()
+                            if name_ != name
                         )
                     ):
+                        split_var = div_expr.args[0]
+                        split_number = div_expr.args[1]
                         match_div = True
                         matched_node = node
 
