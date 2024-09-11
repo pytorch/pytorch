@@ -8,7 +8,7 @@ import sympy
 
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
-from torch._inductor.runtime.triton_heuristics import grid as default_grid
+from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
 from .. import config
 from ..codecache import CudaKernelParamCache
@@ -88,11 +88,11 @@ class DeferredCudaDefaultGrid:
         grid = self.grid
         assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
         grid = self._process_grid(grid)
-        grid_callable = self.grid_callable or default_grid
+        assert self.grid_callable is not None, "grid_callable can't be None"
         if not self.grid_extra_kwargs:
-            grid_fn = grid_callable(*grid)
+            grid_fn = self.grid_callable(*grid)
         else:
-            grid_fn = grid_callable(*grid, **self.grid_extra_kwargs)
+            grid_fn = self.grid_callable(*grid, **self.grid_extra_kwargs)
 
         params = CudaKernelParamCache.get(self.kernel_name)
         assert (
@@ -102,6 +102,7 @@ class DeferredCudaDefaultGrid:
             "XBLOCK": params["x_block"],
             "YBLOCK": params["y_block"],
             "ZBLOCK": params["z_block"],
+            "RBLOCK": params["r_block"],
         }
         return grid_fn(block_cfg)
 
@@ -327,7 +328,7 @@ class CppWrapperCuda(CppWrapperCpu):
         kernel_name: str,
         grid: List[Any],
         cuda: bool = True,
-        grid_callable: Optional[Callable[..., Any]] = None,
+        grid_callable: Optional[Callable[..., Any]] = default_grid_fn,
         **grid_extra_kwargs,
     ):
         """
