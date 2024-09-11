@@ -145,12 +145,13 @@ _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
     num_rows = col_indices.shape[-2]
-    num_cols = col_indices.shape[-1]
+    num_cols = col_indices.shape[-1] # TODO: update here
     batch_dims = num_blocks_in_row.shape[:-1]
     device = num_blocks_in_row.device
 
     def create_dense_one(kv_num_blocks, kv_indices):
-        dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
+        extended_num_cols = 16 # TODO: a good way to specify the value here
+        dense_mask = kv_indices.new_zeros(num_rows, extended_num_cols + 1, dtype=torch.int32)
 
         row_indices = torch.arange(num_rows, dtype=torch.int, device=device).unsqueeze(
             -1
@@ -163,7 +164,7 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
 
         # set the values in 'a' to 1 where the indices are valid
         dense_mask[row_indices, valid_indices] = 1
-        return dense_mask[:, :num_cols].contiguous()
+        return dense_mask[:, :extended_num_cols].contiguous()
 
     create_dense_batched = create_dense_one
     for _ in range(len(batch_dims)):
@@ -903,33 +904,11 @@ class PagedCache:
         # Mapping from physical page index to logical page index
         self.physical_to_logical = -torch.ones(n_pages, dtype=torch.int64, device=device)
 
-    # # @classmethod
-    # def from_page_table(
-    #     self,
-    #     page_table: Tensor,
-    #     n_pages: int,
-    # ):
-    #     max_batch_size, max_seq_pages = page_table.shape
-
-    #     self.page_table = page_table
-        
-    #     self.physical_to_logical = -torch.ones(n_pages, dtype=torch.int64)
-    #     for b in range(max_batch_size):
-    #         for logical_idx in range(max_seq_pages):
-    #             physical_idx = self.page_table[b][logical_idx]
-    #             self.physical_to_logical[physical_idx] = logical_idx
-
-    #     # TODO
-    #     # self.allocated_seq_len = torch.zeros(max_batch_size, dtype=torch.int64)
-    #     # self.empty_pages
-        
-
-    #     return
-
     def update(self, input_pos: Tensor, val: Tensor, cache: Tensor):
-        # input_pos: [S], val: [B, H, S, D]
+        # input_pos: [S], val: [B, H, S, D], cache: [1, H, MAX_S, D]
         B, H, S, D = val.shape
         assert H == cache.shape[1]
+        assert D == cache.shape[3]
 
         # find address
         logical_block_idx = input_pos // self.page_size  # [S]
@@ -942,26 +921,27 @@ class PagedCache:
         addr = addr.view(-1)  # [B*S]
 
         # update
-        # TODO: view vs reshape
+        # TODO: use view?
         vt = val.transpose(0, 1).reshape(H, B * S, D)  # [H, B*S, D]
         cache[0, :, addr] = vt
 
     def convert_logical_block_mask(self, block_mask: BlockMask) -> BlockMask:
-        assert block_mask.BLOCK_SIZE[1] == self.page_size
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
+        assert block_mask.BLOCK_SIZE[1] == self.page_size
+        assert B == self.page_table.size(0)
 
         new_kv_num_blocks = block_mask.kv_num_blocks.clone()
         new_kv_indices = torch.gather(
-            self.page_table, 1, block_mask.kv_indices.view(B, -1)
-        )
+            self.page_table, 1, block_mask.kv_indices.view(B, -1).to(torch.int64)
+        ).view(block_mask.kv_indices.shape).to(torch.int32)
 
         new_full_kv_indices, new_full_kv_num_blocks = None, None
         if block_mask.full_kv_num_blocks is not None:
             assert block_mask.full_kv_indices is not None
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
             new_full_kv_indices = torch.gather(
-                self.page_table, 1, block_mask.full_kv_indices.view(B, -1)
-            )
+                self.page_table, 1, block_mask.full_kv_indices.view(B, -1).to(torch.int64)
+            ).view(block_mask.full_kv_indices.shape).to(torch.int32)
 
         return BlockMask.from_kv_blocks(
             new_kv_num_blocks,

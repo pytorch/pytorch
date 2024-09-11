@@ -2472,6 +2472,17 @@ class TestPagedCache(InductorTestCase):
         self.assertEqual(len(paged_cache.empty_pages), n_pages)
 
     @supported_platform
+    def test_convert_logical_block_mask(self):
+        # TODO: a hard coded example on convert_logical_block_mask
+        return
+
+
+    @supported_platform
+    def test_update(self):
+        # TODO: a hard coded example on update
+        return
+
+    @supported_platform
     def test_flex_attention_causal_mask(self):
         # flex_attention(q, k, v, block_mask=causal_mask) works with paged cache
         n_pages, page_size, max_batch_size, max_seq_len = 16, 128, 4, 512
@@ -2488,7 +2499,7 @@ class TestPagedCache(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, max_seq_len, max_seq_len)
+        block_mask = create_block_mask(causal_mask, max_batch_size, 1, max_seq_len, max_seq_len)
         compiled_flex_attention = torch.compile(flex_attention)
 
         # Get q, k, v. Compute expected out, q_grad, k_grad, v_grad
@@ -2498,11 +2509,9 @@ class TestPagedCache(InductorTestCase):
         out = compiled_flex_attention(q, k, v, block_mask=block_mask)
         out.sum().backward()
 
-        # 
-
         # write k, v to cache according to the page table
-        k_cache = torch.zeros(1, n_heads, 2048, head_dim, device="cuda", dtype=torch.float16, requires_grad=True)
-        v_cache = torch.zeros(1, n_heads, 2048, head_dim, device="cuda", dtype=torch.float16, requires_grad=True)
+        k_cache = torch.zeros(1, n_heads, 2048, head_dim, device="cuda", dtype=torch.float16)
+        v_cache = torch.zeros(1, n_heads, 2048, head_dim, device="cuda", dtype=torch.float16)
         input_pos = torch.tensor(range(0, max_seq_len), device="cuda", dtype=torch.int32)
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
 
