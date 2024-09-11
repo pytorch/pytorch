@@ -3741,12 +3741,15 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float)
     def test_linalg_qr_autograd(self, device, dtype):
-        # Check differentiability for modes as specified in the docs:
+        # Check differentiability for modes as specified in the docs.
+        # Differentiability in all cases is only guaranteed if first k = min(m, n) columns are linearly independent.
         # Mode 'reduced' is always differentiable.
         # Mode 'r' is never differentiable.
         # Mode 'complete' is differentiable for m <= n.
         for mode in 'complete', 'reduced', 'r':
             for m, n in [(5, 7), (7, 5)]:
+                # Random matrix inputs will effectively satisfy rank requirement of k = min(m, n) columns linearly
+                # independent.
                 inp = torch.randn((m, n), device=device, dtype=dtype, requires_grad=True)
                 q, r = torch.linalg.qr(inp, mode=mode)
                 b = torch.sum(r)
