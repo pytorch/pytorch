@@ -136,7 +136,7 @@ struct TORCH_XPU_API XPUEvent {
         enable_timing_ && other.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
 
-    using namepsace sycl::info::event_profiling;
+    using namespace sycl::info::event_profiling;
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = other.event().get_profiling_info<command_end>();
     uint64_t start_time_ns = event().get_profiling_info<command_end>();

@@ -148,7 +148,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto* xpu_event1 = reinterpret_cast<sycl::event*>(event1);
     auto* xpu_event2 = reinterpret_cast<sycl::event*>(event2);
 
-    using namepsace sycl::info::event_profiling;
+    using namespace sycl::info::event_profiling;
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns = xpu_event2->get_profiling_info<command_end>();
     uint64_t start_time_ns = xpu_event1->get_profiling_info<command_end>();
