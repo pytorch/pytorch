@@ -6,11 +6,11 @@
 #endif
 
 // ROCm 6.3 is planned to have these functions, but until then here they are.
-#if defined(USE_ROCM) && ROCM_VERSION < 60300
+#if defined(USE_ROCM) && ROCM_VERSION >= 60201
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 
-__device__ inline __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
+__device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
 #if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)) && \
   __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
   typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
@@ -38,7 +38,7 @@ __device__ inline __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address, __hi
 #endif
 }
 
-__device__ inline __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
+__device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 value) {
 #if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)) && \
   __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16)
   // The api expects an ext_vector_type of half
@@ -66,7 +66,7 @@ __device__ inline __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
   return old_val.h2r;
 #endif
 }
-#define ATOMICADD unsafeAtomicAdd
+#define ATOMICADD preview_unsafeAtomicAdd
 #define NATIVE_ZERO_BF16 __float2bfloat16(0.0f)
 #define NATIVE_BFLOAT16 __hip_bfloat16
 #define NATIVE_BFLOAT162 __hip_bfloat162
