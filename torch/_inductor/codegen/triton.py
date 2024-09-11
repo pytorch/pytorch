@@ -32,7 +32,13 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
 
-from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
+from ...utils._sympy.symbol import (
+    free_symbol_is_type,
+    prefix_str,
+    PrefixedSymbol,
+    symbol_is_type,
+    SymT,
+)
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
@@ -129,12 +135,16 @@ def gen_common_triton_imports():
 
 
 block_offsets = {
-    symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
+    symt: PrefixedSymbol(
+        f"{prefix_str[symt]}offset", prefix=symt, integer=True, nonnegative=True
+    )
     for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
 }
 
 block_sizes = {
-    symt: sympy.Symbol(f"{prefix_str[symt].upper()}BLOCK", integer=True, positive=True)
+    symt: PrefixedSymbol(
+        f"{prefix_str[symt].upper()}BLOCK", prefix=symt, integer=True, positive=True
+    )
     for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
 }
 

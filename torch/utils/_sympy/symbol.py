@@ -13,7 +13,7 @@ in this file and seeing what breaks.
 """
 
 from enum import auto, Enum
-from typing import Sequence, Union
+from typing import Tuple, Union
 
 import sympy
 
@@ -76,20 +76,38 @@ prefix_str = {
 }
 
 
+class PrefixedSymbol(sympy.Symbol):
+    def __new__(cls, name, prefix, *, integer=None, nonnegative=None, positive=None):
+        obj = sympy.Symbol.__new__(
+            cls, name, integer=integer, nonnegative=nonnegative, positive=positive
+        )
+        obj.prefix = prefix
+        return obj
+
+    def _hashable_content(self):
+        # since we use only 3 assumptions, we only check on those three instead of the
+        # full set of assumptions to avoid an expensive caching operation
+        return (self.name, self.is_integer, self.is_nonnegative, self.is_positive)
+
+
 def make_symbol(prefix: SymT, idx: int, **kwargs) -> sympy.Symbol:
     # TODO: maybe put the assumptions here directly
-    return sympy.Symbol(f"{prefix_str[prefix]}{idx}", **kwargs)
+    return PrefixedSymbol(f"{prefix_str[prefix]}{idx}", prefix=prefix, **kwargs)
 
 
 # This type is a little wider than it should be, because free_symbols says
 # that it contains Basic, rather than Symbol
-def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Sequence[SymT]]) -> bool:
-    assert isinstance(sym, sympy.Symbol)
-    name_str = sym.name.lower()  # Match capitalized names like XBLOCK, RBLOCK
-    if isinstance(prefix, SymT):
-        return name_str.startswith(prefix_str[prefix])
+def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Tuple[SymT, ...]]) -> bool:
+    assert isinstance(sym, PrefixedSymbol)
+    # This function is called a *lot* of times, so it needs to be fast
+    if type(prefix) == tuple:
+        # a list comprehension with any is slow
+        for p in prefix:
+            if sym.prefix == p:
+                return True
+        return False
     else:
-        return name_str.startswith(tuple(prefix_str[p] for p in prefix))
+        return sym.prefix == prefix
 
 
 def free_symbol_is_type(e: sympy.Expr, prefix: SymT) -> bool:
