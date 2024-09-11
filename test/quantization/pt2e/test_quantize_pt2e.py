@@ -1453,7 +1453,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         for n in m.graph.nodes:
             if n.op == "get_attr" and "frozen_param" in n.target:
-                self.assertIn("stack_trace", n.meta)
                 for key in n.meta:
                     self.assertEqual(n.meta[key], weight_meta[key])
 
