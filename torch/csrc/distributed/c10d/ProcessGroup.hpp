@@ -66,8 +66,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         return "mpi";
       case BackendType::UNDEFINED:
         return "undefined";
-      default:
+      case BackendType::CUSTOM:
         return "custom";
+      default:
+        TORCH_CHECK(false, "THis should never happen!");
     }
   };
 
