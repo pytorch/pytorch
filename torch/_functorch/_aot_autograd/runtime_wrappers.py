@@ -13,7 +13,6 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
-import logging
 
 import torch
 import torch.utils.dlpack
@@ -68,8 +67,6 @@ from .utils import (
 
 
 zip = strict_zip
-
-log = logging.getLogger(__name__)
 
 
 class CompilerWrapper:

@@ -436,7 +436,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             ],
             # TODO(yf225): make this check work for activation_checkpoint=True case
             post_grad_custom_pre_pass=self._assert_no_aliased_graph_inputs
-            if fullgraph  # if fullgraph and not activation_checkpoint
+            if fullgraph
             else None,
         ):
             losses_compiled = test_compiled()
@@ -688,7 +688,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     ):
         seq_len = 16
         vocab_size = 8
-        n_layers = 1
+        n_layers = 3
 
         def model_init_fn():
             torch.manual_seed(self.rank)
@@ -785,8 +785,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     def test_transformer_backend_inductor(self):
         # TODO: enable fullgraph=False case
         for fullgraph, all_requires_grad, activation_checkpoint in itertools.product(
-            # [True], [True, False], [True, False]
-            [True], [True], [True]
+            [True], [True, False], [True, False]
         ):
             log.warning(
                 f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
@@ -822,75 +821,75 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         activation_checkpoint=activation_checkpoint,
                     )
                 )
-            # if fullgraph:
-            #     self.assertTrue(
-            #         len(triton_codes) == 2,
-            #         "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
-            #     )
-            #     fwd_code = triton_codes[0]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for fwd_ag_block_info in [
-            #         dict(
-            #             overlapped_compute_op_str="triton_"
-            #             if all_requires_grad
-            #             else None,
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten.native_dropout.",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_all_gather(
-            #             file_check, **fwd_ag_block_info
-            #         )
-            #     file_check.run(fwd_code)
+            if fullgraph:
+                self.assertTrue(
+                    len(triton_codes) == 2,
+                    "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
+                )
+                fwd_code = triton_codes[0]
+                file_check = FileCheck().check("def call(args):")
+                for fwd_ag_block_info in [
+                    dict(
+                        overlapped_compute_op_str="triton_"
+                        if all_requires_grad
+                        else None,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten.native_dropout.",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **fwd_ag_block_info
+                    )
+                file_check.run(fwd_code)
 
-            #     bwd_code = triton_codes[1]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for bwd_ag_block_info in [
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         if bwd_ag_block_info is not None:
-            #             file_check = self.inductor_code_check_fsdp_all_gather(
-            #                 file_check, **bwd_ag_block_info
-            #             )
-            #     for bwd_rs_block_info in [
-            #         dict(overlapped_compute_op_str="extern_kernels.mm(")
-            #         if all_requires_grad
-            #         else None,
-            #         dict(
-            #             overlapped_compute_op_str=None
-            #         ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-            #         dict(overlapped_compute_op_str=None),
-            #         dict(overlapped_compute_op_str=None) if all_requires_grad else None,
-            #     ]:
-            #         if bwd_rs_block_info is not None:
-            #             file_check = self.inductor_code_check_fsdp_reduce_scatter(
-            #                 file_check, **bwd_rs_block_info
-            #             )
-            #     file_check.run(bwd_code)
-            # else:
-            #     # TODO: when fullgraph=False and there is graph break in FWD graph,
-            #     # there are several recompiles, need to figure out why.
-            #     self.assertTrue(
-            #         len(triton_codes) > 2,
-            #         "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
-            #     )
+                bwd_code = triton_codes[1]
+                file_check = FileCheck().check("def call(args):")
+                for bwd_ag_block_info in [
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        last_all_gather=True,
+                    ),
+                ]:
+                    if bwd_ag_block_info is not None:
+                        file_check = self.inductor_code_check_fsdp_all_gather(
+                            file_check, **bwd_ag_block_info
+                        )
+                for bwd_rs_block_info in [
+                    dict(overlapped_compute_op_str="extern_kernels.mm(")
+                    if all_requires_grad
+                    else None,
+                    dict(
+                        overlapped_compute_op_str=None
+                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                    dict(overlapped_compute_op_str=None),
+                    dict(overlapped_compute_op_str=None) if all_requires_grad else None,
+                ]:
+                    if bwd_rs_block_info is not None:
+                        file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                            file_check, **bwd_rs_block_info
+                        )
+                file_check.run(bwd_code)
+            else:
+                # TODO: when fullgraph=False and there is graph break in FWD graph,
+                # there are several recompiles, need to figure out why.
+                self.assertTrue(
+                    len(triton_codes) > 2,
+                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+                )
 
 
 if __name__ == "__main__":
