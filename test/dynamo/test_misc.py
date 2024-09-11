@@ -100,7 +100,7 @@ T = typing.TypeVar("T")
 TPFLAGS_MAPPING = 1 << 6
 
 
-# Aux class defined in the global scope
+# A class defined in the global scope, used in MiscTests.test_const_getattr
 class _B:
     def __init__(self):
         pass
@@ -1417,7 +1417,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 3)
 
     def test_const_getattr(self):
-        # Repro from https://github.com/pytorch/pytorch/issues/118675
+        # See https://github.com/pytorch/pytorch/issues/118675
         def fn(x):
             y = x[f"{_B.__module__}.{_B.__name__}"]
             z = x[f"{_B.__class__.__module__}.{_B.__name__}"]

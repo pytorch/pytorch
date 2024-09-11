@@ -185,10 +185,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
 
-        try:
-            obj = inspect.getattr_static(self.value, name)
-        except AttributeError:
-            obj = None
+        obj = inspect.getattr_static(self.value, name, None)
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
@@ -214,12 +211,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableBuilder(tx, source)(obj.__get__(self.value))
 
         if inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
-            builder = (
-                VariableBuilder(tx, source)
-                if source
-                else functools.partial(SourcelessBuilder.create, tx=tx)
-            )
-            return builder(value=getattr(self.value, name))
+            value = getattr(self.value, name)
+            if source is not None:
+                return VariableBuilder(tx, source)(value=value)
+            else:
+                return SourcelessBuilder.create(tx=tx, value=value)
 
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)

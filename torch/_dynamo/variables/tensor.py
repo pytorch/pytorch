@@ -219,7 +219,6 @@ class TensorVariable(VariableTracker):
 
     def dynamic_getattr(self, tx: "InstructionTranslator", name):
         fake_val = self.proxy.node.meta["example_value"]
-
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
         # if:
@@ -267,6 +266,7 @@ class TensorVariable(VariableTracker):
             msg = f"{exc!r} raised in eval('{self.source.name()}')"
             raise NotImplementedError(msg) from exc
 
+        real_value = getattr(_input_associated_real_value, name)
         if _input_associated_real_value is None:
             return
 
@@ -276,8 +276,6 @@ class TensorVariable(VariableTracker):
         if get_custom_getattr(_input_associated_real_value):
             return
 
-        attr_source = AttrSource(self.source, name)
-        real_value = getattr(_input_associated_real_value, name)
         if callable(real_value):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
@@ -286,6 +284,7 @@ class TensorVariable(VariableTracker):
 
         from .builder import VariableBuilder
 
+        attr_source = AttrSource(self.source, name)
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableBuilder(tx, attr_source)(real_value)
 
@@ -447,7 +446,6 @@ class TensorVariable(VariableTracker):
 
         if result is None:
             raise NotImplementedError
-
         return result
 
     def call_id(self, tx):
@@ -1172,8 +1170,6 @@ class NumpyNdarrayVariable(TensorVariable):
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy
 
-        result = None
-
         example_value = self.as_proxy().node.meta["example_value"]
         example_ndarray = tnp.ndarray(example_value)
 
@@ -1192,7 +1188,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 (self.as_proxy(), name),
                 {},
             )
-            result = NumpyNdarrayVariable.create(tx, proxy)
+            return NumpyNdarrayVariable.create(tx, proxy)
 
         # These are awkward to implement.  The standard playbook for torch._numpy
         # interop is to trace a call into the torch._numpy wrapper which works for
@@ -1221,9 +1217,8 @@ class NumpyNdarrayVariable(TensorVariable):
             unimplemented(f"TODO: add support for ndarray.{name}")
         elif name in ["__version__"]:
             unimplemented("delegate np.__version__ to NumPy")
-        if result is not None:
-            return result
-        return super().var_getattr(tx, name)
+        else:
+            return super().var_getattr(tx, name)
 
     @staticmethod
     def patch_args(name, args, kwargs):

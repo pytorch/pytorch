@@ -238,9 +238,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
         v = self.as_python_constant()
-        if not hasattr(v, name):
-            raise NotImplementedError
-        return getattr(v, name)
+        try:
+            return getattr(v, name)
+        except AttributeError:
+            raise NotImplementedError from None
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
@@ -248,27 +249,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         from .builder import SourcelessBuilder, VariableBuilder
         from .misc import GetAttrVariable
 
-        if self.source:
-            source = AttrSource(self.source, name)
-            builder = VariableBuilder(tx, source)
-        else:
-            source = None
-            builder = functools.partial(SourcelessBuilder.create, tx=tx)
-
+        source = self.source and AttrSource(self.source, name)
         try:
             value = self.const_getattr(tx, name)
-        except NotImplementedError:
-            return GetAttrVariable(self, name, source=source)
-
-        # Otherwise VariableBuilder will Skip it
-        # This is the path taken by list.append and similar methods
-        if is_function_or_wrapper(value):
-            return GetAttrVariable(self, name, source=source)
-
-        try:
-            return builder(value=value)
+            if not is_function_or_wrapper(value):
+                if source:
+                    return VariableBuilder(tx, source)(value=value)
+                else:
+                    return SourcelessBuilder.create(tx=tx, value=value)
         except (NotImplementedError, Unsupported):
-            return GetAttrVariable(self, name, source=source)
+            pass
+        return GetAttrVariable(self, name, source=source)
 
     def is_proxy(self):
         try:
