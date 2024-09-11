@@ -4,7 +4,7 @@
 import functools
 from collections import namedtuple
 from contextlib import nullcontext
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 from unittest import expectedFailure, skipUnless
 from unittest.mock import patch
 
@@ -184,6 +184,13 @@ test_Hq_Hkv = [
     (16, 1),
     (8, 2),
     (16, 16),
+]
+
+test_Bq_Bkv = [
+    (3, 1),
+    (5, 1),
+    (8, 1),
+    (16, 1),
 ]
 
 (Hq, Hkv) = (16, 8)
@@ -447,6 +454,37 @@ class TestFlexDecoding(InductorTestCase):
         tolerance = Tolerances(atol=2e-1, rtol=2e-1)
         torch.testing.assert_close(
             ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast(
+        self,
+        dtype: torch.dtype,
+        head_dims: Tuple[int, int],
+        batch_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq > 1 and Bkv == 1
+
+        self.run_test(
+            score_mod,
+            dtype,
+            Bq,
+            Hq,
+            1,
+            D,
+            Bkv,
+            Hkv,
+            S,
+            D,
         )
 
     @supported_platform
