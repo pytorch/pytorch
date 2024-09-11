@@ -26,7 +26,7 @@ from ..utils import (
     odict_values,
     set_example_value,
 )
-from .base import MutableLocal, VariableTracker
+from .base import build_variable, MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
@@ -134,10 +134,8 @@ class BaseListVariable(VariableTracker):
             assert not kwargs
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
-            from .builder import SourcelessBuilder
-
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfills.index),
+                build_variable(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )

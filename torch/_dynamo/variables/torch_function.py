@@ -12,7 +12,7 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
 from ..utils import get_safe_global_name, has_torch_function, is_tensor_base_attr_getter
-from .base import VariableTracker
+from .base import build_variable, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
 from .lists import TupleVariable
@@ -180,12 +180,8 @@ def _get_subclass_type_var(tx: "InstructionTranslator", var):
     if isinstance(var, TensorWithTFOverrideVariable):
         return var.class_type_var(tx)
     elif isinstance(var, UserDefinedObjectVariable):
-        from .builder import SourcelessBuilder, VariableBuilder
-
-        if var.source:
-            return VariableBuilder(tx, TypeSource(var.source))(var.python_type())
-        else:
-            return SourcelessBuilder.create(tx, var.python_type())
+        source = var.source and TypeSource(var.source)
+        return build_variable(tx, var.python_type(), source)
 
 
 def _is_attr_overidden(tx: "InstructionTranslator", var, name):
@@ -204,30 +200,23 @@ def _is_attr_overidden(tx: "InstructionTranslator", var, name):
 def call_torch_function(
     tx, torch_function_type, torch_function_var, fn, types, args, kwargs
 ):
-    from .builder import SourcelessBuilder
-
     # signature:
     # def __torch_function__(cls, func, types, args=(), kwargs=None):
     tf_args = (
         torch_function_type,
         fn,
         types,
-        SourcelessBuilder.create(tx, tuple(args)),
-        SourcelessBuilder.create(tx, kwargs),
+        build_variable(tx, tuple(args)),
+        build_variable(tx, kwargs),
     )
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
 
 def build_torch_function_fn(tx: "InstructionTranslator", value, source):
-    from .builder import SourcelessBuilder, VariableBuilder
+    if source is not None:
+        source = AttrSource(AttrSource(source, "__torch_function__"), "__func__")
 
-    if source:
-        return VariableBuilder(
-            tx,
-            AttrSource(AttrSource(source, "__torch_function__"), "__func__"),
-        )(value.__torch_function__.__func__)
-    else:
-        return SourcelessBuilder.create(tx, value.__torch_function__.__func__)
+    return build_variable(tx, value.__torch_function__.__func__, source)
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
@@ -311,8 +300,6 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # base tensors, custom attribute accesses will graph break.
         import torch
 
-        from .builder import SourcelessBuilder
-
         if name in banned_attrs:
             unimplemented(
                 f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
@@ -331,7 +318,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                         GuardBuilder.FUNCTION_MATCH
                     )
                 )
-            get_fn = SourcelessBuilder.create(tx, getattr(torch.Tensor, name).__get__)
+            get_fn = build_variable(tx, getattr(torch.Tensor, name).__get__)
 
             return self.call_torch_function(
                 tx,
@@ -366,8 +353,6 @@ class TensorWithTFOverrideVariable(TensorVariable):
         if tx.output.torch_function_enabled:
             import torch
 
-            from .builder import SourcelessBuilder, VariableBuilder
-
             if _is_attr_overidden(tx, self, name):
                 unimplemented(
                     f"Calling overridden method {name} on a tensor"
@@ -378,12 +363,14 @@ class TensorWithTFOverrideVariable(TensorVariable):
             # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
             # We've established with the above check that the method is not overridden, so we guard that the method is the same
             # as the impl defined on tensor and retrieve it
-            if self.source:
-                func_var = VariableBuilder(
-                    tx, AttrSource(AttrSource(self.source, "__class__"), name)
-                )(inspect.getattr_static(self.python_type(), name))
+            source = self.source and AttrSource(
+                AttrSource(self.source, "__class__"), name
+            )
+            if source:
+                value = inspect.getattr_static(self.python_type(), name)
             else:
-                func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
+                value = getattr(torch.Tensor, name)
+            func_var = build_variable(tx, value, source)
             return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
         else:
             return super().call_method(tx, name, args, kwargs)

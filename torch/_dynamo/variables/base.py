@@ -12,7 +12,7 @@ from ..utils import is_function_or_wrapper, istype
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
 
 
 class MutableLocalSource(Enum):
@@ -245,17 +245,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
 
-        from .builder import SourcelessBuilder, VariableBuilder
         from .misc import GetAttrVariable
 
         source = self.source and AttrSource(self.source, name)
         try:
             value = self.const_getattr(tx, name)
             if not is_function_or_wrapper(value):
-                if source:
-                    return VariableBuilder(tx, source)(value=value)
-                else:
-                    return SourcelessBuilder.create(tx=tx, value=value)
+                return build_variable(tx, value, source)
         except (NotImplementedError, Unsupported):
             pass
         return GetAttrVariable(self, name, source=source)
@@ -394,3 +390,18 @@ def typestr(*objs):
             return type(obj).__name__
     else:
         return " ".join(map(typestr, objs))
+
+
+def build_variable(
+    tx: "InstructionTranslatorBase",
+    value: Any,
+    source: Optional[Source] = None,
+    attr: Optional[str] = None,
+) -> Any:
+    from . import builder
+
+    if source is None:
+        return builder.SourcelessBuilder.create(tx, value)
+    if attr:
+        source = AttrSource(source, attr)
+    return builder.VariableBuilder(tx, source)(value)

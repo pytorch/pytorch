@@ -37,7 +37,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import VariableTracker
+from .base import build_variable, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     NullContextVariable,
@@ -370,7 +370,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             TensorVariable,
             UserDefinedObjectVariable,
         )
-        from .builder import SourcelessBuilder, wrap_fx_proxy, wrap_fx_proxy_cls
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         @register(*tracing_state_functions)
         def handle_tracing_state_functions(
@@ -395,14 +395,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
             # some variable types to track and compare tensor getset descriptors
-            return SourcelessBuilder.create(
-                tx, torch.overrides.get_default_nowrap_functions()
-            )
+            return build_variable(tx, torch.overrides.get_default_nowrap_functions())
 
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx: "InstructionTranslator", *args, **kwargs):
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfills.accumulate_grad), args, kwargs
+                build_variable(tx, polyfills.accumulate_grad), args, kwargs
             )
 
         @register(math.radians)
@@ -410,7 +408,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfills.radians), args, kwargs
+                    build_variable(tx, polyfills.radians), args, kwargs
                 )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
@@ -587,7 +585,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfills.foreach_lerp_inplace),
+                    build_variable(tx, polyfills.foreach_lerp_inplace),
                     args,
                     kwargs,
                 )
@@ -600,7 +598,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfills.foreach_pow_scalar),
+                    build_variable(tx, polyfills.foreach_pow_scalar),
                     args,
                     kwargs,
                 )
@@ -669,7 +667,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
                 # guard propagation via options is the best we can do.
-                return SourcelessBuilder.create(tx, invocation_result)
+                return build_variable(tx, invocation_result)
 
             @register(DTensor.from_local)
             def handle_from_local(self, tx: "InstructionTranslator", *args, **kwargs):
@@ -1096,8 +1094,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
     @staticmethod
     def _nn_param_via_prefix_insert(tx: "InstructionTranslator", data, requires_grad):
         # Alternate version if we have a .source
-        from .builder import VariableBuilder
-
         varname = tx.output.new_var()
 
         # construct the nn.Parmeter before the graph save it to varname
@@ -1120,7 +1116,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         example_value = torch.nn.Parameter(
             tx.output.example_value_from_input_node(data.as_proxy().node)
         )
-        result = VariableBuilder(tx, source)(example_value)
+        result = build_variable(tx, example_value, source)
         # No need to guard on this since we already guarded on `data`.
         # These guards would fail since varname doesn't exist until after the function starts
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(

@@ -5,11 +5,13 @@ from typing import TYPE_CHECKING
 
 from ..bytecode_transformation import create_call_function
 from ..exc import Unsupported
-from .base import VariableTracker
+from .base import build_variable, VariableTracker
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+PARAM_NAMES = "query key value attn_mask dropout is_causal enable_gqa".split()
 
 
 class SDPAParamsVariable(VariableTracker):
@@ -20,35 +22,10 @@ class SDPAParamsVariable(VariableTracker):
     def create(tx: "InstructionTranslator", value, source):
         from torch.backends.cuda import SDPAParams
 
-        from ..source import AttrSource
-        from .builder import VariableBuilder
         from .torch import TorchInGraphFunctionVariable
 
-        query_var = VariableBuilder(tx, AttrSource(source, "query"))(value.query)
-        key_var = VariableBuilder(tx, AttrSource(source, "key"))(value.key)
-        value_var = VariableBuilder(tx, AttrSource(source, "value"))(value.value)
-        attn_mask_var = VariableBuilder(tx, AttrSource(source, "attn_mask"))(
-            value.attn_mask
-        )
-        dropout_var = VariableBuilder(tx, AttrSource(source, "dropout"))(value.dropout)
-        is_causal_var = VariableBuilder(tx, AttrSource(source, "is_causal"))(
-            value.is_causal
-        )
-        enable_gqa_var = VariableBuilder(tx, AttrSource(source, "enable_gqa"))(
-            value.enable_gqa
-        )
-        param_vars = [
-            query_var,
-            key_var,
-            value_var,
-            attn_mask_var,
-            dropout_var,
-            is_causal_var,
-            enable_gqa_var,
-        ]
-        return TorchInGraphFunctionVariable(SDPAParams).call_function(
-            tx, param_vars, {}
-        )
+        params = [build_variable(tx, getattr(value, p), source, p) for p in PARAM_NAMES]
+        return TorchInGraphFunctionVariable(SDPAParams).call_function(tx, params, {})
 
     def __init__(self, proxy, param_vars, **kwargs) -> None:
         self.proxy = proxy

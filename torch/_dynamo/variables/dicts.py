@@ -16,7 +16,7 @@ from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
-from .base import MutableLocal, VariableTracker
+from .base import build_variable, MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -955,12 +955,9 @@ class HFPretrainedConfigVariable(VariableTracker):
         assert self.is_matching_cls(type(obj))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from .builder import VariableBuilder
-
         try:
             attr_value = getattr(self.obj, name)
-            attr_source = AttrSource(self.source, name)
-            return VariableBuilder(tx, attr_source)(attr_value)
+            return build_variable(tx, attr_value, self.source, name)
 
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
@@ -1024,15 +1021,10 @@ class PythonSysModulesVariable(VariableTracker):
         key: VariableTracker,
         default: Optional[VariableTracker] = None,
     ):
-        from .builder import VariableBuilder
-
         k, has_key = self._contains_helper(tx, key)
 
         if has_key:
-            return VariableBuilder(
-                tx,
-                GetItemSource(self.source, k),
-            )(sys.modules[k])
+            return build_variable(tx, sys.modules[k], GetItemSource(self.source, k))
 
         if default is not None:
             return default
@@ -1040,10 +1032,5 @@ class PythonSysModulesVariable(VariableTracker):
         return ConstantVariable.create(value=None)
 
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
-        from .builder import VariableBuilder
-
         k, has_key = self._contains_helper(tx, key)
-        return VariableBuilder(
-            tx,
-            GetItemSource(self.source, k),
-        )(sys.modules[k])
+        return build_variable(tx, sys.modules[k], GetItemSource(self.source, k))

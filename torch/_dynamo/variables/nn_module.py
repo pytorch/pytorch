@@ -40,7 +40,7 @@ from ..utils import (
     proxy_args_kwargs,
     set_example_value,
 )
-from .base import MutableLocal, typestr, VariableTracker
+from .base import build_variable, MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
 from .lists import SliceVariable
@@ -241,12 +241,7 @@ class NNModuleVariable(VariableTracker):
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        from .builder import VariableBuilder
-
-        if self.source:
-            source = AttrSource(self.source, name)
-        else:
-            source = None
+        source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
         base_dict = object.__getattribute__(base, "__dict__")
@@ -294,7 +289,7 @@ class NNModuleVariable(VariableTracker):
             return variables.UserDefinedClassVariable(base.__class__, source=source)
 
         if object_member:
-            out = VariableBuilder(tx, NNModuleSource(source))(subobj)
+            out = build_variable(tx, subobj, NNModuleSource(source))
 
             if isinstance(out, (NNModuleVariable, UnspecializedNNModuleVariable)):
                 # nn_module_stack source is BC surface area. Ensure that
@@ -330,7 +325,7 @@ class NNModuleVariable(VariableTracker):
                 return variables.UserMethodVariable(subobj, self, source=source)
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
-                return VariableBuilder(tx, NNModuleSource(source))(subobj)
+                return build_variable(tx, subobj, NNModuleSource(source))
             else:
                 unimplemented(
                     f"class property {name} - {typestr(base)} {typestr(subobj)}"
@@ -1080,7 +1075,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         )
                     return variables.ConstDictVariable({})
 
-        # For non-empty hook dicts, one way is to just fallback to VariableBuilder and create a ConstDictVariable.
+        # For non-empty hook dicts, one way is to just fallback to build_variable() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
         # differnt nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
         # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a
