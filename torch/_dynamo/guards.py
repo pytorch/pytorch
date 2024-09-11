@@ -98,6 +98,7 @@ from .source import (
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
     SubclassAttrListSource,
+    TorchFunctionModeStackSource,
     TupleIteratorGetItemSource,
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
@@ -111,6 +112,7 @@ from .utils import (
     dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
+    get_torch_function_mode_stack_at,
     guard_failures,
     istype,
     key_is_id,
@@ -314,6 +316,7 @@ CLOSURE_VARS = {
     "___dict_contains": lambda a, b: a in b,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
+    "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
     "__math_isnan": math.isnan,
     "__numpy_isnan": None if np is None else np.isnan,
     "inf": float("inf"),
@@ -901,6 +904,15 @@ class GuardBuilder(GuardBuilderBase):
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager
+        elif istype(source, TorchFunctionModeStackSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: get_torch_function_mode_stack_at(
+                    source._get_index()
+                ),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.grad_manager(
@@ -2214,6 +2226,8 @@ class CheckFunctionManager:
         self.output_graph = output_graph
         w_builder = None
 
+        # NB: Until we trace device contexts, we need to use the stack recorded at the beginning of tracing
+        # in case a set default device call was made in the graph.
         self.torch_function_mode_stack = (
             output_graph.torch_function_mode_stack if output_graph else None
         )
@@ -2649,12 +2663,14 @@ def make_torch_function_mode_stack_guard(intial_stack):
 
     def check_torch_function_mode_stack():
         cur_stack = get_torch_function_mode_stack()
-        if len(cur_stack) != len(types):
+
+        types_ = [ty for ty in types if ty not in IGNORED_MODES]
+        cur_stack_ = [mode for mode in cur_stack if type(mode) not in IGNORED_MODES]
+
+        if len(cur_stack_) != len(types_):
             return False
 
-        for ty, mode in zip(types, cur_stack):
-            if ty in IGNORED_MODES:
-                continue
+        for ty, mode in zip(types_, cur_stack_):
             if ty != type(mode):
                 return False
 
