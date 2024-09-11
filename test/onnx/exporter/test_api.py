@@ -196,6 +196,15 @@ class TestExportAPIDynamo(common_utils.TestCase):
             TestRefineDynamicShapeModel(), inps, dynamic_shapes=dynamic_shapes
         )
 
+    def test_zero_output_aten_node(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten._assert_async.msg(torch.tensor(True), "assertion failed")
+                return x + x
+
+        input = torch.randn(2)
+        self.assert_export(Model(), (input))
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
