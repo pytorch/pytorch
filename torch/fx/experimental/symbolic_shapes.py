@@ -4584,7 +4584,14 @@ class ShapeEnv:
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
         """Apply symbol replacements to any symbols in the given expression
         """
-        replacements = {s: self._find(cast(sympy.Symbol, s)) for s in expr.free_symbols}
+        replacements = {}
+        for s in expr.free_symbols:
+            r = self._find(cast(sympy.Symbol, s))
+            # Micro-optimization: only do replacements if r and s are different
+            # Otherwise, xreplace is not a no-op and will trigger expensive
+            # assumption queries if expr has a relational node.
+            if not r.is_Symbol or r != s:
+                replacements[s] = r
         return safe_expand(expr.xreplace(replacements))
 
     @_lru_cache
