@@ -945,7 +945,7 @@ class PolyfilledFunctionVariable(UserFunctionVariable):
         return cls(value, source=source)
 
     def __init__(self, fn: _F, **kwargs) -> None:
-        super().__init__(**kwargs)
+        super(UserFunctionVariable, self).__init__(**kwargs)
         self.fn: _F = fn
 
         handler = self._get_polyfill_handlers().get(fn, fn)
