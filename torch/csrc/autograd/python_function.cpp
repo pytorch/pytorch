@@ -330,7 +330,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->compiled_autograd_symints);
   args.set_default_dyn_type(prior);
 
-  args.collect(f->saved_variables);
+  args.collect(f->saved_variables, true); // always unpacked as output in eager
   args.collect(f->materialize_grads);
   args.collect(f->is_variable_input);
   args.collect(f->needs_input_grad);
@@ -413,8 +413,7 @@ PyObject* PyNode::to_py_args(
     throw_python_error();
   auto& output_info = py_fn->output_info;
   for (const auto i : c10::irange(num_inputs)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject* input;
+    PyObject* input = nullptr;
     if (inputs[i].defined() || !py_fn->materialize_grads ||
         (input_metadata(i).was_default_constructed() &&
          !py_fn->materialize_non_diff_grads)) {
@@ -1181,6 +1180,26 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto num_inputs = cdata->num_inputs();
+  THPObjectPtr list(PyTuple_New(num_inputs));
+  if (!list) {
+    return nullptr;
+  }
+  for (size_t i = 0; i < num_inputs; ++i) {
+    const auto& metadata = cdata->input_metadata(i);
+    THPObjectPtr item(py::cast(metadata).release().ptr());
+    if (!item) {
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(list.get(), i, item.release());
+  }
+  return list.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -1628,8 +1647,8 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
-typedef PyObject* (*getter)(PyObject*, void*);
-typedef int (*setter)(PyObject*, PyObject*, void*);
+using getter = PyObject* (*)(PyObject*, void*);
+using setter = int (*)(PyObject*, PyObject*, void*);
 
 namespace {
 
@@ -1723,6 +1742,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
     {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
+    {"_input_metadata",
+     (getter)THPFunction_input_metadata,
+     nullptr,
+     nullptr,
+     nullptr},
     {"materialize_grads",
      nullptr,
      (setter)THPFunction_set_materialize_grads,

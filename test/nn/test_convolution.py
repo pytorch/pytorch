@@ -6,12 +6,10 @@ import warnings
 from itertools import product
 
 import torch
-
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     TEST_CUDA,
@@ -62,6 +60,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 
+
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
 
@@ -88,7 +87,8 @@ class TestConvolutionNN(NNTestCase):
         path = download_file("https://download.pytorch.org/test_data/legacy_conv2d.pt")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SourceChangeWarning)
-            m = torch.load(path, encoding="utf-8")
+            # weights_only=False as this is legacy code that saves the model
+            m = torch.load(path, encoding="utf-8", weights_only=False)
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 

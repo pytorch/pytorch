@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 import dataclasses
-
 import functools
-import logging
-
-from typing import Any, Optional
+from typing import Any, TYPE_CHECKING
 
 import onnxscript  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
@@ -17,6 +14,10 @@ from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter
 from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
+
+
+if TYPE_CHECKING:
+    import logging
 
 # NOTE: The following limits are for the number of items to display in diagnostics for
 # a list, tuple or dict. The limit is picked such that common useful scenarios such as
@@ -194,7 +195,7 @@ def _onnxscript_traced_onnx_function(obj: onnxscript.TracedOnnxFunction) -> str:
 
 
 # from torch/fx/graph.py to follow torch format
-def _stringify_shape(shape: Optional[torch.Size]) -> str:
+def _stringify_shape(shape: torch.Size | None) -> str:
     if shape is None:
         return ""
     return f"[{', '.join(str(x) for x in shape)}]"
@@ -248,7 +249,7 @@ diagnose_call = functools.partial(
 
 @dataclasses.dataclass
 class UnsupportedFxNodeDiagnostic(Diagnostic):
-    unsupported_fx_node: Optional[torch.fx.Node] = None
+    unsupported_fx_node: torch.fx.Node | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()

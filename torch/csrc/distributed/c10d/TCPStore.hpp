@@ -45,30 +45,6 @@ struct SocketAddress {
   std::uint16_t port{};
 };
 
-class Counter {
- public:
-  void update(double val);
-  std::unordered_map<std::string, double> observe() const;
-
-  double mean() const noexcept {
-    return mean_;
-  }
-  int64_t count() const noexcept {
-    return count_;
-  }
-  double variance() const noexcept {
-    return m2_ / static_cast<double>(count_);
-  }
-  double sample_variance() const noexcept {
-    return m2_ / static_cast<double>(count_ - 1);
-  }
-
- private:
-  int64_t count_ = 0;
-  double mean_ = 0;
-  double m2_ = 0;
-};
-
 } // namespace detail
 
 struct TCPStoreOptions {
@@ -157,15 +133,14 @@ class TORCH_API TCPStore : public Store {
     return addr_.port;
   }
 
-  std::unordered_map<std::string, std::unordered_map<std::string, double>>
-  collectClientCounters() const noexcept;
-
   bool isLibUvBackend() const noexcept {
     return usingLibUv_;
   }
 
   // note(xilunwu): this function is only for internal testing
   void _splitSet(const std::string& key, const std::vector<uint8_t>& data);
+
+  std::string repr() const;
 
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
@@ -187,7 +162,6 @@ class TORCH_API TCPStore : public Store {
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
-  std::unordered_map<std::string, detail::Counter> clientCounters_;
   bool usingLibUv_ = true;
 };
 

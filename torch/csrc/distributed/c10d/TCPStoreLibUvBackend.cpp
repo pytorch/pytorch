@@ -235,7 +235,9 @@ class UvTcpServer : public UvTcpSocket {
       TORCH_CHECK(
           uv_res == 0,
           "UV Store addr parsing failure. ",
-          "useIpv6: ",
+          "port: ",
+          port,
+          ", useIpv6: ",
           useIpv6,
           ", code: ",
           uv_res,
@@ -249,7 +251,9 @@ class UvTcpServer : public UvTcpSocket {
       TORCH_CHECK(
           uv_res == 0,
           "The server socket has failed to bind. ",
-          "useIpv6: ",
+          "port: ",
+          port,
+          ", useIpv6: ",
           useIpv6,
           ", code: ",
           uv_res,
@@ -263,7 +267,9 @@ class UvTcpServer : public UvTcpSocket {
       TORCH_CHECK(
           uv_res == 0,
           "The server socket has failed to listen on any local network address. ",
-          "useIpv6: ",
+          "port: ",
+          port,
+          ", useIpv6: ",
           useIpv6,
           ", code: ",
           uv_res,
