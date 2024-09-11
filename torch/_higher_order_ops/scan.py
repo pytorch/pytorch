@@ -225,11 +225,11 @@ def generic_scan(operator, init, xs, dim=0, reverse=False):
             *[
                 [
                     torch.zeros(
-                        list(e.size())[:dim] + [num_elems] + list(e.size())[dim:],
+                        [num_elems] + list(e.size()),
                         dtype=e.dtype,
                         device=e.device,
                     ),
-                    torch.ones_like(e, dtype=torch.int64).unsqueeze(dim),
+                    torch.ones_like(e, dtype=torch.int64).unsqueeze(0),
                 ]
                 for i, e in enumerate(dummy_out)
             ]
@@ -238,10 +238,11 @@ def generic_scan(operator, init, xs, dim=0, reverse=False):
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
             for o, x, idx in zip(outs, out, idxs):
-                # o: (M, N, num_elems, ...)
-                # x: (M, N, ...) -> (M, N, 1, ...)
-                # ind * idx: (M, N, 1, ...) with values to be ind
-                o.scatter_(dim, ind * idx, x.unsqueeze(dim))
+                # o: (num_elems, M, N ...)
+                # x: (M, N, ...) -> (M, N)
+                # ind * idx: (1, M, N,) with values to be ind
+                # o[idx[m][n][k]][n][k] = x[m][n][k]
+                o.scatter_(0, ind * idx, x.unsqueeze(0))
 
         for i in range(num_elems):
             ind = i if not reverse else num_elems - i - 1
@@ -266,14 +267,15 @@ def first_slice_copy(t: torch.Tensor, dim: int) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
 
 
-def make_expanded_output_shape(dim, scan_length, shapes, use_sh=False):
-    expanded_shapes = [
-        tuple(
-            (s if use_sh else -1) if i != dim else scan_length for i, s in enumerate(sh)
-        )
-        for sh in shapes
-    ]
-    return expanded_shapes
+# We also do a clone with contiguous_format. This is to be consistent with
+# eager semantic of scan, which stacks the outputs. The result is contiguous
+# as a result of the stack operation.
+def stack_y(y: torch.Tensor, scan_length: int) -> torch.Tensor:
+    return (
+        y.unsqueeze(0)
+        .repeat(*([scan_length] + [1] * y.ndim))
+        .clone(memory_format=torch.contiguous_format)
+    )
 
 
 def trace_scan(
@@ -327,20 +329,13 @@ def trace_scan(
 
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[dim]
-        fake_out_shapes = make_expanded_output_shape(
-            dim, scan_length, [o.meta["val"].size() for o in output]
+        fake_carry, fake_outputs = _extract_carry_and_out(
+            [o.meta["val"] for o in outputs], len(init)
         )
-
-        def expand_tensor(t, sh):
-            if isinstance(t, torch.Tensor):
-                return t.expand(*sh)
-            return t
-
-        expanded_outs = [
-            pytree.tree_map(expand_tensor, t.meta["val"], sh)
-            for t, sh in zip(output, fake_out_shapes)
-        ]
-        out = [*init, *expanded_outs]
+        out = (
+            *fake_carry,
+            *tuple(stack_y(t, scan_length) for t in fake_outputs),
+        )
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -375,12 +370,7 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, dim, reverse):
         )
         out = (
             *carry,
-            *tuple(
-                t.unsqueeze(dim)
-                .repeat(*([1] * dim + [scan_length] + [1] * (t.ndim - dim)))
-                .clone()
-                for t in outputs
-            ),
+            *tuple(stack_y(t, scan_length) for t in outputs),
         )
         return out
 
@@ -449,7 +439,7 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         result_flat.append(y)
 
     results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+        torch.stack([e[leave_ind] for e in op(result_flat)])
         for leave_ind in range(num_leaves)
     ]
     return (
