@@ -1035,7 +1035,7 @@ def forward(self, x_1, output_1):
         @register_lowering(torch.ops.mylib.weird_op_with_lowering)
         def _(x):
             return empty_strided(
-                x.shape, (2, 1), dtype=x.dtype, device=torch.device("cuda:0")
+                x.shape, (2, 1), dtype=x.dtype, device=torch.device(GPU_TYPE, 0)
             )
 
         # Triton kernel that has different behavior depending on the input strides.
@@ -1068,7 +1068,7 @@ def forward(self, x_1, output_1):
             arange_out(x, y)
             return x + y
 
-        x = torch.randn(2, 2, device="cuda")
+        x = torch.randn(2, 2, device=GPU_TYPE)
         eager_out = f(x)
 
         compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
