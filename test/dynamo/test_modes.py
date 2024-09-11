@@ -445,6 +445,25 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_torch_function_mode_restore_on_exc(self):
+        @torch._dynamo.disable()
+        def err():
+            raise RuntimeError("test")
+
+        @torch.compile()
+        def fn(x):
+            with TestMode():
+                x += 1
+                err()
+                x += 2
+                return x
+
+        try:
+            fn(torch.ones(2, 2))
+        except RuntimeError:
+            pass
+        self.assertEqual(_len_torch_function_stack(), 0)
+
     def test_torch_function_mode_and_pop_graph_break_mutation(self):
         def fn(x, y):
             with TestMode():
