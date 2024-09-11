@@ -624,19 +624,23 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     return None
 
 
+def get_mutated_tensors(kernel_idx, constant_args_idx, kwargs):
+    kernel = kernel_side_table.get_kernel(kernel_idx)
+    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
+    return identify_mutated_tensors(kernel, {**kwargs, **constant_args})
+
+
 @triton_kernel_wrapper_mutation.py_functionalize_impl
 def triton_kernel_wrapper_mutation_functionalize(
     ctx, kernel_idx, constant_args_idx, grid, kwargs
 ):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-    kernel = kernel_side_table.get_kernel(kernel_idx)
-    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
-    tensors_to_clone = identify_mutated_tensors(
-        kernel, {**unwrapped_kwargs, **constant_args}
+    tensors_to_clone = get_mutated_tensors(
+        kernel_idx, constant_args_idx, unwrapped_kwargs
     )
     with ctx.redispatch_to_next():
         unwrapped_outputs = triton_kernel_wrapper_functional(

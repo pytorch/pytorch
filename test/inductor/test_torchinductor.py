@@ -10627,6 +10627,7 @@ class CommonTemplate:
 
             lib.define(
                 "bar(Tensor x, bool is_compiling) -> Tensor",
+                tags=torch.Tag.flexible_layout,
             )
 
             bar_strides = []
