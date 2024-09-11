@@ -109,6 +109,21 @@ class DeviceOpOverrides:
     def device_guard(self, device_idx):
         raise NotImplementedError
 
+    def cpp_device_guard(self):
+        raise NotImplementedError
+
+    def cpp_aoti_device_guard(self):
+        raise NotImplementedError
+
+    def cpp_stream_guard(self):
+        raise NotImplementedError
+
+    def cpp_aoti_stream_guard(self):
+        raise NotImplementedError
+
+    def cpp_getStreamFromExternal(self):
+        raise NotImplementedError
+
 
 device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 
@@ -222,7 +237,11 @@ def init_backend_registration():
         )
 
     if get_scheduling_for_device("xpu") is None:
-        register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
+        register_backend_for_device(
+            "xpu",
+            TritonScheduling,
+            WrapperCodeGen,
+        )
 
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
@@ -344,6 +363,8 @@ def deduce_output_dtype_by_name(
     ):
         buf_name = args[1]
         return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+    elif op_name == "to_dtype_bitcast":
+        return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
 
 
@@ -437,7 +458,7 @@ class DataTypePropagation:
 
     @classmethod
     def propagate_scheduler_node(cls, node):
-        from ..ir import LoopBody
+        from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
         assert isinstance(node, SchedulerNode)
