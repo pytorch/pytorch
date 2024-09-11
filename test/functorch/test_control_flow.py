@@ -1339,7 +1339,7 @@ def forward(self, pred_1, x_1):
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_scan_compile2(self, reverse, compile_mode, device, autograd):
+    def test_scan_compile(self, reverse, compile_mode, device, autograd):
         def add2(x: torch.Tensor, y: torch.Tensor):
             return x * y, x + y
 
@@ -1460,7 +1460,8 @@ def forward(self, pred_1, x_1):
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize(
         "dtype",
@@ -1569,12 +1570,17 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    # @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_dim(self, reverse, device):
+    def test_scan_dim(self, reverse, compile_mode, device):
         import random
+
+        scan_fct = compile_mode_helper(scan, compile_mode)
 
         num_dims = [random.randint(2, 5) for _ in range(10)]
         for num_dim in num_dims:
+            torch.compiler.reset()
             shapes = [random.randint(1, 10) for _ in range(num_dim)]
             rnd_scan_dim = random.randint(0, num_dim - 1)
             x = torch.randn(*shapes, device=device)
@@ -1592,7 +1598,7 @@ def forward(self, pred_1, x_1):
                     torch.ones(*init_shapes, device=device),
                 ),
             ]:
-                result = scan(op, init, x, dim=rnd_scan_dim, reverse=reverse)
+                result = scan_fct(op, init, x, dim=rnd_scan_dim, reverse=reverse)
                 result_exp = _fake_scan(
                     op, init=init, xs=x, dim=rnd_scan_dim, reverse=reverse
                 )
@@ -2023,7 +2029,9 @@ def forward(self, pred_1, x_1):
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["compile"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_downstream_scan_matmul(self, compile_mode, reverse, device):
@@ -2057,7 +2065,8 @@ def forward(self, pred_1, x_1):
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_downstream_scan_scan(self, compile_mode, reverse, device):
@@ -2102,7 +2111,8 @@ def forward(self, pred_1, x_1):
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_downstream_scan_scan_dim(self, compile_mode, reverse, device):
@@ -2352,7 +2362,8 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_scanned_0(self, reverse, compile_mode, device):
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -2380,7 +2391,8 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_non_tensor(self, reverse, compile_mode, device):
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -2401,7 +2413,8 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_wrong_shape(self, reverse, compile_mode, device):
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -2429,7 +2442,8 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_wrong_pytree(self, reverse, compile_mode, device):
         def add_one_carry(x: torch.Tensor, y: torch.Tensor):
@@ -2458,7 +2472,8 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init(self, reverse, compile_mode, device):
         scan_fct = compile_mode_helper(scan, compile_mode)
