@@ -920,6 +920,15 @@ def _compile(
             # NB: e's msg is mutated here to add user stack, but we DON'T want
             # that stack in the Scuba logged fail_reason
             exception_handler(e, code, frame, export=export)
+            # NB: this is the post-mutation exception
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "dynamo_error",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: traceback.format_exc(),
+            )
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
