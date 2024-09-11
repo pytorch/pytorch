@@ -249,5 +249,6 @@ def construct_stacked_leaf(
         )
     result = torch.stack(tensors)
     if all_requires_grad:
-        result = result.detach().requires_grad_()
+        # result = result.detach().requires_grad_()
+        result = result.requires_grad_()
     return result

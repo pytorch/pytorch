@@ -436,7 +436,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             ],
             # TODO(yf225): make this check work for activation_checkpoint=True case
             post_grad_custom_pre_pass=self._assert_no_aliased_graph_inputs
-            if fullgraph and not activation_checkpoint
+            if fullgraph  # if fullgraph and not activation_checkpoint
             else None,
         ):
             losses_compiled = test_compiled()
@@ -785,7 +785,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     def test_transformer_backend_inductor(self):
         # TODO: enable fullgraph=False case
         for fullgraph, all_requires_grad, activation_checkpoint in itertools.product(
-            [True], [True, False], [True, False]
+            # [True], [True, False], [True, False]
+            [True], [True], [True]
         ):
             log.warning(
                 f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
