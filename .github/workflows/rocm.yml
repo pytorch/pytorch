@@ -3,7 +3,7 @@ name: rocm
 on:
   push:
     branches:
-     - main
+      - main
       - release/*
     tags:
       - ciflow/rocm/*
