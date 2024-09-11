@@ -607,9 +607,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
                 return batch * 5
 
         compiled_func = torch.compile(func)
-        compiled_func(
-            torch.ones((100,), device="cuda"), self.process_group, self.rank
-        )
+        compiled_func(torch.ones((100,), device="cuda"), self.process_group, self.rank)
         dist.barrier()
 
 

@@ -1712,9 +1712,7 @@ class DistributedDataParallelTest(
 
         m = ConvNet(layer_devs, layer_formats, layer_dtypes)
         if self.rank == 0:
-            DistributedDataParallel(
-                m, device_ids=[dev0], process_group=process_group
-            )
+            DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
         else:
             with self.assertRaisesRegex(
                 RuntimeError,
