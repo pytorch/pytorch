@@ -6729,7 +6729,7 @@ class SequentialScan(ExternKernel):
         reverse: bool,
         additional_inputs: List[TensorBox],
     ):
-        from torch._higher_order_ops.scan import _extract_carry_and_out
+        from torch._higher_order_ops.scan import _extract_carry_and_out, expand_tensor
 
         num_init_leaves = len(init)
         init = [cls.realize_input(x) for x in init]
@@ -6745,7 +6745,7 @@ class SequentialScan(ExternKernel):
         _, fx_init, fx_xs, _, _, fx_additional_inputs = extract_scan_args(
             *V.graph.current_node.args
         )
-        fx_all_inputs = fx_init + fx_xs + fx_additional_inputs
+        fx_all_inputs = fx_init + fx_xs + tuple(fx_additional_inputs) if type(fx_init) == tuple else fx_additional_inputs
 
         if combine_subgraph.graph is None:
             # create and lower subgraphs
@@ -6757,14 +6757,14 @@ class SequentialScan(ExternKernel):
             with V.set_graph_handler(combine_subgraph.graph):
                 fake_sliced_inputs = (
                     [node.meta["val"] for node in fx_init]
-                    + [torch.select_copy(node.meta["val"], dim, 0) for node in fx_xs]
+                    + [torch.select_copy(node.meta["val"], int(dim), 0) for node in fx_xs]
                     + [node.meta["val"] for node in fx_additional_inputs]
                 )  # type: ignore[union-attr]
                 combine_subgraph.graph.run(*fake_sliced_inputs)
 
         carry, ys = _extract_carry_and_out(combine_subgraph.graph.graph_outputs, num_init_leaves)  # type: ignore[union-attr]
 
-        if _has_aliased_buffers(carry + ys):
+        if _has_aliased_buffers(carry) or _has_aliased_buffers(ys):
             raise AssertionError(
                 "Output aliasing is currently not supported in compiled torch.scan. "
                 f"The outputs of the combine_fn subgraph of torch.scan are aliased: {combine_subgraph.graph.graph_outputs}"
@@ -6809,13 +6809,9 @@ class SequentialScan(ExternKernel):
 
         def stacked_size_stride(y):
             tmp = torch.empty_strided(y.get_size(), y.get_stride())
-            # Semantic-wise, scan will torch.stack the intermediates, so
-            # torch.stack will force the output become contingous, which is also what clone does.
-            expanded_tmp = (
-                tmp.unsqueeze(dim)
-                .repeat(*([1] * dim + [scan_length] + [1] * (tmp.ndim - dim)))
-                .clone()
-            )
+            # # Semantic-wise, scan will torch.stack the intermediates, so
+            # # torch.stack will force the output become contingous, which is also what clone does.
+            expanded_tmp = expand_tensor(tmp, int(dim), scan_length)
             return expanded_tmp.size(), expanded_tmp.stride()
 
         stacked_y_size_stride = [stacked_size_stride(y) for y in ys]

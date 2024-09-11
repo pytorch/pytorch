@@ -1133,6 +1133,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from torch._higher_order_ops.scan import (
             _extract_carry_and_out,
             first_slice_copy,
+            expand_tensor
         )
 
         from .builder import wrap_fx_proxy
@@ -1274,9 +1275,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ]
             example_out = [y.node.meta["example_value"] for y in y_proxies]
             example_stacked_out = [
-                out.unsqueeze(dim_fake)
-                .repeat(*([1] * dim_fake + [scan_length] + [1] * (out.ndim - dim_fake)))
-                .clone(memory_format=torch.contiguous_format)
+                expand_tensor(out, dim_fake, scan_length, memory_format=torch.contiguous_format)
                 for out in example_out
             ]
             out_meta = [*example_carry, *example_stacked_out]
