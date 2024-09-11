@@ -10,6 +10,7 @@ from collections import defaultdict
 from typing import Dict, List, Set, TYPE_CHECKING
 
 import torch
+from torch.multiprocessing.reductions import StorageWeakRef
 
 from . import config, ir
 from .dependencies import WeakDep
@@ -400,7 +401,7 @@ Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass.
                     f"""
 For graph input {graph_input}: resize-to-full node {node_list[resize_to_full_idx]} at index {resize_to_full_idx}
 happens after resize-to-0 node {node_list[resize_to_0_idx]} at index {resize_to_0_idx}.
-Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass.
+Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for that unsharded param.
 """  # noqa: G004
                 )
                 return False
@@ -428,17 +429,39 @@ Offending node: {unsharded_param}. Graph: {graph}
             or node.target == torch.ops.inductor.resize_storage_bytes_.default
         )
 
+    def is_node_mutating_unsharded_param_or_its_alias(node, unsharded_params):
+        # Check whether the node is mutating any of the unsharded params or their aliases.
+        mutated_arg_idxes = (
+            [
+                i
+                for i, x in enumerate(node.target._schema.arguments)
+                if x.alias_info is not None and x.alias_info.is_write
+            ]
+            if isinstance(node.target, torch._ops.OpOverload)
+            else []
+        )
+        mutated_node_arg_storages = {
+            StorageWeakRef(node.args[i].meta["val"].untyped_storage())
+            for i in mutated_arg_idxes
+        }
+        storages_of_unsharded_params = {
+            StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
+            for unsharded_param in unsharded_params
+        }
+        return len(mutated_node_arg_storages & storages_of_unsharded_params) > 0
+
     for node in node_list:
         if (
             node.op == "call_function"
             and isinstance(node.target, torch._ops.OpOverload)
             and node.target._schema.is_mutable
             and not is_allowed_mutation(node)
-            and any(arg in unsharded_param_to_fsdp_copy_node_idxes for arg in node.args)
         ):
-            raise RuntimeError(
-                "User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is used"
-            )
+            assert not is_node_mutating_unsharded_param_or_its_alias(
+                node, unsharded_param_to_fsdp_copy_node_idxes.keys()
+            ), f"""\
+User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is used. Violating node: {node}
+"""
 
     # For each `fsdp.copy_(unsharded_param, Y)`, replace downstream usage of `unsharded_param` with `Y`.
     #
@@ -463,16 +486,24 @@ Offending node: {unsharded_param}. Graph: {graph}
             assert fsdp_copy_node.args[0] is unsharded_param
             _, replacement = fsdp_copy_node.args
             replacement_nodes.add(replacement)
-            # subgraph_start_idx is inclusive
-            subgraph_start_idx = fsdp_copy_node_idx
+            # subgraph_start_idx is exclusive
+            subgraph_start_idx = fsdp_copy_node_idx + 1
             # subgraph_end_idx is exclusive (also intentionally don't replace args in return op)
             subgraph_end_idx = (
                 fsdp_copy_node_idxes[i + 1]
                 if i < len(fsdp_copy_node_idxes) - 1
                 else len(node_list) - 1
             )
-            subgraph = node_list[subgraph_start_idx:subgraph_end_idx]
-            for node in subgraph:
+            subgraph_nodes = node_list[subgraph_start_idx:subgraph_end_idx]
+            assert unsharded_param is not None
+            assert not any(
+                is_node_mutating_unsharded_param_or_its_alias(node, [unsharded_param])
+                for node in subgraph_nodes
+            ), f"""\
+Assumed no ops mutating unsharded param {unsharded_param} in subgraph {subgraph_nodes}, but it's not true!
+Graph: {graph}
+"""
+            for node in subgraph_nodes:
                 if (
                     node.op == "call_function" and unsharded_param in node.args
                 ):  # TODO(yf225): implement replacement in kwargs
