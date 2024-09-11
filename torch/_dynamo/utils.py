@@ -63,7 +63,6 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._C import (
-    _get_function_stack_at,
     _instruction_counter,
     _len_torch_function_stack,
     _pop_torch_function_stack,
@@ -1608,8 +1607,12 @@ def same(
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
         fp64_ref = ref
-    if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
-        assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
+    if isinstance(
+        ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
+    ):
+        assert isinstance(
+            res, (list, tuple, collections.deque)
+        ), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -3061,7 +3064,9 @@ def is_parameter_freezing():
 def get_torch_function_mode_stack(filter_ignored=True):
     from .variables.torch_function import IGNORED_MODES
 
-    stack = [_get_function_stack_at(i) for i in range(_len_torch_function_stack())]
+    stack = [
+        get_torch_function_mode_stack_at(i) for i in range(_len_torch_function_stack())
+    ]
     if filter_ignored:
         stack = [mode for mode in stack if type(mode) not in IGNORED_MODES]
 
@@ -3079,6 +3084,11 @@ def set_torch_function_mode_stack(stack):
 
     for mode in stack:
         _push_on_torch_function_stack(mode)
+
+
+def clear_torch_function_mode_stack():
+    for i in range(_len_torch_function_stack()):
+        _pop_torch_function_stack()
 
 
 def verify_guard_fn_signature(value):
