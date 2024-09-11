@@ -13,7 +13,7 @@ in this file and seeing what breaks.
 """
 
 from enum import auto, Enum
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 
 import sympy
 
@@ -76,9 +76,18 @@ prefix_str = {
 }
 
 
+# A custom class to keep SymT prefix as an attribute.
+# The name also keeps the string form of the prefix as an attribute.
 class PrefixedSymbol(sympy.Symbol):
     def __new__(
-        cls, name, prefix, *, integer=None, nonnegative=None, positive=None, real=None
+        cls,
+        name: str,
+        prefix: SymT,
+        *,
+        integer: Optional[bool] = None,
+        nonnegative: Optional[bool] = None,
+        positive: Optional[bool] = None,
+        real: Optional[bool] = None,
     ):
         obj = sympy.Symbol.__new__(
             cls,
@@ -122,7 +131,12 @@ class PrefixedSymbol(sympy.Symbol):
 
 
 def make_symbol(
-    prefix: SymT, idx: int, integer=None, nonnegative=None, positive=None, real=None
+    prefix: SymT,
+    idx: int,
+    integer: Optional[bool] = None,
+    nonnegative: Optional[bool] = None,
+    positive: Optional[bool] = None,
+    real: Optional[bool] = None,
 ) -> sympy.Symbol:
     return PrefixedSymbol(
         f"{prefix_str[prefix]}{idx}",
