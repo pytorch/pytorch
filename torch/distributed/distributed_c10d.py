@@ -1769,7 +1769,8 @@ def _new_process_group_helper(
             pg_options.global_ranks_in_group = global_ranks_in_group
             pg_options.group_name = group_name
             backend_class = ProcessGroupNCCL(
-                backend_prefix_store, group_rank, group_size, pg_options
+                backend_prefix_store, group_rank, group_size, pg_options,
+                global_store=store,
             )
             backend_type = ProcessGroup.BackendType.NCCL
         elif backend_str == Backend.UCC and is_ucc_available():
@@ -4452,7 +4453,8 @@ def split_group(
     pg_options.global_ranks_in_group = global_ranks_in_my_group
     pg_options.group_name = group_name
     backend_class = ProcessGroupNCCL(
-        prefix_store, group_rank, len(my_group), pg_options
+        prefix_store, group_rank, len(my_group), pg_options,
+        global_store=store,
     )
     backend_type = ProcessGroup.BackendType.NCCL
     backend_class._set_sequence_number_for_group()

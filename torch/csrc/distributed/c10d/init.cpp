@@ -2670,7 +2670,13 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                   const c10::intrusive_ptr<::c10d::Store>&,
                   int,
                   int,
-                  c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>>(),
+                  c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>,
+                  c10::optional<c10::intrusive_ptr<::c10d::Store>>>(),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::arg("options"),
+              py::arg("global_store") = c10::nullopt,
               py::call_guard<py::gil_scoped_release>())
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -2687,6 +2693,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("rank"),
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
+              py::arg("global_store") = nullptr,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_shutdown",
