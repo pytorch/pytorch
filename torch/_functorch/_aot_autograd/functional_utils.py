@@ -231,8 +231,8 @@ def gen_alias_from_base(
     # and (ii) the concrete returned output does require grad or not.
     def patch_requires_grad(out):
         if aliased_base_tensor.requires_grad and not target_requires_grad:
-            # out = out.detach()
-            out = out
+            out = out.detach()
+            # out = out
         elif not aliased_base_tensor.requires_grad and target_requires_grad:
             out.requires_grad_(True)
         return out

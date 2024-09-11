@@ -67,8 +67,7 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 def coerce_tangent(x):
     if not isinstance(x, Tensor):
         return x
-    # out = x.detach().contiguous()
-    out = x.contiguous()
+    out = x.detach().contiguous()
     # Note [Tangents must be contiguous, Part 2]
     # In the same way that "what strides do we assigns to our tangents" is a question
     # that we can not answer (and therefore have to guess) as we trace the backward ahead-of-time,

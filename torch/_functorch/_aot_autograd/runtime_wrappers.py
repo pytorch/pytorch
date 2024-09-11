@@ -295,9 +295,9 @@ def _create_runtime_wrapper(
         if trace_joint:
             args_ = list(args)
             # See Note [Detaching inputs that never need gradients]
-            # for idx in indices_of_inps_to_detach:
-            #     if isinstance(args_[idx], torch.Tensor):
-            #         args_[idx] = args_[idx].detach()
+            for idx in indices_of_inps_to_detach:
+                if isinstance(args_[idx], torch.Tensor):
+                    args_[idx] = args_[idx].detach()
 
             # It's possible to have trace_joint inside user specified with no_grad() region,
             # if there is a nested with enable_grad(), that forces some outputs to require gradients.
@@ -399,8 +399,8 @@ def _create_runtime_wrapper(
                         # if all of the mutations to the leaf input were non-autograd-tracking mutations
                         # (aka mutations under no_grad(), or on detached views).
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
-                        # original_inpt.detach().copy_(updated_inpt)
-                        original_inpt.copy_(updated_inpt)
+                        original_inpt.detach().copy_(updated_inpt)
+                        # original_inpt.copy_(updated_inpt)
                     else:
                         original_inpt.copy_(updated_inpt)
         else:
@@ -801,8 +801,8 @@ class AOTDedupeWrapper(CompilerWrapper):
                 not fw_metadata.input_info[i].mutates_data
                 and not fw_metadata.input_info[i].mutates_metadata
             ):
-                leaf_flat_args.append(a.requires_grad_(a.requires_grad))
-                # leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
+                # leaf_flat_args.append(a.requires_grad_(a.requires_grad))
+                leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
             else:
                 ok = False
                 break
