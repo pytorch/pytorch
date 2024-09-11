@@ -459,11 +459,13 @@ class AutogradCompilerInstance:
                 for i in range(len(tensors)):
                     nodecall_index, node_name = origins[i]
                     self.set_node_origin(node_name, nodecall_index, None)
-                    bound_proxies.append(proxies[i])
+                    bound_proxies.append(proxies[i])  # type: ignore[index]
+                proxies = bound_proxies
             else:
-                bound_proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
-        assert len(tensors) == len(bound_proxies)
-        track_tensor_tree(tensors, bound_proxies, constant=None, tracer=self.fx_tracer)
+                proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
+
+        assert len(tensors) == len(proxies)
+        track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
     def bind_backward_state(self, index: int):
         assert self.hooks_proxy is not None

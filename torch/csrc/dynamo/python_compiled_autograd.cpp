@@ -397,12 +397,16 @@ PyObject* wrap_node_origins(
     const AutogradCompilerCall& compiler,
     size_t dynamic_sizes) {
   TORCH_INTERNAL_ASSERT(
-      compiler.tensor_args.input_origins.size() ==
-      compiler.tensor_args.inputs.size());
-  TORCH_INTERNAL_ASSERT(compiler.size_input_origins.size() == dynamic_sizes);
+      compiler.tensor_args.input_origins.empty() ||
+      (compiler.tensor_args.input_origins.size() ==
+       compiler.tensor_args.inputs.size()));
   TORCH_INTERNAL_ASSERT(
-      compiler.lifted_ivalue_args.args_origins.size() ==
-      compiler.lifted_ivalue_args.args.size());
+      compiler.size_input_origins.empty() ||
+      (compiler.size_input_origins.size() == dynamic_sizes));
+  TORCH_INTERNAL_ASSERT(
+      compiler.lifted_ivalue_args.args_origins.empty() ||
+      (compiler.lifted_ivalue_args.args_origins.size() ==
+       compiler.lifted_ivalue_args.args.size()));
   PyObject* pyallorigins = PyList_New(3);
   size_t next = 0;
   for (const std::vector<uint32_t>& vec :
@@ -458,7 +462,7 @@ static TraceState call_begin_capture(
   THPObjectPtr pyivalueargsinput(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
   THPObjectPtr pynodeorigins(
-      wrap_node_origins(compiler_call, PyTuple_GET_SIZE(pysizeinput)));
+      wrap_node_origins(compiler_call, PyTuple_GET_SIZE(pysizeinput.get())));
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self,
       method_name,
@@ -543,7 +547,10 @@ CacheNode* _compiled_autograd_impl(
 
     { // update cache and gather args into `compiler_call`
       CompiledNodeArgs node_args(compiler_call, call);
-      node_args.collect(call, vlogger.has_value());
+      node_args.collect(call);
+      if (vlogger.has_value()) {
+        compiler_call.set_active_node_call_idx(i);
+      }
       if (node_args.cond(call.needed)) {
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
