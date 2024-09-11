@@ -2483,7 +2483,7 @@ class TestPagedCache(InductorTestCase):
 
         expected_page_table = torch.tensor(
             [[0, 3, 5, 7], [2, 1, 4, 6]],
-            device="cuda:0",
+            device="cuda",
         )
         self.assertEqual(
             paged_cache.allocated_seq_len,
@@ -2528,10 +2528,88 @@ class TestPagedCache(InductorTestCase):
         self.assertEqual(new_block_mask.full_kv_num_blocks, expected_full_kv_num_blocks)
         self.assertEqual(new_block_mask.full_kv_indices, expected_full_kv_indices)
 
+        # TODO: check q_indices
+
     @supported_platform
     def test_update(self):
-        # TODO: a hard coded example on update
-        return
+        dtype = torch.float32
+
+        n_pages, page_size, max_batch_size, max_seq_len = 6, 2, 2, 6
+        paged_cache = PagedCache(n_pages, page_size, max_batch_size, max_seq_len)
+
+        n_heads, head_dim = 2, 3
+        cache_shape = (1, n_heads, n_pages * page_size, head_dim)
+        cache = torch.zeros(cache_shape, dtype=dtype, device="cuda")
+        paged_cache.allocate_until_length(torch.tensor([1, 3], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([4, 5], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([6, 6], device="cuda"))
+
+        expected_page_table = torch.tensor(
+            [[0, 3, 5], [2, 1, 4]],
+            device="cuda",
+        )
+        self.assertEqual(paged_cache.page_table, expected_page_table)
+
+        input_pos = torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+        k = torch.arange(
+            max_batch_size * n_heads * max_seq_len * head_dim,
+            device="cuda",
+            dtype=dtype,
+        ).view(max_batch_size, n_heads, max_seq_len, head_dim)
+
+        paged_cache.update(input_pos, k, cache)
+
+        expected_cache = torch.tensor(
+            [
+                [
+                    # h = 0
+                    [
+                        # page = 0
+                        [0.0, 1.0, 2.0],
+                        [3.0, 4.0, 5.0],
+                        # page = 1
+                        [42.0, 43.0, 44.0],
+                        [45.0, 46.0, 47.0],
+                        # page = 2
+                        [36.0, 37.0, 38.0],
+                        [39.0, 40.0, 41.0],
+                        # page = 3
+                        [6.0, 7.0, 8.0],
+                        [9.0, 10.0, 11.0],
+                        # page = 4
+                        [48.0, 49.0, 50.0],
+                        [51.0, 52.0, 53.0],
+                        # page = 5
+                        [12.0, 13.0, 14.0],
+                        [15.0, 16.0, 17.0],
+                    ],
+                    # h = 1
+                    [
+                        # page = 0
+                        [18.0, 19.0, 20.0],
+                        [21.0, 22.0, 23.0],
+                        # page = 1
+                        [60.0, 61.0, 62.0],
+                        [63.0, 64.0, 65.0],
+                        # page = 2
+                        [54.0, 55.0, 56.0],
+                        [57.0, 58.0, 59.0],
+                        # page = 3
+                        [24.0, 25.0, 26.0],
+                        [27.0, 28.0, 29.0],
+                        # page = 4
+                        [66.0, 67.0, 68.0],
+                        [69.0, 70.0, 71.0],
+                        # page = 5
+                        [30.0, 31.0, 32.0],
+                        [33.0, 34.0, 35.0],
+                    ],
+                ]
+            ],
+            device="cuda",
+            dtype=dtype,
+        )
+        self.assertEqual(cache, expected_cache)
 
     @supported_platform
     def test_flex_attention_causal_mask(self):

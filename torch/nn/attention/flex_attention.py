@@ -1025,8 +1025,8 @@ class PagedCache:
         ] = allocated_pages
 
         # update metadata
-        self.physical_to_logical[allocated_pages] = torch.tensor(
-            range(start_page_idx, end_page_idx), device=num_pages_to_allocate.device
+        self.physical_to_logical[allocated_pages] = torch.arange(
+            start_page_idx, end_page_idx, device=num_pages_to_allocate.device
         )
         self.allocated_seq_len[batch_idx] += num_pages_to_allocate * self.page_size
 
