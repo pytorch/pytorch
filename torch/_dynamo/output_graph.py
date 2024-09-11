@@ -1832,6 +1832,7 @@ class SubgraphTracer(fx.Tracer):
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
         self.prev_inst = None
+        self.under_checkpoint = False
         self.ignore_side_effects = False
 
         self._cur_code = None

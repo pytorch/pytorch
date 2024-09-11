@@ -320,7 +320,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
-        if not tx.output.current_tracer.ignore_side_effects:
+        if (
+            tx.output.current_tracer.under_checkpoint
+            and not tx.output.current_tracer.ignore_side_effects
+        ):
             try:
                 from torch.distributed._composable.fsdp._fsdp_state import FSDPState
             except Exception:

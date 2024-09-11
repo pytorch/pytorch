@@ -713,11 +713,10 @@ class SideEffects:
 
 
 @contextlib.contextmanager
-def ignore_side_effects(
-    tx: torch._dynamo.symbolic_convert.InstructionTranslator,
-):
+def ignore_side_effects(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
+    orig_val = tx.output.current_tracer.ignore_side_effects
     try:
         tx.output.current_tracer.ignore_side_effects = True
         yield
     finally:
-        tx.output.current_tracer.ignore_side_effects = False
+        tx.output.current_tracer.ignore_side_effects = orig_val
