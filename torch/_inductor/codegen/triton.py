@@ -299,7 +299,7 @@ class BlockPtrOptions:
             final_shape.append(sympy.Integer(1))
 
         def remove_dims(it):
-            """Removes any broadcasting dims from a given sequence"""
+            """Removes any broadcasting or singleton dims from a given sequence"""
             assert len(it) == len(broadcasting_dims)
             return [
                 item
@@ -1745,7 +1745,7 @@ class TritonKernel(SIMDKernel):
         return block_ptr, advance_block_ptr, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        # Broadcast and restore singletons.
+        # Stores require an explicit broadcast.
         value = indexing.codegen_broadcast_and_reshape(
             value, indexing.final_shape, indexing.block_shape, False
         )
