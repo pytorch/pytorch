@@ -659,18 +659,7 @@ class FSDPParam:
                     t.size() for t in all_gather_inputs
                 ]
                 return [t.view(-1) for t in all_gather_inputs]
-            if ca.compiled_autograd_enabled:
-                local_tensor = self.sharded_param._local_tensor
-                padded_sharded_size = self.padded_sharded_param_size
-                if local_tensor.size() != padded_sharded_size:
-                    padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
-                    padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
-                    local_tensor = padded_local_tensor
-                if self.pin_memory and not local_tensor.is_pinned():
-                    local_tensor = local_tensor.cpu().pin_memory()
-                sharded_param_data = local_tensor.view(-1)
-            else:
-                sharded_param_data = self._sharded_param_data
+            sharded_param_data = self._sharded_param_data
             if self.offload_to_cpu:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True

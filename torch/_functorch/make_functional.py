@@ -484,7 +484,6 @@ def transpose_stack(
     tuple_of_tuple_of_tensors = tuple(zip(*tuple_of_tuple_of_tensors))
     results = tuple(
         torch.stack(shards).detach() for shards in tuple_of_tuple_of_tensors
-        # torch.stack(shards) for shards in tuple_of_tuple_of_tensors
     )
     return results
 
@@ -573,7 +572,6 @@ def functional_init(
         weights = tuple(make_functional_deprecated_v1(model)[0] for model in models)
         weights = tuple(zip(*weights))
         weights = tuple(torch.stack(shards).detach() for shards in weights)
-        # weights = tuple(torch.stack(shards) for shards in weights)
         return weights, fn, names
 
     return wrapped
@@ -612,10 +610,8 @@ def functional_init_with_buffers(
         )
         weights = tuple(zip(*weights))
         weights = tuple(torch.stack(shards).detach() for shards in weights)
-        # weights = tuple(torch.stack(shards) for shards in weights)
         buffers = tuple(zip(*buffers))
         buffers = tuple(torch.stack(shards).detach() for shards in buffers)
-        # buffers = tuple(torch.stack(shards) for shards in buffers)
         return weights, buffers, fn, weight_names, buffer_names
 
     return wrapped

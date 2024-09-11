@@ -400,7 +400,6 @@ def _create_runtime_wrapper(
                         # (aka mutations under no_grad(), or on detached views).
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
                         original_inpt.detach().copy_(updated_inpt)
-                        # original_inpt.copy_(updated_inpt)
                     else:
                         original_inpt.copy_(updated_inpt)
         else:
@@ -801,7 +800,6 @@ class AOTDedupeWrapper(CompilerWrapper):
                 not fw_metadata.input_info[i].mutates_data
                 and not fw_metadata.input_info[i].mutates_metadata
             ):
-                # leaf_flat_args.append(a.requires_grad_(a.requires_grad))
                 leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
             else:
                 ok = False

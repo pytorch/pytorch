@@ -151,9 +151,6 @@ def aot_dispatch_base_graph(
     saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
         torch.Tensor, lambda t: t.detach(), updated_flat_args_subclasses_desugared
     )
-    # saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
-    #     torch.Tensor, lambda t: t, updated_flat_args_subclasses_desugared
-    # )
     fw_module = _create_graph(
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
@@ -292,9 +289,6 @@ def aot_dispatch_autograd_graph(
     saved_updated_joint_inputs = pytree.tree_map_only(
         torch.Tensor, lambda t: t.detach(), updated_joint_inputs
     )
-    # saved_updated_joint_inputs = pytree.tree_map_only(
-    #     torch.Tensor, lambda t: t, updated_joint_inputs
-    # )
     maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
 
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
