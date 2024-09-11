@@ -754,7 +754,7 @@ class FSDPParam:
         local_tensor = self._create_padded_local_tensor(new_param)
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
-        # Detach because we don't need gradients of `self.sharded_param` to flow back to the padded local_tensor
+        # Detach since we don't need gradients of `self.sharded_param` to flow back to the padded local_tensor.
         self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]].detach()
 
     def __repr__(self):
