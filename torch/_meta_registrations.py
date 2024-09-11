@@ -6515,7 +6515,8 @@ def meta_split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
     # This method has a decomposition, so this function is not necessary
-    # but running the decomposition with meta tensors is slow
+    # but running the decomposition which calls narrow is slow because of all
+    # the unnecessary checks
     for split_size in split_sizes:
         torch._check_is_size(
             split_size,
@@ -6528,9 +6529,11 @@ def meta_split_with_sizes(
     )
     result = []
     for split_size in split_sizes:
-        shape = list(self.shape)
-        shape[dim] = split_size
-        result.append(self.new_empty(shape))
+        new_shape = list(self.shape)
+        new_shape[dim] = split_size
+        # We mimic narrow which calls _slice_in_dim_meta which in turn calls _slice_meta
+        # By doing that we avoid a lot of checks in slice_in_dim and slice
+        result.append(self.as_strided(new_shape, self.stride(), self.storage_offset()))
     return result
 
 
