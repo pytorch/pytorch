@@ -441,9 +441,7 @@ class CppWrapperCuda(CppWrapperCpu):
             self.kernel_autotune_calls.writeline(line)
         if zero_fill:
             if isinstance(nbytes, sympy.Expr):
-                self.writeline(
-                    f"workspace.zero_(){self.ending}"
-                )
+                self.writeline(f"workspace.zero_(){self.ending}")
             else:
                 # TODO: remove this function to use the default WrapperCodegen behavior after service platform has zero_() symbol
                 # default behavior is f"workspace.zero_(){self.ending}"
