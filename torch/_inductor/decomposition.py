@@ -1010,7 +1010,7 @@ def searchsorted(
         lambda: (
             "torch.searchsorted(): boundary and sorter must have the same size, but "
             f"got boundary tensor {list(sorted_sequence.shape)} and got sorter tensor "
-            f"{list(sorter.shape)}"
+            f"{list(sorter.shape) if sorter is not None else []}"
         ),
     )
 
