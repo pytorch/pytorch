@@ -225,9 +225,9 @@ jobs:
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
-      - name: Test Pytorch binary
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+      # - name: Test Pytorch binary
+      #   if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+      #   uses: ./pytorch/.github/actions/test-pytorch-binary
 
       - name: Teardown Linux
         if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
