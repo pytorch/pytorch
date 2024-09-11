@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import collections
-import functools
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 

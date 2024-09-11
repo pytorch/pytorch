@@ -3260,9 +3260,7 @@ class AOTInductorTestsTemplate:
             model, example_inputs_list, dynamic_shapes=dynamic_shapes
         )
 
-    # max_autotune is disabled due to https://github.com/pytorch/pytorch/issues/135106
-    # @common_utils.parametrize("max_autotune", [False, True])
-    @common_utils.parametrize("max_autotune", [False])
+    @common_utils.parametrize("max_autotune", [False, True])
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
