@@ -988,8 +988,10 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             cond_node,
             body_node,
-            [operand.as_proxy() for operand in operands],
-            [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs,
+            tuple([operand.as_proxy() for operand in operands]),
+            tuple(
+                [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs
+            ),
         )
 
         flat_example_value = pytree.tree_map_only(
