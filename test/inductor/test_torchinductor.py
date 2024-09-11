@@ -11491,7 +11491,7 @@ class CommonTemplate:
 
 @dataclasses.dataclass
 class TestFailure:
-    suffixes: Tuple[str]
+    suffixes: Tuple[str, ...]
     is_skip: bool = False
     __test__: bool = False
 
