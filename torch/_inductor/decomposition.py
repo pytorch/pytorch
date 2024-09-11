@@ -981,26 +981,26 @@ def max_pool2d_with_indices(
     return vals, indices
 
 
-@register_decomposition(aten.searchsorted)
+@register_decomposition(aten.searchsorted.Tensor)
 def searchsorted(
     sorted_sequence: torch.Tensor,
-    values: torch.Tensor,
+    self: torch.Tensor,
     *,
     out_int32: bool = False,
     right: bool = False,
     side: Optional[str] = None,
     sorter: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    # If the sorted_sequence is not one-dimensional, its shape must match that of values
+    # If the sorted_sequence is not one-dimensional, its shape must match that of vaflues
     # in all but the last dimension.
     torch._check(
         len(sorted_sequence.shape) <= 1
-        or sorted_sequence.shape[:-1] == values.shape[:-1],
+        or sorted_sequence.shape[:-1] == self.shape[:-1],
         lambda: (
             "torch.searchsorted(): boundaries tensor should be 1 dimension or the "
             "first N-1 dimensions of boundaries tensor and input value tensor must "
             f"match, but we got boundaries tensor {list(sorted_sequence.shape)} and "
-            f"input value tensor {list(values.shape)}"
+            f"input value tensor {list(self.shape)}"
         ),
     )
 
@@ -1022,5 +1022,25 @@ def searchsorted(
     )
 
     return prims._searchsorted_with_positional_sorter(
-        sorted_sequence, values, sorter, out_int32=out_int32, right=right, side=side
+        sorted_sequence, self, sorter, out_int32=out_int32, right=right, side=side
+    )
+
+
+@register_decomposition(aten.searchsorted.Scalar)
+def searchsorted_scalar(
+    sorted_sequence: torch.Tensor,
+    self: Any,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+    side: Optional[str] = None,
+    sorter: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    return searchsorted(
+        sorted_sequence,
+        torch.Tensor([self]),
+        out_int32=out_int32,
+        right=right,
+        side=side,
+        sorter=sorter,
     )
