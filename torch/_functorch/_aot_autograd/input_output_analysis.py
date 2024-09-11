@@ -230,7 +230,7 @@ def create_synthetic_base_metadata(
 
     inner_mutated_tangents = [
         # See Note [Tangents memory format]
-        coerce_tangent(x)
+        coerce_tangent(x)[0]
         for inner_idx, x in enumerate(inner_args)
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
     ]

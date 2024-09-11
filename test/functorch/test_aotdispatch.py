@@ -6222,7 +6222,7 @@ class TestAOTModuleSimplified(AOTTestCase):
             self.assertEqual(ctx.d[torch.channels_last], 4)
             self.assertEqual(ctx.d[torch.contiguous_format], 0)
 
-    def test_nested_tensor_tangent(self):
+    def test_grads_no_force_contiguous_nested_tensor_tangent(self):
         # NestedTensor setattr could fails with AttributeError for attr "_min_seqlen_tensor"
         # Adding test to verify that it is handled.
         def fn(x):

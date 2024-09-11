@@ -934,7 +934,6 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
-@torch._dynamo.disable
 def aot_module_simplified(
     mod: nn.Module,
     args,

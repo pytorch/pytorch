@@ -55,7 +55,6 @@ from .schemas import (
 from .subclass_utils import (
     get_types_for_subclass,
     requires_subclass_dispatch,
-    subclass_setattr,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
@@ -1446,9 +1445,10 @@ class AOTDispatchAutograd:
             return x
 
         is_subclass: bool = is_traceable_wrapper_subclass(x)
-        x = x.contiguous(
-            memory_format=memory_format[0] if is_subclass else memory_format
-        )
+        mem_format = memory_format[0] if is_subclass else memory_format
+
+        if not x.is_contiguous(memory_format=mem_format):
+            x = x.contiguous(memory_format=mem_format)
 
         if not is_subclass:
             return x
@@ -1458,7 +1458,7 @@ class AOTDispatchAutograd:
                 elem, memory_format[1 + i]
             )
             if new_elem is not elem:
-                subclass_setattr(x, attr, new_elem)
+                setattr(x, attr, new_elem)
 
         return x
 
