@@ -4,7 +4,7 @@
 import functools
 import string
 from collections import namedtuple
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from typing import Callable, Optional, Tuple
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
@@ -1287,7 +1287,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score
 
         self.run_test(bias_mod)
-
 
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
