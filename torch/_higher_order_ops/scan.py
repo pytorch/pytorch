@@ -389,11 +389,19 @@ def trace_scan(
 
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[dim]
-        expanded_outs = [
-            pytree.tree_map(expand_tensor, t.meta["val"], dim, scan_length)
-            for t in output
-        ]
-        out = [*init, *expanded_outs]
+        fake_carry, fake_outputs = _extract_carry_and_out(
+            [o.meta["val"] for o in outputs], len(init)
+        )
+        out = (
+            *fake_carry,
+            *tuple(
+                # t.unsqueeze(dim)
+                # .repeat(*([1] * dim + [scan_length] + [1] * (t.ndim - dim)))
+                # .clone()
+                expand_tensor(t, dim, scan_length)
+                for t in fake_outputs
+            ),
+        )
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 

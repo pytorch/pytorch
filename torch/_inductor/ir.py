@@ -6793,7 +6793,6 @@ class SequentialScan(ExternKernel):
         )
 
         # last_carry should have the same shape and stride as init
-        # TODO(yidi): figure out what happens when the offset is unkown
         last_carry_output = [
             MultiOutput(
                 FixedLayout(
@@ -6809,11 +6808,14 @@ class SequentialScan(ExternKernel):
         ]
 
         def stacked_size_stride(y):
-            tmp = torch.empty_strided(y.get_size(), y.get_stride())
-            # # Semantic-wise, scan will torch.stack the intermediates, so
-            # # torch.stack will force the output become contingous, which is also what clone does.
-            expanded_tmp = expand_tensor(tmp, int(dim), scan_length)
-            return expanded_tmp.size(), expanded_tmp.stride()
+            sizes = [*y.get_size()[:dim], scan_length, *y.get_size()[dim:]]
+            # TODO: this is a hacky way to get the stride of the stacked output
+            # Semantic-wise this is correct because scan will torch.stack the intermediates, so
+            # torch.stack will force the output become contingous.
+            strides = [1]
+            for i, sz in enumerate(reversed(sizes[1:])):
+                strides.append(sz * strides[-1])
+            return sizes, list(reversed(strides))
 
         stacked_y_size_stride = [stacked_size_stride(y) for y in ys]
 

@@ -2047,7 +2047,7 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"dim = {sequential_scan.dim}")
         self.writeline(f"reverse = {sequential_scan.reverse}")
         scatter_idxs = []
-        self.writeline(f"intermediate_outs = [[]] * {len(outer_ys_out)}")
+        self.writeline(f"intermediate_outs = [[] for i in range({len(outer_ys_out)})]")
 
         self.writeline("for i in range(scan_length):")
         self.writeline(EnterSubgraphLine(self, sequential_scan.combine_subgraph.graph))
@@ -2076,7 +2076,12 @@ class WrapperCodeGen(CodeGen):
 
         self.writeline(ExitSubgraphLine(self))
         for i, outer_ys in enumerate(outer_ys_out):
-            self.writeline(f"{outer_ys} = torch.stack(intermediate_outs[{i}], dim)")
+            if sequential_scan.reverse:
+                self.writeline(
+                    f"{outer_ys} = torch.stack(tuple(reversed(intermediate_outs[{i}])), dim)"
+                )
+            else:
+                self.writeline(f"{outer_ys} = torch.stack(intermediate_outs[{i}], dim)")
 
     @staticmethod
     def statically_known_int_or_none(x):
