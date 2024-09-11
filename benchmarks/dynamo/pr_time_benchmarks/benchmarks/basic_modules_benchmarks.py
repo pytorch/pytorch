@@ -1,3 +1,4 @@
+import gc
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -121,38 +122,67 @@ class ModuleComparison(torch.nn.Module):
 
 
 class Benchmark(BenchmarkBase):
-    def __init__(self, ModuleClass, backend):
+    def __init__(self, ModuleClass, backend, is_gpu=False, dynamic=False):
         self.ModuleClass = ModuleClass
         self.backend = backend
         self._name = ModuleClass.__name__
+        self._is_gpu = is_gpu
+        self._dynamic = dynamic
 
     def name(self):
-        return f"basic_modules_{self._name}_{self.backend}"
+        prefix = f"basic_modules_{self._name}_{self.backend}"
+        if self._dynamic:
+            prefix += "_dynamic"
+        if self._is_gpu:
+            prefix += "_gpu"
+        return prefix
 
     def _prepare_once(self):
         self.m = self.ModuleClass()
-        self.input = torch.ones(10)
+        torch.set_float32_matmul_precision("high")
+        self.input = torch.ones(10, device="cuda" if self._is_gpu else "cpu")
+        gc.collect()
+        gc.disable()
 
     def _prepare(self):
         torch._dynamo.reset()
 
     def _work(self):
         with fresh_inductor_cache():
-            opt_m = torch.compile(backend=self.backend)(self.m)
+            opt_m = torch.compile(backend=self.backend, dynamic=self._dynamic)(
+                self.m.cuda() if self._is_gpu else self.m
+            )
             opt_m(self.input)
 
 
 def main():
     result_path = sys.argv[1]
     benchmarks = [
-        Benchmark(ListOfLinears, "inductor"),
+        Benchmark(
+            ListOfLinears,
+            "inductor",
+        ),
         Benchmark(ListOfLinears, "eager"),
+        Benchmark(ListOfLinears, "eager", dynamic=True),
+        Benchmark(ListOfLinears, "inductor", dynamic=True),
+        Benchmark(ListOfLinears, "inductor", is_gpu=True),
+        Benchmark(ListOfLinears, "inductor", is_gpu=True, dynamic=True),
         Benchmark(ModuleForwardHasGraphBreak, "inductor"),
         Benchmark(ModuleForwardHasGraphBreak, "eager"),
         Benchmark(SequentialWithDuplicatedModule, "inductor"),
         Benchmark(SequentialWithDuplicatedModule, "eager"),
+        Benchmark(SequentialWithDuplicatedModule, "inductor", dynamic=True),
+        Benchmark(SequentialWithDuplicatedModule, "eager", dynamic=True),
+        Benchmark(SequentialWithDuplicatedModule, "inductor", is_gpu=True),
+        Benchmark(
+            SequentialWithDuplicatedModule, "inductor", is_gpu=True, dynamic=True
+        ),
         Benchmark(ModuleComparison, "inductor"),
         Benchmark(ModuleComparison, "eager"),
+        Benchmark(ModuleComparison, "inductor", dynamic=True),
+        Benchmark(ModuleComparison, "eager", dynamic=True),
+        Benchmark(ModuleComparison, "inductor", is_gpu=True),
+        Benchmark(ModuleComparison, "inductor", is_gpu=True, dynamic=True),
     ]
     for b in benchmarks:
         b.enable_compile_time_instruction_count().collect_all().append_results(
