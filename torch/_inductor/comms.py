@@ -364,8 +364,12 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
         if (
             node.op == "call_function"
             and node.target == torch.ops.inductor.resize_storage_bytes_.default
-            and node.args[0].op == "placeholder"
         ):
+            assert (
+                node.args[0].op == "placeholder"
+            ), f"""\
+Resize can only operate on graph inputs, but got {node} which is resizing non-graph-input {node.args[0]}
+"""
             graph_input = node.args[0]
             new_size = node.args[1]
             if new_size > 0:
@@ -422,7 +426,6 @@ Offending node: {unsharded_param}. Graph: {graph}
             if check_resize_pattern(unsharded_param):
                 unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
 
-    # Check no user mutation on any unsharded_param
     def is_allowed_mutation(node):
         return (
             node.target == torch.ops.fsdp.copy_.default
@@ -450,6 +453,7 @@ Offending node: {unsharded_param}. Graph: {graph}
         }
         return len(mutated_node_arg_storages & storages_of_unsharded_params) > 0
 
+    # Check no user mutation on any unsharded_param
     for node in node_list:
         if (
             node.op == "call_function"
@@ -495,7 +499,6 @@ User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is us
                 else len(node_list) - 1
             )
             subgraph_nodes = node_list[subgraph_start_idx:subgraph_end_idx]
-            assert unsharded_param is not None
             assert not any(
                 is_node_mutating_unsharded_param_or_its_alias(node, [unsharded_param])
                 for node in subgraph_nodes
