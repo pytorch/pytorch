@@ -94,7 +94,6 @@ from .symbolic_convert import (
 from .trace_rules import is_numpy
 from .utils import (
     CleanupManager,
-    clear_torch_function_mode_stack,
     CompilationMetrics,
     counters,
     dynamo_timed,
@@ -109,11 +108,11 @@ from .utils import (
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
-    set_torch_function_mode_stack,
     setup_compile_debug,
     troubleshooting_url,
     write_record_to_file,
 )
+from .variables.torch_function import torch_function_mode_stack_state_mgr
 
 
 np: Optional[ModuleType]
@@ -206,28 +205,25 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             py_rng_state = random.getstate()
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
-            prior_tf_mode_stack = torch.overrides._get_current_function_mode_stack()
-            clear_torch_function_mode_stack()
             if torch.cuda.is_available():
                 cuda_rng_state = torch.cuda.get_rng_state()
             allow_tf32 = torch._C._get_cublas_allow_tf32()
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
-
             exit_stack = contextlib.ExitStack()
             exit_stack.enter_context(
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
+            exit_stack.enter_context(torch_function_mode_stack_state_mgr)
             try:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
-                exit_stack.close()
                 assert (
                     torch._C._len_torch_function_stack() == 0
                 ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
-                set_torch_function_mode_stack(prior_tf_mode_stack)
+                exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
                 torch.use_deterministic_algorithms(

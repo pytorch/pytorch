@@ -155,7 +155,10 @@ def get_overridable_functions():
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
-    return set(chain(*get_overridable_functions_().values()))
+    funcs = set(chain(*get_overridable_functions_().values()))
+    more = {torch.ones, torch.ones_like, torch.zeros, torch.zeros_like, torch.empty}
+    funcs.update(more)
+    return funcs
 
 
 class BaseTorchVariable(VariableTracker):
