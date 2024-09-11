@@ -436,12 +436,12 @@ at::Tensor wrapped_quantized_linear_meta(
 #endif // USE_FBGEMM
 }
 
-at::Tensor wrapped_linear_prepack(const at::Tensor& weight,
+at::Tensor _wrapped_linear_prepack(const at::Tensor& weight,
     const at::Tensor& weight_scale,
     const at::Tensor& weight_zero_point,
     const at::Tensor& bias);
 
-at::Tensor wrapped_linear_prepack(const at::Tensor& weight,
+at::Tensor _wrapped_linear_prepack(const at::Tensor& weight,
     const at::Tensor& weight_scale,
     const at::Tensor& weight_zero_point,
     const at::Tensor& bias) {
@@ -474,14 +474,14 @@ at::Tensor wrapped_linear_prepack(const at::Tensor& weight,
 #endif // USE_FBGEMM
 }
 
-at::Tensor wrapped_quantized_linear_prepacked(const at::Tensor& input, const at::Tensor& input_scale,
+at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at::Tensor& input_scale,
     const at::Tensor& input_zero_point,
     const at::Tensor& packed_weight,
     const at::Tensor& output_scale,
     const at::Tensor& output_zero_point,
     [[maybe_unused]] const int64_t out_channel);
 
-at::Tensor wrapped_quantized_linear_prepacked(const at::Tensor& input, const at::Tensor& input_scale,
+at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at::Tensor& input_scale,
     const at::Tensor& input_zero_point,
     const at::Tensor& packed_weight,
     const at::Tensor& output_scale,
@@ -507,12 +507,12 @@ at::Tensor wrapped_quantized_linear_prepacked(const at::Tensor& input, const at:
 #endif // USE_FBGEMM
 }
 
-at::Tensor wrapped_linear_prepack_meta(const at::Tensor& weight,
+at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
     [[maybe_unused]] const at::Tensor& weight_scale,
     [[maybe_unused]] const at::Tensor& weight_zero_point,
     [[maybe_unused]] const at::Tensor& bias);
 
-at::Tensor wrapped_linear_prepack_meta(const at::Tensor& weight,
+at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
     [[maybe_unused]] const at::Tensor& weight_scale,
     [[maybe_unused]] const at::Tensor& weight_zero_point,
     [[maybe_unused]] const at::Tensor& bias) {
@@ -530,7 +530,7 @@ at::Tensor wrapped_linear_prepack_meta(const at::Tensor& weight,
 #endif // USE_FBGEMM
 }
 
-at::Tensor wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
+at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
     [[maybe_unused]] const at::Tensor& input_scale,
     [[maybe_unused]] const at::Tensor& input_zero_point,
     [[maybe_unused]] const at::Tensor& packed_weight,
@@ -538,7 +538,7 @@ at::Tensor wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
     [[maybe_unused]] const at::Tensor& output_zero_point,
     const int64_t out_channel);
 
-at::Tensor wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
+at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
     [[maybe_unused]] const at::Tensor& input_scale,
     [[maybe_unused]] const at::Tensor& input_zero_point,
     [[maybe_unused]] const at::Tensor& packed_weight,
@@ -695,21 +695,21 @@ TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
   m.impl(TORCH_SELECTIVE_NAME("_quantized::wrapped_quantized_linear"), TORCH_FN(wrapped_quantized_linear));
   m.impl(
-      TORCH_SELECTIVE_NAME("_quantized::wrapped_linear_prepack"),
-      wrapped_linear_prepack);
+      TORCH_SELECTIVE_NAME("_quantized::_wrapped_linear_prepack"),
+      _wrapped_linear_prepack);
   m.impl(
-      TORCH_SELECTIVE_NAME("_quantized::wrapped_quantized_linear_prepacked"),
-      wrapped_quantized_linear_prepacked);
+      TORCH_SELECTIVE_NAME("_quantized::_wrapped_quantized_linear_prepacked"),
+      _wrapped_quantized_linear_prepacked);
 }
 
 TORCH_LIBRARY_IMPL(_quantized, Meta, m) {
   m.impl(TORCH_SELECTIVE_NAME("_quantized::wrapped_quantized_linear"), TORCH_FN(wrapped_quantized_linear_meta));
   m.impl(
-      TORCH_SELECTIVE_NAME("_quantized::wrapped_linear_prepack"),
-      wrapped_linear_prepack_meta);
+      TORCH_SELECTIVE_NAME("_quantized::_wrapped_linear_prepack"),
+      _wrapped_linear_prepack_meta);
   m.impl(
-      TORCH_SELECTIVE_NAME("_quantized::wrapped_quantized_linear_prepacked"),
-      wrapped_quantized_linear_prepacked_meta);
+      TORCH_SELECTIVE_NAME("_quantized::_wrapped_quantized_linear_prepacked"),
+      _wrapped_quantized_linear_prepacked_meta);
 }
 
 TORCH_LIBRARY_IMPL(onednn, CPU, m) {
