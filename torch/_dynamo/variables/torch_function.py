@@ -1,8 +1,11 @@
 # mypy: ignore-errors
 
+import collections
+import contextlib
 import inspect
-from typing import Dict, List, TYPE_CHECKING
+from typing import Deque, Dict, List, TYPE_CHECKING
 
+import torch._C
 import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
@@ -15,6 +18,7 @@ from ..utils import get_safe_global_name, has_torch_function, is_tensor_base_att
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
+from .lazy import LazyVariableTracker
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
 from .user_defined import UserDefinedObjectVariable
@@ -59,6 +63,67 @@ banned_attrs = [
 IGNORED_MODES = {DeviceContext}
 
 
+class SymbolicTorchFunctionState:
+    def __init__(self, py_stack):
+        # This is annoyingly complicated because of how the torch function subclass + mode C API was designed
+        # There are two exposed C knobs here as contexts: torch._C.DisableTorchFunction and torch._C.DisableTorchFunctionSubclass
+        # These are their definitions:
+        # 1) torch._C._is_torch_function_enabled indicates that neither of the above knobs have been entered
+        # (if either are entered, this will be False)
+        # 2) torch._C._is_torch_function_mode_enabled indicates that either the torch mode stack is empty OR
+        # torch._C.DisableTorchFunction has been entered
+        # To disambiguate these and keep myself sane I added a C API to check whether all torch function
+        # concepts (modes and subclasses) are enabled.
+        # This only returns true iff we have not entered torch._C.DisableTorchFunction and allows us to separate
+        # the stack length from the enablement state of torch function modes.
+        # This is important because now if a mode is pushed while dynamo is tracing, we know whether
+        # or not torch function modes are enabled and whether we should trace it.
+        self.torch_function_subclass_enabled = torch._C._is_torch_function_enabled()
+
+        # This differs from the C API of the same name
+        # this will only be false iff we have entered torch._C.DisableTorchFunction
+        # and does not take into account the mode stack length, while the C API bundles these
+        # two concepts
+        self.torch_function_mode_enabled = (
+            not torch._C._is_torch_function_all_disabled()
+        )
+
+        self.cur_mode = None
+
+        TorchFunctionModeStackVariable.reset()
+
+        self.mode_stack: Deque[TorchFunctionModeVariable] = collections.deque()
+
+        for i, val in enumerate(py_stack):
+            self.mode_stack.append(
+                LazyVariableTracker.create(val, source=TorchFunctionModeStackSource(i))
+            )
+
+    def in_torch_function_mode(self):
+        return len(self.mode_stack) > 0
+
+    def pop_torch_function_mode(self):
+        return self.mode_stack.pop()
+
+    def push_torch_function_mode(self, mode_var):
+        self.mode_stack.append(mode_var)
+
+    def call_torch_function_mode(self, tx, fn, types, args, kwargs):
+        with self._pop_mode_for_inlining() as cur_mode:
+            return cur_mode.call_torch_function(tx, fn, types, args, kwargs)
+
+    @contextlib.contextmanager
+    def _pop_mode_for_inlining(self):
+        old_mode = self.cur_mode
+        self.cur_mode = self.pop_torch_function_mode()
+        try:
+            yield self.cur_mode
+        finally:
+            mode = self.cur_mode
+            self.cur_mode = old_mode
+            self.push_torch_function_mode(mode)
+
+
 class TorchFunctionModeStackVariable(VariableTracker):
     """Fake VT to use as a dummy object, indicating the presence of torch function mode stack mutation"""
 
@@ -88,19 +153,20 @@ class TorchFunctionModeStackVariable(VariableTracker):
     def register_mutation(cls, tx: "InstructionTranslator"):
         if cls.stack_value_singleton not in tx.output.side_effects:
             var = cls(
-                source=Source(), symbolic_stack=tx.symbolic_torch_function_mode_stack
+                source=Source(),
+                symbolic_stack=tx.symbolic_torch_function_state.mode_stack,
             )
             tx.output.side_effects.track_mutable(cls.stack_value_singleton, var)
             tx.output.side_effects.mutation(var)
 
     @classmethod
     def register_device_context_insertion(cls, tx: "InstructionTranslator"):
-        stack = tx.symbolic_torch_function_mode_stack
+        stack = tx.symbolic_torch_function_state.mode_stack
         if stack and cls.is_device_context(stack[0]):
             return
         else:
             cls.offset += 1
-            tx.symbolic_torch_function_mode_stack.insert(
+            stack.insert(
                 0,
                 TorchFunctionModeVariable(
                     None, source=TorchFunctionModeStackSource(-cls.offset)
@@ -109,7 +175,7 @@ class TorchFunctionModeStackVariable(VariableTracker):
 
     @classmethod
     def clear_default_device(cls, tx: "InstructionTranslator"):
-        stack = tx.symbolic_torch_function_mode_stack
+        stack = tx.symbolic_torch_function_state.mode_stack
         if stack and cls.is_device_context(stack[0]):
             stack.popleft()
             cls.offset -= 1
@@ -124,23 +190,39 @@ class TorchFunctionModeStackVariable(VariableTracker):
 
 
 class TorchFunctionModeVariable(ContextWrappingVariable):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, source=None, **kwargs):
         super().__init__(value, **kwargs)
         self.value = value
-
-    @staticmethod
-    def get_global_mangled_name(tx, val):
-        return get_safe_global_name(
-            tx, f"__torch_function_mode_{val.__class__.__name__}", val
-        )
+        self.cm_obj = value  # needed for BC with calling enter from CM code
+        self.source = source
 
     def reconstruct(self, codegen):
-        # We don't support locally created torch function modes yet
+        # This shouldn't be called unless we have a source
         assert self.source
         self.source.reconstruct(codegen)
 
-    def _call_func(self, tx, values):
-        unimplemented("torch function mode context manager is not supported yet")
+    def module_name(self):
+        return self.value.__module__
+
+    def fn_name(self):
+        return type(self.value).__name__
+
+    def python_type(self):
+        return type(self.value)
+
+    def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
+        return call_torch_function(
+            tx,
+            self,
+            build_torch_function_fn(tx, self.value, self.source),
+            fn,
+            types,
+            args,
+            kwargs,
+        )
+
+    def _call_func(self, tx: "InstructionTranslator", values):
+        unimplemented("enter/exit for torch function mode NYI")
 
 
 def _get_all_args(args, kwargs):
@@ -231,8 +313,12 @@ def build_torch_function_fn(tx: "InstructionTranslator", value, source):
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
-    return tx.output.torch_function_enabled and any(
+    has_overridden_args = any(
         has_torch_function(arg) for arg in _get_all_args(args, kwargs)
+    )
+    tf_state = tx.symbolic_torch_function_state
+    return (has_overridden_args and tf_state.torch_function_subclass_enabled) or (
+        tf_state.torch_function_mode_enabled and tf_state.in_torch_function_mode()
     )
 
 
@@ -245,11 +331,20 @@ def dispatch_torch_function(tx: "InstructionTranslator", fn, args, kwargs):
         _get_subclass_type,
     )
 
+    types = TupleVariable([_get_subclass_type_var(tx, arg) for arg in overloaded_args])
+
+    if tx.symbolic_torch_function_state.in_torch_function_mode():
+        res = tx.symbolic_torch_function_state.call_torch_function_mode(
+            tx, fn, types, args, kwargs
+        )
+        if not (isinstance(res, ConstantVariable) and res.value is NotImplemented):
+            return res
+
     for arg in overloaded_args:
         res = arg.call_torch_function(
             tx,
             fn,
-            TupleVariable([_get_subclass_type_var(tx, arg) for arg in overloaded_args]),
+            types,
             args,
             kwargs,
         )
