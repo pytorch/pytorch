@@ -1342,6 +1342,17 @@ def forward(self, pred_1, x_1):
             )
         self.assertEqual(cumsum1, cumsum_exp)
 
+    def test_scan_y_less_ndim_then_dim(self):
+        def combine_fn(carry, x):
+            return carry @ x, (carry @ x).sum()
+
+        init = torch.randn(4, 3)
+        xs = torch.randn(3, 3, 2)
+        dim = 2
+        out = scan(combine_fn, init, xs, dim=dim)
+        exp_out = _fake_scan(combine_fn, init, xs, dim=dim)
+        self.assertEqual(out, exp_out)
+
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])

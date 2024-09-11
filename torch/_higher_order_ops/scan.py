@@ -219,8 +219,8 @@ def generic_scan(operator, init, xs, dim=0, reverse=False):
         # Pre-alocate
         # outs -> Output matrix
         # idxs -> Index matrix for scatter_
-        # out: (M, N, num_elems, ...)
-        # idx: (M, N, 1, ...)
+        # out: (num_elems, M, N, ...)
+        # idx: (1, M, N)
         outs, idxs = zip(
             *[
                 [
@@ -239,9 +239,9 @@ def generic_scan(operator, init, xs, dim=0, reverse=False):
             # Store the intermediate out in the outs matrix
             for o, x, idx in zip(outs, out, idxs):
                 # o: (num_elems, M, N ...)
-                # x: (M, N, ...) -> (M, N)
+                # x: (M, N, ...) -> (1, M, N)
                 # ind * idx: (1, M, N,) with values to be ind
-                # o[idx[m][n][k]][n][k] = x[m][n][k]
+                # essentially: o[ind][n][k] = x[0][n][k]
                 o.scatter_(0, ind * idx, x.unsqueeze(0))
 
         for i in range(num_elems):
@@ -334,7 +334,7 @@ def trace_scan(
         )
         out = (
             *fake_carry,
-            *tuple(stack_y(t, scan_length) for t in fake_outputs),
+            *(stack_y(t, scan_length) for t in fake_outputs),
         )
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
@@ -364,13 +364,13 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, dim, reverse):
         carry, outputs = _extract_carry_and_out(
             combine_fn(
                 *init,
-                *[torch.select_copy(inp, dim, 0) for inp in xs],
+                *[first_slice_copy(inp, dim) for inp in xs],
             ),
             len(init),
         )
         out = (
             *carry,
-            *tuple(stack_y(t, scan_length) for t in outputs),
+            *(stack_y(t, scan_length) for t in outputs),
         )
         return out
 
@@ -383,7 +383,7 @@ def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse):
         functional_combine_fn = ctx.functionalize(combine_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         sample_unwrapped_xs_sliced = [
-            torch.select_copy(inp, dim, 0) for inp in unwrapped_xs
+            first_slice_copy(inp, dim) for inp in unwrapped_xs
         ]
         sample_inputs = list(
             itertools.chain(
