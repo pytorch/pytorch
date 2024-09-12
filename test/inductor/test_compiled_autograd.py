@@ -20,11 +20,12 @@ import torch.nn.functional as F
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.backends.debugging import aot_eager
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import skipIfWindows
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU, HAS_XPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -812,10 +813,7 @@ main()
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_issue106555(self):
-        if HAS_CUDA:
-            DEVICE = torch.device("cuda:0")
-        elif HAS_XPU:
-            DEVICE = torch.device("xpu:0")
+        DEVICE = torch.device(GPU_TYPE, 0)
         NUM_FEATURES = 256
 
         def bias_sigmoid_mul(x1, x2, bias):
@@ -858,10 +856,8 @@ main()
                 x = x + self.module_with_jit_2(x.transpose(-2, -3)).transpose(-2, -3)
                 return x
 
-        if HAS_CUDA:
-            torch.cuda.set_device(device=DEVICE)
-        elif HAS_XPU:
-            torch.xpu.set_device(device=DEVICE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        device_interface.set_device(device=DEVICE)
         torch.manual_seed(1234567890)
         model = Model()
         model.train()
@@ -2101,19 +2097,16 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
     def test_free_activation_memory(self):
         script = """
 import torch
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_XPU
+from torch._dynamo.device_interface import get_interface_for_device
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 def main():
-    device_module = None
-    if HAS_CUDA:
-        device_module = torch.cuda
-    elif HAS_XPU:
-        device_module = torch.xpu
-    assert(device_module.memory_allocated() == 0)
+    device_interface = get_interface_for_device(GPU_TYPE)
+    assert(device_interface.memory_allocated() == 0)
 
     # Use an op to check that the memory is freed by the time the op is executed
     def assertion_impl(to_clone):
-        mem_allocated = device_module.memory_allocated()
+        mem_allocated = device_interface.memory_allocated()
         assert mem_allocated < 4000000  # some activations should be freed
         return to_clone.clone()
 
@@ -2137,7 +2130,7 @@ def main():
 
         # allocate at least 4,000,000 bytes (1,000,000 * 4 bytes)
         activations = [torch.ones(1000000, dtype=torch.float32, device=GPU_TYPE)]
-        assert device_module.memory_allocated() > 4000000
+        assert device_interface.memory_allocated() > 4000000
 
         out = compiled_fn(activations)
         assert len(activations) == 0
@@ -2152,19 +2145,16 @@ main()
 
         script = """
 import torch
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_XPU
+from torch._dynamo.device_interface import get_interface_for_device
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 def main():
-    device_module = None
-    if HAS_CUDA:
-        device_module = torch.cuda
-    elif HAS_XPU:
-        device_module = torch.xpu
-    assert device_module.memory_allocated() == 0
+    device_interface = get_interface_for_device(GPU_TYPE)
+    assert device_interface.memory_allocated() == 0
 
     # Use an op to check that the memory is freed by the time the op is executed
     def assertion_impl(to_clone):
-        mem_allocated = device_module.memory_allocated()
+        mem_allocated = device_interface.memory_allocated()
         assert mem_allocated < 1200000  # some activations should be freed
         assert mem_allocated > 800000  # currently subclasses don't seem to be freed in inductor
         return to_clone.clone()
@@ -2202,13 +2192,14 @@ def main():
             torch.ones((1, 100000), device=GPU_TYPE),  # 400,000 bytes
         ]
         # 1,200,000 bytes (3 * 4 * 100,000 bytes)
-        assert device_module.memory_allocated() > 1200000
+        assert device_interface.memory_allocated() > 1200000
 
         out = compiled_fn(activations)
         assert len(activations) == 0
 
 main()
         """
+        self.run_as_subprocess(script)
 
     def test_callback_graph_break_throws_error(self):
         called = [0]
