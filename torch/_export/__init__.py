@@ -216,6 +216,20 @@ def capture_pre_autograd_graph(
     return module
 
 
+# We only want to print this once to avoid flooding logs in workflows where aot_compile_warning
+# is called multiple times.
+@lru_cache
+def aot_compile_warning():
+    from torch._inductor import config
+
+    log.warning("+============================+")
+    log.warning("|     !!!   WARNING   !!!    |")
+    log.warning("+============================+")
+    log.warning(
+        "torch._export.aot_compile() is being deprecated, please switch to "
+        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export()) instead.")
+
+
 def aot_compile(
     f: Callable,
     args: Tuple[Any],
@@ -265,6 +279,8 @@ def aot_compile(
     from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
     from torch._inductor import config
+
+    aot_compile_warning()
 
     if config.is_predispatch:
         gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()

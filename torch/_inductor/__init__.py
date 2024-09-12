@@ -40,7 +40,18 @@ def aoti_compile_and_package(
 ) -> str:
     """
     Compiles the exported program with AOTInductor, and packages it into a .pt2
-    file specified by the input package_path.
+    artifact specified by the input package_path. To load the package, you can
+    call `torch._inductor.package.load_package(package_path)`.
+
+    Args:
+        exported_program: An exported program created through a call from torch.export
+        args: Example positional inputs
+        kwargs: Optional example keyword inputs
+        package_path: Optional specified path to the generated .pt2 artifact.
+        inductor_configs: Optional dictionary of configs to control inductor.
+
+    Returns:
+        Path to the generated artifact
     """
     from torch._inductor.package import package_aoti
     from torch.export import ExportedProgram
