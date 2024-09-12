@@ -787,8 +787,12 @@ class WrapperCodeGen(CodeGen):
     def generate_extern_kernel_out(
         self, kernel: str, out: str, out_view: Optional[str], args: List[str]
     ):
+        # add debug printer code for triton kernel calls at (jit) inductor level
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         args.append(f"out={out_view if out_view else out}")
-        self.writeline(f"{kernel}({', '.join(args)})")
+        with debug_printer_manager:
+            self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
         self,
