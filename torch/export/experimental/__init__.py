@@ -58,7 +58,6 @@ def _export_forward_backward(
     ep = _decompose_exported_program(
         ep,
         decomp_table=core_aten_decompositions(),
-        _preserve_ops=(),  # type: ignore[arg-type]
         joint_loss_index=joint_loss_index,
     )
     gm, new_graph_signature = _copy_graph_module_and_signature(ep)

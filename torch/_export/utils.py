@@ -45,6 +45,10 @@ placeholder_prefixes = {
 }
 
 
+def is_fbcode() -> bool:
+    return not hasattr(torch.version, "git_version")
+
+
 def _collect_and_set_constant_attrs(
     graph_signature, constants, mod
 ) -> "ConstantAttrMap":

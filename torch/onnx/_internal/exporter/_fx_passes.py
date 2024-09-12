@@ -15,13 +15,20 @@ def decompose_with_registry(
 
     This function is needed so it shows clearly on the profiler results.
     """
+    from torch._decomp import decomp_table_to_post_autograd_aten
     onnx_registered_ops = set(_decomp.get_onnx_implemented_overloads(registry))
     decomp_table = _decomp.create_onnx_friendly_decomposition_table(onnx_registered_ops)
+    decomp_table.update(decomp_table_to_post_autograd_aten())
     # Try to preserve some known CompositeImplicitAutograd ops
     to_preserve = _decomp.get_preserve_ops()
     # We can only preserve implemented ops
     can_preserve = tuple(to_preserve.intersection(onnx_registered_ops))
-    return exported_program.run_decompositions(decomp_table, _preserve_ops=can_preserve)
+    for op in can_preserve:
+        if op in decomp_table:
+            del decomp_table[op]
+    # We shouldn't put HOPs into the decomp table, because it is undefined behavior
+    decomp_table = {k: v for k, v in decomp_table.items() if hasattr(k, "_schema")}
+    return exported_program.run_decompositions(decomp_table)
 
 
 def insert_type_promotion_nodes(
