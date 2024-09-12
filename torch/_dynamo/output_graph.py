@@ -1834,8 +1834,14 @@ class SubgraphTracer(fx.Tracer):
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
         self.prev_inst = None
-        self.under_checkpoint = False
-        self.ignore_side_effects = False
+        # True if this tracer is currently tracing into torch.utils.checkpoint
+        # as part of speculate_subgraph.
+        self.under_activation_checkpoint = False
+        # True if we want to allow side-effects (doesn't throw error on their existence)
+        # during this tracer's tracing of torch.utils.checkpoint (via speculate_subgraph).
+        # Only safe if we know for sure that *NOT* replaying these side-effects during
+        # backward recomputation of the checkpoint region doesn't affect its correctness.
+        self.allow_side_effects_under_checkpoint = False
 
         self._cur_code = None
         self._orig_gm_meta = None

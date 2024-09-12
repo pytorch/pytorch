@@ -150,6 +150,14 @@ class SideEffects:
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
+    def should_allow_side_effects_under_checkpoint(self):
+        output_graph = self.output_graph_weakref()
+        return (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
+            and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
+        )
+
     def check_allowed_side_effect(self, item):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
@@ -157,11 +165,7 @@ class SideEffects:
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
             return True
-        output_graph = self.output_graph_weakref()
-        if (
-            output_graph
-            and output_graph.current_tx.output.current_tracer.ignore_side_effects
-        ):
+        if self.should_allow_side_effects_under_checkpoint():
             return True
         if not is_side_effect_safe(item.mutable_local):
             unimplemented(
@@ -713,10 +717,11 @@ class SideEffects:
 
 
 @contextlib.contextmanager
-def ignore_side_effects(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
-    orig_val = tx.output.current_tracer.ignore_side_effects
+def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
+    assert tx.output.current_tracer.under_activation_checkpoint
+    orig_val = tx.output.current_tracer.allow_side_effects_under_checkpoint
     try:
-        tx.output.current_tracer.ignore_side_effects = True
+        tx.output.current_tracer.allow_side_effects_under_checkpoint = True
         yield
     finally:
-        tx.output.current_tracer.ignore_side_effects = orig_val
+        tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val

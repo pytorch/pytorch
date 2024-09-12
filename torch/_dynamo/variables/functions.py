@@ -323,8 +323,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 tx, self.fn, self.get_name(), args, kwargs
             )
         if (
-            tx.output.current_tracer.under_checkpoint
-            and not tx.output.current_tracer.ignore_side_effects
+            tx.output.current_tracer.under_activation_checkpoint
+            and not tx.output.current_tracer.allow_side_effects_under_checkpoint
         ):
             try:
                 from torch.distributed._composable.fsdp._fsdp_state import FSDPState
@@ -334,7 +334,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 FSDPState._pre_forward,
                 FSDPState._post_forward,
             ]:
-                with torch._dynamo.side_effects.ignore_side_effects(tx):
+                with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
