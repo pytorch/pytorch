@@ -4,6 +4,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
+import heapq
 import itertools
 import logging
 import math
@@ -72,11 +73,44 @@ loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
 
 @dataclasses.dataclass
+class InputBuffer:
+    dep: Dep
+    size_free: int
+    users: List[NodeUser] = dataclasses.field(default_factory=list)
+    succ_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
+        default_factory=OrderedSet
+    )
+    outdegree: int = 0
+
+    def get_name(self) -> str:
+        return self.dep.name
+
+    def set_users(self, users: List[NodeUser]) -> None:
+        # deduplicate
+        result: Dict[int, NodeUser] = {}
+        for use in users:
+            if id(use.node) in result:
+                result[id(use.node)] = use.merge(result[id(use.node)])
+            else:
+                result[id(use.node)] = use
+        self.users = list(result.values())
+
+    def __hash__(self) -> int:
+        return hash(self.dep.name)
+
+
+@dataclasses.dataclass
 class SchedulerBuffer:
     scheduler: Scheduler
     node: ir.Buffer
     defining_op: BaseSchedulerNode
     users: List[NodeUser] = dataclasses.field(default_factory=list)
+    size_alloc: int = 0
+    size_free: int = 0
+    succ_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
+        default_factory=OrderedSet
+    )
+    outdegree: int = 0
 
     def __hash__(self) -> int:
         return hash(self.node.name)
@@ -167,6 +201,14 @@ class BaseSchedulerNode:
     # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
     min_order: int
     max_order: int
+    pred_buffers: List[Union[SchedulerBuffer, InputBuffer]]
+    pred_nodes: List[BaseSchedulerNode]
+    succ_nodes: List[BaseSchedulerNode]
+    indegree: int
+    index: int
+    memory_to_free: int
+    size: int
+    measure: int
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
@@ -1765,6 +1807,9 @@ class Scheduler:
             buf.get_name(): buf for node in self.nodes for buf in node.get_outputs()
         }
         self.name_to_fused_node: Dict[str, BaseSchedulerNode] = self.name_to_node.copy()
+        self.name_to_input_buf: Dict[str, InputBuffer] = {}
+        if config.reorder_for_peak_memory:
+            self.get_freeable_input_buf()
 
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
@@ -1804,6 +1849,9 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
+        if config.reorder_for_peak_memory:
+            self.compute_size_for_scheduler_buffer()
+            self.nodes = self.reorder_for_peak_memory(self.nodes)
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
@@ -1899,6 +1947,22 @@ class Scheduler:
         self.nodes = [
             node for node in self.nodes if node.get_name() not in removed_node_names
         ] + list(fe_nodes)
+
+    def get_freeable_input_buf(self) -> None:
+        """
+        Create and keep track of all input buffers that can be freed during the program
+        """
+        for node in self.nodes:
+            for dep in node.read_writes.reads:
+                if (
+                    dep.name in V.graph.graph_inputs
+                    and not dep.name.startswith("primals_")
+                    and dep.name not in self.name_to_input_buf
+                ):
+                    self.name_to_input_buf[dep.name] = InputBuffer(
+                        dep,
+                        self.dep_size_hint(dep),
+                    )
 
     def compute_dependencies(self) -> None:
         """
@@ -2106,6 +2170,45 @@ class Scheduler:
             for buf in node.get_outputs():
                 buf.set_users(name_to_users[buf.get_name()].items)
 
+        if config.reorder_for_peak_memory:
+            # copy user information onto freeable input buffers
+            for input_buf_name, input_buf in self.name_to_input_buf.items():
+                input_buf.set_users(name_to_users[input_buf_name].items)
+
+    def compute_size_for_scheduler_buffer(self) -> None:
+        """
+        Compute the size of each scheduler buffer, including (1) memory allocated when
+        it is created and (2) memory deallocated when it is freed.
+
+        We specially handle the case of MultiOutputLayout.
+        Consider the following case:
+          buf0 = some_ops_with_multi_outputs(...)
+          buf1 = buf0[0] # assume 10 bytes
+          buf2 = buf0[1] # assume 20 bytes
+        In such cases,
+          buf0: at creation, 30 bytes allocated, when deleted, 0 bytes freed
+          buf1: at creation, 0 bytes allocated, when deleted, 10 bytes freed
+          buf2: at creation, 0 bytes allocated, when deleted, 20 bytes freed
+        """
+        # compute the size of SchedulerBuffer without MultiOutputLayout layout
+        for sched_buf in self.name_to_buf.values():
+            if not isinstance(sched_buf.node.layout, MultiOutputLayout):
+                sched_buf.size_alloc = V.graph.sizevars.size_hint(
+                    sched_buf.node.get_numel(), fallback=0
+                ) * get_dtype_size(sched_buf.node.get_dtype())
+                sched_buf.size_free = sched_buf.size_alloc
+
+        # compute the size of SchedulerBuffer with MultiOutputLayout layout
+        for sched_buf in self.name_to_buf.values():
+            if isinstance(sched_buf.node.layout, MultiOutputLayout):
+                for user in sched_buf.users:
+                    if isinstance(user.node, OutputNode):
+                        continue
+                    assert isinstance(user.node, BaseSchedulerNode)
+                    for buf in user.node.get_outputs():
+                        sched_buf.size_alloc += buf.size_alloc
+                        buf.size_alloc = 0
+
     def dead_node_elimination(self) -> None:
         """
         Remove any nodes without users
@@ -2143,8 +2246,323 @@ class Scheduler:
         for node in self.nodes:
             node.prune_weak_deps()
 
-    def topological_sort_schedule(
+    def map_successor_nodes_with_predecessor_buffers(self) -> None:
+        """
+        For scheduling and memory estimation, for each scheduler node, we maintain
+        a list of its dependency buffers (SchedulerBuffer and InputBuffer).
+        This is similar to node.read_writes.reads, which is a list of Dep.
+        Reversely, for each SchedulerBuffer / InputBuffer, assign its successor nodes.
+        A buffer's successor nodes determines when a buffer can be freed.
+        """
+        for node in self.nodes:
+            node.pred_buffers = []
+            for dep_name in {dep.name for dep in node.unmet_dependencies}:
+                sched_buf = self.name_to_buf.get(dep_name)
+                if sched_buf:
+                    node.pred_buffers.append(sched_buf)
+                    sched_buf.succ_nodes.add(node)
+            for dep_name in {
+                dep.name for dep in node.read_writes.reads - node.unmet_dependencies
+            }:
+                input_buf = self.name_to_input_buf.get(dep_name)
+                if input_buf:
+                    node.pred_buffers.append(input_buf)
+                    input_buf.succ_nodes.add(node)
+
+    def estimate_peak_memory(self, nodes: List[BaseSchedulerNode]) -> int:
+        """
+        Given a list of nodes in their execution order, estimate the peak memory, by
+        keeping track of the liveliness of SchedulerBuffers and InputBuffers.
+        """
+
+        # map each scheduler buffer to its size, start time, and end time
+        @dataclasses.dataclass
+        class BufferInfo:
+            buffer: Union[SchedulerBuffer, InputBuffer]
+            size_alloc: int
+            size_free: int
+            start_time: int
+            end_time: int
+
+        name_to_buf_info: Dict[str, BufferInfo] = {}
+        node_name_to_time: Dict[str, int] = {}
+
+        # assign start_time
+        for buf_name, input_buf in self.name_to_input_buf.items():
+            name_to_buf_info[buf_name] = BufferInfo(
+                input_buf, input_buf.size_free, input_buf.size_free, 0, 0
+            )
+        for t, node in enumerate(nodes):
+            node_name_to_time[node.get_name()] = t
+            for sched_buf in node.get_outputs():
+                name_to_buf_info[sched_buf.get_name()] = BufferInfo(
+                    sched_buf, sched_buf.size_alloc, sched_buf.size_free, t, t
+                )
+
+        # assign end_time
+        for buf_name, buf_info in name_to_buf_info.items():
+            succ_node_time = [
+                node_name_to_time[succ_node.get_name()]
+                for succ_node in buf_info.buffer.succ_nodes
+                if succ_node.get_name() in node_name_to_time
+            ]
+            if succ_node_time:
+                buf_info.end_time = max(succ_node_time)
+
+        # the end time of output buffers should be at the end of the horizon
+        for buf_name in V.graph.get_output_names():
+            if buf_name in name_to_buf_info:
+                name_to_buf_info[buf_name].end_time = len(nodes) - 1
+
+        # incremental memory changes at each time period
+        memory = [0 for _ in range(len(nodes) + 1)]
+
+        # for each buffer, update memory when created and when freed
+        for buf_name, buf_info in name_to_buf_info.items():
+            memory[buf_info.start_time] += buf_info.size_alloc
+            memory[buf_info.end_time + 1] -= buf_info.size_free
+
+        # get peak memory by compute the cumulative memories
+        max_memory = 0
+        cur_memory = 0
+        for t in range(len(nodes) + 1):
+            cur_memory += memory[t]
+            max_memory = max(max_memory, cur_memory)
+
+        return max_memory
+
+    def assign_predcessor_and_successor_nodes_to_nodes(self) -> None:
+        """
+        Assign to each scheduler node its predecessor and successor nodes.
+        """
+        for node in self.nodes:
+            node.pred_nodes = list(
+                {
+                    self.name_to_fused_node[pred_buffer.defining_op.get_name()]
+                    for pred_buffer in node.pred_buffers
+                    if (
+                        isinstance(pred_buffer, SchedulerBuffer)
+                        and pred_buffer.defining_op.get_name()
+                        in self.name_to_fused_node
+                    )
+                }
+            )
+            node.succ_nodes = list(
+                {
+                    succ_node
+                    for buffer in node.get_outputs()
+                    for succ_node in buffer.succ_nodes
+                }
+            )
+
+    def topological_sort_lpmf(
         self, nodes: List[BaseSchedulerNode]
+    ) -> List[BaseSchedulerNode]:
+        """
+        A bfs-based greedy topological order.
+        The algorithm maintain the max memory so far.
+        At every iteration, for each scheduleable node, it computes:
+         - how much memory needs to be allocated for the output buffers of this node;
+         - how much memory can be freed as a result of executing this node.
+        This gives us two values for each node:
+         (1) mem1: memory during the execution of the node;
+         (2) mem2: memory after executing the node, after some input buffers are freed.
+        The greedy approach select as follows:
+         (i) if there are nodes whose mem1 values are below the max memory so far,
+             then pick the node with the lowest mem2 value;
+         (ii) otherwise, pick the one with the lowest mem1 value.
+        """
+
+        # compute nodes' number of unmet dependencies (for schedulability)
+        # initialize the list of nodes ready to be scheduled
+        nodes_to_schedule: Set[BaseSchedulerNode] = set()
+        for node in nodes:
+            # note that .unmet_dependencies could have deps with the same name
+            # and in that case, it should only be counted once
+            node.indegree = len(node.pred_nodes)
+            if node.indegree == 0:
+                nodes_to_schedule.add(node)
+
+        # compute buffers' number of unmet successors (used to decide when to free)
+        for buf in list(self.name_to_buf.values()) + list(
+            self.name_to_input_buf.values()
+        ):
+            buf.outdegree = len(buf.succ_nodes)
+            if buf.get_name() in V.graph.get_output_names():
+                buf.outdegree += 1
+
+        # initialize memory estimations
+        live_memory = sum(
+            input_buf.size_free for input_buf in self.name_to_input_buf.values()
+        )
+
+        # this is the total output memory, which is a lower bound for peak memory
+        # note: need to hanlde cases where V.graph.get_output_names() has duplicates
+        output_memory = sum(
+            self.name_to_buf[buf_name].size_free
+            for buf_name in set(V.graph.get_output_names())
+            if buf_name in self.name_to_buf
+        )
+        max_memory = max(live_memory, output_memory)
+
+        # compute the amount of memory that is allocated when a node is scheduled
+        # and the amount of memory that can be freed when a node is scheduled
+        for i, node in enumerate(nodes):
+            node.index = i  # keep track of the original order
+            node.size = sum(buffer.size_alloc for buffer in node.get_outputs())
+            node.memory_to_free = 0
+            # 1. if a buffer read by this node is last used by this node
+            #    then the buffer can be freed
+            for buf in node.pred_buffers:
+                if buf.outdegree == 1:
+                    node.memory_to_free += buf.size_free
+            # 2. if a buffer written by this node is used internally and
+            #    not needed afterwards, it can be freed
+            for buf in node.get_outputs():
+                if buf.outdegree == 0:
+                    node.memory_to_free += buf.size_free
+
+        # schedule nodes one at a time
+        schedule: List[BaseSchedulerNode] = []
+        while nodes_to_schedule:
+            # select a node to schedule:
+            selected_node = min(
+                nodes_to_schedule,
+                key=lambda node: (
+                    max(live_memory + node.size, max_memory),
+                    node.size - node.memory_to_free,
+                    node.index,
+                ),
+            )
+            nodes_to_schedule.remove(selected_node)
+            schedule.append(selected_node)
+
+            # update memory usage
+            live_memory += selected_node.size
+            max_memory = max(max_memory, live_memory)
+            live_memory -= selected_node.memory_to_free
+
+            # update successor nodes and nodes_to_schedule
+            for succ_node in selected_node.succ_nodes:
+                assert succ_node.indegree > 0
+                succ_node.indegree -= 1
+                if succ_node.indegree == 0:
+                    nodes_to_schedule.add(succ_node)
+
+            # update predecessor nodes
+            for buf in selected_node.pred_buffers:
+                assert buf.outdegree > 0
+                buf.outdegree -= 1
+                if buf.outdegree == 1:
+                    for succ_node in buf.succ_nodes:
+                        succ_node.memory_to_free += buf.size_free
+
+        return schedule
+
+    def topological_sort_bfs(
+        self, nodes: List[BaseSchedulerNode]
+    ) -> List[BaseSchedulerNode]:
+        """
+        A BFS topological sort that selects nodes whose depednecies are executed
+        the earliest. This follows a FIFO idea.
+        """
+
+        @dataclasses.dataclass
+        class HeapElement:
+            priority: List[int]
+            node: BaseSchedulerNode
+
+            def __lt__(self, other: HeapElement) -> bool:
+                return self.priority < other.priority
+
+        def _node_priority(node: BaseSchedulerNode) -> List[int]:
+            assert node.indegree == 0
+            ids = sorted({pred_node.index for pred_node in node.pred_nodes})
+            ids.append(node.index)
+            return ids
+
+        # compute nodes' number of unmet dependencies (for schedulability)
+        # initialize the list of nodes ready to be scheduled
+        nodes_to_schedule: List[HeapElement] = []
+        for t, node in enumerate(nodes):
+            node.index = t
+            # note that .unmet_dependencies could have deps with the same name
+            # and in that case, it should only be counted once
+            node.indegree = len(node.pred_nodes)
+            if node.indegree == 0:
+                heapq.heappush(
+                    nodes_to_schedule, HeapElement(_node_priority(node), node)
+                )
+
+        # schedule nodes one at a time
+        schedule: List[BaseSchedulerNode] = []
+        while nodes_to_schedule:
+            # select a node to schedule
+            selected_node = heapq.heappop(nodes_to_schedule).node
+            selected_node.index = len(schedule)
+            schedule.append(selected_node)
+
+            # update successor nodes and nodes_to_schedule
+            for succ_node in selected_node.succ_nodes:
+                assert succ_node.indegree > 0
+                succ_node.indegree -= 1
+                if succ_node.indegree == 0:
+                    heapq.heappush(
+                        nodes_to_schedule,
+                        HeapElement(_node_priority(succ_node), succ_node),
+                    )
+        return schedule
+
+    def reorder_for_peak_memory(
+        self,
+        nodes: List[BaseSchedulerNode],
+    ) -> List[BaseSchedulerNode]:
+        """
+        Try a few heuristics based topological sort algorithms, and pick the one whose
+        resulting topological order has the lowest peak memory estimation.
+        """
+
+        @dataclasses.dataclass
+        class PeakMemoryResult:
+            order: List[BaseSchedulerNode]
+            peak_memory: int
+
+        # preparation --  as nodes are scheduled one at a time, these help
+        # keep track of when a buffer can be freed, and when a node can be scheduled
+        self.map_successor_nodes_with_predecessor_buffers()
+        self.assign_predcessor_and_successor_nodes_to_nodes()
+
+        # keep track of the peak memory estimates of different methods
+        peak_memory_diff_methods: List[PeakMemoryResult] = []
+
+        # the default
+        estimated_peak_memory = self.estimate_peak_memory(nodes)
+        peak_memory_diff_methods.append(PeakMemoryResult(nodes, estimated_peak_memory))
+
+        # lpmf based method
+        order_lpmf = self.topological_sort_lpmf(nodes)
+        assert len(order_lpmf) == len(nodes)
+        peak_memory_lpmf = self.estimate_peak_memory(order_lpmf)
+        peak_memory_diff_methods.append(PeakMemoryResult(order_lpmf, peak_memory_lpmf))
+
+        # bfs based method
+        order_bfs = self.topological_sort_bfs(nodes)
+        assert len(order_bfs) == len(nodes)
+        peak_memory_bfs = self.estimate_peak_memory(order_bfs)
+        peak_memory_diff_methods.append(PeakMemoryResult(order_bfs, peak_memory_bfs))
+
+        # dfs based method
+        order_dfs = self.topological_sort_schedule(nodes, order="size")
+        assert len(order_dfs) == len(nodes)
+        peak_memory_dfs = self.estimate_peak_memory(order_dfs)
+        peak_memory_diff_methods.append(PeakMemoryResult(order_dfs, peak_memory_dfs))
+
+        # get the optimal one
+        best_result = min(peak_memory_diff_methods, key=lambda x: x.peak_memory)
+        return best_result.order
+
+    def topological_sort_schedule(
+        self, nodes: List[BaseSchedulerNode], order: str = "default"
     ) -> List[BaseSchedulerNode]:
         """
         Ensure nodes is in topologically sorted order
@@ -2166,8 +2584,18 @@ class Scheduler:
         for node in nodes:
             for name in node.get_buffer_names():
                 name_to_node[name] = node
-        for node in nodes:
-            visit(node)
+        if order == "default":
+            for node in nodes:
+                visit(node)
+        if order == "size":
+            for t, node in enumerate(nodes):
+                node.index = t
+                node.size = sum(buffer.size_alloc for buffer in node.get_outputs())
+                node.measure = node.size + sum(
+                    pred_buf.size_free for pred_buf in node.pred_buffers
+                )
+            for node in sorted(nodes, key=lambda x: (x.measure, x.index)):
+                visit(node)
         return result
 
     def _get_unmet_dep_nodes(self, snode: BaseSchedulerNode) -> List[BaseSchedulerNode]:
