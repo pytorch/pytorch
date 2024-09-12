@@ -329,11 +329,13 @@ class BaseSchedulerNode:
     def get_first_name(self) -> str:
         return self.get_name()
 
+    @cache_on_self
     def get_operation_names(self) -> OrderedSet[str]:
-        return OrderedSet(node.get_name() for node in self.get_nodes())
+        return OrderedSet([node.get_name() for node in self.get_nodes()])
 
+    @cache_on_self
     def get_buffer_names(self) -> OrderedSet[str]:
-        return OrderedSet(out.get_name() for out in self.outputs)
+        return OrderedSet([out.get_name() for out in self.outputs])
 
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
