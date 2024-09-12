@@ -890,6 +890,25 @@ graph():
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
 
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
+    def test_real_tensor_for_max_op(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x = x[x > 0]
+                y = y[y > 0]
+                return max(x.shape[0], y.shape[0])
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
+        x = torch.zeros(64)
+        y = torch.ones(64)
+        self.assertEqual(ep.module()(x, x), model(x, x))
+        self.assertEqual(ep.module()(x, y), model(x, y))
+
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
             def forward(self, rv: torch.Tensor, t: torch.Tensor):
