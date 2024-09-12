@@ -4592,7 +4592,10 @@ class ShapeEnv:
             # assumption queries if expr has a relational node.
             if not r.is_Symbol or r != s:
                 replacements[s] = r
-        return safe_expand(expr.xreplace(replacements))
+        if replacements:
+            return safe_expand(expr.xreplace(replacements))
+        else:
+            return expr
 
     @_lru_cache
     def _update_divisible(self):
@@ -4626,8 +4629,9 @@ class ShapeEnv:
                     if self.replace(Mod(base, divisor)) in self.divisible and \
                             base == base1 and self.replace(Mod(base1, divisor1)) in self.divisible:
                         div_replacements[atom] = divisor1
-            expr = expr.xreplace(div_replacements)
-            expr = safe_expand(expr)
+            if div_replacements:
+                expr = expr.xreplace(div_replacements)
+                expr = safe_expand(expr)
         if expr.has(FloorDiv):
             div_replacements = {}
             pows = expr.atoms(sympy.Pow)
@@ -4636,13 +4640,14 @@ class ShapeEnv:
                 base, divisor = fd.args
                 if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = CleanDiv(base, divisor)
-            new_expr = expr.xreplace(div_replacements)
-            new_expr = safe_expand(new_expr)
-            new_pows = new_expr.atoms(sympy.Pow)
-            new_rationals = new_expr.atoms(sympy.Rational).difference(new_expr.atoms(sympy.Integer))
-            # divisions simplified away
-            if new_pows.issubset(pows) and new_rationals.issubset(rationals):
-                expr = new_expr
+            if div_replacements:
+                new_expr = expr.xreplace(div_replacements)
+                new_expr = safe_expand(new_expr)
+                new_pows = new_expr.atoms(sympy.Pow)
+                new_rationals = new_expr.atoms(sympy.Rational).difference(new_expr.atoms(sympy.Integer))
+                # divisions simplified away
+                if new_pows.issubset(pows) and new_rationals.issubset(rationals):
+                    expr = new_expr
         return expr
 
     @lru_cache(256)
