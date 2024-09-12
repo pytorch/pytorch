@@ -21,7 +21,8 @@ __all__ = [
     "register_decomposition",
     "get_decompositions",
     "core_aten_decompositions",
-    "decomp_table_to_post_autograd_aten",
+    "_decomp_table_to_post_autograd_aten",
+    "_special_op_to_preserve_cia"
 ]
 
 _T = TypeVar("_T")
@@ -288,25 +289,21 @@ def _is_cia_op(op: "OpOverload") -> bool:
     )
 
 
-def _is_special_op_to_decompose(*args, **kwargs):
-    kernel = kwargs["kernel"]
-    del kwargs["kernel"]
-    # Can't call kernel.decompose due to infinite recursion as
-    # we register this kernel to py_impl directly
-    dk = torch._C.DispatchKey.CompositeImplicitAutograd
-    if torch._C._dispatch_has_kernel_for_dispatch_key(
-        kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-    ):
-        return kernel._op_dk(dk, *args, **kwargs)
-    else:
-        return NotImplemented
-
-
-def _is_special_op_to_preserve(*args, **kwargs):
-    return NotImplemented
-
-
 def _collect_all_valid_cia_ops():
+    """
+    This is an util function that gets the all CIA functional ops. 
+
+    The algorithm is in 2 steps:
+      1. We first query C++ dispatcher to get the list of CIA ops 
+         and then we call getattr on torch.ops.aten to lazily populate 
+         them.
+
+      2. Sometimes, handful of ops have CIA registered in python dispatcher 
+         but not on the C++ side, these can't be caught at the first step.
+         So we walk again to get the final list.
+    """
+
+    # First step to lazily populate torch.ops.aten 
     cia_ops = torch._C._dispatch_get_registrations_for_dispatch_key(
         "CompositeImplicitAutograd"
     )
@@ -323,7 +320,8 @@ def _collect_all_valid_cia_ops():
             op_overload_name = split_list[1]
 
         _ = getattr(getattr(torch.ops.aten, op_name), op_overload_name)
-
+    
+    # Second step to finally compile the list of all valid ops
     cia_ops = set()
     for op in torch.ops.aten:
         op_packet = getattr(torch.ops.aten, op)
@@ -332,6 +330,35 @@ def _collect_all_valid_cia_ops():
             if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
                 cia_ops.add(op_overload)
     return cia_ops
+
+
+def _get_decomp_for_cia(op):
+    # [NOTE] Seperating out func.decompose
+    # Ideally we should be able to just register func.decompose but
+    # we can't as this decomp is gonna be registered to the py_impl.
+    # As a result it will infinitely recurse. So we first check if the op
+    # has py_impl entry for CIA and if it is we use that first. If not,
+    # we register C++ query to py_impl.
+    dk = torch._C.DispatchKey.CompositeImplicitAutograd
+    if dk in op.py_kernels and not isinstance(
+        op.py_kernels[dk], torch._C.DispatchKey
+    ):
+        return op.py_kernels[dk]
+
+    def _special_op_to_decompose_cia(*args, **kwargs):
+        kernel = kwargs["kernel"]
+        del kwargs["kernel"]
+        # Can't call kernel.decompose due to infinite recursion as
+        # we register this kernel to py_impl directly
+        dk = torch._C.DispatchKey.CompositeImplicitAutograd
+        if torch._C._dispatch_has_kernel_for_dispatch_key(
+            kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        ):
+            return kernel._op_dk(dk, *args, **kwargs)
+        else:
+            raise AssertionError(f"Expected {kernel} to have CompositeImplicitAutograd kernel")
+    
+    return partial(_special_op_to_decompose_cia, kernel=op)
 
 
 # See NOTE [Core ATen Ops]
@@ -381,35 +408,18 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             del decomp_table[k]
 
     for op in _collect_all_valid_cia_ops():
-        # [NOTE] Seperating out func.decompose
-        # Ideally we should be able to just register func.decompose but
-        # we can't as this decomp is gonna be registered to the py_impl.
-        # As a result it will infinitely recurse. So we first check if the op
-        # has py_impl entry for CIA and if it is we use that first. If not,
-        # we register C++ query to py_impl.
-        if (
-            torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels
-        ) and not isinstance(
-            op.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd],
-            torch._C.DispatchKey,
-        ):
-            decomp_table[op] = op.py_kernels[
-                torch._C.DispatchKey.CompositeImplicitAutograd
-            ]
-        else:
-            decomp_table[op] = partial(_is_special_op_to_decompose, kernel=op)
+        decomp_table[op] = _get_decomp_for_cia(op)
     return decomp_table
 
-
-def decomp_table_to_post_autograd_aten():
+# This table is a stop-gap table which replicates
+# the old behaviour of post-dispatch IR.
+# This table contains all functional CIA ops mapping 
+# to their default decomp. In old export, this will 
+# be decomposed implicitly.
+def _decomp_table_to_post_autograd_aten():
     decomp_table = {}
     for k in _collect_all_valid_cia_ops():
-        if torch._C.DispatchKey.CompositeImplicitAutograd in k.py_kernels:
-            decomp_table[k] = k.py_kernels[
-                torch._C.DispatchKey.CompositeImplicitAutograd
-            ]
-        else:
-            decomp_table[k] = partial(_is_special_op_to_decompose, kernel=k)
+        decomp_table[k] = _get_decomp_for_cia(k)
     return decomp_table
 
 

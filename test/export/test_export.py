@@ -20,7 +20,7 @@ from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._decomp import (
     core_aten_decompositions,
-    decomp_table_to_post_autograd_aten,
+    _decomp_table_to_post_autograd_aten,
     get_decompositions,
 )
 from torch._dynamo.test_case import TestCase
@@ -1061,7 +1061,7 @@ graph():
                 {}, _preserve_ops=(torch.ops.aten.linear.default,)
             )
         else:
-            decomp_table = decomp_table_to_post_autograd_aten()
+            decomp_table = _decomp_table_to_post_autograd_aten()
             del decomp_table[torch.ops.aten.linear.default]
             ep = ep.run_decompositions(decomp_table)
 
@@ -2574,6 +2574,36 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             export(
                 cf_stacklist(),
+                ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+                strict=strict,
+            )
+
+        class Box:
+            def __init__(self, content):
+                self.content = content
+
+        from torch.utils._pytree import register_pytree_node
+
+        register_pytree_node(
+            Box,
+            lambda box: ([box.content], None),  # flatten_fn
+            lambda contents, _context: Box(*contents),  # unflatten_fn
+            flatten_with_keys_fn=None,  # unflatten_fn
+            serialized_type_name="test_no_suggested_fixes_for_data_dependent_errors.Box",
+        )
+
+        class cf_stacklist_udd(torch.nn.Module):
+            def forward(self, xs, y):
+                box = Box(y.item())
+                # box.content is not a local, so we can't suggest a fix
+                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+
+        with self.assertRaisesRegex(
+            error_type,
+            "Could not guard on data-dependent expression u0 < 0",
+        ):
+            export(
+                cf_stacklist_udd(),
                 ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
                 strict=strict,
             )

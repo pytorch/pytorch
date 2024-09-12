@@ -224,17 +224,20 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
             op._dispatch_cache.clear()
 
 
+def _special_op_to_preserve_cia(*args, **kwargs):
+    "This is an special marker that tells our infra that we shouldn't decompose this op"
+    return NotImplemented
+
+
 @contextmanager
 def _override_decomp_aten_to_variants():
-    from torch._decomp import _is_special_op_to_preserve
-
     # Preserve variants of aten::to understanding that they are mutating/aliasing
     # and their CompositeImplicitAutograd kernels will not become NotImplemented.
     # We will later replace them with aten._to_copy when functionalizing.
     with _override_composite_implicit_decomp(
         {
-            torch.ops.aten.to.dtype_layout: _is_special_op_to_preserve,
-            torch.ops.aten.to.dtype: _is_special_op_to_preserve,
+            torch.ops.aten.to.dtype_layout: _special_op_to_preserve_cia,
+            torch.ops.aten.to.dtype: _special_op_to_preserve_cia,
         },
         safe=False,
     ):
@@ -242,16 +245,9 @@ def _override_decomp_aten_to_variants():
 
 
 def _split_decomp_table_to_cia_and_python_decomp(
-    decomp_table: Dict[torch._ops.OperatorBase, Callable], is_joint: bool
+    decomp_table: Dict[torch._ops.OperatorBase, Callable]
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
-    from torch._decomp import (
-        _collect_all_valid_cia_ops,
-        _core_aten_decompositions_post_autograd,
-        _is_special_op_to_preserve,
-    )
-
-    if is_joint:
-        return {}, _core_aten_decompositions_post_autograd()
+    from torch._decomp import _collect_all_valid_cia_ops
 
     all_preservable_cia_ops = _collect_all_valid_cia_ops()
     cia_ops_to_callable = {}
@@ -282,7 +278,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
     # If we reached here, it means user intentionally deleted these CIA ops from
     # decomp table.
     for k in all_preservable_cia_ops:
-        cia_ops_to_callable[k] = _is_special_op_to_preserve
+        cia_ops_to_callable[k] = _special_op_to_preserve_cia
 
     return cia_ops_to_callable, decomp_table
 
@@ -290,7 +286,8 @@ def _split_decomp_table_to_cia_and_python_decomp(
 def _decompose_and_get_gm_with_new_signature_constants(
     ep,
     *,
-    decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
+    python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
 ):
     from torch._functorch.aot_autograd import aot_export_module
@@ -304,22 +301,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace,
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-    # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
-    # At this point, we have a decomp_table that contains decomp behaviour for
-    # both CIA and post-autograd ops.
-    # We need to separate the op into two categories:
-    # 1. CIA op: These are the ops that we want to override
-    #    CompositeImplicitAutograd decomp for. For them, we need to use _override_composite_implicit_decomp
-    #    context manager to plumb it through AOTDispatcher
-    # 2. Non-CIA op: These ops are only relevant after AOTDIspatcher runs, so just
-    #    checking if they are statically functional is enough.
-    # For joint IR case tho, we need to use the old path because we can't register
-    # custom decomps this way because we can't use context manager as it installs
-    # autograd_error node.
-    cia_to_decomp, python_decomp = _split_decomp_table_to_cia_and_python_decomp(
-        decomp_table, joint_loss_index is not None
-    )
 
     # TODO Merge this path with inference IR decomp, but it will require some additional work
     # so I will leave it for now. T200307782
@@ -382,7 +363,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 {},
                 fake_params_buffers,
                 constant_attrs,
-                decomp_table=python_decomp,
+                decomp_table=python_decomp_table,
                 _check_autograd_state=False,
             )
 
@@ -422,7 +403,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
-            decompositions=python_decomp,
+            decompositions=python_decomp_table,
             trace_joint=True if joint_loss_index is not None else False,
             output_loss_index=joint_loss_index
             if joint_loss_index is not None
@@ -622,12 +603,14 @@ def _common_getitem_elimination_pass(
 def _decompose_exported_program(
     ep,
     *,
-    decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
+    python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
 ):
     gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
         ep,
-        decomp_table=decomp_table,
+        cia_to_decomp=cia_to_decomp,
+        python_decomp_table=python_decomp_table,
         joint_loss_index=joint_loss_index,
     )
 
@@ -1031,7 +1014,7 @@ class ExportedProgram:
         """
         from torch._decomp import (
             core_aten_decompositions,
-            decomp_table_to_post_autograd_aten,
+            _decomp_table_to_post_autograd_aten,
         )
         from torch._inductor import config
 
@@ -1051,16 +1034,31 @@ class ExportedProgram:
         if config.is_fbcode():
             # This means the decomp_table would only be containing post-autograd ops
             # We should manually add CIA decomps
-            for k, v in decomp_table_to_post_autograd_aten().items():
+            for k, v in _decomp_table_to_post_autograd_aten().items():
                 _decomp_table[k] = v
 
         for op in _preserve_ops:
             if op in _decomp_table:
                 del _decomp_table[op]
+        
+        # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
+        # At this point, we have a decomp_table that contains decomp behaviour for
+        # both CIA and post-autograd ops.
+        # We need to separate the op into two categories:
+        # 1. CIA op: These are the ops that we want to override
+        #    CompositeImplicitAutograd decomp for. For them, we need to use _override_composite_implicit_decomp
+        #    context manager to plumb it through AOTDispatcher
+        # 2. Non-CIA op: These ops are only relevant after AOTDIspatcher runs, so just
+        #    checking if they are statically functional is enough.
+        # For joint IR case tho, we need to use the old path because we can't register
+        # custom decomps this way because we can't use context manager as it installs
+        # autograd_error node.
+        cia_to_decomp, python_decomp_table = _split_decomp_table_to_cia_and_python_decomp(_decomp_table)
 
         return _decompose_exported_program(
             self,
-            decomp_table=_decomp_table,
+            cia_to_decomp=cia_to_decomp,
+            python_decomp_table=python_decomp_table,
             joint_loss_index=None,
         )
 
