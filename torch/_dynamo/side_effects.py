@@ -575,21 +575,36 @@ class SideEffects:
                 )
 
             elif isinstance(var, variables.ConstDictVariable):
+                # Reconstruct works as follow:
+                # (1) codegen(...) each pair of key/value
+                # (2) create a new dictionary with the pairs of key/values above
+                # (3) clear the original dictionary
+                #   + only if a key was removed from the input dict
+                # (4) update the original dictionary with the dict created in (2)
+
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.load_method("update")
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.load_method("clear")
+                if var.should_reconstruct_all:
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_method("clear")
 
                 suffixes.append(
                     [
-                        *create_call_method(0),  # clear
-                        create_instruction("POP_TOP"),
                         *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )
+
+                if var.should_reconstruct_all:
+                    suffixes.append(
+                        [
+                            *create_call_method(0),  # clear
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
             ):
