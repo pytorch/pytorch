@@ -348,6 +348,8 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     if config.is_fbcode():
         return decomp_table
 
+    aten = torch.ops.aten
+
     # We are deleting custom decomp in core_aten_decomp
     # for CIA ops but it should be fine technically
     # because this table is only meant to be used in export context
