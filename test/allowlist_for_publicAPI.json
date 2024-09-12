@@ -2092,6 +2092,7 @@
     "Node",
     "NodeList",
     "NodeSet",
+    "Optional",
     "SimpleQueue",
     "Tuple",
     "compatibility",
