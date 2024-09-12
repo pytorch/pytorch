@@ -1026,9 +1026,14 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
         emb = torch.nn.Embedding(100, 8, device=device)
         y = emb(x)
-        ys = y.unbind()
-        for i, inp in enumerate(inputs):
-            self.assertEqual(emb(inp), ys[i])
+
+        @torch._dynamo.disable
+        def check(inputs, y):
+            ys = y.unbind()
+            for i, inp in enumerate(inputs):
+                self.assertEqual(emb(inp), ys[i])
+
+        check(inputs, y)
 
     @skipMeta
     @torch.inference_mode()
@@ -5951,6 +5956,37 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertFalse(clone.is_contiguous())
         check_nt_equality(detached, transposed)
 
+    def test_permute(self, device):
+        nt = random_nt_from_dims(
+            [2, None, 3, 5], device, torch.float32, layout=torch.jagged
+        )
+        nt_shape = nt.shape
+        nt_inner_shape = nt.values().shape
+        with self.assertRaisesRegex(
+            ValueError,
+            r"permute\(\): number of dimensions in the tensor input \(4\) "
+            + r"does not match the length of the desired ordering of dimensions \(3\).",
+        ):
+            nt.permute(0, 2, 1)
+        with self.assertRaisesRegex(
+            ValueError, r"permute\(\): duplicate dims are not allowed."
+        ):
+            nt.permute(0, 2, -2, 3)
+        with self.assertRaisesRegex(
+            ValueError, "Permute is not supported on the batch dimension for jagged NT"
+        ):
+            nt.permute(1, 0, 2, 3)
+        nt_permute = nt.permute(0, 2, 1, -1)
+        self.assertEqual(
+            nt_permute.shape, (nt_shape[0], nt_shape[2], nt_shape[1], nt_shape[3])
+        )
+        self.assertEqual(
+            nt_permute.values().shape,
+            (nt_inner_shape[1], nt_inner_shape[0], nt_inner_shape[2]),
+        )
+        self.assertEqual(nt_permute._ragged_idx, 2)
+        self.assertEqual(nt_permute.permute(0, 2, 1, 3), nt)
+
     def test_to_dtype(self, device):
         nt = random_nt_from_dims(
             [2, None, 3], device, torch.float32, layout=torch.jagged
@@ -7121,9 +7157,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         a, b, c = nt.unbind()
         b.sum().backward()
 
-        expected_grad = torch.zeros_like(nt)
-        expected_grad.unbind()[1].add_(1.0)
-        torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
+        @torch._dynamo.disable
+        def check(nt):
+            expected_grad = torch.zeros_like(nt)
+            expected_grad.unbind()[1].add_(1.0)
+            self.assertEqual(nt.grad, expected_grad)
+
+        check(nt)
 
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])

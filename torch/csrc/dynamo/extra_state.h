@@ -16,6 +16,8 @@ extern "C" {
 
 // Flag to just run a frame normally
 #define SKIP_CODE ((void*)0x1)
+// Flag to run a frame and any recursive calls normally
+#define SKIP_CODE_RECURSIVE ((void*)0x2)
 
 // Points to the extra scratch space on the code object
 extern Py_ssize_t extra_index;
@@ -97,7 +99,7 @@ void destroy_extra_state(void* obj);
 //  - there is no return, but the extra_state is stolen, so it becomes
 //  set_extra_state responsibility to clean it up. It will be deleted during
 //  the reset_code/skip, when the set_extra_state is called with
-//  NULL/SKIP_CODE.
+//  NULL/SKIP_CODE/SKIP_CODE_RECURSIVE.
 
 // Invariant - Dont set the extra state for the extra state that is already on
 // the code object. Otherwise, we will first free up the old extra state
