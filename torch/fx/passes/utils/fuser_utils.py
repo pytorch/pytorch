@@ -105,6 +105,8 @@ def fuse_as_graphmodule(gm: GraphModule,
 
         module_name: class name for the fused GraphModule
 
+        partition_lookup_table (Optional[Dict[Node, None]]): optional dict of nodes to speed up lookup
+
     Returns:
         fused_gm (GraphModule): fused graph module, where its node is a copy of `nodes` in `gm`
 
@@ -124,7 +126,7 @@ def fuse_as_graphmodule(gm: GraphModule,
     # validates partition doesn't introduce dependency circles in the graph
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"
 
-    # if no provide dict of partition nodes, reconstruct it by nodes list to reduce lookup time
+    # if no dict of partition nodes is provided, reconstruct it by nodes list to reduce lookup time
     partition_lookup_table = dict.fromkeys(nodes) if partition_lookup_table is None else partition_lookup_table
 
     subgraph = Graph()
