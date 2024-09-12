@@ -318,8 +318,8 @@ def get_cpu_info(run_lambda):
     return cpu_info
 
 def get_xpu_env_info():
-    if not torch.xpu.is_available():
-        return "No XPU"
+    if not (TORCH_AVAILABLE and torch.xpu.is_available()):
+        return "N/A"
 
     run_lambda = run
 
