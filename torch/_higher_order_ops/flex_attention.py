@@ -233,6 +233,8 @@ def sdpa_dense(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    from torch._inductor.ir import get_stride_order
+
     out, lse = math_attention(
         query,
         key,
@@ -244,7 +246,8 @@ def sdpa_dense(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
-    out = out.contiguous()
+    out_stride_order = tuple(get_stride_order(query.stride()))
+    out = out.permute(out_stride_order)
     return out, lse
 
 
@@ -425,6 +428,8 @@ def flex_attention_fake_tensor_mode(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    from torch._inductor.ir import get_stride_order
+
     with mode:
         v_head_dim = value.size(-1)
         batch_size, num_heads, seq_len_q, q_head_dim = query.shape
@@ -432,7 +437,10 @@ def flex_attention_fake_tensor_mode(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
         out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
-        return query.new_empty(out_shape).contiguous(), logsumexp
+        out_stride_order = tuple(get_stride_order(query.stride()))
+        out = query.new_empty(out_shape)
+        out = out.permute(out_stride_order)
+        return out, logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------
