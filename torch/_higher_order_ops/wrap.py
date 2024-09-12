@@ -122,6 +122,9 @@ class WrapActivationCheckpoint(HigherOrderOperator):
         with fx_traceback.preserve_node_meta():
             return checkpoint(Interpreter(function).run, *args, **kwargs)
 
+    def pure(self):
+        return False
+
 
 wrap_activation_checkpoint = WrapActivationCheckpoint()
 
@@ -235,6 +238,9 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
             with fx_traceback.preserve_node_meta():
                 return Interpreter(gmod).run(*args)
+
+    def pure(self):
+        return False
 
 
 tag_activation_checkpoint = TagActivationCheckpoint()

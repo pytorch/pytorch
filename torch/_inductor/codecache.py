@@ -1263,11 +1263,12 @@ class FxGraphCache:
             log.debug("fx graph cache no shape env")
             raise BypassFxGraphCache("No shape env")
 
-        # HigherOrderOperators should be handled on a case-by-case basis.
-        # Currently, we just skip caching if we have any.
-        # We also skip if there are any torchbind objects.
+        # We skip caching if there are any torchbind objects.
         for node in gm.graph.nodes:
-            if isinstance(node.target, torch._ops.HigherOrderOperator):
+            if (
+                isinstance(node.target, torch._ops.HigherOrderOperator)
+                and not node.target.pure()
+            ):
                 raise BypassFxGraphCache(
                     f"Can't cache HigherOrderOperators: {node.target.name()}"
                 )

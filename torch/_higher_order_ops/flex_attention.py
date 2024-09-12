@@ -71,6 +71,9 @@ class FlexAttentionHOP(HigherOrderOperator):
             mask_mod_other_buffers,
         )
 
+    def pure(self):
+        return True
+
 
 flex_attention = FlexAttentionHOP()
 

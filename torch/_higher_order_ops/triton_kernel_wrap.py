@@ -533,6 +533,9 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
             kwargs=kwargs,
         )
 
+    def pure(self):
+        return False
+
 
 triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
@@ -550,6 +553,9 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
             kwargs=kwargs,
             tensors_to_clone=tensors_to_clone,
         )
+
+    def pure(self):
+        return False
 
 
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()

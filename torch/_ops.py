@@ -438,6 +438,12 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def name(self):
         return self._name
 
+    def pure(self):
+        """
+        Is this higher order operator side effect free?
+        """
+        return False
+
 
 def _to_flat_tuple(args, kwargs):
     return pytree.arg_tree_leaves(*args, **kwargs)
