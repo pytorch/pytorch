@@ -408,7 +408,7 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
-            if self.device_props.type != "hip":
+            if self.device_props.type == "hip":
                 if "waves_per_eu" in compile_meta:
                     options["waves_per_eu"] = compile_meta["waves_per_eu"]
                 if "matrix_instr_nonkdim" in compile_meta:
