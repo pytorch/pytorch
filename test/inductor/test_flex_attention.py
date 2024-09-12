@@ -5,7 +5,7 @@ import functools
 import string
 from collections import namedtuple
 from contextlib import contextmanager
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
