@@ -635,12 +635,22 @@ def _get_param_module_infos(
 
 class RegisterPostBackwardFunction(torch.autograd.Function):
     @staticmethod
+    def _assert_not_using_compiled_autograd():
+        assert not ca.compiled_autograd_enabled, """\
+When compiled autograd is enabled, we rely on `root_post_backward_callback` to call
+each `FSDPParamGroup.post_backward`, and we should not be calling into `RegisterPostBackwardFunction`.
+If you are here, it means the forward part of this FSDP2 instance is not compiled, and you must also
+compile the forward part if you want to use compiled autograd."""
+
+    @staticmethod
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
+        RegisterPostBackwardFunction._assert_not_using_compiled_autograd()
         ctx.param_group = param_group
         return inputs
 
     @staticmethod
     def backward(ctx, *grads: torch.Tensor):
+        RegisterPostBackwardFunction._assert_not_using_compiled_autograd()
         ctx.param_group.post_backward()
         return (None,) + grads
