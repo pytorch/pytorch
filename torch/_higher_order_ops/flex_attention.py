@@ -192,6 +192,13 @@ def math_attention(
     value = torch.repeat_interleave(value, G, dim=1)
     key = torch.repeat_interleave(key, G, dim=1)
 
+    Bq, Bkv = query.size(0), key.size(0)
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
+
+    key = key.expand((Bq, *key.size()[1:]))
+    value = value.expand((Bq, *value.size()[1:]))
+
     _, post_mod_scores = _math_attention_inner(
         query,
         key,
@@ -686,6 +693,18 @@ def sdpa_dense_backward(
     score_mod_other_buffers: Tuple,
     mask_mod_other_buffers: Tuple,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Get outputs before calling repeat interleave
+    actual_grad_query = torch.empty_like(query)
+    actual_grad_key = torch.empty_like(key)
+    actual_grad_value = torch.empty_like(value)
+
+    Bq, Bkv = query.size(0), key.size(0)
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
+
+    key = key.expand((Bq, *key.size()[1:]))
+    value = value.expand((Bq, *value.size()[1:]))
+
     G = query.size(1) // key.size(1)
     key = torch.repeat_interleave(key, G, dim=1)
     value = torch.repeat_interleave(value, G, dim=1)
@@ -767,7 +786,20 @@ def sdpa_dense_backward(
     grad_key = torch.sum(grad_key, 2, keepdim=False)
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
-    return grad_query.contiguous(), grad_key.contiguous(), grad_value.contiguous()
+    if Bq != Bkv:
+        assert (
+            Bq > 1 and Bkv == 1
+        ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
+
+        # Reduce DK, DV along broadcasted batches.
+        grad_key = torch.sum(grad_key, 0, keepdim=True)
+        grad_value = torch.sum(grad_value, 0, keepdim=True)
+
+    actual_grad_query.copy_(grad_query)
+    actual_grad_key.copy_(grad_key)
+    actual_grad_value.copy_(grad_value)
+
+    return actual_grad_query, actual_grad_key, actual_grad_value
 
 
 def trace_flex_attention_backward(
