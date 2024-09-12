@@ -54,6 +54,9 @@ class CondOp(HigherOrderOperator):
     def __call__(self, pred, true_fn, false_fn, operands):
         return super().__call__(pred, true_fn, false_fn, operands)
 
+    def pure(self):
+        return True
+
 
 cond_op = CondOp()
 

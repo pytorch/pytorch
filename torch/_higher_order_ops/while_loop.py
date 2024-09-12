@@ -55,6 +55,9 @@ class WhileLoopOp(HigherOrderOperator):
             )
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
+    def pure(self):
+        return True
+
 
 while_loop_op = WhileLoopOp()
 

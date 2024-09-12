@@ -39,6 +39,9 @@ class MapWrapper(HigherOrderOperator):
     def __call__(self, xs, *args):
         return map_wrapper(xs, *args)
 
+    def pure(self):
+        return True
+
 
 class MapImpl(HigherOrderOperator):
     def __init__(self):
@@ -46,6 +49,9 @@ class MapImpl(HigherOrderOperator):
 
     def __call__(self, *args, **kwargs):
         return super().__call__(*args, **kwargs)
+
+    def pure(self):
+        return True
 
 
 map = MapWrapper()

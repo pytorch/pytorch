@@ -192,6 +192,9 @@ class ScanOp(HigherOrderOperator):
     def __call__(self, combine_fn, init, xs, dim, reverse):
         return super().__call__(combine_fn, init, xs, dim, reverse)
 
+    def pure(self):
+        return True
+
 
 scan_op = ScanOp()
 

@@ -214,6 +214,9 @@ class AutoFunctionalized(HigherOrderOperator):
         assert isinstance(kwargs, dict)
         return super().__call__(_mutable_op, **kwargs)
 
+    def pure(self):
+        return True
+
 
 auto_functionalized = AutoFunctionalized()
 auto_functionalized.__module__ = "torch.ops.higher_order"
@@ -242,6 +245,9 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
         return super().__call__(_mutable_op, **kwargs)
+
+    def pure(self):
+        return True
 
 
 auto_functionalized_v2 = AutoFunctionalizedV2()
