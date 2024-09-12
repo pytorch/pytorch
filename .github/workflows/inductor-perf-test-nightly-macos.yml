@@ -1,0 +1,69 @@
+name: perf-nightly-macos
+# Technically not an inductor test, but uses it as a template for tracking macos performance
+
+on:
+  push:
+    tags:
+      - ciflow/mps/*
+  # NB: GitHub has an upper limit of 10 inputs here
+  workflow_dispatch:
+    inputs:
+      training:
+        description: Run training (on by default)?
+        required: false
+        type: boolean
+        default: true
+      inference:
+        description: Run inference (off by default)?
+        required: false
+        type: boolean
+        default: false
+      benchmark_configs:
+        description: The list of configs used the benchmark
+        required: false
+        type: string
+        default: torchbench_perf_mps
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  macos-py3-arm64-build:
+    name: macos-py3-arm64
+    uses: ./.github/workflows/_mac-build.yml
+    with:
+      sync-tag: macos-py3-arm64-build
+      build-environment: macos-py3-arm64
+      runner-type: macos-m1-stable
+      build-generates-artifacts: true
+      # To match the one pre-installed in the m1 runners
+      python-version: 3.9.12
+      # The runner macos-m2-14 is not a typo, it's a custom runner that is different
+      # than our AWS macos-m1-14 runners
+      test-matrix: |
+        { include: [
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
+        ]}
+      selected-test-configs: ${{ inputs.benchmark_configs }}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
+  macos-py3-arm64-mps-torchbench:
+    name: macos-py3-arm64-mps-torchbench
+    uses: ./.github/workflows/_mac-test-mps.yml
+    needs: macos-py3-arm64-build
+    # if: github.event.schedule == '0 7 * * *'
+    with:
+      sync-tag: macos-py3-arm64-mps-test
+      build-environment: macos-py3-arm64
+      dashboard-tag: training-true-inference-true-default-true-mps
+      test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
+      timeout-minutes: 720
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
