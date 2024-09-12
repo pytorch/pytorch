@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_onednn_rnn_layer(
     AtenTensorHandle input,
     AtenTensorHandle weight0,
     AtenTensorHandle weight1,
