@@ -1177,7 +1177,7 @@ class GitHubPR:
 
         # When the merge process reaches this part, we can assume that the commit
         # has been successfully pushed to trunk
-        merge_commit_sha = repo.rev_parse(name=REMOTE_MAIN_BRANCH)
+        merge_commit_sha = repo.rev_parse(name=self.default_branch())
 
         if comment_id and self.pr_num:
             # Finally, upload the record to Rockset. The list of pending and failed
@@ -1208,7 +1208,7 @@ class GitHubPR:
         # commit message and close the PR, but sometimes it doesn't, leading to
         # confusion.  When it doesn't, we close it manually.
         time.sleep(60)  # Give Github some time to close the PR
-        close_merged_pr(
+        manually_close_merged_pr(
             pr=self,
             additional_merged_prs=additional_merged_prs,
             merge_commit_sha=merge_commit_sha,
@@ -1515,7 +1515,7 @@ def checks_to_markdown_bullets(
     ]
 
 
-def close_merged_pr(
+def manually_close_merged_pr(
     pr: GitHubPR,
     additional_merged_prs: List[GitHubPR],
     merge_commit_sha: str,
@@ -1524,9 +1524,8 @@ def close_merged_pr(
     pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
     if not pr.is_closed():
         message = (
-            f"PR {pr.pr_num} appears to have been merged in {merge_commit_sha}, "
-            "but it is still open, likely due to a Github bug, "
-            "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen."
+            f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
+            "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra."
         )
         gh_post_pr_comment(pr.org, pr.project, pr.pr_num, message, dry_run)
         gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
@@ -1536,9 +1535,9 @@ def close_merged_pr(
         )
         if not additional_pr.is_closed():
             message = (
-                f"PR {pr.pr_num} was merged as part of PR {pr.pr_num} in the stack under {merge_commit_sha}, "
-                "but it is still open, likely due to a Github bug, "
-                "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen."
+                f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
+                "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
+                "If you think this is a mistake, please feel free to reopen and contact Dev Infra."
             )
             gh_post_pr_comment(
                 additional_pr.org,
@@ -1550,6 +1549,7 @@ def close_merged_pr(
             gh_close_pr(
                 additional_pr.org, additional_pr.project, additional_pr.pr_num, dry_run
             )
+    print(f"PR {pr.pr_num} and all additional PRs in the stack have been closed.")
 
 
 @retries_decorator()
