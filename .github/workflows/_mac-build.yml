@@ -49,6 +49,13 @@ on:
         type: boolean
         default: false
         description: If true, use the Github cache as the storage option for sccache instead of S3.
+      selected-test-configs:
+        description: |
+          A comma-separated list of test configurations from the test matrix to keep,
+          The empty list means we are going to keep every configurations by defaults
+        required: false
+        type: string
+        default: ""
 
     outputs:
       test-matrix:
