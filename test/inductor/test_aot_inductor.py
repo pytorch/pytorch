@@ -1336,15 +1336,19 @@ class AOTInductorTestsTemplate:
                 return x + b
 
         example_inputs = (
-            x := torch.randn((3, 2), device=self.device),
+            torch.randn((3, 2), device=self.device),
             torch.randn((1, 2), device=self.device),
         )
-        torch._dynamo.mark_dynamic(x, index=0)  # Create dynamic symbol
+        dynamic_shapes = {
+            "x": {0: Dim("dx"), 1: Dim.STATIC},
+            "b": None,
+        }
 
         # Compile & run model where dynamic dim size > 0.
         so_path: str = AOTIRunnerUtil.compile(
             Repro(),
             example_inputs,
+            dynamic_shapes=dynamic_shapes,
         )
         aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
         aot_inductor_module(*example_inputs)
