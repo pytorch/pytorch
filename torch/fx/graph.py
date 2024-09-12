@@ -37,6 +37,8 @@ _origin_type_map = {
     tuple: Tuple,
 }
 
+_legal_ops = dict.fromkeys(['call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output'])
+
 
 # Signature for functions thattransforms the body (`list[str]`) of the
 # generated code
@@ -1010,7 +1012,7 @@ class Graph:
 
             The newly-created and inserted node.
         """
-        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
+        assert op in _legal_ops
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         assert isinstance(args, tuple), "args must be a tuple"
