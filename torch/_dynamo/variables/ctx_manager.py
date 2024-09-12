@@ -980,13 +980,6 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
 class SDPAKernelVariable(ContextWrappingVariable):
     """represents torch.nn.attention.sdpa_kernel"""
 
-    _backend_list = [
-        "cudnn",
-        "flash",
-        "mem_efficient",
-        "math",
-    ]
-
     @staticmethod
     def create(tx: "InstructionTranslator", backends, **kwargs):
         if isinstance(backends, torch.nn.attention.SDPBackend):
