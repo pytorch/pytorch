@@ -15,8 +15,9 @@ import torch.onnx.operators
 from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch._streambase import _StreamBase
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
-from .. import config, polyfill, variables
+from .. import config, polyfills, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
     can_convert_to_tracable_parameter,
@@ -26,7 +27,7 @@ from ..create_parameter_op import (
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import SyntheticLocalSource
+from ..source import CallFunctionNoArgsSource, SyntheticLocalSource
 from ..utils import (
     check_unspec_or_constant_args,
     guard_if_dyn,
@@ -44,7 +45,11 @@ from .ctx_manager import (
 )
 from .distributed import DistributedVariable, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
-from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+from .torch_function import (
+    can_dispatch_torch_function,
+    dispatch_torch_function,
+    TorchFunctionModeStackVariable,
+)
 
 
 try:
@@ -95,6 +100,10 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     ]
 )
 
+constant_fold_functions_need_guards = [
+    torch.cuda.current_device,
+]
+
 constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
@@ -115,7 +124,7 @@ constant_fold_functions = [
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
     torch.autograd._is_checkpoint_valid,
-]
+] + constant_fold_functions_need_guards
 if torch.distributed.is_available():
     constant_fold_functions.extend(
         [
@@ -125,6 +134,7 @@ if torch.distributed.is_available():
         ]
     )
 # Convert to dict for O(1) access times
+constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need_guards)
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
@@ -150,10 +160,7 @@ class BaseTorchVariable(VariableTracker):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -171,9 +178,6 @@ class BaseTorchVariable(VariableTracker):
 
     def as_proxy(self):
         return self.value
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -398,7 +402,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx: "InstructionTranslator", *args, **kwargs):
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.accumulate_grad), args, kwargs
+                SourcelessBuilder.create(tx, polyfills.accumulate_grad), args, kwargs
             )
 
         @register(math.radians)
@@ -406,7 +410,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfill.radians), args, kwargs
+                    SourcelessBuilder.create(tx, polyfills.radians), args, kwargs
                 )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
@@ -577,6 +581,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [args[0], result], {}
                 )
 
+        @register(torch._foreach_lerp_)
+        def handle_inplace_foreach_lerp_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_lerp_inplace),
+                    args,
+                    kwargs,
+                )
+
+        @register(torch._foreach_pow)
+        def handle_foreach_pow_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            # In eager it's more performant to call item() from within the C op implementation
+            # in compile, it's more performant to not graph break.
+            if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_pow_scalar),
+                    args,
+                    kwargs,
+                )
+
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
             if (condition.is_python_constant() and condition.as_python_constant()) or (
@@ -598,7 +626,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
         if DistributedVariable.is_available():
-            from torch.distributed._tensor import DTensor
             from torch.distributed.distributed_c10d import (
                 _get_group_size_by_name,
                 _get_group_tag,
@@ -606,6 +633,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
             )
+            from torch.distributed.tensor import DTensor
 
             @register(
                 _get_group_size_by_name,
@@ -648,10 +676,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
                 # and rewrite args to have only proxyable args, then insert call_function
                 args_as_value = [x.as_python_constant() for x in args[1:]]
-                kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+                kwargs_as_value = {
+                    k: v.as_python_constant()
+                    for k, v in kwargs.items()
+                    if k not in ["shape", "stride"]
+                }
+                kwargs_to_be_proxied = {
+                    k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
+                }
 
-                def fn_with_prim_types(x):
-                    return self.value(x, *args_as_value, **kwargs_as_value)
+                def fn_with_prim_types(x, shape=None, stride=None):
+                    return self.value(
+                        x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
+                    )
 
                 # attach the same function name for better debugging
                 fn_with_prim_types.__name__ = "prim " + self.value.__name__
@@ -661,7 +698,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     proxy=tx.output.create_proxy(
                         "call_function",
                         fn_with_prim_types,
-                        *proxy_args_kwargs([args[0]], {}),
+                        *proxy_args_kwargs(
+                            [args[0]],
+                            kwargs_to_be_proxied,
+                        ),
                     ),
                 )
 
@@ -742,6 +782,51 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [*args], kwargs
                 )
 
+        @register(torch._C._pop_torch_function_stack)
+        def handle_pop_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert not args and not kwargs
+            if not tx.symbolic_torch_function_mode_stack:
+                raise unimplemented("Popping from an empty torch function mode stack")
+            TorchFunctionModeStackVariable.register_mutation(tx)
+            return tx.symbolic_torch_function_mode_stack.pop()
+
+        @register(torch._C._push_on_torch_function_stack)
+        def handle_push_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert len(args) == 1 and not kwargs
+            TorchFunctionModeStackVariable.register_mutation(tx)
+            tx.symbolic_torch_function_mode_stack.append(args[0])
+            return ConstantVariable.create(None)
+
+        @register(torch._C._len_torch_function_stack)
+        def handle_len_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert not args and not kwargs
+            return ConstantVariable.create(len(tx.symbolic_torch_function_mode_stack))
+
+        @register(torch.set_default_device)
+        def handle_set_default_device(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            # Today this is inserted in the graph, once TF mode
+            # handling is complete, we can trace the device context
+            # like any other TF mode and remove this special handling
+            # Insert the TF mode representing the device context at
+            # the bottom of the stack to match the eager semantics
+            # Running the graph will ensure that the DeviceContext mode is
+            # at the correct position in the stack
+            TorchFunctionModeStackVariable.register_mutation(tx)
+            if args[0].is_python_constant() and args[0].as_python_constant() is None:
+                TorchFunctionModeStackVariable.clear_default_device(tx)
+            else:
+                TorchFunctionModeStackVariable.register_device_context_insertion(tx)
+
+            return None
+
         return handlers
 
     def call_function(
@@ -756,6 +841,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
         ):
+            # constant fold functions need to be guarded.
+            if self.value in constant_fold_functions_need_guards:
+                source = CallFunctionNoArgsSource(self.source)
+                install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
             # constant fold
             return ConstantVariable.create(
                 self.as_python_constant()(
@@ -957,6 +1046,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # this results in cleaner graphs, but only works for inputs
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
+
+        if is_traceable_wrapper_subclass_type(data.class_type):
+            unimplemented("Parameter constructor with tensor subclass NYI")
 
         if not can_convert_to_tracable_parameter():
             unimplemented("Workaround for issues with nn_parameter construction")

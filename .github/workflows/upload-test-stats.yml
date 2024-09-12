@@ -2,7 +2,7 @@ name: Upload test stats
 
 on:
   workflow_run:
-    workflows: [pull, trunk, periodic, inductor, unstable, slow, unstable-periodic, inductor-periodic, rocm, inductor-micro-benchmark, inductor-cu124, inductor-rocm]
+    workflows: [pull, trunk, periodic, inductor, unstable, slow, unstable-periodic, inductor-periodic, rocm, inductor-micro-benchmark, inductor-micro-benchmark-x86, inductor-cu124, inductor-rocm]
     types:
       - completed
 
@@ -96,7 +96,7 @@ jobs:
           python3 -m tools.stats.check_disabled_tests --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
 
       - name: Upload gpt-fast benchmark results to Rockset
-        if: steps.upload-s3.outcome && steps.upload-s3.outcome == 'success' && github.event.workflow_run.name == 'inductor-micro-benchmark'
+        if: steps.upload-s3.outcome && steps.upload-s3.outcome == 'success' && contains('inductor-micro-benchmark', github.event.workflow_run.name)
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}

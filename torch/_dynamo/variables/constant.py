@@ -44,7 +44,12 @@ class ConstantVariable(VariableTracker):
                 assert not isinstance(value, disallowed_type), reason
 
         # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (list, tuple, set, frozenset)):
+        if is_literal and isinstance(value, (set, frozenset)):
+            items = []
+            for i, x in enumerate(value):
+                items.append(ConstantVariable.create(x))
+            return variables.SetVariable(items, **kwargs)
+        elif is_literal and isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
@@ -56,11 +61,7 @@ class ConstantVariable(VariableTracker):
                         source=item_source,
                     )
                 )
-            if isinstance(value, (list, tuple)):
-                return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
-            else:
-                assert isinstance(value, (set, frozenset)), type(value)
-                return variables.SetVariable(items)
+            return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
 
         return ConstantVariable(value, **kwargs)
 
@@ -83,9 +84,6 @@ class ConstantVariable(VariableTracker):
 
     def __str__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -147,6 +145,14 @@ class ConstantVariable(VariableTracker):
             return variables.BuiltinVariable(str.format).call_function(
                 tx, [self, *args], kwargs
             )
+        elif name == "join" and istype(self.value, str):
+            assert len(args) == 1 and len(kwargs) == 0
+            arg_unpacked = args[0].force_unpack_var_sequence(tx)
+            try:
+                arg_const = [x.as_python_constant() for x in arg_unpacked]
+                return ConstantVariable.create(self.value.join(arg_const))
+            except NotImplementedError:
+                return super().call_method(tx, name, args, kwargs)
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -220,9 +226,6 @@ class EnumVariable(VariableTracker):
 
     def __str__(self) -> str:
         return f"EnumVariable({type(self.value)})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
