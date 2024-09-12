@@ -3,7 +3,7 @@
 
 #include <chrono>
 
-#include "caffe2/core/common.h"
+#include <c10/macros/Macros.h>
 
 namespace caffe2 {
 
