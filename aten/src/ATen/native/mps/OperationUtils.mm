@@ -691,7 +691,7 @@ MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph* mpsGraph, MPSDataType data
 }
 
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataType, MPSShape* mpsShape) {
-  return [mpsGraph placeholderWithShape:mpsShape dataType:dataType name:nil];
+  return [mpsGraph placeholderWithShape:nil dataType:dataType name:nil];
 }
 
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph* mpsGraph, const Tensor& tensor) {

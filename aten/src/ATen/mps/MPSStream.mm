@@ -28,6 +28,7 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   _executionDescriptor.enableCommitAndContinue = _enableCommitAndContinue;
 
   // Choose level which optimizes for GPU
+  [_compilationDescriptor disableTypeInference];
   _compilationDescriptor.optimizationLevel = MPSGraphOptimizationLevel0;
   _executionDescriptor.compilationDescriptor = _compilationDescriptor;
 }

@@ -60,9 +60,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
     auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" +
         std::to_string(attn_mask.has_value());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&](auto mpsGraph, auto graph) {
-      auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, query);
-      auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, key);
-      auto vTensor = mpsGraphRankedPlaceHolder(mpsGraph, value);
+      auto qTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(query));
+      auto kTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(key));
+      auto vTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(value));
       auto kT = [mpsGraph transposeTensor:kTensor dimension:2 withDimension:3 name:nil];
       auto scaleTensor = [mpsGraph constantWithScalar:scale_factor shape:getMPSShape({1}) dataType:MPSDataTypeFloat32];
 
@@ -96,7 +96,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                                   falsePredicateTensor:minusInf
                                                   name:nil];
       } else if (attn_mask) {
-        graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
+        graph->maskTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(*attn_mask));
         maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
       }
       auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];

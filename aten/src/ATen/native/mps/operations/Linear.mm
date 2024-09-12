@@ -67,8 +67,8 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   @autoreleasepool {
     string key = "mps_linear" + getTensorsStringKey({input, weight, bias});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight);
+      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input));
+      MPSGraphTensor* weightTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(weight));
 
       MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor
                                                               dimension:-1
