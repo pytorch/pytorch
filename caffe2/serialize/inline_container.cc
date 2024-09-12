@@ -10,15 +10,11 @@
 #include <sys/types.h>
 #include <thread>
 
-#include <c10/core/Allocator.h>
-#include <c10/core/Backend.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 
-#include "caffe2/core/common.h"
 #include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"
 #include "caffe2/serialize/istream_adapter.h"
@@ -27,8 +23,8 @@
 #include "caffe2/serialize/versions.h"
 #include "miniz.h"
 
-namespace caffe2 {
-namespace serialize {
+
+namespace caffe2::serialize {
 constexpr c10::string_view kDebugPklSuffix(".debug_pkl");
 
 struct MzZipReaderIterWrapper {
@@ -194,8 +190,7 @@ void PyTorchStreamReader::init() {
 
   // version check
   at::DataPtr version_ptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t version_size;
+  size_t version_size = 0;
   if (hasRecord(".data/version")) {
     std::tie(version_ptr, version_size) = getRecord(".data/version");
   } else {
@@ -204,7 +199,7 @@ void PyTorchStreamReader::init() {
   }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   try {
-    version_ = std::stoull(version);
+    version_ = std::stoll(version);
   } catch (const std::invalid_argument& e) {
     CAFFE_THROW("Couldn't parse the version ",
                  version,
@@ -627,7 +622,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)> writer_func)
+    const std::function<size_t(const void*, size_t)>& writer_func)
     : archive_name_("archive"),
       writer_func_(writer_func) {
   setup(archive_name_);
@@ -638,7 +633,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
   archive_name_plus_slash_ = archive_name_ + "/"; // for writeRecord().
 
-  if (archive_name_.size() == 0) {
+  if (archive_name_.empty()) {
     CAFFE_THROW("invalid file name: ", file_name);
   }
   if (!writer_func_) {
@@ -649,7 +644,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
     const std::string dir_name = parentdir(file_name);
     if(!dir_name.empty()) {
-      struct stat st;
+      struct stat st{};
       bool dir_exists = (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
       TORCH_CHECK(dir_exists, "Parent directory ", dir_name, " does not exist.");
     }
@@ -706,8 +701,8 @@ void PyTorchStreamWriter::writeRecord(
       /*uncomp_size=*/0,
       /*uncomp_crc32=*/0,
       /*last_modified=*/nullptr,
-      /*user_extra_data=*/padding_.c_str(),
-      /*user_extra_data_len=*/padding_size,
+      /*user_extra_data_local=*/padding_.c_str(),
+      /*user_extra_data_local_len=*/padding_size,
       /*user_extra_data_central=*/nullptr,
       /*user_extra_data_central_len=*/0);
   valid("writing file ", name.c_str());
@@ -820,5 +815,4 @@ PyTorchStreamWriter::~PyTorchStreamWriter() {
   }
 }
 
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize

@@ -9,7 +9,6 @@ import inspect
 import itertools
 import random
 import sys
-import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
@@ -83,6 +82,11 @@ def is_forbidden_context_manager(ctx):
         from _pytest.python_api import RaisesContext
         from _pytest.recwarn import WarningsChecker
 
+        # TODO mlazos: Temporary to get this stack to pass
+        # remove in subsequent PR
+        from torch.overrides import BaseTorchFunctionMode
+
+        f_ctxs.append(BaseTorchFunctionMode)
         f_ctxs.append(RaisesContext)
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -409,6 +413,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
+            # import here to avoid an unfortunate circular dependency.
             from .ctx_manager import GenericContextWrappingVariable
 
             cm_obj = tx.output.side_effects.track_object_new(
@@ -416,6 +421,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
+
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
@@ -705,7 +711,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            if is_standard_setattr(method) or isinstance(self.value, threading.local):
+            if is_standard_setattr(method):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
             # [NOTE] OrderedDict, dict subtypes must always have source
@@ -803,7 +809,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def needs_slow_setattr(self):
         return not is_standard_setattr(
             inspect.getattr_static(self.value, "__setattr__", None)
-        ) and not isinstance(self.value, threading.local)
+        )
 
     def unpack_var_sequence(self, tx):
         if (
