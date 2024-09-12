@@ -395,8 +395,7 @@ def enable_fake_mode():
     are too large to fit into memory.
 
     Returns:
-        A :class:`ONNXFakeContext` object that must be passed to :func:`dynamo_export`
-        through the :attr:`ExportOptions.fake_context` argument.
+        A :class:`ONNXFakeContext` object.
 
     Example::
 
@@ -414,15 +413,16 @@ def enable_fake_mode():
         ...     my_nn_module = MyModel()
         ...     arg1 = torch.randn(2, 2, 2)  # positional input 1
         >>> export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-        >>> onnx_program = torch.onnx.dynamo_export(
-        ...     my_nn_module,
-        ...     arg1,
-        ...     export_options=export_options
-        ... )
+        >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True)
+        >>> onnx_program.apply_weights(MyModel().state_dict())
         >>> # Saving model WITHOUT initializers
-        >>> onnx_program.save("my_model_without_initializers.onnx")
+        >>> onnx_program.save(
+        ...     "my_model_without_initializers.onnx",
+        ...     include_initializers=False,
+        ...     keep_initializers_as_inputs=True,
+        ... )
         >>> # Saving model WITH initializers
-        >>> onnx_program.save("my_model_with_initializers.onnx", model_state=MyModel().state_dict())
+        >>> onnx_program.save("my_model_with_initializers.onnx")
 
     .. warning::
         This API is experimental and is *NOT* backward-compatible.

@@ -88,7 +88,11 @@ def export_for_training(
     flow and data structures (with certain exceptions), and (3) records the set of
     shape constraints needed to show that this normalization and control-flow elimination
     is sound for future inputs. This API is intended for PT2 quantization training use cases
-    and will soon be the default IR of torch.export.export in the near future.
+    and will soon be the default IR of torch.export.export in the near future. To read further about
+    the motivation behind this change, please refer to
+    https://dev-discuss.pytorch.org/t/why-pytorch-does-not-need-a-new-standardized-operator-set/2206
+    With this API, and :func:`run_decompositions()`, you should be able to get inference IR with
+    your custom decomposition behaviour.
 
     **Soundness Guarantee**
 
@@ -171,8 +175,7 @@ def export(
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
-    :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
-    a method) along with example inputs, and produces a traced graph representing
+    :func:`export` takes any nn.Module along with example inputs, and produces a traced graph representing
     only the Tensor computation of the function in an Ahead-of-Time (AOT) fashion,
     which can subsequently be executed with different inputs or serialized.  The
     traced graph (1) produces normalized operators in the functional ATen operator set
