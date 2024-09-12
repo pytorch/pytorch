@@ -995,11 +995,6 @@ def flex_attention(
                 f"Expect number of query heads to be a multiple of kv heads for GQA "
                 f"but got Hq={Hq} and Hkv={Hkv}."
             )
-    if query.device != block_mask.kv_num_blocks.device:
-        raise RuntimeError(
-            f"Expect q/k/v and block_mask to be on the same device "
-            f"but got {query.device} and {block_mask.kv_num_blocks.device}."
-        )
 
     if score_mod is None:
         score_mod = _identity
@@ -1007,6 +1002,12 @@ def flex_attention(
         block_mask = _create_empty_block_mask(query, key)
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
+
+    if query.device != block_mask.kv_num_blocks.device:
+        raise RuntimeError(
+            f"Expect q/k/v and block_mask to be on the same device "
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."
+        )
 
     kernel_options = _apply_kernel_options(
         query,
