@@ -19,8 +19,8 @@ import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._decomp import (
-    core_aten_decompositions,
     _decomp_table_to_post_autograd_aten,
+    core_aten_decompositions,
     get_decompositions,
 )
 from torch._dynamo.test_case import TestCase

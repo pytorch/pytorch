@@ -1013,8 +1013,8 @@ class ExportedProgram:
             ep = ep.run_decompositions(decomp_table=decomp_table)
         """
         from torch._decomp import (
-            core_aten_decompositions,
             _decomp_table_to_post_autograd_aten,
+            core_aten_decompositions,
         )
         from torch._inductor import config
 
@@ -1040,7 +1040,7 @@ class ExportedProgram:
         for op in _preserve_ops:
             if op in _decomp_table:
                 del _decomp_table[op]
-        
+
         # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
         # At this point, we have a decomp_table that contains decomp behaviour for
         # both CIA and post-autograd ops.
@@ -1053,7 +1053,10 @@ class ExportedProgram:
         # For joint IR case tho, we need to use the old path because we can't register
         # custom decomps this way because we can't use context manager as it installs
         # autograd_error node.
-        cia_to_decomp, python_decomp_table = _split_decomp_table_to_cia_and_python_decomp(_decomp_table)
+        (
+            cia_to_decomp,
+            python_decomp_table,
+        ) = _split_decomp_table_to_cia_and_python_decomp(_decomp_table)
 
         return _decompose_exported_program(
             self,
