@@ -315,6 +315,8 @@ supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
     isa_list: List[VecISA] = []
+    if sys.platform == "darwin" and platform.processor() == "arm":
+        isa_list.append(VecNEON())
 
     if sys.platform not in ["linux", "win32"]:
         return isa_list
@@ -335,7 +337,7 @@ def valid_vec_isa_list() -> List[VecISA]:
                             break
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
-    elif arch in ["aarch64", "arm64"]:
+    elif arch == "aarch64":
         isa_list.append(VecNEON())
     elif arch in ["x86_64", "AMD64"]:
         """
