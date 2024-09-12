@@ -4776,6 +4776,56 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
+    def test_export_for_inference_e2e(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(10, 1)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        inp = (torch.randn(5, 10),)
+        m = M()
+
+        decomp_table = torch.export.core_aten_decompositions()
+
+        def _custom_decomp_for_linear(x, weight, bias):
+            return x + bias.sum()
+
+        decomp_table[torch.ops.aten.linear.default] = _custom_decomp_for_linear
+        del decomp_table[torch.ops.aten.sum.default]
+        ep = torch.export.export_for_inference(
+            m, inp, decomp_table=decomp_table, dynamic_shapes={"x": {0: Dim("batch")}}
+        )
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, p_lin_weight, p_lin_bias, x):
+    sum_1 = torch.ops.aten.sum.default(p_lin_bias);  p_lin_bias = None
+    add = torch.ops.aten.add.Tensor(x, sum_1);  x = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_core = ep.run_decompositions()
+
+        self.assertExpectedInline(
+            str(ep_core.graph_module.code).strip(),
+            """\
+def forward(self, p_lin_weight, p_lin_bias, x):
+    sum_1 = torch.ops.aten.sum.dim_IntList(p_lin_bias, []);  p_lin_bias = None
+    add = torch.ops.aten.add.Tensor(x, sum_1);  x = sum_1 = None
+    return (add,)""",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Expected input"):
+            ep.module()(torch.randn(4, 12))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected input"):
+            ep_core.module()(torch.randn(4, 12))
+
+    @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
