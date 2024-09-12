@@ -13,13 +13,12 @@ from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.fx_passes.move_constructors_to_device import (
     move_constructors_to_gpu,
 )
-from ..fx_utils import FakeTensorUpdater
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.multiprocessing.reductions import StorageWeakRef
 
-from ...utils._ordered_set import OrderedSet
 from .. import config
+from ..fx_utils import FakeTensorUpdater
 from ..pattern_matcher import (
     CallFunction,
     init_once_fakemode,
