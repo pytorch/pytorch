@@ -210,6 +210,8 @@ include_patterns = [
     'aten/src/ATen/native/nested/*.h',
     'c10/**/*.cpp',
     'c10/**/*.h',
+    'caffe2/**/*.cc',
+    'caffe2/**/*.h',
     'torch/*.h',
     'torch/csrc/*.h',
     'torch/csrc/*.cpp',
