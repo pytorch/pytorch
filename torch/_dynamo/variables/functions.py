@@ -152,6 +152,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert isinstance(
             fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
+        # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
+        # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
@@ -925,7 +927,7 @@ class FunctoolsPartialVariable(VariableTracker):
         )
 
 
-class PolyfilledFunctionVariable(UserFunctionVariable):
+class PolyfilledFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "fn",
         "is_constant",
@@ -946,7 +948,7 @@ class PolyfilledFunctionVariable(UserFunctionVariable):
         return cls(value, source=source)
 
     def __init__(self, fn: _F, is_constant: bool = False, **kwargs) -> None:
-        super(UserFunctionVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.fn: _F = fn
 
         handler = self._get_polyfill_handlers().get(fn, fn)

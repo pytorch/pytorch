@@ -509,11 +509,9 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(exported_program.module()(*args), m(*args))
 
-        from torch._export import capture_pre_autograd_graph
-
-        gm: torch.fx.GraphModule = capture_pre_autograd_graph(
+        gm: torch.fx.GraphModule = torch.export.export_for_training(
             m, args=example_args, dynamic_shapes=dynamic_shapes
-        )
+        ).module()
 
         args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))

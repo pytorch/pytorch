@@ -329,11 +329,13 @@ class BaseSchedulerNode:
     def get_first_name(self) -> str:
         return self.get_name()
 
+    @cache_on_self
     def get_operation_names(self) -> OrderedSet[str]:
-        return OrderedSet(node.get_name() for node in self.get_nodes())
+        return OrderedSet([node.get_name() for node in self.get_nodes()])
 
+    @cache_on_self
     def get_buffer_names(self) -> OrderedSet[str]:
-        return OrderedSet(out.get_name() for out in self.outputs)
+        return OrderedSet([out.get_name() for out in self.outputs])
 
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
@@ -502,6 +504,7 @@ class BaseSchedulerNode:
         buffer.writelines(out_lines)
         self.written = True
 
+    @cache_on_self
     def get_read_write_buffers_sizes(self) -> int:
         """
         Counting the number of bytes accessed for a kernel is
@@ -607,6 +610,7 @@ class BaseSchedulerNode:
 
         return node_bytes
 
+    @cache_on_self
     def get_estimated_runtime(self) -> float:
         """
         Returns estimated op runtime in nanoseconds (ns)
@@ -3404,17 +3408,18 @@ class Scheduler:
                 seen.add(key)
 
         for node in self.nodes:
-            try:
-                log.debug(
-                    "Generating code for node %s with estimated runtime %f",
-                    node.get_name(),
-                    node.get_estimated_runtime(),
-                )
-            except Exception as e:
-                log.debug(
-                    "Generating code for node %s with estimated runtime 0.0",
-                    node.get_name(),
-                )
+            if log.isEnabledFor(logging.DEBUG):
+                try:
+                    log.debug(
+                        "Generating code for node %s with estimated runtime %f",
+                        node.get_name(),
+                        node.get_estimated_runtime(),
+                    )
+                except Exception as e:
+                    log.debug(
+                        "Generating code for node %s with estimated runtime 0.0",
+                        node.get_name(),
+                    )
 
             self.enter_context(node)
 
