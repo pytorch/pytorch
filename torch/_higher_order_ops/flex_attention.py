@@ -425,7 +425,7 @@ def flex_attention_fake_tensor_mode(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
         out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
-        return query.new_empty(out_shape), logsumexp
+        return query.new_empty(out_shape).contiguous(), logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------
