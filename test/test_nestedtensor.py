@@ -6067,12 +6067,31 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(sentences[0][1], torch.tensor([0.0, 0.0, 0.0]))
         self.assertEqual(sentences[1][2], torch.tensor([1.0, 0.0, 0.0]))
 
-        lengths = torch.tensor([2, 2, 2], device=device)
-        b = torch.nested.nested_tensor_from_jagged(
-            torch.zeros(7, 3, device=device), offsets, lengths
-        )
-        with self.assertRaises(IndexError):
-            b[indices] = 1.0
+        import subprocess
+
+        with self.subTest():
+            r = subprocess.call(
+                [
+                    sys.executable,
+                    "-c",
+                    """\
+import torch
+offsets = torch.tensor([0, 2, 5, 7], device='cuda')
+lengths = torch.tensor([2, 2, 2], device='cuda')
+indices = [
+    torch.tensor([0, 1, 2], device='cuda'),
+    torch.tensor([0, 2, 1], device='cuda'),
+    torch.tensor([0, 0, 0], device='cuda'),
+]
+a = torch.nested.nested_tensor_from_jagged(
+    torch.zeros(7, 3, device='cuda'), offsets, lengths
+)
+a[indices] = 1.0
+torch.cuda.synchronize()
+""",
+                ]
+            )
+            self.assertTrue(r != 0)
 
     @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):

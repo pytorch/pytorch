@@ -1419,8 +1419,10 @@ def index_put_(func, *args, **kwargs):
         lengths = inp.offsets().diff()
     else:
         lengths = inp.lengths()
-    if not torch.all(indices[inp._ragged_idx] < lengths):
-        raise IndexError("Some indices in the ragged dimension are out of bounds!")
+    torch._assert_async(
+        torch.all(indices[inp._ragged_idx] < lengths),
+        "Some indices in the ragged dimension are out of bounds!",
+    )
 
     # Recompute indices for _values
     ragged_indices = (
