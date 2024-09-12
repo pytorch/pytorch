@@ -548,6 +548,8 @@ def unflatten(
         An instance of :class:`UnflattenedModule`, which has the same module
         hierarchy as the original eager module pre-export.
     """
+    if module.verifier.dialect == "TRAINING":
+        raise RuntimeError("Unflattener doesn't support non-functional training IR yet")
     module = _remove_effect_tokens(module)
     return UnflattenedModule(module, flat_args_adapter)
 
