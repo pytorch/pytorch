@@ -1,7 +1,19 @@
 # mypy: allow-untyped-defs
-from __future__ import (  # for onnx.ModelProto (ONNXProgram) and onnxruntime (ONNXRuntimeOptions)
-    annotations,
-)
+from __future__ import annotations
+
+
+__all__ = [
+    "DiagnosticOptions",
+    "ExportOptions",
+    "ONNXProgram",
+    "ONNXRuntimeOptions",
+    "InvalidExportOptionsError",
+    "OnnxRegistry",
+    "UnsatisfiedDependencyError",
+    "dynamo_export",
+    "enable_fake_mode",
+]
+
 
 import abc
 import contextlib
@@ -17,6 +29,7 @@ from typing_extensions import Self
 import torch
 import torch._ops
 import torch.utils._pytree as pytree
+from torch.onnx import errors
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import (
@@ -382,8 +395,7 @@ def enable_fake_mode():
     are too large to fit into memory.
 
     Returns:
-        A :class:`ONNXFakeContext` object that must be passed to :func:`dynamo_export`
-        through the :attr:`ExportOptions.fake_context` argument.
+        A :class:`ONNXFakeContext` object.
 
     Example::
 
@@ -401,15 +413,16 @@ def enable_fake_mode():
         ...     my_nn_module = MyModel()
         ...     arg1 = torch.randn(2, 2, 2)  # positional input 1
         >>> export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-        >>> onnx_program = torch.onnx.dynamo_export(
-        ...     my_nn_module,
-        ...     arg1,
-        ...     export_options=export_options
-        ... )
+        >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True)
+        >>> onnx_program.apply_weights(MyModel().state_dict())
         >>> # Saving model WITHOUT initializers
-        >>> onnx_program.save("my_model_without_initializers.onnx")
+        >>> onnx_program.save(
+        ...     "my_model_without_initializers.onnx",
+        ...     include_initializers=False,
+        ...     keep_initializers_as_inputs=True,
+        ... )
         >>> # Saving model WITH initializers
-        >>> onnx_program.save("my_model_with_initializers.onnx", model_state=MyModel().state_dict())
+        >>> onnx_program.save("my_model_with_initializers.onnx")
 
     .. warning::
         This API is experimental and is *NOT* backward-compatible.
@@ -509,6 +522,7 @@ class ONNXProgram:
         self._diagnostic_context = diagnostic_context
         self._fake_context = fake_context
         self._export_exception = export_exception
+        self._state_dict: dict[str, torch.Tensor] = {}
 
     def __call__(
         self,
@@ -549,7 +563,7 @@ class ONNXProgram:
                 if isinstance(model_with_state_dict, torch.nn.Module):
                     model_state = model_with_state_dict.state_dict()
                 else:
-                    model_state = None
+                    model_state = self._state_dict
                 self.save(
                     onnx_model,
                     model_state=model_state,
@@ -723,6 +737,13 @@ class ONNXProgram:
         ), "model_with_state_dict must be specified."
         return self._output_adapter.apply(model_outputs, model=model_with_state_dict)  # type: ignore[return-value]
 
+    def apply_weights(self, state_dict: dict[str, torch.Tensor]) -> None:
+        """Apply the weights from the specified state dict to the ONNX model.
+        Args:
+            state_dict: The state dict containing the weights to apply to the ONNX model.
+        """
+        self._state_dict = state_dict
+
     def save(
         self,
         destination: str | io.BufferedIOBase,
@@ -750,6 +771,9 @@ class ONNXProgram:
         assert (
             include_initializers is True or model_state is None
         ), "Cannot specify both `include_initializers=False` and `model_state`."
+
+        if self._state_dict and model_state is None:
+            model_state = self._state_dict
 
         # Add initializers when symbolic tracing is enabled
         _model_state_files: list[str | io.BytesIO | dict[str, Any]] = []
@@ -808,10 +832,6 @@ class ONNXProgram:
                         )
             else:
                 try:
-                    if not isinstance(self.model_proto, onnx.ModelProto):  # type: ignore[attr-defined]
-                        raise ValueError(
-                            "onnx_program.ModelProto is not an onnx.ModelProto"
-                        )
                     destination.write(self.model_proto.SerializeToString())
                 except ValueError as exc:
                     raise ValueError(
@@ -1061,28 +1081,6 @@ class UnsatisfiedDependencyError(RuntimeError):
         self.package_name = package_name
 
 
-class OnnxExporterError(RuntimeError):
-    """Raised when an ONNX exporter error occurs.
-
-    This exception is thrown when there's an error during the ONNX export process.
-    It encapsulates the :class:`ONNXProgram` object generated until the failure, allowing
-    access to the partial export results and associated metadata.
-    """
-
-    onnx_program: Final[ONNXProgram]  # type: ignore[misc]
-
-    def __init__(self, onnx_program: ONNXProgram, message: str):
-        """
-        Initializes the OnnxExporterError with the given ONNX program and message.
-
-        Args:
-            onnx_program (ONNXProgram): The partial results of the ONNX export.
-            message (str): The error message to be displayed.
-        """
-        super().__init__(message)
-        self.onnx_program = onnx_program
-
-
 class InvalidExportOptionsError(RuntimeError):
     """Raised when user specified an invalid value for the :class:`ExportOptions`."""
 
@@ -1232,10 +1230,7 @@ def dynamo_export(
             "or SARIF web viewer (https://microsoft.github.io/sarif-web-component/). "
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
         )
-        raise OnnxExporterError(
-            ONNXProgram._from_failure(e, resolved_export_options.diagnostic_context),
-            message,
-        ) from e
+        raise errors.OnnxExporterError(message) from e
 
 
 def common_pre_export_passes(
@@ -1313,17 +1308,3 @@ def common_pre_export_passes(
     )
 
     return module
-
-
-__all__ = [
-    "DiagnosticOptions",
-    "ExportOptions",
-    "ONNXProgram",
-    "ONNXRuntimeOptions",
-    "InvalidExportOptionsError",
-    "OnnxExporterError",
-    "OnnxRegistry",
-    "UnsatisfiedDependencyError",
-    "dynamo_export",
-    "enable_fake_mode",
-]
