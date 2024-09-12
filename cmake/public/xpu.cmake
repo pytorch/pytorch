@@ -13,6 +13,14 @@ if(NOT SYCL_FOUND)
 endif()
 set(PYTORCH_FOUND_XPU TRUE)
 
+#find oneDPL Library
+find_package(oneDPL REQUIRED)
+if(oneDPL_FOUND)
+  set(ONEDPL_DEVICE_LOWER_BOUND_WORKS TRUE)
+  return()
+endif()
+set(ONEDPL_DEVICE_LOWER_BOUND_WORKS FALSE)
+
 # SYCL library interface
 add_library(torch::sycl INTERFACE IMPORTED)
 
