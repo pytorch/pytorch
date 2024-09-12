@@ -304,11 +304,23 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         # padded dense -> jagged
         total_L = nt._values.shape[0]
 
-        from .nested_tensor import nested_from_padded
+        from .nested_tensor import _load_val_from_tensor, nested_from_padded
 
-        # TODO: propagate cached min / max sequence length
+        min_seqlen = None
+        if nt._min_seqlen_tensor is not None:
+            min_seqlen = _load_val_from_tensor(nt._min_seqlen_tensor)
+
+        max_seqlen = None
+        if nt._max_seqlen_tensor is not None:
+            max_seqlen = _load_val_from_tensor(nt._max_seqlen_tensor)
+
         return nested_from_padded(
-            output_padded, offsets=nt._offsets, ragged_idx=nt._ragged_idx, sum_S=total_L
+            output_padded,
+            offsets=nt._offsets,
+            ragged_idx=nt._ragged_idx,
+            sum_S=total_L,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
         )
 
     # ex: (B, j0, D_0, D_1) + (A, B, 1, D_0, D_1) -> error because this breaks the invariant

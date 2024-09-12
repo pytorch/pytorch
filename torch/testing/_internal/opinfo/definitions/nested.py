@@ -64,11 +64,10 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
         )
         yield nt
 
-        # TODO: re-enable these in a separate set of tests
         # without min / max seqlen cached
-        # values = nt.values().clone().detach()
-        # offsets = nt.offsets().clone().detach()
-        # yield torch.nested.nested_tensor_from_jagged(values, offsets)
+        values = nt.values().clone().detach()
+        offsets = nt.offsets().clone().detach()
+        yield torch.nested.nested_tensor_from_jagged(values, offsets)
 
     # TODO: add non-contiguous NJTs
 
@@ -350,7 +349,8 @@ def reference_nn_functional_embedding_bag(op, sample):
     # run reference on a single bag at a time
     new_kwargs = dict(sample.kwargs)
     new_kwargs.update(
-        {"offsets": torch.tensor([0], dtype=torch.int64, device=sample.input.device)}
+        # NB: unbind_reference() will slice offsets on first dim so make it shape (1, 1)
+        {"offsets": torch.tensor([[0]], dtype=torch.int64, device=sample.input.device)}
     )
     # flip input / weight back to what unbind_reference() expects
     sample = SampleInput(sample.args[0], args=(sample.input,), kwargs=new_kwargs)
