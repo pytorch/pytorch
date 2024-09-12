@@ -18,6 +18,7 @@ from torch._guards import detect_fake_mode
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    _maybe_run_with_interpreter,
     _set_compilation_env,
     reenter_make_fx,
     unique_graph_id,
@@ -449,8 +450,8 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next() as m:
-        functional_true = ctx.functionalize(true_fn)
-        functional_false = ctx.functionalize(false_fn)
+        functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
+        functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for branch in [functional_true, functional_false]:
             if _has_potential_branch_input_mutation(
