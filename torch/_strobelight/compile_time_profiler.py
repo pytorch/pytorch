@@ -8,7 +8,6 @@ from typing import Any, Optional
 
 from torch._strobelight.cli_function_profiler import StrobelightCLIFunctionProfiler
 
-
 logger = logging.getLogger("strobelight_compile_time_profiler")
 
 console_handler = logging.StreamHandler()
@@ -20,7 +19,6 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
-
 
 class StrobelightCompileTimeProfiler:
     success_profile_count: int = 0
@@ -47,8 +45,17 @@ class StrobelightCompileTimeProfiler:
         float(os.environ.get("COMPILE_STROBELIGHT_SAMPLE_RATE", 1e7))
     )
 
+    default_profiler: Any = StrobelightCLIFunctionProfiler
+    try:
+        # For internal fbcode based builds, prefer Thrift based
+        # strobelight integration
+        from torch._strobelight.function_profiler import StrobelightFunctionProfiler
+        default_profiler = StrobelightFunctionProfiler
+    except ImportError:
+        pass
+
     @classmethod
-    def enable(cls, profiler_class: Any = StrobelightCLIFunctionProfiler) -> None:
+    def enable(cls, profiler_class: Any = default_profiler) -> None:
         if cls.enabled:
             logger.info("compile time strobelight profiling already enabled")
             return
