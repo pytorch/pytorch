@@ -12,16 +12,18 @@ from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfi
 
 log = logging.getLogger(__name__)
 
-if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
+def enable_compiletime_strobelight():
     import shutil
-
     if not shutil.which("strobeclient"):
-        log.info(
-            "TORCH_COMPILE_STROBELIGHT is true, but seems like you are not on a FB machine."
-        )
+        log.warning("strobeclient not found: not enabling compiletime profiling")
     else:
-        log.info("Strobelight profiler is enabled via environment variable")
+        log.info("Enabling Strobelight profiler")
         StrobelightCompileTimeProfiler.enable()
+
+if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
+    log.info("Strobelight profiler is enabled via environment variable")
+    enable_compiletime_strobelight()
+
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
