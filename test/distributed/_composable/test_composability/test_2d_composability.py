@@ -342,7 +342,7 @@ class TestFullyShard2DStateDict(DTensorTestBase):
     def backend(self):
         # need to specify gloo backend for testing cpu offload
         return "cpu:gloo,cuda:nccl"
-    
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_fully_shard_tp_2d_set_full_state_dict(self):
