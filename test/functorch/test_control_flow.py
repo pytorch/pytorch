@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._higher_order_ops.associative_scan import associative_scan
-from torch._higher_order_ops.scan import _fake_scan, scan
+from torch._higher_order_ops.scan import _fake_scan, scan, shift_source_dim_to_target_dim
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -27,19 +27,11 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfTorchDynamo,
+    skipIfRocm,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
 )
-
-
-# say we have a tensor of shape [3, 4, 5, 6]
-# shift_first_dim_to(t, 3) -> [4, 5, 6, 3]
-def shift_first_dim_to(t, to_dim: int):
-    assert to_dim >= 0 and to_dim < t.ndim
-    sz_list = list(t.size())
-    dims = list(range(1, to_dim + 1)) + [0] + list(range(to_dim + 1, t.ndim))
-    return t.permute(*dims)
 
 
 # TODO: pull these helpers from AOTAutograd later
@@ -1601,9 +1593,9 @@ def forward(self, pred_1, x_1):
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    # @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_dim(self, reverse, compile_mode, device):
+    @parametrize("autograd", [False, True])
+    def test_scan_dim(self, reverse, compile_mode, device, autograd):
         import random
 
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -1613,20 +1605,20 @@ def forward(self, pred_1, x_1):
             torch.compiler.reset()
             shapes = [random.randint(1, 10) for _ in range(num_dim)]
             rnd_scan_dim = random.randint(0, num_dim - 1)
-            x = torch.randn(*shapes, device=device)
+            x = torch.randn(*shapes, device=device, requires_grad=autograd)
             init_shapes = shapes[:rnd_scan_dim] + shapes[rnd_scan_dim + 1 :]
 
             for op, op_pt, init in [
                 (
                     get_scan_combine_fn("add", False),
                     torch.cumsum,
-                    torch.zeros(*init_shapes, device=device),
+                    torch.zeros(*init_shapes, device=device, requires_grad=autograd),
                 ),
-                # (
-                #     get_scan_combine_fn("mul", False),
-                #     torch.cumprod,
-                #     torch.ones(*init_shapes, device=device),
-                # ),
+                (
+                    get_scan_combine_fn("mul", False),
+                    torch.cumprod,
+                    torch.ones(*init_shapes, device=device, requires_grad=autograd),
+                ),
             ]:
                 result = scan_fct(op, init, x, dim=rnd_scan_dim, reverse=reverse)
                 result_exp = _fake_scan(
@@ -1636,9 +1628,18 @@ def forward(self, pred_1, x_1):
                 if not reverse:
                     result_exp_PT = op_pt(x, rnd_scan_dim)
                     res_list = list(result)
-                    res_list[1] = shift_first_dim_to(res_list[1], rnd_scan_dim)
+                    res_list[1] = shift_source_dim_to_target_dim(res_list[1], 0, rnd_scan_dim)
                     self.assertEqual(res_list[1], result_exp_PT)
+                    
+                if autograd:
+                    result_flatten, _ = pytree.tree_flatten(result)
+                    result_exp_flatten, _ = pytree.tree_flatten(result_exp)
+                    grad_out = [torch.ones_like(el) for el in result_exp_flatten]
+                    expected_grads = torch.autograd.grad(result_exp_flatten, (init, x), grad_out)
+                    grads = torch.autograd.grad(result_flatten, (init, x), grad_out)
+                    self.assertEqual(grads, expected_grads)
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2120,7 +2121,7 @@ def forward(self, pred_1, x_1):
                 dim=1,
                 reverse=reverse,
             )
-            o1 = pytree.tree_map(lambda t: shift_first_dim_to(t, 1), o1)
+            o1 = pytree.tree_map(lambda t: shift_source_dim_to_target_dim(t, 0, 1), o1)
             o2 = scan(
                 get_scan_combine_fn("add", False),
                 init2,
@@ -2139,7 +2140,7 @@ def forward(self, pred_1, x_1):
             dim=1,
             reverse=reverse,
         )[1]
-        xs = pytree.tree_map(lambda t: shift_first_dim_to(t, 1), xs)
+        xs = pytree.tree_map(lambda t: shift_source_dim_to_target_dim(t, 0, 1), xs)
         expected_result = _fake_scan(
             get_scan_combine_fn("add", False),
             init=init2,
@@ -2517,7 +2518,7 @@ def forward(self, pred_1, x_1):
             self.assertEqual(grads, expected_grads)
 
         # Init tensor entirely different shape than inp
-        init = torch.randn(7, 8, device=device)
+        init = torch.randn(7, 8, device=device, requires_grad=autograd)
 
         def add_scalar_carry2(x: torch.Tensor, y: torch.Tensor):
             return x + 1.0, x[: y.shape[0], : y.shape[1]] + y
@@ -2572,15 +2573,9 @@ def forward(self, pred_1, x_1):
 
         # Correct case
         op, op_pt = (get_scan_combine_fn("add", False), torch.cumsum)
-        x = torch.randn(3, 2, 2, device=device)
-        dim = 1
-
-        if reverse:
-            init = torch.zeros_like(torch.select_copy(x, -1, 0))
-            inp = torch._ops.ops.aten.slice(x, dim, 0, -1, 1)
-        else:
-            init = torch.zeros_like(torch.select_copy(x, 1, 0))
-            inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        init = torch.zeros(3, 2, device=device, requires_grad=autograd)
+        dim = 2
 
         result = scan_fct(op, init, x, dim=dim, reverse=reverse)
         result_exp = _fake_scan(op, init=init, xs=x, dim=dim, reverse=reverse)
@@ -2589,15 +2584,15 @@ def forward(self, pred_1, x_1):
         if not reverse:
             result_exp_PT = op_pt(x, dim)
             result = list(result)
-            result[1] = pytree.tree_map(lambda t: shift_first_dim_to(t, dim), result[1])
+            result[1] = pytree.tree_map(lambda t: shift_source_dim_to_target_dim(t, 0, dim), result[1])
             self.assertEqual(result[1], result_exp_PT)
             
         if autograd:
-            result_flat = pytree.tree_leaves(result)
-            result_exp_flat = pytree.tree_leaves(result_exp)
-            grad_out = [torch.ones_like(r) for r in result_exp_flat]
-            expected_grads = torch.autograd.grad(result_exp_flat, (init,x), grad_out)
-            grads = torch.autograd.grad(result_flat, (init,x), grad_out)
+            result_flatten, _ = pytree.tree_flatten(result)
+            result_exp_flatten, _ = pytree.tree_flatten(result_exp)
+            grad_out = [torch.ones_like(el) for el in result_exp_flatten]
+            expected_grads = torch.autograd.grad(result_exp_flatten, (init, x), grad_out)
+            grads = torch.autograd.grad(result_flatten, (init, x), grad_out)
             self.assertEqual(grads, expected_grads)
 
     @requires_cuda
@@ -2828,8 +2823,9 @@ def forward(self, pred_1, x_1):
             grads = torch.autograd.grad(result_flat, (*init_flat,*inp_flat), grad_out)
             self.assertEqual(grads, expected_grads)
 
-    def test_scan_RNN(self):
-        dim = 1
+    @parametrize("autograd", [False, True])
+    def test_scan_RNN(self, autograd):
+        dim = 0
         device = torch.device("cpu")
 
         rnn = torch.nn.RNN(
@@ -2837,33 +2833,33 @@ def forward(self, pred_1, x_1):
             hidden_size=7,
         )
         rnn = rnn.to(device=device)
-        x = torch.randn(1, 2, 5, device=device)
-        h = torch.randn(1, 2, 7, device=device)
+        x = torch.randn(2, 1, 5, device=device, requires_grad=autograd)
+        h = torch.randn(1, 7, device=device, requires_grad=autograd)
 
-        new_state_dict = {
-            "weight_ih_l0": torch.ones_like(rnn.weight_ih_l0),
-            "bias_ih_l0": torch.ones_like(rnn.bias_ih_l0),
-            "weight_hh_l0": torch.ones_like(rnn.weight_hh_l0),
-            "bias_hh_l0": torch.ones_like(rnn.bias_hh_l0),
-        }
-        rnn.load_state_dict(new_state_dict)
-
+        W_ih = rnn.weight_ih_l0.T.clone()
+        b_ih = rnn.bias_ih_l0.clone()
+        W_hh = rnn.weight_hh_l0.T.clone()
+        b_hh = rnn.bias_hh_l0.clone()
+        
         def RNN(x: torch.Tensor, y: torch.Tensor):
-            W_ih = torch.ones((5, 7), device=device)
-            b_ih = torch.ones((7), device=device)
-            W_hh = torch.ones((7, 7), device=device)
-            b_hh = torch.ones((7), device=device)
             c_new = y @ W_ih + b_ih
             h_new = torch.tanh(c_new + x @ W_hh + b_hh)
             return h_new, h_new
 
-        expected_result = rnn(
-            torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
-        )
+        expected_result = rnn(x, torch.unsqueeze(h, 0))
         expected_result_state = torch.permute(expected_result[1], (1, 0, 2))
-        result = scan(RNN, init=torch.select_copy(h, dim, 0), xs=x, dim=dim)
+        result = scan(RNN, h, x, dim=dim)
         self.assertEqual(result[0].unsqueeze(0), expected_result_state)
         self.assertEqual(result[1], expected_result[0])
+        
+        if autograd:
+            result_flat = pytree.tree_leaves(result)
+            result_exp_flat = pytree.tree_leaves(expected_result)
+            
+            grad_out = [torch.ones_like(r) for r in result_exp_flat]
+            expected_grads = torch.autograd.grad(result_exp_flat, (h, x), grad_out)
+            grads = torch.autograd.grad(result_flat, (h, x), grad_out)
+            self.assertEqual(grads, expected_grads)
 
     @skipIfNoDynamoSupport
     def test_scan_simple_graph_no_carry(self):

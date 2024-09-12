@@ -6729,7 +6729,7 @@ class SequentialScan(ExternKernel):
         reverse: bool,
         additional_inputs: List[TensorBox],
     ):
-        from torch._higher_order_ops.scan import _extract_carry_and_out, expand_tensor
+        from torch._higher_order_ops.scan import _extract_carry_and_out
 
         num_init_leaves = len(init)
         init = [cls.realize_input(x) for x in init]
