@@ -45,7 +45,6 @@ class TestTypePromotion(TestCase):
     # Promoting inplace would require re-allocating and copying the memory of the
     # tensor data, since element size could change.
     # https://github.com/pytorch/pytorch/issues/127049
-    @xfailIfTorchDynamo
     @float_double_default_dtype
     def test_inplace(self, device):
         int_tensor = torch.ones([4, 4, 4], dtype=torch.int32, device=device)
