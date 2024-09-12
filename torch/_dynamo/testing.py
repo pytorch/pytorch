@@ -372,6 +372,13 @@ def skipIfPy312(fn):
     return fn
 
 
+def requiresPy310(fn):
+    if sys.version_info >= (3, 10):
+        return fn
+    else:
+        unittest.skip(fn)
+
+
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
 # and test/dynamo/test_dynamic_shapes.py
 def expectedFailureDynamic(fn):
