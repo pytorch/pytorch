@@ -101,11 +101,32 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
         _maybe_layout_constraints[fn] = None
         return None
     # We lazily register tag-based layout constraints.
-    if torch._C.Tag.needs_fixed_stride_order in fn.tags:
-        _maybe_layout_constraints[fn] = constrain_to_fx_strides
-        return _maybe_layout_constraints[fn]
-    _maybe_layout_constraints[fn] = None
-    return None
+
+    def handle_layout_constraint_tag(tag):
+        if tag is torch._C.Tag.needs_fixed_stride_order:
+            _maybe_layout_constraints[fn] = constrain_to_fx_strides
+            return _maybe_layout_constraints[fn]
+        elif tag is torch._C.Tag.flexible_layout:
+            _maybe_layout_constraints[fn] = None
+            return None
+        else:
+            raise AssertionError(f"Unknown layout constraint tag: {tag}")
+
+    tag = get_layout_constraint_tag(fn)
+    return handle_layout_constraint_tag(tag)
+
+
+def get_layout_constraint_tag(fn):
+    tags_by_priority = [
+        torch._C.Tag.needs_fixed_stride_order,
+        torch._C.Tag.flexible_layout,
+    ]
+    for tag in tags_by_priority:
+        if tag in fn.tags:
+            return tag
+    if torch._library.utils.is_builtin(fn):
+        return torch._C.Tag.flexible_layout
+    return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
 
 
 def assert_nyi(cond, msg):
@@ -1462,7 +1483,7 @@ def cat(inputs, dim=0):
         if not isinstance(x, ir.Pointwise):
             return 0
 
-        count = x.inner_fn_opcount()
+        count = x.inner_fn_opcount().num_ops
         for read in x.get_read_names():
             count += op_count(V.graph.get_buffer(read))
 
@@ -6197,12 +6218,12 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
+def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
-        for x in itertools.chain(input, input)
+        for x in itertools.chain(xs, xs)
     ]
     lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
@@ -6212,9 +6233,9 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
             *pytree.tree_leaves(rhs),
         )
 
-    kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
-    kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
-    kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
+    kwargs = _make_scan_inner(xs[0], axis=dim, dtype=None)
+    kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
+    kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
     result = ir.Scan.create(
         combine_fn=wrapped_combine_fn,
         can_fallback_to_aten=False,

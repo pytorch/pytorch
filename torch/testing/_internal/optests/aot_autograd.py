@@ -118,7 +118,9 @@ def _test_aot_autograd_forwards_backwards_helper(
             raise
 
         # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all(x is None for x in orig_grad):
+        tensor_args = [x for x in pytree.tree_flatten(args)[0] if isinstance(x, torch.Tensor)]
+        any_non_leaves = any(x.grad_fn is not None for x in tensor_args)
+        if all(x is None for x in orig_grad) and any_non_leaves:
             with assert_raises_regex_fn(RuntimeError, 'does not require grad and does not have a grad_fn'):
                 call_forwards_backwards(compiled_f, args)
             return
