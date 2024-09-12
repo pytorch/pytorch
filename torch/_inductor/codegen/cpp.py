@@ -71,7 +71,7 @@ from .cpp_utils import (
     INDEX_TYPE,
     LocalBufferContext,
     promote_args,
-    template_fusion_with_epilogue_supported,
+    template_fusion_with_epilogues_supported,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -4151,8 +4151,8 @@ class CppScheduling(BaseScheduling):
             # TODO(jgong5): support pre-op fusion with template
             return False
         if node1.is_template():
-            template_fusion_supported, _ = template_fusion_with_epilogue_supported(
-                node1, node2
+            template_fusion_supported, _ = template_fusion_with_epilogues_supported(
+                node1, [node2]
             )
             return not node2.is_reduction() and template_fusion_supported
         return (
