@@ -88,7 +88,6 @@ if TEST_WITH_ROCM:
     )
 if config.abi_compatible:
     xfail_list = [
-        "test_lstm_packed_change_input_sizes_cpu",
         *[
             func
             for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
@@ -131,7 +130,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
