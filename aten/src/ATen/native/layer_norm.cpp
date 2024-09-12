@@ -6,6 +6,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -295,7 +296,12 @@ Tensor rms_norm(
       eps_val = eps.value();
     }
 
-    auto result = input.mul(at::rsqrt(at::pow(input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val)));
+    // upcast is needed for fp16 and bf16
+    c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
+    Tensor upcasted_input = input.to(opmath_t);
+
+    Tensor rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
+    Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
 
     if (weight_opt.has_value()) {
       result = result.mul(weight_opt.value());

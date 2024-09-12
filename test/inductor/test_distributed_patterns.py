@@ -26,22 +26,13 @@ def init_fake_distributed(device="cpu"):
         return t.narrow(0, 0, t.size(0) // WORLD_SIZE).clone()
 
     def fw_pre_hook(mod, inp):
-        if not compiled_autograd.compiled_autograd_enabled:
-            # torch.ops.fsdp.set_ doesn't work well in eager mode, so use the slow copy_ path instead.
-            mod.unsharded_weight.untyped_storage().resize_(
-                mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
-            )
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                mod.unsharded_weight
-            ):
-                mod.unsharded_weight.copy_(all_gather(mod.sharded_weight))
-        else:
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                mod.unsharded_weight
-            ):
-                torch.ops.fsdp.set_(
-                    mod.unsharded_weight, all_gather(mod.sharded_weight)
-                )
+        mod.unsharded_weight.untyped_storage().resize_(
+            mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
+        )
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+            mod.unsharded_weight
+        ):
+            torch.ops.fsdp.copy_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod._parameters["weight"] = mod.unsharded_weight
 
     # Forward:
@@ -58,22 +49,13 @@ def init_fake_distributed(device="cpu"):
         mod.unsharded_weight.untyped_storage().resize_(0)
 
     def bw_pre_hook(mod, gO):
-        if not compiled_autograd.compiled_autograd_enabled:
-            # torch.ops.fsdp.set_ doesn't work well in eager mode, so use the slow copy_ path instead.
-            mod.unsharded_weight.untyped_storage().resize_(
-                mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
-            )
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                mod.unsharded_weight
-            ):
-                mod.unsharded_weight.copy_(all_gather(mod.sharded_weight))
-        else:
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                mod.unsharded_weight
-            ):
-                torch.ops.fsdp.set_(
-                    mod.unsharded_weight, all_gather(mod.sharded_weight)
-                )
+        mod.unsharded_weight.untyped_storage().resize_(
+            mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
+        )
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+            mod.unsharded_weight
+        ):
+            torch.ops.fsdp.copy_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod._parameters["weight"] = mod.unsharded_weight
 
     # Backward:
@@ -465,7 +447,6 @@ class DistributedPatternTests(TestCase):
     @requires_gpu()
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_inductor(self):
-        # TODO: fix .set_ lowering in CPU inductor, and enable the CPU test.
         m1, inp1 = init_fake_distributed(GPU_TYPE)
         out1 = steps(m1, inp1)
 
