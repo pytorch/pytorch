@@ -179,9 +179,9 @@ def export_for_inference(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
-    decomp_table: Optional[Dict["OpOverload", Optional[Callable]]] = None,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
+    decomp_table: Optional[Dict["OpOverload", Optional[Callable]]] = None,
 ) -> ExportedProgram:
     """
     :func:`export_for_inference` takes any nn.Module along with example inputs, and produces a traced graph representing
