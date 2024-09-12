@@ -1878,6 +1878,7 @@ class DimConstraints:
         # NOTE(avik): We do not need to solve them for symbols that have already been specialized.
         reduced_congruences = self._reduce_congruences()
         for s, congruences in reduced_congruences.items():
+            # break
             for congruence in congruences:
                 # any congruence that cannot be checked becomes a dynamic constraint as well
                 if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):
@@ -4382,9 +4383,11 @@ class ShapeEnv:
                                for rs in self.deferred_runtime_asserts.values()
                                for r in rs)
         else:
-            runtime_asserts = (r.expr
+            runtime_asserts = [r.expr
                                for s in symbols if s not in self.var_to_val
-                               for r in self.deferred_runtime_asserts.get(s, ()))
+                               for r in self.deferred_runtime_asserts.get(s, ())]
+            runtime_asserts += [r.expr
+                               for r in self.deferred_runtime_asserts.get(None, ())]
         guards = (g.expr for g in self.guards)
         axioms = itertools.chain(guards, runtime_asserts)
         if compute_hint:
@@ -4446,7 +4449,6 @@ class ShapeEnv:
         hint for the particular hint values of backed SymInts, e.g., if
         s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
-
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
 
