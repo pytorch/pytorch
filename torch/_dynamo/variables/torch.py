@@ -449,14 +449,47 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.compile)
         def handle_torch_compile(self, tx: "InstructionTranslator", *args, **kwargs):
             if len(args) == 1:
-                from ..eval_frame import innermost_fn
+                from ..eval_frame import innermost_backend
 
-                const_args = [x.as_python_constant() for x in args]
-                const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-                res = torch.compile(*const_args, **const_kwargs)
+                # Create proxy function or nn.Module to create a proxy
+                # torch.compile object. This will be used to extract backend and
+                # compare with the current backend.
+                def nothing_fn(*args, **kwargs):
+                    pass
 
-                current_backend = innermost_fn(tx.output.compiler_fn)
-                new_backend = innermost_fn(res._torchdynamo_backend)  # type: ignore[attr-defined]
+                class Nothing(torch.nn.Module):
+                    pass
+
+                model_vt = args[0]
+                if isinstance(
+                    model_vt,
+                    (
+                        variables.UserFunctionVariable,
+                        variables.NestedUserFunctionVariable,
+                    ),
+                ):
+                    model_fake = nothing_fn
+                elif isinstance(
+                    model_vt,
+                    (
+                        variables.UnspecializedNNModuleVariable,
+                        variables.NNModuleVariable,
+                    ),
+                ):
+                    model_fake = Nothing()
+                else:
+                    unimplemented("torch.compile with unsupported first argument")
+
+                try:
+                    const_kwargs = {
+                        k: v.as_python_constant() for k, v in kwargs.items()
+                    }
+                except NotImplementedError:
+                    unimplemented("torch.compile with non-constant kwargs")
+                torch_compiled_fake = torch.compile(model_fake, **const_kwargs)
+
+                current_backend = innermost_backend(tx.output.compiler_fn)
+                new_backend = innermost_backend(torch_compiled_fake._torchdynamo_backend)  # type: ignore[attr-defined]
 
                 if current_backend == new_backend:
                     # torch.compile is a no-op in dynamo
