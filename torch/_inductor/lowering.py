@@ -1888,8 +1888,8 @@ def native_dropout(x, p, train):
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
 def bernoulli_(x, *args):
-    assert (
-        config.fallback_random or x.get_device() == torch.device("cpu")
+    assert config.fallback_random or x.get_device() == torch.device(
+        "cpu"
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
     op_overload = (
@@ -1903,8 +1903,8 @@ def bernoulli_(x, *args):
 
 @register_lowering(aten.bernoulli.p, type_promotion_kind=None)
 def bernoulli_p(x, *args):
-    assert (
-        config.fallback_random or x.get_device() == torch.device("cpu")
+    assert config.fallback_random or x.get_device() == torch.device(
+        "cpu"
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     return bernoulli_(clone(x), *args)
 
@@ -2050,14 +2050,19 @@ def _searchsorted_with_positional_sorter(
     right: bool = False,
     side: Optional[str] = None,
 ) -> TensorBox:
-    validate_bucketize = lambda tb: V.graph.has_feature(tb, BackendFeature.BUCKETIZE)
-    validate_strides = lambda tb: tb.get_stride()[-1] == 1
+    validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
+        tb, BackendFeature.BUCKETIZE
+    )
+    validate_strides = lambda tb: tb.get_stride()[-1] == 1  # noqa: E731
     # sorted_sequence and sorter must both be contiguous in the last dimension for our
     # assumptions in ops.bucketize to work.
     if (
         not (validate_strides(sorted_sequence) and validate_bucketize(sorted_sequence))
         or not validate_bucketize(values)
-        or (sorter is not None and not (validate_strides(sorter) and validate_bucketize(sorter)))
+        or (
+            sorter is not None
+            and not (validate_strides(sorter) and validate_bucketize(sorter))
+        )
     ):
         return fallback_handler(aten.searchsorted.Tensor, add_to_fallback_set=False)(
             sorted_sequence,
@@ -6200,13 +6205,17 @@ def set__source_tensor(self, source_tensor):
     return TensorBox.create(ir.SetSourceTensorKernel(self, source_tensor))
 
 
-if hasattr(torch.ops.fsdp, "set_"):
+if hasattr(torch.ops.fsdp, "copy_"):
 
-    @register_lowering(torch.ops.fsdp.set_.default)
-    def fsdp_set_(self, source_tensor):
-        self.realize()
-        source_tensor.realize()
-        ir.SetSourceTensorKernel(self, source_tensor)
+    @register_lowering(torch.ops.fsdp.copy_.default)
+    def fsdp_copy_(dst, src):
+        if dst is src:
+            # dst.copy_(dst) can happen from the reinplacing pass
+            return dst
+        src = to_device(src, dst.get_device())
+        src = to_dtype(src, dst.get_dtype())
+        src = expand(src, dst.get_size())
+        return mutate_to(dst, src)
 
 
 @register_lowering(torch.ops.aten.resize)
