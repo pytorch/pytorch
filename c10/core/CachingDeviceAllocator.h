@@ -16,7 +16,9 @@ struct Stat {
 
   void decrease(size_t amount) {
     current -= static_cast<int64_t>(amount);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+    // It mainly used to detect the potential bugs in CI test, will change back
+    // when CI is green.
+    TORCH_CHECK(
         current >= 0,
         "Negative tracked stat in device allocator (likely logic error).");
     freed += static_cast<int64_t>(amount);
