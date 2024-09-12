@@ -289,6 +289,9 @@ def _is_cia_op(op: "OpOverload") -> bool:
     )
 
 
+_ALL_VALID_CIA_OPS_IN_EXPORT = None
+
+
 def _collect_all_valid_cia_ops():
     """
     This is an util function that gets the all CIA functional ops.
@@ -302,6 +305,11 @@ def _collect_all_valid_cia_ops():
          but not on the C++ side, these can't be caught at the first step.
          So we walk again to get the final list.
     """
+
+    # This is an expensive operation, so we cache the result
+    global _ALL_VALID_CIA_OPS_IN_EXPORT
+    if _ALL_VALID_CIA_OPS_IN_EXPORT is not None:
+        return _ALL_VALID_CIA_OPS_IN_EXPORT
 
     # First step to lazily populate torch.ops.aten
     cia_ops = torch._C._dispatch_get_registrations_for_dispatch_key(
@@ -329,6 +337,9 @@ def _collect_all_valid_cia_ops():
             op_overload = getattr(op_packet, overload)
             if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
                 cia_ops.add(op_overload)
+    _ALL_VALID_CIA_OPS_IN_EXPORT = cia_ops
+    # For typing purposes :( 
+    assert _ALL_VALID_CIA_OPS_IN_EXPORT is not None
     return cia_ops
 
 
