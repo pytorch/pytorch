@@ -75,7 +75,7 @@ class CppWrapperCpu(WrapperCodeGen):
         call_args,
         grid=None,
         device_index=None,
-        cuda=True,
+        gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
@@ -87,19 +87,19 @@ class CppWrapperCpu(WrapperCodeGen):
         """
         Generates kernel call code.
 
-        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        if cuda:
+        if gpu:
             return super().generate_kernel_call(
                 kernel_name,
                 call_args,
                 grid,
                 device_index,
-                cuda,
+                gpu,
                 triton,
                 arg_types,
                 raw_args,
@@ -920,7 +920,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.prefix = cached_dtypes_buffer
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
+        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=False
     ):
         self.header.splice(f"\n{kernel}\n")
 
