@@ -38,7 +38,7 @@ def construct_strides(
     sizes: Sequence[int],
     fill_order: Sequence[int],
 ) -> Sequence[int]:
-    """From a list of sizes and a permutation order, construct the strides of the permuted tensor."""
+    """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
     assert len(sizes) == len(
         fill_order
@@ -48,7 +48,7 @@ def construct_strides(
     # Start with stride 1 for the innermost dimension
     current_stride = 1
 
-    # Iterate through the permutation order from right to left (innermost to outermost)
+    # Iterate through the fill order populating strides
     for dim in fill_order:
         strides[dim] = current_stride
         current_stride *= sizes[dim]
