@@ -1587,6 +1587,27 @@ command = [
 ]
 is_formatter = true
 
+
+[[linter]]
+code = 'META_NO_CREATE_UNBACKED'
+include_patterns = [
+  "torch/_meta_registrations.py"
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=create_unbacked',
+    '--linter-name=META_NO_CREATE_UNBACKED',
+    '--error-name=no create_unbacked in meta registrations',
+    """--error-description=\
+        Data-dependent operators should have their meta \
+        registration in torch/_subclasses/fake_impls.py, \
+        not torch/_meta_registrations.py
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
 [[linter]]
 code = 'ATEN_CPU_GPU_AGNOSTIC'
 include_patterns = [
