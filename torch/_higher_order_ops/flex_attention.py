@@ -23,6 +23,31 @@ from torch.fx.graph_module import GraphModule
 from torch.overrides import TorchFunctionMode
 
 
+def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch.Tensor:
+    """
+    Create a new tensor with the same data and shape as the input,
+    but with strides permuted based on the input tensor's stride order.
+
+    Args:
+        out (torch.Tensor): The output tensor of attention.
+        query_strides (List[int]): The stride order of the input query tensor
+
+    Returns:
+        torch.Tensor: A new tensor with same shape and data as the input,
+        but with strides permuted based on the query tensor's stride order.
+    """
+    from torch._inductor.ir import get_stride_order
+    from torch._inductor.kernel.flex_attention import construct_strides
+
+    stride_order = get_stride_order(query_strides)
+
+    assert out.storage_offset() == 0, "Only support storage_offset == 0"
+    out_strides = construct_strides(out.shape, stride_order)
+    new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
+    new_out.copy_(out)
+    return new_out
+
+
 class TransformGetItemToIndex(TorchFunctionMode):
     # This is needed since we want to support calling
     # A[q_idx], where q_idx is a scalar tensor in score_mod.
@@ -233,8 +258,6 @@ def sdpa_dense(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    from torch._inductor.ir import get_stride_order
-
     out, lse = math_attention(
         query,
         key,
@@ -246,8 +269,7 @@ def sdpa_dense(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
-    out_stride_order = tuple(get_stride_order(query.stride()))
-    out = out.permute(out_stride_order)
+    out = _permute_strides(out, query.stride())
     return out, lse
 
 
@@ -428,8 +450,6 @@ def flex_attention_fake_tensor_mode(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    from torch._inductor.ir import get_stride_order
-
     with mode:
         v_head_dim = value.size(-1)
         batch_size, num_heads, seq_len_q, q_head_dim = query.shape
@@ -437,9 +457,8 @@ def flex_attention_fake_tensor_mode(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
         out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
-        out_stride_order = tuple(get_stride_order(query.stride()))
         out = query.new_empty(out_shape)
-        out = out.permute(out_stride_order)
+        out = _permute_strides(out, query.stride())
         return out, logsumexp
 
 
