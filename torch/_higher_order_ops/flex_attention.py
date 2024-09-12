@@ -23,7 +23,7 @@ from torch.fx.graph_module import GraphModule
 from torch.overrides import TorchFunctionMode
 
 
-# Duplicate of _indcutor/kernel/flex_attention.py to avoid circular inport
+# Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
 def _construct_strides(
     sizes: Sequence[int],
     fill_order: Sequence[int],
