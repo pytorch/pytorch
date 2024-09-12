@@ -396,8 +396,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         input_creation_fn,
         backend,
         fullgraph,
-        num_of_zero_size_unsharded_params=None,
-        num_of_full_size_unsharded_params=None,
         activation_checkpoint=False,
     ):
         def compiler_fn(compiled_autograd_backend):
