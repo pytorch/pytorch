@@ -157,11 +157,6 @@ class TestFullyShardCompile(FSDPTest):
     def _assert_no_aliased_unsharded_params_in_graph_inputs(
         self, graph: torch.fx.Graph
     ) -> None:
-        is_bwd_graph = any(
-            node.op == "call_function"
-            and node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default
-            for node in graph.nodes
-        )
         # FSDP2 unsharded params are mutated in the graph without going through functionalization.
         # Therefore, we want to make sure they don't have aliases in the graph inputs, to make it easier
         # for us to do the replacement of unsharded params with the all-gathered temporary buffer directly
