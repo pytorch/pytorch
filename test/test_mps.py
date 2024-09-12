@@ -344,6 +344,7 @@ def mps_ops_modifier(ops):
         'tanh',
         'tensor_split',
         'transpose',
+        'transpose_copy',
         'T',
         'unbind',
         'unflatten',

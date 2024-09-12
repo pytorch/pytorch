@@ -268,7 +268,7 @@ class CapabilityBasedPartitioner:
         # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
         return fuse_by_partitions(
             self.graph_module,
-            [partition.nodes for partition in partitions],
+            [list(partition.nodes) for partition in partitions],
             prefix=prefix,
         )
 
