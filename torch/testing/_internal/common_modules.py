@@ -3186,7 +3186,7 @@ def module_error_inputs_torch_nn_Linear(module_info, device, dtype, requires_gra
                 constructor_input=FunctionInput("10", 20),
                 forward_input=FunctionInput(make_input(3, 10)),
             ),
-            error_on=ModuleErrorEnum.CONSTRUCTOR_ERROR,
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
             error_regex="Expected int for in_features but got <class 'str'>"
         ),
@@ -3195,7 +3195,7 @@ def module_error_inputs_torch_nn_Linear(module_info, device, dtype, requires_gra
                 constructor_input=FunctionInput(10, 20.7),
                 forward_input=FunctionInput(make_input(3, 10)),
             ),
-            error_on=ModuleErrorEnum.CONSTRUCTOR_ERROR,
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
             error_regex="Expected int for out_features but got <class 'float'>"
         ),
@@ -3211,7 +3211,7 @@ def module_error_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_g
                 constructor_input=FunctionInput("10", 20, 30),
                 forward_input=FunctionInput(make_input(3, 10), make_input(3, 20)),
             ),
-            error_on=ModuleErrorEnum.CONSTRUCTOR_ERROR,
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
             error_regex="Expected int for in1_features but got <class 'str'>"
         ),
@@ -3220,7 +3220,7 @@ def module_error_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_g
                 constructor_input=FunctionInput(10, 20.7, 30),
                 forward_input=FunctionInput(make_input(3, 10), make_input(3, 20)),
             ),
-            error_on=ModuleErrorEnum.CONSTRUCTOR_ERROR,
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
             error_regex="Expected int for in2_features but got <class 'float'>"
         ),
@@ -3229,7 +3229,7 @@ def module_error_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_g
                 constructor_input=FunctionInput(10, 20, "30"),
                 forward_input=FunctionInput(make_input(3, 10), make_input(3, 20)),
             ),
-            error_on=ModuleErrorEnum.CONSTRUCTOR_ERROR,
+            error_on=ModuleErrorEnum.CONSTRUCION_ERROR,
             error_type=TypeError,
             error_regex="Expected int for out_features but got <class 'str'>"
         ),
