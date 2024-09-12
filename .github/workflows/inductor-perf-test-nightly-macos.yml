@@ -50,8 +50,6 @@ jobs:
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   macos-py3-arm64-mps-torchbench:
     name: macos-py3-arm64-mps-torchbench
@@ -65,5 +63,3 @@ jobs:
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
