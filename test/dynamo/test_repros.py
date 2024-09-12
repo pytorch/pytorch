@@ -5476,15 +5476,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
-            return tuple(map(f, x, y))
+            return map(f, x, y)
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")
 
         inps = gen_inps(3, 3)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
         inps = gen_inps(3, 5)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
     def test_staticmethod_allow_in_graph(self):
         class MyClass:
@@ -5555,7 +5557,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             z0 = x.sin()
             z1 = x.sin()
             y = x + 1
-            torch.ops.fsdp.set_.default(x, y)
+            torch.ops.fsdp.copy_.default(x, y)
             # z3 and z3 can be CSEd with each other,
             # but *not* with z0/z1 (they cross a mutation boundary)
             z2 = x.sin()
@@ -5587,7 +5589,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             z = x.sin()
             y = x + 1
             # graph input has its storage mutated
-            torch.ops.fsdp.set_.default(x, y)
+            torch.ops.fsdp.copy_.default(x, y)
             z2 = x.sin()
             return z2, l**2
 
