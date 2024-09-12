@@ -753,6 +753,7 @@ class CachingAutotuner(KernelInterface):
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
+            "r_block": launcher.config.kwargs.get("RBLOCK", None),
             "num_warps": launcher.bin.num_warps
             if hasattr(launcher.bin, "num_warps")
             else launcher.bin.metadata.num_warps,
