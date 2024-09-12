@@ -916,7 +916,7 @@ def _get_dtype_from_loopbodies(loop_bodies):
     return dtypes
 
 
-def same_index_for_template_read_and_epilogue_write_in_epilogue(template, epilogue):
+def template_fusion_with_epilogue_supported(template, epilogue):
     assert template.is_template()
     template_node = template.get_template_node()
     assert template_node is not None
@@ -931,19 +931,27 @@ def same_index_for_template_read_and_epilogue_write_in_epilogue(template, epilog
         list(set(indexes_of_template_buf_read_in_epilogue))
     )
 
-    # We don't support different read indexes of template buffer for now.
+    same_index_for_template_read_and_epilogue_write_in_epilogue = None
     if num_indexes_of_template_buf_read_in_epilogue > 1:
-        return False
+        # We don't support different read indexes of template buffer for now.
+        supported = False
+    elif num_indexes_of_template_buf_read_in_epilogue == 0:
+        # No read of template_buffer in the epilogue, thus no need to check if
+        # it's the same as the write index of the epilogue output.
+        same_index_for_template_read_and_epilogue_write_in_epilogue = True
+        supported = True
+    else:
+        index_of_template_buf_read_in_epilogue = (
+            indexes_of_template_buf_read_in_epilogue[0]
+        )
 
-    # No read of template_buffer in the epilogue, thus no need to check if
-    # it's the same as the write index of the epilogue output
-    if num_indexes_of_template_buf_read_in_epilogue == 0:
-        return True
+        epilogue_writes = epilogue.node.get_read_writes().writes
+        same_index_for_template_read_and_epilogue_write_in_epilogue = all(
+            epilogue_write.index == index_of_template_buf_read_in_epilogue
+            for epilogue_write in epilogue_writes
+        )
+        # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
+        # in the epilogue node don't have the same index.
+        supported = same_index_for_template_read_and_epilogue_write_in_epilogue
 
-    index_of_template_buf_read_in_epilogue = indexes_of_template_buf_read_in_epilogue[0]
-
-    epilogue_writes = epilogue.node.get_read_writes().writes
-    return all(
-        epilogue_write.index == index_of_template_buf_read_in_epilogue
-        for epilogue_write in epilogue_writes
-    )
+    return supported, same_index_for_template_read_and_epilogue_write_in_epilogue

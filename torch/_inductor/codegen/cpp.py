@@ -71,7 +71,7 @@ from .cpp_utils import (
     INDEX_TYPE,
     LocalBufferContext,
     promote_args,
-    same_index_for_template_read_and_epilogue_write_in_epilogue,
+    template_fusion_with_epilogue_supported,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -4151,15 +4151,10 @@ class CppScheduling(BaseScheduling):
             # TODO(jgong5): support pre-op fusion with template
             return False
         if node1.is_template():
-            # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
-            # in the epilogue node don't have the same index
-            # and remove the check of same_index_for_template_read_and_epilogue_write_in_epilogue
-            return (
-                not node2.is_reduction()
-                and same_index_for_template_read_and_epilogue_write_in_epilogue(
-                    node1, node2
-                )
+            template_fusion_supported, _ = template_fusion_with_epilogue_supported(
+                node1, node2
             )
+            return not node2.is_reduction() and template_fusion_supported
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
