@@ -1,4 +1,3 @@
-import gc
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -40,8 +39,6 @@ class Benchmark(BenchmarkBase):
         self.m = self.ModuleClass()
         torch.set_float32_matmul_precision("high")
         self.input = torch.ones(10, device="cuda" if self._is_gpu else "cpu")
-        gc.collect()
-        gc.disable()
 
     def _prepare(self):
         torch._dynamo.reset()
