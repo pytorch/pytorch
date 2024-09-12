@@ -3562,6 +3562,42 @@ def meta_binop_inplace(self, other):
         aten.sub_.Tensor,
     ],
 )
+def meta_binop_inplace_promote(self, other, alpha=1):
+    """
+    Checks for promotion rules for some dtypes.
+    int.add/sub_(float) and bool.add/sub_(others) are rejected.
+    Promoting in these in-place operations would require reallocating
+    and copying over elements, hence not allowed.
+    """
+
+    def is_integeric(arg):
+        if isinstance(arg, TensorLike):
+            return utils.is_integer_dtype(arg.dtype)
+        else:
+            return isinstance(arg, int)
+
+    def is_floatic(arg):
+        if isinstance(arg, TensorLike):
+            return utils.is_float_dtype(arg.dtype)
+        else:
+            return isinstance(arg, float)
+
+    def is_booleanic(arg):
+        if isinstance(arg, TensorLike):
+            return utils.is_boolean_dtype(arg.dtype)
+        else:
+            return isinstance(arg, bool)
+
+    # Do not allow int+float->int in-place
+    if is_integeric(self) and is_floatic(other):
+        raise RuntimeError("Promotion of int.add/sub_(float) in in-place ops are not possible due to element size change.")
+
+    # Do not allow bool+other->bool in-place
+    if is_booleanic(self) and not is_booleanic(other):
+        raise RuntimeError("Promotion of book.add/sub_(others) in in-place ops are not possible due to element size change.")
+    return self
+
+
 def meta_binop_inplace_alpha(self, other, alpha=1):
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
