@@ -71,6 +71,7 @@ from .cpp_utils import (
     INDEX_TYPE,
     LocalBufferContext,
     promote_args,
+    same_index_for_template_read_and_epilogue_write_in_epilogue,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -4146,48 +4147,13 @@ class CppScheduling(BaseScheduling):
             return 0
 
     def can_fuse_vertical(self, node1, node2):
-        # TODO: Add support of fusion when the read of template buffer and
-        # the write of epilogue output in the epilogue node don't have the same index.
-        def same_index_for_template_read_and_epilogue_write_in_epilogue(
-            template, epilogue
-        ):
-            assert template.is_template()
-            template_node = template.get_template_node()
-            assert template_node is not None
-            template_buf_name = template_node.get_name()
-
-            epilogue_reads = epilogue.node.get_reads()
-            indexes_of_template_buf_read_in_epilogue = [
-                read.index for read in epilogue_reads if read.name == template_buf_name
-            ]
-
-            num_indexes_of_template_buf_read_in_epilogue = len(
-                list(set(indexes_of_template_buf_read_in_epilogue))
-            )
-
-            # We don't support different read indexes of template buffer for now.
-            if num_indexes_of_template_buf_read_in_epilogue > 1:
-                return False
-
-            # No read of template_buffer in the epilogue, thus no need to check if
-            # it's the same as the write index of the epilogue output
-            if num_indexes_of_template_buf_read_in_epilogue == 0:
-                return True
-
-            index_of_template_buf_read_in_epilogue = (
-                indexes_of_template_buf_read_in_epilogue[0]
-            )
-
-            epilogue_writes = epilogue.node.get_read_writes().writes
-            return all(
-                epilogue_write.index == index_of_template_buf_read_in_epilogue
-                for epilogue_write in epilogue_writes
-            )
-
         if node2.is_template():
             # TODO(jgong5): support pre-op fusion with template
             return False
         if node1.is_template():
+            # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
+            # in the epilogue node don't have the same index
+            # and remove the check of same_index_for_template_read_and_epilogue_write_in_epilogue
             return (
                 not node2.is_reduction()
                 and same_index_for_template_read_and_epilogue_write_in_epilogue(
