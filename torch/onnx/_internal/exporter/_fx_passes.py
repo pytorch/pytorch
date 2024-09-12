@@ -17,8 +17,6 @@ def decompose_with_registry(
     """
     onnx_registered_ops = set(_decomp.get_onnx_implemented_overloads(registry))
     decomp_table = _decomp.create_onnx_friendly_decomposition_table(onnx_registered_ops)
-    # We shouldn't put HOPs into the decomp table, because it is undefined behavior
-    decomp_table = {k: v for k, v in decomp_table.items() if hasattr(k, "_schema")}
     return exported_program.run_decompositions(decomp_table)
 
 
