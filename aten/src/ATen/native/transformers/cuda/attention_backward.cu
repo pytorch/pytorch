@@ -420,6 +420,7 @@ _efficient_attention_backward(
   hipError_t err;
   using aotriton::v2::flash::attn_bwd;
   using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
   err = attn_bwd(mk_aotensor(q_t, "q"),
