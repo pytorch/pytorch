@@ -32,9 +32,7 @@ class Benchmark(BenchmarkBase):
 
 def main():
     result_path = sys.argv[1]
-    Benchmark().enable_compile_time_instruction_count().collect_all().append_results(
-        result_path
-    )
+    Benchmark().enable_instruction_count().collect_all().append_results(result_path)
 
 
 if __name__ == "__main__":
