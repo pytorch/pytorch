@@ -1149,22 +1149,6 @@ void brgemm(
   "Half Brgemm is only supported on X64 when oneDNN ukernel is enabled and avx512_fp16 is supported");
 }
 
-void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const at::BFloat16* A,
-    const at::BFloat16* B,
-    float* C) {
-  TORCH_CHECK(false,
-  "BFloat16 Brgemm is currently not supported");
-}
-
 void brgemm_release() {
 #if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   dnnl::ukernel::brgemm::release_hw_context();
