@@ -761,11 +761,12 @@ def flex_attention(
     # This works because only the last dim differs and we check it is contiguous.
     q_strides = query.get_stride()
     assert q_strides[-1] == 1, "Query must be contiguous in the last dimension"
+
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
         [B, Hq, seq_len_q, v_head_dim],
-        query.get_stride(),
+        stride=None,  # contiguous strides
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = [B, Hq, seq_len_q]
