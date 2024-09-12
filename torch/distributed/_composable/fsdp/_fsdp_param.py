@@ -9,14 +9,10 @@ import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import DTensor, Replicate, Shard
-from torch.distributed._tensor.device_mesh import _mesh_resources
-from torch.distributed._tensor.placement_types import (
-    _StridedShard,
-    DTensorSpec,
-    Placement,
-    TensorMeta,
-)
+from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor.device_mesh import _mesh_resources
+from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
@@ -668,9 +664,7 @@ class FSDPParam:
                 # Note that this has small performance penalty: re-creation of padded local_tensor
                 # involves copying the local_tensor into the bigger (padded) buffer. We will explore ways to
                 # optimize it if it becomes an issue in the future.
-                local_tensor = self._maybe_pad_local_tensor(
-                    self._sharded_local_tensor
-                )
+                local_tensor = self._maybe_pad_local_tensor(self._sharded_local_tensor)
                 sharded_param_data = local_tensor.view(-1)
             else:
                 sharded_param_data = self._sharded_param_data
