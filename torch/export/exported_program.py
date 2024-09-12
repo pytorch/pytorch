@@ -1000,12 +1000,14 @@ class ExportedProgram:
         If you don't want to decompose anything
 
         .. code-block:: python
+        
             ep = torch.export.export(model, ...)
             ep = ep.run_decompositions(decomp_table={})
 
         If you want to get a core aten operator set except for certain operator, you can do following:
 
         .. code-block:: python
+
             ep = torch.export.export(model, ...)
             from torch._decomp import core_aten_decompositions
             decomp_table = core_aten_decompositions()

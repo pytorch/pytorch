@@ -82,7 +82,7 @@ def create_onnx_friendly_decomposition_table(
         decomposition functions.
     """
     decomposition_table: dict[torch._ops.OperatorBase, Callable] = (
-        torch._decomp.decomp_table_to_post_autograd_aten()
+        torch._decomp._decomp_table_to_post_autograd_aten()
     )
 
     # NOTE: If we import torch._decomp, we will get RuntimeError: Only a single
