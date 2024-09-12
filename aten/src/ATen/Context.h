@@ -116,7 +116,7 @@ class TORCH_API Context {
   static bool hasOpenMP();
   static bool hasMKL();
   static bool hasLAPACK();
-  static bool hasMKLDNN();
+  static bool hasONEDNN();
   static bool hasMAGMA() {
     return detail::getCUDAHooks().hasMAGMA();
   }
@@ -198,16 +198,16 @@ class TORCH_API Context {
   // to test this instead
   bool userEnabledCuDNN() const;
   void setUserEnabledCuDNN(bool e);
-  bool userEnabledMkldnn() const;
-  void setUserEnabledMkldnn(bool e);
+  bool userEnabledOnednn() const;
+  void setuserEnabledOnednn(bool e);
   bool benchmarkCuDNN() const;
   void setBenchmarkCuDNN(bool);
   int benchmarkLimitCuDNN() const;
   void setBenchmarkLimitCuDNN(int);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-  bool deterministicMkldnn() const;
-  void setDeterministicMkldnn(bool);
+  bool deterministicOnednn() const;
+  void setdeterministicOnednn(bool);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
@@ -381,7 +381,7 @@ class TORCH_API Context {
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
-  bool deterministic_mkldnn = false;
+  bool deterministic_onednn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
@@ -403,7 +403,7 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
-  bool enabled_mkldnn = true;
+  bool enabled_onednn = true;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
@@ -533,8 +533,8 @@ inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
 }
 
-inline bool hasMKLDNN() {
-  return globalContext().hasMKLDNN();
+inline bool hasONEDNN() {
+  return globalContext().hasONEDNN();
 }
 
 inline void manual_seed(uint64_t seed) {

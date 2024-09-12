@@ -10,7 +10,7 @@
 
 using namespace torch::aot_inductor;
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
     AtenTensorHandle input,
@@ -59,4 +59,4 @@ AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
   });
 }
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

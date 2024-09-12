@@ -1008,6 +1008,10 @@ aten::nonzero.out
 aten::nonzero_static
 aten::nonzero_static.out
 aten::normal_functional
+aten::onednn_rnn_layer
+aten::onednn_rnn_layer.out
+aten::onednn_rnn_layer_backward
+aten::onednn_rnn_layer_backward.out
 aten::ones.names
 aten::ones.names_out
 aten::ones.out
