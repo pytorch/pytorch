@@ -9,6 +9,33 @@
 namespace c10d {
 namespace detail {
 
+// TCPStore is a key-value store used by PyTorch mainly for distributed
+// rendezvous, but for other purposes as well. (e.g., a centralized storage for
+// synchronization among different processes.)
+//
+// It is run via a classic client-server architecture, where the server runs
+// a separate background thread (alternatively we call it daemon thread). The
+// client and server communicate via TCP sockets.
+//
+// Currently we have two types of server backends:
+// 1. TCPStoreBackend: a single thread to handle all incoming request
+// synchronously.
+// 2. LibUVTCPStoreBackend: an event-driven asynchronous stream processing that
+// leverages libuv library (https://github.com/libuv/libuv) for better
+// performance. And this backend now is recommended to users. (We set the
+// default value of `useLibUV` inside `TCPStoreOptions` to true now, so users
+// should get it by default).
+//
+// Code structure:
+// ├── TCPStore client side API and server setup code:
+// │   TCPStore.hpp/TCPStore.cpp
+// ├── TCPStoreBackend server side API implementation code:
+// │   TCPStoreBackend.hpp/TCPStoreBackend.cpp
+// |   (actual class:`TCPStoreMasterDaemon`)
+// ├── LibUVTCPStoreBackend
+// │   TCPStoreLibUvBackend.cpp
+// |   (actual class: `LibUVStoreDaemon`)
+
 class TCPServer;
 
 class TCPClient;
