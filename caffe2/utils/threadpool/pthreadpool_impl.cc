@@ -7,9 +7,7 @@ namespace caffe2 {
 namespace {
 static thread_local bool using_new_threadpool{false};
 }
-WithCastToNewThreadPool::WithCastToNewThreadPool(bool use_new_threadpool) {
-  use_new_threadpool_ = using_new_threadpool;
-  using_new_threadpool = use_new_threadpool;
+WithCastToNewThreadPool::WithCastToNewThreadPool(bool use_new_threadpool) : use_new_threadpool_(using_new_threadpool) {
 }
 WithCastToNewThreadPool::~WithCastToNewThreadPool() {
   using_new_threadpool = use_new_threadpool_;
