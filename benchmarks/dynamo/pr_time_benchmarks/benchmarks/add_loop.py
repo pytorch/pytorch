@@ -1,3 +1,4 @@
+import gc
 import sys
 
 from benchmark_base import BenchmarkBase
@@ -29,6 +30,8 @@ class Benchmark(BenchmarkBase):
 
     def _prepare(self):
         torch._dynamo.reset()
+        gc.collect()
+        gc.disable()
 
     def _work(self):
         @torch.compile(backend=self._backend, fullgraph=True, dynamic=self._dynamic)
