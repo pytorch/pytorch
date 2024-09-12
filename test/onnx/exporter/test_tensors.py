@@ -3,14 +3,13 @@
 
 from __future__ import annotations
 
-import unittest
-
 import onnxscript
 
 from torch.onnx._internal.exporter import _tensors
+from torch.testing._internal import common_utils
 
 
-class SymbolicTensorTest(unittest.TestCase):
+class SymbolicTensorTest(common_utils.TestCase):
     def test_it_is_hashable(self):
         tensor = _tensors.SymbolicTensor(
             opset=onnxscript.values.Opset(domain="test", version=1)
@@ -20,4 +19,4 @@ class SymbolicTensorTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    common_utils.run_tests()
