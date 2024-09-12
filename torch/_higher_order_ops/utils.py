@@ -224,7 +224,6 @@ def _from_fun(t):
                 t.stride(),
                 dtype=t.dtype,
                 requires_grad=t.requires_grad,
-                device=t.device,
             )
         else:
             # clone of a functional tensor produces a functional tensor
