@@ -50,6 +50,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- |
+| 2.5 | >=3.9, <=3.12, (3.13 experimental) | CUDA 11.8, CUDA 12.1, CUDA 12.4, CUDNN 9.1.0.70  | None | ROCm 6.2 |
 | 2.4 | >=3.8, <=3.12 | CUDA 11.8, CUDA 12.1, CUDNN 9.1.0.70  | CUDA 12.4, CUDNN 9.1.0.70 | ROCm 6.1 |
 | 2.3 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 6.0 |
 | 2.2 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.7 |
@@ -68,10 +69,10 @@ Following is the release cadence for year 2023/2024. All dates below are tentati
 | 2.2 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
 | 2.3 | Mar 2024 | Apr 2024 | Jun 2024 | Not planned |
 | 2.4 | Jun 2024 | Jul 2024 | (Sept 2024) | Not planned |
-| 2.5 | Aug 2024 | Oct 2024 | (Nov 2024) | (Dec 2024) |
+| 2.5 | Sep 2024 | Oct 2024 | (Nov 2024) | (Dec 2024) |
 | 2.6 | Dec 2024 | Jan 2025 | (Feb 2025) | (Mar 2025) |
 | 2.7 | Mar 2025 | Apr 2025 | (May 2025) | (Jun 2025) |
-| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sept 2025) |
+| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sep 2025) |
 | 2.9 | Aug 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
 
 ## General Overview

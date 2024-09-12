@@ -45,13 +45,8 @@
 
 namespace at::cuda::tunable {
 
-namespace {
-
-TuningContext tuning_context;
-
-} // anonymous namespace
-
 TuningContext* getTuningContext() {
+  static TuningContext tuning_context;
   return &tuning_context;
 }
 
@@ -193,7 +188,10 @@ TuningResultsValidator::TuningResultsValidator() {
     RegisterValidator(
        "ROCM_VERSION",
        [rocm_version]() { return rocm_version; },
-       [rocm_version](auto&& k) { return rocm_version == k ? OK : FAIL; });
+       [rocm_version](auto&& k) {
+        TUNABLE_LOG1("ROCM_VERSION validation: expect ", k, " to match ", rocm_version);
+        return rocm_version == k ? OK : FAIL;
+      });
   }
   // gfx arch
   {
@@ -201,7 +199,10 @@ TuningResultsValidator::TuningResultsValidator() {
     RegisterValidator(
         "GCN_ARCH_NAME",
         [gcn_arch_name]() { return gcn_arch_name; },
-        [gcn_arch_name](auto&& k) { return gcn_arch_name == k ? OK : FAIL; });
+        [gcn_arch_name](auto&& k) {
+          TUNABLE_LOG1("GCN_ARCH_NAME validation: expect ", k, " to match ", gcn_arch_name);
+          return gcn_arch_name == k ? OK : FAIL;
+        });
   }
   // rocblas
   {
@@ -217,7 +218,10 @@ TuningResultsValidator::TuningResultsValidator() {
     RegisterValidator(
         "ROCBLAS_VERSION",
         [rocblas_version]() { return rocblas_version; },
-        [rocblas_version](auto&& k) { return rocblas_version == k ? OK : FAIL; });
+        [rocblas_version](auto&& k) {
+          TUNABLE_LOG1("ROCBLAS_VERSION validation: expect ", k, " to match ", rocblas_version);
+          return rocblas_version == k ? OK : FAIL;
+        });
   }
   // hipblaslt
   {
@@ -231,7 +235,10 @@ TuningResultsValidator::TuningResultsValidator() {
     RegisterValidator(
         "HIPBLASLT_VERSION",
         [hipblaslt_version]() { return hipblaslt_version; },
-        [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+        [hipblaslt_version](auto&& k) {
+          TUNABLE_LOG1("HIPBLASLT_VERSION validation: expect ", k, " to match ", hipblaslt_version);
+          return hipblaslt_version == k ? OK : FAIL;
+        });
   }
 #endif
 }
