@@ -159,7 +159,10 @@ class ROCmTemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
+
                 using bfloat16 = hip_bfloat16;
+                using float8_e4m3fnuz = __hip_fp8_e4m3_fnuz;
+                using float8_e5m2fnuz = __hip_fp8_e5m2_fnuz;
             """
         )
         return res

@@ -12,6 +12,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
+try:
+    from .test_fp8 import _quantize_tensorwise
+except ImportError:
+    from test_fp8 import _quantize_tensorwise
+
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -252,6 +257,75 @@ class TestCKBackend(TestCase):
             Y_eager = torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
             torch.testing.assert_close(Y_compiled, Y_eager)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize("dtype", (torch.bfloat16,))
+    @parametrize("use_fast_accum", (True,))
+    def test_max_autotune_scaled_mm(self, max_autotune_gemm_backends, dtype, use_fast_accum):
+
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+
+        x = torch.randn(2240, 256, **tensor_options)
+        w = torch.randn(2048, 256, **tensor_options)
+
+        dtype_float8 = torch.float8_e4m3fnuz
+
+        # quantize weight (prior to inference)
+        w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
+        w_t_fp8 = w_fp8.t()
+
+        # quantize input x
+        x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
+
+        assert "rocm" in dir(config)
+
+        bias = None
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        y_eager = linear(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 2,
+                "rocm.n_max_profiling_configs": 2,
+                "rocm.ck_dir": self.ck_dir,
+            }
+        ):
+            linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+            y_compiled = linear_compiled(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
+            self.assertEqual(y_eager.dtype, dtype)
+            self.assertEqual(y_compiled.dtype, dtype)
+
+            torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
 
 
 if __name__ == "__main__":

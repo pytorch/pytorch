@@ -27,6 +27,7 @@ class CKTemplate(ROCmTemplate):
                 // HIP headers
 
                 #include <hip/hip_bfloat16.h>
+                #include <hip/hip_fp8.h>
 
                 // CK headers
 

@@ -254,6 +254,10 @@ class CKGemmTemplate(CKTemplate):
         Y = self.output_node
         Bias = self.input_nodes[2] if 3 == len(self.input_nodes) else None
 
+        if len(self.input_nodes) == 4:
+            scale_x = self.input_nodes[2]
+            scale_w = self.input_nodes[3]
+
         op = copy.deepcopy(op)
 
         # This parameter is converted into tuple because of change
@@ -302,9 +306,9 @@ class CKGemmTemplate(CKTemplate):
             globals=self.globals().getvalue(),
             instance_definition=instance_definition,
             kernel_definition=kernel.def_kernel(
-                inputs=[X, W, Bias],  # type: ignore[list-item]
+                inputs=[X, W, scale_x, scale_w, Bias],  # type: ignore[list-item]
                 outputs=[Y],
-                names_str="X, W, Bias, Y",
+                names_str="X, W, inv_scale_x, inv_scale_w, Bias, Y",
                 input_reorder=self.input_reorder,
                 size_args=[
                     f"ck::index_t {arg}"
@@ -391,6 +395,7 @@ class CKGemmTemplate(CKTemplate):
         """
         Add Composable Kernel Universal GEMM instance choices to the auto-tuning list.
         """
+        print(f"{input_nodes=}")
         template = CKGemmTemplate(
             input_nodes,
             layout,
@@ -408,7 +413,7 @@ class CKGemmTemplate(CKTemplate):
     def size_args(self):
         X = self.input_nodes[0]
         W = self.input_nodes[1]
-        Bias = self.input_nodes[2] if len(self.input_nodes) > 2 else None
+        Bias = self.input_nodes[2] if len(self.input_nodes) == 3 else None
         Y = self.output_node
 
         M = X.get_size()[0]
