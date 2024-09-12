@@ -32,9 +32,6 @@ class BaseOperator:
         """For the first input size"""
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def multiple_runs(self):
-        """For different input sizes"""
-        raise NotImplementedError("Subclasses must implement this method.")
 
 
 def dir_contains_file(dir, file_name) -> bool:
