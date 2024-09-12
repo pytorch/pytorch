@@ -847,7 +847,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     lambda: self._test_traceable_fsdp(
                         *self._create_transformer_factory_fns(
                             all_requires_grad=all_requires_grad,
-                            activation_checkpoint=activation_checkpoint,
                         ),
                         "inductor",
                         fullgraph=fullgraph,
