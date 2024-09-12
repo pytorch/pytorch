@@ -75,7 +75,7 @@ class CppWrapperCpu(WrapperCodeGen):
         call_args,
         grid=None,
         device_index=None,
-        cuda=True,
+        gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
@@ -87,19 +87,19 @@ class CppWrapperCpu(WrapperCodeGen):
         """
         Generates kernel call code.
 
-        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        if cuda:
+        if gpu:
             return super().generate_kernel_call(
                 kernel_name,
                 call_args,
                 grid,
                 device_index,
-                cuda,
+                gpu,
                 triton,
                 arg_types,
                 raw_args,
@@ -920,7 +920,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.prefix = cached_dtypes_buffer
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
+        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=False
     ):
         self.header.splice(f"\n{kernel}\n")
 
@@ -1703,7 +1703,6 @@ class CppWrapperCpu(WrapperCodeGen):
         call_strs = []
         if config.abi_compatible:
             final_tmp_name = None
-            final_tmp_name_is_RAIIAtenTensorHandle = False
 
             def create_reinterpret_call():
                 tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -1766,7 +1765,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     )
                     call_strs.extend(tmp_call_strs)
                     final_tmp_name = tmp_output_name
-                    final_tmp_name_is_RAIIAtenTensorHandle = True
                 else:
                     return f"{data.get_name()}"
             else:
@@ -1780,7 +1778,6 @@ class CppWrapperCpu(WrapperCodeGen):
                         reinterpret_call
                     )
                     call_strs.extend(tmp_call_strs)
-                    final_tmp_name_is_RAIIAtenTensorHandle = True
                 elif (
                     self.can_stack_allocate_buffer(data)
                     and self.is_statically_known_list_of_ints(size_list)
@@ -1788,13 +1785,15 @@ class CppWrapperCpu(WrapperCodeGen):
                     and ir.is_contiguous_strides_for_shape(stride_list, size_list)
                 ):
                     # No need to wrap with RAIIAtenTensorHandle when using stack_allocation
-                    final_tmp_name_is_RAIIAtenTensorHandle = False
+                    call_strs.append(
+                        f"auto {final_tmp_name}_array_ref = wrap_with_raii_handle_if_needed({final_tmp_name});"
+                    )
+                    final_tmp_name = f"{final_tmp_name}_array_ref"
                 else:
                     call_strs.append(
                         f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
                     )
                     final_tmp_name = f"{final_tmp_name}_raii"
-                    final_tmp_name_is_RAIIAtenTensorHandle = True
 
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.
@@ -1831,10 +1830,7 @@ class CppWrapperCpu(WrapperCodeGen):
             #     }.data()
             # );
             # ```
-            if not final_tmp_name_is_RAIIAtenTensorHandle:
-                return f"wrap_with_raii_handle_if_needed({final_tmp_name})"
-            else:
-                return final_tmp_name
+            return final_tmp_name
         else:
             args = [data.get_name(), size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"
