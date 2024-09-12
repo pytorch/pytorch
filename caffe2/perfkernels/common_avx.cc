@@ -2,7 +2,7 @@
 // example, if your compiler did not specify -mavx, you should not provide
 // the CAFFE2_PERF_WITH_AVX macro.
 
-#include "caffe2/core/common.h"
+#include "caffe2/core/macros.h"
 
 #ifdef CAFFE2_PERF_WITH_AVX
 #ifndef __AVX__

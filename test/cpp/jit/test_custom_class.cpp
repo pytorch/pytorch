@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <caffe2/serialize/istream_adapter.h>
 #include <test/cpp/jit/test_custom_class_registrations.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/custom_class.h>

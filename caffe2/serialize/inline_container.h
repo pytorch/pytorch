@@ -6,7 +6,6 @@
 #include <fstream>
 #include <istream>
 #include <mutex>
-#include <ostream>
 #include <unordered_set>
 
 #include <c10/core/Allocator.h>
@@ -91,8 +90,8 @@ typedef struct mz_zip_archive mz_zip_archive;
 // model.json as the last file when writing after we have accumulated all
 // other information.
 
-namespace caffe2 {
-namespace serialize {
+
+namespace caffe2::serialize {
 
 static constexpr const char* kSerializationIdRecordName = ".data/serialization_id";
 
@@ -196,18 +195,18 @@ class TORCH_API PyTorchStreamReader final {
   std::string archive_name_;
   std::string archive_name_plus_slash_;
   std::shared_ptr<ReadAdapterInterface> in_;
-  int64_t version_;
+  int64_t version_{};
   std::mutex reader_lock_;
   bool load_debug_symbol_ = true;
   std::string serialization_id_;
-  size_t additional_reader_size_threshold_;
+  size_t additional_reader_size_threshold_{};
 };
 
 class TORCH_API PyTorchStreamWriter final {
  public:
   explicit PyTorchStreamWriter(const std::string& archive_name);
   explicit PyTorchStreamWriter(
-      const std::function<size_t(const void*, size_t)> writer_func);
+      const std::function<size_t(const void*, size_t)>& writer_func);
 
   void setMinVersion(const uint64_t version);
 
@@ -274,5 +273,4 @@ size_t getPadding(
     std::string& padding_buf);
 } // namespace detail
 
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize

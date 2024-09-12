@@ -39,7 +39,7 @@ TORCH_API inline bool EndsWith(
   }
 }
 
-TORCH_API int32_t editDistanceHelper(
+TORCH_API size_t editDistanceHelper(
     const char* s1,
     size_t s1_len,
     const char* s2,
