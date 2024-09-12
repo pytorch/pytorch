@@ -286,8 +286,8 @@ def _split_decomp_table_to_cia_and_python_decomp(
 
 def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     """
-    This is an official decomposition table which contains decomposition of
-    all ATEN operators to core aten decompositions. Use this API together with
+    This is the default decomposition table which contains decomposition of
+    all ATEN operators to core aten opset. Use this API together with
     :func:`run_decompositions()`
     """
     from torch._decomp import core_aten_decompositions
