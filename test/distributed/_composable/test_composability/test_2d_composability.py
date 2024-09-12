@@ -822,7 +822,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         """
         This is a workaround for loading full state dict into a FSDP1+TP 2D model.
         Since named_parameters() in FSDP1 does not return DTensor, we don't have the information to shard the full_state_dict
-        and load it directly into the 2d model. In order to load a full state dict in FSDP1+TP 2D model, we need to dor:
+        and load it directly into the 2d model. In order to load a full state dict in FSDP1+TP 2D model, we need to do:
         1) load the full state dict into a 1D FSDP model
         2) dcp.save the full/shard state dict into storage
         3) initialize a 2D FSDP1+TP model
@@ -866,7 +866,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         model_2d = FSDP(model_2d, device_mesh=dp_mesh, use_orig_params=True)
         optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
         # get the default sharded state dict for model_2d
-        # note this is because we can not set full_state_dict back to 2D
+        # note this is because we can not set full_state_dict back to 2D directly
         msd = get_model_state_dict(model_2d)
         osd = get_optimizer_state_dict(model_2d, optimizers=optim_2d)
         state_dict = {"model": msd, "optim": osd}
