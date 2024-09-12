@@ -2823,7 +2823,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result[1], expected_result_out)
 
     @skipIfNoDynamoSupport
-    @skipIfCrossRef  # Arg order changes with crossref
     def test_scan_simple_graph_no_carry(self):
         x = torch.randn(3, 10, 2, device=torch.device("cpu"))
         init = torch.randn(1, 10, 2, device=torch.device("cpu"))
@@ -2884,6 +2883,7 @@ def forward(self, pred_1, x_1):
             gm = make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
 
     @skipIfNoDynamoSupport
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_scan_simple_graph(self):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
