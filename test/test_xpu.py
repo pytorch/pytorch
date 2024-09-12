@@ -393,7 +393,7 @@ print(torch.xpu.device_count())
         torch.xpu.reset_accumulated_memory_stats()
         # Activate 1kB memory
         a = torch.randn(256, device="xpu")
-        # Detect if the current activate device memory is 1kB
+        # Detect if the current activate device memory is 1kB 
         self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 1024)
         del a
         self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 0)
