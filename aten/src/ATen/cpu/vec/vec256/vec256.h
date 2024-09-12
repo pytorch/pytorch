@@ -314,6 +314,17 @@ inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
   return flip8(v);
 }
 
+inline Vectorized<bool> operator&&(
+    const Vectorized<bool>& self,
+    const Vectorized<bool>& other) {
+  const __m256i* self_ = reinterpret_cast<const __m256i*>(self.as_bytes());
+  const __m256i* other_ = reinterpret_cast<const __m256i*>(other.as_bytes());
+  __m256i out = _mm256_and_si256(*self_, *other_);
+  Vectorized<bool> ret;
+  std::memcpy(ret, &out, ret.size() * sizeof(bool));
+  return ret;
+}
+
 #endif // (defined(CPU_CAPABILITY_AVX2)
 
 }} // namepsace at::vec::CPU_CAPABILITY

@@ -241,7 +241,7 @@ class TritonTemplateKernel(TritonKernel):
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
             size = V.graph.sizevars.size_hints(inp.get_size())
-            numel = functools.reduce(operator.mul, size)
+            numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
@@ -540,12 +540,12 @@ class TritonTemplateKernel(TritonKernel):
                 output_index = sympy.Symbol("xindex", integer=True)
 
             # Generate load code
-            load_code = f"{output_name} = tl.load({input_name} + ({output_index}))"
+            load_code = f"{output_name} = tl.load({input_name} + ({output_index})"
             # load_code = f"{output_name} = tl.load({input_name} + {texpr(input_index)}"
-            # if mask:
-            #     load_code += f", {mask}, other={other})"
-            # else:
-            #     load_code += ")"
+            if mask:
+                load_code += f", mask={mask}, other={other})"
+            else:
+                load_code += ")"
         hook_key = f"<LOAD_INPUT_{input_name}>"
 
         def hook():
