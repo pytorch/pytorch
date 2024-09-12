@@ -74,7 +74,7 @@ custom_op_default_layout_constraint = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
-triton_kernel_default_layout_constraint = "flexible_layout"
+triton_kernel_default_layout_constraint = "needs_fixed_stride_order"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -330,8 +330,8 @@ autotune_fallback_to_aten = (
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
 
-# DEPRECATED, DO NOT USE
-search_autotune_cache = False
+# enable searching global and local cache regardless of `max_autotune`
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
