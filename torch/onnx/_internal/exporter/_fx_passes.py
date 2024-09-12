@@ -17,13 +17,6 @@ def decompose_with_registry(
     """
     onnx_registered_ops = set(_decomp.get_onnx_implemented_overloads(registry))
     decomp_table = _decomp.create_onnx_friendly_decomposition_table(onnx_registered_ops)
-    # Try to preserve some known CompositeImplicitAutograd ops
-    to_preserve = _decomp.get_preserve_ops()
-    # We can only preserve implemented ops
-    can_preserve = tuple(to_preserve.intersection(onnx_registered_ops))
-    for op in can_preserve:
-        if op in decomp_table:
-            del decomp_table[op]
     # We shouldn't put HOPs into the decomp table, because it is undefined behavior
     decomp_table = {k: v for k, v in decomp_table.items() if hasattr(k, "_schema")}
     return exported_program.run_decompositions(decomp_table)

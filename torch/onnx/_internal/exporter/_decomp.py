@@ -82,19 +82,13 @@ def create_onnx_friendly_decomposition_table(
         decomposition functions.
     """
     decomposition_table: dict[torch._ops.OperatorBase, Callable] = (
-        torch._decomp._decomp_table_to_post_autograd_aten()
+        torch._decomp.core_aten_decompositions()
     )
 
-    # NOTE: If we import torch._decomp, we will get RuntimeError: Only a single
-    # TORCH_LIBRARY can be used to register the namespace nvprims; please put all of your
-    # definitions in a single TORCH_LIBRARY block.
-    for op_overload, decomp_fn in torch._decomp.decomposition_table.items():  # type: ignore[attr-defined]
-        # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX
-        # symbolic function.
-        # NOTE: Do not skip torch._refs decomps. They are fine because otherwise the model is
-        # not exportable anyways.
-        if op_overload in onnx_registered_ops:
-            continue
-        decomposition_table[op_overload] = decomp_fn
+    preserve_ops = get_preserve_ops()
+
+    for op_overload in list(decomposition_table.keys()):
+        if (op_overload in onnx_registered_ops) or (op_overload in preserve_ops):
+            del decomposition_table[op_overload]
 
     return decomposition_table

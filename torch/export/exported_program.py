@@ -1000,7 +1000,7 @@ class ExportedProgram:
         If you don't want to decompose anything
 
         .. code-block:: python
-        
+
             ep = torch.export.export(model, ...)
             ep = ep.run_decompositions(decomp_table={})
 
