@@ -3080,8 +3080,6 @@ class Scheduler:
     # if there's indirect indexing, don't match it
     def fusable_read_and_write(self, read: Dep, write: MemoryDep) -> bool:
         if isinstance(read, MemoryDep):
-            if read.mode == write.mode and write.mode is not None:
-                return True
             read_name = self.mutation_renames.get(read.name, read.name)
 
             if (
