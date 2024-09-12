@@ -15,5 +15,20 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def device_guard(self, device_idx):
         return f"torch.cuda._DeviceGuard({device_idx})"
 
+    def cpp_device_guard(self):
+        return "at::cuda::CUDAGuard"
+
+    def cpp_aoti_device_guard(self):
+        return "AOTICudaGuard"
+
+    def cpp_stream_guard(self):
+        return "at::cuda::CUDAStreamGuard"
+
+    def cpp_aoti_stream_guard(self):
+        return "AOTICudaStreamGuard"
+
+    def cpp_getStreamFromExternal(self):
+        return "at::cuda::getStreamFromExternal"
+
 
 register_device_op_overrides("cuda", CUDADeviceOpOverrides())

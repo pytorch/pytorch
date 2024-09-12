@@ -278,6 +278,7 @@
 
 - name: affine_grid_generator(Tensor theta, SymInt[] size, bool align_corners) -> Tensor
   theta: affine_grid_generator_backward_symint(grad, size, align_corners)
+  result: auto_linear
 
 - name: alias(Tensor(a) self) -> Tensor(a)
   self: grad
