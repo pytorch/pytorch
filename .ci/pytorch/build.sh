@@ -285,7 +285,7 @@ else
         python -mpip install --pre numpy==2.0.0rc1
       fi
 
-      #WERROR=1 python setup.py clean
+      WERROR=1 python setup.py clean
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
@@ -294,7 +294,7 @@ else
         WERROR=1 python setup.py bdist_wheel
       fi
     else
-      #python setup.py clean
+      python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
