@@ -1056,7 +1056,6 @@ class ExportedProgram:
 
         for op in _preserve_ops:
             if op in _decomp_table:
-                print("HERERERERE", op)
                 del _decomp_table[op]
 
         return _decompose_exported_program(
