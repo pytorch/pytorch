@@ -14,6 +14,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _identity,
+    BlockMask,
     create_block_mask,
     flex_attention,
 )
@@ -253,7 +254,7 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_test(
         self,
-        score_mod: Callable,
+        score_mod: Optional[Callable],
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -263,7 +264,11 @@ class TestFlexDecoding(InductorTestCase):
         KV_H: int = Hkv,
         KV_S: int = S,
         V_D: int = D,
+        block_mask: Optional[BlockMask] = None,
     ):
+        assert (
+            score_mod is not None or block_mask is not None
+        ), "Must provide score_mod or block_mask"
         assert Q_H % KV_H == 0
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D),
@@ -280,7 +285,6 @@ class TestFlexDecoding(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
-        block_mask = None
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
@@ -806,7 +810,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query, key, value, block_mask=block_mask, enable_gqa=True, return_lse=True
         )
         self.assertEqual(out[:, :, M:, :].sum(), 0)
-        self.assertTrue((lse[:, :, M:] == 0.0).all())
+        self.assertTrue((lse[:, :, M:] == -float("inf")).all())
 
         loss = out.sum() + lse.sum()
         loss.backward()
@@ -941,6 +945,36 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # Ensure that we're still generating the flexattention kernel
         FileCheck().check_count(".run(primals_1, primals_2, primals_3", 1, True).run(
             code[0]
+        )
+
+    @supported_platform
+    def test_non_sparse_mulitple_block_size(self):
+        def generate_causal_offset(offset: torch.Tensor):
+            def causal_offset_mask(b, h, q_idx, kv_idx):
+                return (offset + q_idx) >= kv_idx
+
+            return causal_offset_mask
+
+        def noop(score, b, h, q_idx, kv_idx):
+            return score
+
+        mod = generate_causal_offset(
+            torch.tensor(192, device="cuda", dtype=torch.int32)
+        )
+        block_mask = create_block_mask(mod, 1, 1, 1, 65)
+
+        self.run_test(
+            score_mod=None,
+            dtype=torch.float32,
+            block_mask=block_mask,
+            Q_B=1,
+            Q_H=1,
+            Q_S=1,
+            Q_D=16,
+            KV_B=1,
+            KV_H=1,
+            KV_S=65,
+            V_D=16,
         )
 
     @supported_platform

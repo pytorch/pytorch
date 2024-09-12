@@ -15,6 +15,7 @@ import torch.onnx.operators
 from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch._streambase import _StreamBase
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import config, polyfills, variables
 from ..codegen import PyCodegen
@@ -154,10 +155,7 @@ class BaseTorchVariable(VariableTracker):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -175,9 +173,6 @@ class BaseTorchVariable(VariableTracker):
 
     def as_proxy(self):
         return self.value
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -581,6 +576,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [args[0], result], {}
                 )
 
+        @register(torch._foreach_lerp_)
+        def handle_inplace_foreach_lerp_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_lerp_inplace),
+                    args,
+                    kwargs,
+                )
+
+        @register(torch._foreach_pow)
+        def handle_foreach_pow_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            # In eager it's more performant to call item() from within the C op implementation
+            # in compile, it's more performant to not graph break.
+            if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
+                return tx.inline_user_function_return(
+                    SourcelessBuilder.create(tx, polyfills.foreach_pow_scalar),
+                    args,
+                    kwargs,
+                )
+
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
             if (condition.is_python_constant() and condition.as_python_constant()) or (
@@ -652,10 +671,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
                 # and rewrite args to have only proxyable args, then insert call_function
                 args_as_value = [x.as_python_constant() for x in args[1:]]
-                kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+                kwargs_as_value = {
+                    k: v.as_python_constant()
+                    for k, v in kwargs.items()
+                    if k not in ["shape", "stride"]
+                }
+                kwargs_to_be_proxied = {
+                    k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
+                }
 
-                def fn_with_prim_types(x):
-                    return self.value(x, *args_as_value, **kwargs_as_value)
+                def fn_with_prim_types(x, shape=None, stride=None):
+                    return self.value(
+                        x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
+                    )
 
                 # attach the same function name for better debugging
                 fn_with_prim_types.__name__ = "prim " + self.value.__name__
@@ -665,7 +693,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     proxy=tx.output.create_proxy(
                         "call_function",
                         fn_with_prim_types,
-                        *proxy_args_kwargs([args[0]], {}),
+                        *proxy_args_kwargs(
+                            [args[0]],
+                            kwargs_to_be_proxied,
+                        ),
                     ),
                 )
 
@@ -1006,6 +1037,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # this results in cleaner graphs, but only works for inputs
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
+
+        if is_traceable_wrapper_subclass_type(data.class_type):
+            unimplemented("Parameter constructor with tensor subclass NYI")
 
         if not can_convert_to_tracable_parameter():
             unimplemented("Workaround for issues with nn_parameter construction")
