@@ -61,6 +61,7 @@ class BenchmarkBase(ABC):
     # TODO is there other parts we need to add ?
     _enable_compile_time_instruction_count = False
 
+    # number of iterations used to run when collecting instruction_count or compile_time_instruction_count.
     _num_iterations = 5
 
     def with_iterations(self, value):
@@ -95,7 +96,7 @@ class BenchmarkBase(ABC):
     def _count_instructions(self):
         print(f"collecting instruction count for {self.name()}")
         results = []
-        for i in range(10):
+        for i in range(self._num_iterations):
             self._prepare()
             id = i_counter.start()
             self._work()
