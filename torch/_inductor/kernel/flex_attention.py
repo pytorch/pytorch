@@ -3,7 +3,7 @@
 
 import logging
 import math
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import sympy
 
@@ -17,6 +17,7 @@ from ..ir import (
     ExternKernel,
     FixedLayout,
     FlexibleLayout,
+    get_stride_order,
     InputBuffer,
     IRNode,
     StorageBox,
@@ -29,6 +30,26 @@ from ..select_algorithm import autotune_select_algorithm, realize_inputs, Triton
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+Expr = sympy.Expr
+
+
+def construct_strides(
+    sizes: Sequence[int],
+    permutation_order: Sequence[int],
+) -> Sequence[int]:
+    """From a list of sizes and a permutation order, construct the strides of the permuted tensor."""
+    # Initialize strides
+    strides = [0] * len(sizes)
+
+    # Start with stride 1 for the innermost dimension
+    current_stride = 1
+
+    # Iterate through the permutation order from right to left (innermost to outermost)
+    for dim in reversed(permutation_order):
+        strides[dim] = current_stride
+        current_stride *= sizes[dim]
+
+    return strides
 
 
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
@@ -762,11 +783,16 @@ def flex_attention(
     q_strides = query.get_stride()
     assert q_strides[-1] == 1, "Query must be contiguous in the last dimension"
 
+    # Construct output layout with strides matching the query.
+    out_size = [B, Hq, seq_len_q, v_head_dim]
+    permutation_order = get_stride_order(query.get_stride())
+    out_strides = construct_strides(out_size, permutation_order)
+
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
         [B, Hq, seq_len_q, v_head_dim],
-        stride=None,  # contiguous strides
+        stride=out_strides,
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = [B, Hq, seq_len_q]
