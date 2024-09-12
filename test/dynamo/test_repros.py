@@ -5476,15 +5476,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
-            return tuple(map(f, x, y))
+            return map(f, x, y)
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")
 
         inps = gen_inps(3, 3)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
         inps = gen_inps(3, 5)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
     def test_staticmethod_allow_in_graph(self):
         class MyClass:
@@ -5909,6 +5911,22 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             actual[0].untyped_storage().data_ptr(),
             actual[1].untyped_storage().data_ptr(),
         )
+
+    def test_torch_compile_in_compile_frame(self):
+        # TODO(anijain2305/yanboliang) - Dont graph break on torch.compile.
+        def gn(x, c=None):
+            if c is None:
+                c = 2
+            return c * x
+
+        def outer_func(x):
+            return torch.compile(gn)(x)
+
+        compile_outer = torch.compile(outer_func, backend="eager")
+        x = torch.randn(4)
+        ref = outer_func(x)
+        res = compile_outer(x)
+        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(ReproTests)

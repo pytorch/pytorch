@@ -308,6 +308,19 @@ class MiscTests(torch._inductor.test_case.TestCase):
             "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
         )
 
+    def test_scalar_device_movement(self):
+        if not torch._dynamo.config.assume_static_by_default:
+            self.skipTest("Doesn't work with symints")
+
+        def add_fn(a, b, out):
+            res = torch.add(a, b, out=out)
+            return res
+
+        res = add_fn(2, 3, torch.tensor(0.0))
+        add_fn = torch.compile(add_fn, backend="eager", fullgraph=True)
+        res_compiled = add_fn(2, 3, torch.tensor(0.0))
+        self.assertEqual(res, res_compiled)
+
     @skipIfNNModuleInlined("fails internal CI")
     @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
     def test_cpp_extension_recommends_custom_ops(self):
@@ -3366,6 +3379,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(obj42.y, x4 + 2))
         self.assertTrue(same(obj41.y, obj42.y))
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_thread_local_setattr(self):
+        from threading import local
+
+        loc = local()
+
+        @torch.compile(fullgraph=True)
+        def fn(x, l):
+            l.x = x
+            return x + 1
+
+        x = torch.ones(2, 2)
+        fn(x, loc)
+
+        self.assertTrue(loc.x is x)
 
     def test_user_defined_class_name(self):
         class MyClassFoo:
