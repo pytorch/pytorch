@@ -1008,6 +1008,14 @@ aten::nonzero.out
 aten::nonzero_static
 aten::nonzero_static.out
 aten::normal_functional
+aten::onednn_linear
+aten::onednn_linear.out
+aten::onednn_linear_backward
+aten::onednn_linear_backward.out
+aten::onednn_linear_backward_input
+aten::onednn_linear_backward_input.out
+aten::onednn_linear_backward_weights
+aten::onednn_linear_backward_weights.out
 aten::onednn_rnn_layer
 aten::onednn_rnn_layer.out
 aten::onednn_rnn_layer_backward
