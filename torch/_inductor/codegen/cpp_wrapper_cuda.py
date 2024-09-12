@@ -63,7 +63,7 @@ class DeferredCudaKernelLine(DeferredLineBase):
 
 class DeferredCudaDefaultGrid:
     """
-    A marker to
+    A container for the default grid, which may be used by DeferredCudaGridLine
     """
 
     def __init__(
@@ -168,7 +168,6 @@ class CppWrapperCuda(CppWrapperCpu):
         self.device = "cuda"
         super().__init__()
         self.grid_id = count()
-        self.cuda = True
 
     def write_header(self):
         if V.graph.is_const_graph:
