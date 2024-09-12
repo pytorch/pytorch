@@ -123,6 +123,7 @@ def allow_in_graph(fn):
 def substitute_in_graph(
     original_fn: _F,
     *,
+    can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
 ) -> Callable[[_F], _F]:
     """
@@ -142,6 +143,10 @@ def substitute_in_graph(
     Args:
         original_fn (callable): The original function, usually a C function, to register a polyfill
             handler for.
+        can_constant_fold_through (bool, optional): Whether the polyfill handler can be constant
+            folded through. That is, if the polyfill handler is a pure function and its arguments
+            are constant, the result of the polyfill handler can be constant folded during the
+            compilation. Defaults to ``False``.
         skip_signature_check (bool, optional): Whether to skip the signature check between the
             original function and the polyfill handler. Defaults to ``False``.
 
@@ -173,6 +178,7 @@ def substitute_in_graph(
 
     return torch._dynamo.substitute_in_graph(
         original_fn,
+        can_constant_fold_through=can_constant_fold_through,
         skip_signature_check=skip_signature_check,
     )
 

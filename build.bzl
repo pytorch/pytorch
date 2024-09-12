@@ -34,7 +34,6 @@ def define_targets(rules):
             "caffe2/serialize/file_adapter.cc",
             "caffe2/serialize/inline_container.cc",
             "caffe2/serialize/istream_adapter.cc",
-            "caffe2/serialize/read_adapter_interface.cc",
         ],
         copts = ["-fexceptions"],
         tags = [
@@ -76,7 +75,7 @@ def define_targets(rules):
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
 
     gen_aten_outs_cuda = (
-        GENERATED_H_CUDA + GENERATED_CPP_CUDA +
+        GENERATED_H_CUDA + GENERATED_CPP_CUDA + GENERATED_AOTI_CUDA_CPP +
         aten_ufunc_generated_cuda_sources()
     )
 
@@ -320,5 +319,8 @@ GENERATED_AUTOGRAD_CPP = [
 
 GENERATED_AOTI_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+]
+
+GENERATED_AOTI_CUDA_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
 ]
