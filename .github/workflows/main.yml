@@ -1,0 +1,34 @@
+name: Build Python Wheel on Alpine Linux
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'  # Specify the Python version you want to use
+
+    - name: Build wheel in Alpine Linux
+      run: |
+        docker run --rm -v $(pwd):/app -w /app python:3.x-alpine \
+        /bin/sh -c "
+        apk add --no-cache bash git lapack-dev ninja openblas-dev linux-headers musl-dev libffi-dev gfortran cmake build-base &&
+        python -m pip install --upgrade pip setuptools wheel &&
+        python setup.py bdist_wheel"
+        
+    - name: List wheel files
+      run: ls dist/*.whl
+
+    - name: Upload Wheel file as an artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-wheel
+        path: dist/*.whl
