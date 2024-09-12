@@ -5557,7 +5557,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             z0 = x.sin()
             z1 = x.sin()
             y = x + 1
-            torch.ops.fsdp.set_.default(x, y)
+            torch.ops.fsdp.copy_.default(x, y)
             # z3 and z3 can be CSEd with each other,
             # but *not* with z0/z1 (they cross a mutation boundary)
             z2 = x.sin()
@@ -5589,7 +5589,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             z = x.sin()
             y = x + 1
             # graph input has its storage mutated
-            torch.ops.fsdp.set_.default(x, y)
+            torch.ops.fsdp.copy_.default(x, y)
             z2 = x.sin()
             return z2, l**2
 
@@ -5911,6 +5911,21 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             actual[0].untyped_storage().data_ptr(),
             actual[1].untyped_storage().data_ptr(),
         )
+
+    def test_torch_compile_in_compile_frame(self):
+        def gn(x, c=None):
+            if c is None:
+                c = 2
+            return c * x
+
+        def outer_func(x):
+            return torch.compile(gn, backend="eager")(x)
+
+        compile_outer = torch.compile(outer_func, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = outer_func(x)
+        res = compile_outer(x)
+        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(ReproTests)
