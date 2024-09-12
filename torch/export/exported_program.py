@@ -246,19 +246,19 @@ def _split_decomp_table_to_cia_and_python_decomp(
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
     from torch._decomp import (
         _collect_all_valid_cia_ops,
-        _core_aten_decompositions_after_cia,
-        _is_special_op_to_preserve
+        _core_aten_decompositions_post_autograd,
+        _is_special_op_to_preserve,
     )
 
     if is_joint:
-        return {}, _core_aten_decompositions_after_cia()
+        return {}, _core_aten_decompositions_post_autograd()
 
     all_preservable_cia_ops = _collect_all_valid_cia_ops()
     cia_ops_to_callable = {}
 
     for op in list(decomp_table.keys()):
         # TODO we are silently allowing non-safe(non-functional) ops through a crack
-        # due to core aten decomp table having non-functional entries. Once we have 
+        # due to core aten decomp table having non-functional entries. Once we have
         # a tigher check around core aten decomp, we should warn users about them.
         # Tracking issue: (https://github.com/pytorch/pytorch/issues/135759)
 
@@ -278,8 +278,8 @@ def _split_decomp_table_to_cia_and_python_decomp(
             cia_ops_to_callable[op] = decomp_table[op]
             all_preservable_cia_ops.remove(op)
             del decomp_table[op]
-    
-    # If we reached here, it means user intentionally deleted these CIA ops from 
+
+    # If we reached here, it means user intentionally deleted these CIA ops from
     # decomp table.
     for k in all_preservable_cia_ops:
         cia_ops_to_callable[k] = _is_special_op_to_preserve
@@ -995,7 +995,7 @@ class ExportedProgram:
     def run_decompositions(
         self,
         decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
-        _preserve_ops: Tuple[torch._ops.OpOverload, ... ] = ()
+        _preserve_ops: Tuple[torch._ops.OpOverload, ...] = (),
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -1006,15 +1006,15 @@ class ExportedProgram:
         For now, we do not decompose joint graphs.
 
         Args:
-            decomp_table: 
+            decomp_table:
              An optional argument that specifies decomp behaviour for Aten ops
-             (1) If None, we decompose to core aten decompositions 
-             (2) If empty, we don't decompose any operator 
-             
-        
+             (1) If None, we decompose to core aten decompositions
+             (2) If empty, we don't decompose any operator
+
+
         Some examples:
 
-        If you don't want to decompose anything 
+        If you don't want to decompose anything
 
         .. code-block:: python
             ep = torch.export.export(model, ...)
@@ -1029,9 +1029,13 @@ class ExportedProgram:
             decomp_table[your_op] = your_custom_decomp
             ep = ep.run_decompositions(decomp_table=decomp_table)
         """
-        from torch._decomp import core_aten_decompositions
-        
-        # FIXME delete this option after PTC, Executorch syncing is 
+        from torch._decomp import (
+            core_aten_decompositions,
+            decomp_table_to_post_autograd_aten,
+        )
+        from torch._inductor import config
+
+        # FIXME delete this option after PTC, Executorch syncing is
         # bit annoying so can't get rid of it easily
         if _preserve_ops != ():
             warnings.warn(
@@ -1044,8 +1048,15 @@ class ExportedProgram:
             core_aten_decompositions() if decomp_table is None else dict(decomp_table)
         )
 
+        if config.is_fbcode():
+            # This means the decomp_table would only be containing post-autograd ops
+            # We should manually add CIA decomps
+            for k, v in decomp_table_to_post_autograd_aten().items():
+                _decomp_table[k] = v
+
         for op in _preserve_ops:
             if op in _decomp_table:
+                print("HERERERERE", op)
                 del _decomp_table[op]
 
         return _decompose_exported_program(

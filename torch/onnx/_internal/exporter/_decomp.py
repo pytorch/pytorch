@@ -1,5 +1,3 @@
-"""Build decomp table from PyTorch."""
-
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
@@ -83,7 +81,9 @@ def create_onnx_friendly_decomposition_table(
         Dict[torch._ops.OperatorBase, Callable]: A dictionary that maps op overloads to their corresponding
         decomposition functions.
     """
-    decomposition_table: dict[torch._ops.OperatorBase, Callable] = {}
+    decomposition_table: dict[torch._ops.OperatorBase, Callable] = (
+        torch._decomp.decomp_table_to_post_autograd_aten()
+    )
 
     # NOTE: If we import torch._decomp, we will get RuntimeError: Only a single
     # TORCH_LIBRARY can be used to register the namespace nvprims; please put all of your
