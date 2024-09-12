@@ -846,7 +846,10 @@ def create_block_mask(
     KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
         inner_func = torch.compile(
-            torch.compiler.enable(inner_func), fullgraph=True, dynamic=False
+            inner_func,
+            fullgraph=True,
+            dynamic=False,
+            force=True,
         )
     with TransformGetItemToIndex():
         partial_block_mask, full_block_mask = inner_func(
@@ -1031,7 +1034,6 @@ def flex_attention(
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass hop to it. So we wrap it in a dummy function.
-    @torch.compiler.enable
     def _flex_attention_hop_wrapper(*args, **kwargs):
         return flex_attention_hop(*args, **kwargs)
 
@@ -1039,7 +1041,10 @@ def flex_attention(
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, lse = torch.compile(
-                    _flex_attention_hop_wrapper, backend="eager", fullgraph=True
+                    _flex_attention_hop_wrapper,
+                    backend="eager",
+                    fullgraph=True,
+                    force=True,
                 )(
                     query,
                     key,

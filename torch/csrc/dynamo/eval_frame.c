@@ -585,9 +585,9 @@ static PyObject* _custom_eval_frame(
   }
   if (extra == SKIP_CODE_RECURSIVE) {
     DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
-    eval_frame_callback_set(Py_None);
+    eval_frame_callback_enabled = false;
     PyObject* result = eval_frame_default(tstate, frame, throw_flag);
-    eval_frame_callback_set(callback);
+    eval_frame_callback_enabled = true;
     return result;
   }
 
@@ -682,9 +682,11 @@ static PyObject* _custom_eval_frame(
     // Dynamo returned skip_code_recursive_flag, so we should recursively skip code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
     set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
-    PyObject* r = eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
+    eval_frame_callback_enabled = false;
+    PyObject* r = eval_frame_default(tstate, frame, throw_flag);
+    eval_frame_callback_enabled = true;
     return r;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));

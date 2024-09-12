@@ -2298,6 +2298,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    force: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2311,6 +2312,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    force: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2323,6 +2325,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    force: builtins.bool = False,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
     _Callable[_InputT, _RetT],
@@ -2404,6 +2407,8 @@ def compile(
 
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
+       force (bool): Forced (recursive) compilation. Overrides any previous `torch.compiler.disable` region.
+        Do not use with the `disable` option.
 
     Example::
 
@@ -2430,6 +2435,7 @@ def compile(
                 mode=mode,
                 options=options,
                 disable=disable,
+                force=force,
             )
 
         return fn
@@ -2450,6 +2456,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
+        force=force,
     )(model)  # type: ignore[return-value]
 
 
