@@ -96,7 +96,7 @@ class ConstantFolder(torch.fx.Interpreter):
             return True
 
         quant_registered = (
-            getattr(torch.ops.quantized_decomposed, "dequantized_per_channel", None)
+            getattr(torch.ops.quantized_decomposed, "dequantize_per_channel", None)
             is not None
         )
         if quant_registered and node.target in [
