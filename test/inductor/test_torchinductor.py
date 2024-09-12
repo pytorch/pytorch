@@ -10997,6 +10997,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     # We only support dtypeview for abi_conpatible aoti
+    @skip_if_triton_cpu  # compile time crash in CI
     @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview(self):
         if TEST_WITH_ASAN:
