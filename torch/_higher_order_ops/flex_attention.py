@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
-from typing import Any, Callable, Dict, Tuple, Union
+from typing import Any, Callable, Dict, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,6 +23,29 @@ from torch.fx.graph_module import GraphModule
 from torch.overrides import TorchFunctionMode
 
 
+# Duplicate of _indcutor/kernel/flex_attention.py to avoid circular inport
+def _construct_strides(
+    sizes: Sequence[int],
+    fill_order: Sequence[int],
+) -> Sequence[int]:
+    """From a list of sizes and a permutation order, construct the strides of the permuted tensor."""
+    # Initialize strides
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
+    strides = [0] * len(sizes)
+
+    # Start with stride 1 for the innermost dimension
+    current_stride = 1
+
+    # Iterate through the permutation order from right to left (innermost to outermost)
+    for dim in fill_order:
+        strides[dim] = current_stride
+        current_stride *= sizes[dim]
+
+    return strides
+
+
 def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch.Tensor:
     """
     Create a new tensor with the same data and shape as the input,
@@ -36,13 +59,12 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
         torch.Tensor: A new tensor with same shape and data as the input,
         but with strides permuted based on the query tensor's stride order.
     """
-    from torch._inductor.ir import get_stride_order
-    from torch._inductor.kernel.flex_attention import construct_strides
+    from torch._inductor.ir import get_stride_order, stride_order2fill_order
 
     stride_order = get_stride_order(query_strides)
-
+    fill_order = stride_order2fill_order(stride_order)
     assert out.storage_offset() == 0, "Only support storage_offset == 0"
-    out_strides = construct_strides(out.shape, stride_order)
+    out_strides = _construct_strides(out.shape, fill_order)
     new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
