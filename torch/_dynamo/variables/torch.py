@@ -446,6 +446,61 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Workaround dynamic shapes issue
                 return input.call_method(tx, "numel", [], {})
 
+        @register(torch.compile)
+        def handle_torch_compile(self, tx: "InstructionTranslator", *args, **kwargs):
+            if len(args) == 1:
+                from ..eval_frame import innermost_backend
+
+                # Create proxy function or nn.Module to create a proxy
+                # torch.compile object. This will be used to extract backend and
+                # compare with the current backend.
+                def nothing_fn(*args, **kwargs):
+                    pass
+
+                class Nothing(torch.nn.Module):
+                    pass
+
+                model_vt = args[0]
+                if isinstance(
+                    model_vt,
+                    (
+                        variables.UserFunctionVariable,
+                        variables.NestedUserFunctionVariable,
+                    ),
+                ):
+                    model_fake = nothing_fn
+                elif isinstance(
+                    model_vt,
+                    (
+                        variables.UnspecializedNNModuleVariable,
+                        variables.NNModuleVariable,
+                    ),
+                ):
+                    model_fake = Nothing()
+                else:
+                    unimplemented("torch.compile with unsupported first argument")
+
+                try:
+                    const_kwargs = {
+                        k: v.as_python_constant() for k, v in kwargs.items()
+                    }
+                except NotImplementedError:
+                    unimplemented("torch.compile with non-constant kwargs")
+                torch_compiled_fake = torch.compile(model_fake, **const_kwargs)
+
+                current_backend = innermost_backend(tx.output.compiler_fn)
+                new_backend = innermost_backend(torch_compiled_fake._torchdynamo_backend)  # type: ignore[attr-defined]
+
+                if current_backend == new_backend:
+                    # torch.compile is a no-op in dynamo
+                    return args[0]
+                else:
+                    unimplemented(
+                        "Inner torch.compile has a different backend compared to the outer torch.compile"
+                    )
+
+            unimplemented("torch.compile is used as a decorator in the compiled frame")
+
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx: "InstructionTranslator", input):
             assert isinstance(input, TensorVariable)
