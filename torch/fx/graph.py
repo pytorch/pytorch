@@ -20,6 +20,7 @@ import builtins
 import math
 import warnings
 import inspect
+import functools
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -86,14 +87,11 @@ def _snake_case(s: str) -> str:
         ``mod.pascalCase``-> ``mod.pascal_case``
         ``mod.ALL_CAPS`` -> ``mod.all_caps``
     """
-    chars = []
-    prev_lower = False
-    for c in s:
-        if prev_lower and c.isupper():
-            chars.append('_')
-        chars.append(c.lower())
-        prev_lower = c.islower()
-    return ''.join(chars)
+    return _snake_case_sub(s).lower()
+
+
+# Replace occurrences where a lowercase letter is followed by an uppercase letter
+_snake_case_sub = functools.partial(re.compile(r'(?<=[a-z])([A-Z])').sub, r'_\1')
 
 
 def _is_from_torch(obj: Any) -> bool:
