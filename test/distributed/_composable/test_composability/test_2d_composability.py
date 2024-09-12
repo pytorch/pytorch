@@ -336,6 +336,14 @@ class TestFullyShard2DTraining(FSDPTest):
         loss_cp2 = train_step(model_cp, optim_cp, inp)
         self.assertEqual(loss_no_cp2, loss_cp2)
 
+
+class TestFullyShard2DStateDict(DTensorTestBase):
+    @property
+    def backend(self):
+        # need to specify gloo backend for testing cpu offload
+        return "cpu:gloo,cuda:nccl"
+    
+    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_fully_shard_tp_2d_set_full_state_dict(self):
         dummy_model = SimpleModel().cuda()
@@ -589,6 +597,11 @@ class TestNew2dParallelTraining(DTensorTestBase):
 # TODO: update all state dict unit tests to use distributed.checkpoint.state_dict,
 # and consolidate all the state_dict test in test.distributed.checkpoint.
 class TestNew2dParallelStateDict(DTensorTestBase):
+    @property
+    def backend(self):
+        # need to specify gloo backend for testing cpu offload
+        return "cpu:gloo,cuda:nccl"
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_fsdp_2d_extension(self):
