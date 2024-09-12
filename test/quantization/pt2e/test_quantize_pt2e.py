@@ -1864,7 +1864,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def _get_bn_train_eval_ops(self):
         if capture_pre_autograd_graph_using_training_ir():
-           return (
+            return (
                 torch.ops.aten.batch_norm.default,
                 torch.ops.aten.batch_norm.default,
             )
