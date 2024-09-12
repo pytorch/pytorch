@@ -12,7 +12,8 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */) {
+    const Tensor& bias /* optional */,
+    bool calc_mn = true) {
 
   const int normalized_ndim = normalized_shape.size();
   TORCH_CHECK(
@@ -35,11 +36,11 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
       " and normalized_shape = ",
       normalized_shape);
 
-  const auto input_shape = input.sizes();
+  const auto sym_input_shape = input.sym_sizes();
   const auto input_ndim = input.dim();
 
   if (input_ndim < normalized_ndim ||
-      !input_shape.slice(input_ndim - normalized_ndim)
+      !C10_AS_INTARRAYREF_SLOW(sym_input_shape.slice(input_ndim - normalized_ndim))
            .equals(normalized_shape)) {
     std::stringstream ss;
     ss << "Given normalized_shape=" << normalized_shape
@@ -47,17 +48,22 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
     for (auto size : normalized_shape) {
       ss << ", " << size;
     }
-    ss << "], but got input of size" << input_shape;
+    ss << "], but got input of size" << sym_input_shape;
     AT_ERROR(ss.str());
   }
 
-  const int axis = input_ndim - normalized_ndim;
-  const int64_t M =
-      c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
-  const int64_t N =
-      c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
+  if (calc_mn) {
+    const auto input_shape = input.sizes();
+    const int axis = input_ndim - normalized_ndim;
+    const int64_t M =
+        c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
+    const int64_t N =
+        c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
 
-  return std::make_pair(M, N);
+    return std::make_pair(M, N);
+  } else {
+    return std::make_pair(0, 0);
+  }
 }
 
 } // namespace

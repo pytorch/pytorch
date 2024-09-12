@@ -274,7 +274,8 @@ Tensor rms_norm(
   const Tensor& weight = *weight_maybe_owned;
   auto bias_opt = std::optional<Tensor>();
   const Tensor& bias = *at::borrow_from_optional_tensor(bias_opt);
-  (void) _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+
+  (void) _check_layer_norm_inputs(input, normalized_shape, weight, bias, /*calc_mn=*/false);
 
   std::vector<int64_t> dims_to_reduce;
   for (const auto i : c10::irange(normalized_shape.size())) {
