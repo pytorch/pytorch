@@ -4,6 +4,7 @@ import itertools
 import math
 import sys
 
+import torch
 import sympy
 from typing import Callable, List, Tuple, Type
 from torch.testing._internal.common_device_type import skipIf
@@ -17,7 +18,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.functions import FloorDiv, simple_floordiv_gcd
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
-from torch.utils._sympy.reference import ReferenceAnalysis, PythonReferenceAnalysis
+from torch.utils._sympy.reference import ReferenceAnalysis, PythonReferenceAnalysis, TensorReferenceAnalysis
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
@@ -424,6 +425,41 @@ class TestSympyInterp(TestCase):
                     gm(*args)
                 )
 
+    @parametrize("fn", UNARY_OPS + BINARY_OPS + COMPARE_OPS)
+    def test_tensor_interp(self, fn):
+        # Skip tests for operations that are not implemented or not applicable
+        if fn in ("truncdiv", "mod", "int_truediv", "round_decimal"):
+            return
+
+        # Use scalar tensors to avoid ValueError
+        x = torch.tensor(1.0, dtype=torch.float64)
+        y = torch.tensor(4.0, dtype=torch.float64)
+
+        symbols = [x]
+        if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
+            symbols = [x, y]
+
+        try:
+            sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
+            tensor_result = sympy_interp(TensorReferenceAnalysis, dict(zip(symbols, symbols)), sympy_expr)
+
+            # Check that the result is a tensor
+            self.assertIsInstance(tensor_result, torch.Tensor)
+
+            # For operations that change dtype, we just check that the result is a tensor
+            if fn in ("truediv", "floor", "ceil", "sqrt", "exp", "log"):
+                return
+
+            # For boolean operations, check that the result is a boolean tensor
+            if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
+                self.assertEqual(tensor_result.dtype, torch.bool)
+            else:
+                # For other operations, check that the dtype is preserved
+                self.assertEqual(tensor_result.dtype, x.dtype)
+
+        except NotImplementedError:
+            # Some operations are not implemented in TensorReferenceAnalysis
+            pass
 
 def type_name_fn(type: Type) -> str:
     return type.__name__

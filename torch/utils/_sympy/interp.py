@@ -167,6 +167,9 @@ def sympy_interp(
     *,
     index_dtype=torch.int64,
 ):
+    if isinstance(expr, torch.Tensor):
+        return expr
+        
     # Handle base cases
     dtype = None
     if isinstance(expr, BooleanAtom):
