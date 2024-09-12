@@ -995,6 +995,7 @@ class ExportedProgram:
     def run_decompositions(
         self,
         decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
+        _preserve_ops: Tuple[torch._ops.OpOverload, ... ] = ()
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -1004,28 +1005,48 @@ class ExportedProgram:
 
         For now, we do not decompose joint graphs.
 
-        If you want to disable a decomposition for certain operator, you can do following:
+        Args:
+            decomp_table: 
+             An optional argument that specifies decomp behaviour for Aten ops
+             (1) If None, we decompose to core aten decompositions 
+             (2) If empty, we don't decompose any operator 
+             
+        
+        Some examples:
+
+        If you don't want to decompose anything 
 
         .. code-block:: python
-
             ep = torch.export.export(model, ...)
-            ep = ep.run_decompositions(decomp_table={your_op: None})
+            ep = ep.run_decompositions(decomp_table={})
 
         If you want to get a core aten operator set except for certain operator, you can do following:
 
         .. code-block:: python
             ep = torch.export.export(model, ...)
-
             from torch._decomp import core_aten_decompositions
             decomp_table = core_aten_decompositions()
-            decomp_table[your_op] = None
-            ep = ep.run_decompositions(decomp_table={your_op: None})
+            decomp_table[your_op] = your_custom_decomp
+            ep = ep.run_decompositions(decomp_table=decomp_table)
         """
         from torch._decomp import core_aten_decompositions
+        
+        # FIXME delete this option after PTC, Executorch syncing is 
+        # bit annoying so can't get rid of it easily
+        if _preserve_ops != ():
+            warnings.warn(
+                "This API is deprecated and soon will be removed. "
+                "Please look at the docstring to see how to preserve "
+                "an operator."
+            )
 
         _decomp_table = (
             core_aten_decompositions() if decomp_table is None else dict(decomp_table)
         )
+
+        for op in _preserve_ops:
+            if op in _decomp_table:
+                del _decomp_table[op]
 
         return _decompose_exported_program(
             self,
