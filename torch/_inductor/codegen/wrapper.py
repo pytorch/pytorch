@@ -310,13 +310,13 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 if self.last_seen_device_guard_index is None:
                     if config.abi_compatible:
                         code.writeline(
-                            "AOTICudaStreamGuard stream_guard(stream, this->device_idx_);"
+                            f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
                         )
                     else:
                         code.writeline(
                             maybe_hipify_code_wrapper(
-                                "at::cuda::CUDAStreamGuard stream_guard("
-                                + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
+                                f"{V.graph.device_ops.cpp_stream_guard()} stream_guard("
+                                + f"{V.graph.device_ops.cpp_getStreamFromExternal()}(stream, this->device_idx_));"
                             )
                         )
                 else:
@@ -326,10 +326,10 @@ class EnterDeviceContextManagerLine(WrapperLine):
             else:
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
-                        f"AOTICudaGuard device_guard({self.device_idx});"
+                        f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
                         if config.abi_compatible
                         else maybe_hipify_code_wrapper(
-                            f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                            f"{V.graph.device_ops.cpp_device_guard()} device_guard({self.device_idx});"
                         )
                     )
                 else:
@@ -580,6 +580,9 @@ class WrapperCodeGen(CodeGen):
             """,
             strip=True,
         )
+
+    def include_extra_header(self, header: str):
+        pass
 
     def write_kernel_autotune_defs_header(self) -> None:
         self.kernel_autotune_defs.splice(
@@ -1676,9 +1679,15 @@ class WrapperCodeGen(CodeGen):
                     if grid_extra_kwargs:
                         grid_str = f"{grid_str}, {grid_extra_kwargs}"
                     grid_str = f"{grid_fn}({grid_str})"
-                self.writeline(
-                    f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                # add debug printer code for triton kernel calls at (jit) inductor level
+                debug_printer_manager = V.graph.wrapper_code.debug_printer
+                debug_printer_manager.set_printer_args(
+                    call_args, kernel_name, arg_types, None
                 )
+                with debug_printer_manager:
+                    self.writeline(
+                        f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                    )
                 if (
                     config.triton.autotune_at_compile_time
                     and kernel_name not in self.kernel_autotune_names

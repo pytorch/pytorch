@@ -8,69 +8,67 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-declarations")
 
 @implementation MPSCNNNeuronOp
 
-+ (MPSCNNNeuronHardSigmoid*)hardSigmoid API_AVAILABLE(ios(11.0), macos(10.13)) {
-// Remove this once we support iOS 11.3
-#if TARGET_OS_MACCATALYST
-  return nil;
-#else
++ (MPSCNNNeuron*)hardSigmoid API_AVAILABLE(ios(11.0), macos(10.13)) {
+  static MPSCNNNeuron* neuron = nil;
   static dispatch_once_t onceToken;
-  static MPSCNNNeuronHardSigmoid* neuron = nil;
   dispatch_once(&onceToken, ^{
+#if TARGET_OS_MACCATALYST
+    neuron = [[MPSCNNNeuron alloc] initWithDevice:[MetalContext sharedInstance].device neuronDescriptor:[MPSCNNNeuronOpDescriptor hardSigmoidDescriptor]];
+#else
     neuron = [[MPSCNNNeuronHardSigmoid alloc]
-        initWithDevice:[MetalContext sharedInstance].device
-                     a:1.0 / 6.0
-                     b:0.5];
+              initWithDevice:[MetalContext sharedInstance].device
+              a:1.0 / 6.0
+              b:0.5];
+#endif
   });
   return neuron;
-#endif
 }
 
-+ (MPSCNNNeuronReLU*)relu {
-// Remove this once we support iOS 11.3
-#if TARGET_OS_MACCATALYST
-  return nil;
-#else
-  static MPSCNNNeuronReLU* relu = nil;
++ (MPSCNNNeuron*)relu {
+  static MPSCNNNeuron* neuron = nil;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-    relu = [[MPSCNNNeuronReLU alloc]
-        initWithDevice:[MetalContext sharedInstance].device
-                     a:0];
-  });
-  return relu;
+#if TARGET_OS_MACCATALYST
+    neuron = [[MPSCNNNeuron alloc]
+              initWithDevice:[MetalContext sharedInstance].device
+              neuronDescriptor:[MPSCNNNeuronOpDescriptor reluDescriptor]];
+#else
+    neuron = [[MPSCNNNeuronReLU alloc]
+              initWithDevice:[MetalContext sharedInstance].device
+              a:0];
 #endif
+  });
+  return neuron;
 }
 
-+ (MPSCNNNeuronSigmoid*)sigmoid {
-// Remove this once we support iOS 11.3
-#if TARGET_OS_MACCATALYST
-  return nil;
-#else
++ (MPSCNNNeuron*)sigmoid {
+  static MPSCNNNeuron* neuron = nil;
   static dispatch_once_t onceToken;
-  static MPSCNNNeuronSigmoid* sigmoid = nil;
   dispatch_once(&onceToken, ^{
-    sigmoid = [[MPSCNNNeuronSigmoid alloc]
-        initWithDevice:[MetalContext sharedInstance].device];
-  });
-  return sigmoid;
+#if TARGET_OS_MACCATALYST
+    neuron = [[MPSCNNNeuron alloc] initWithDevice:[MetalContext sharedInstance].device neuronDescriptor:[MPSCNNNeuronOpDescriptor sigmoidDescriptor]];
+#else
+    neuron = [[MPSCNNNeuronSigmoid alloc]
+              initWithDevice:[MetalContext sharedInstance].device];
 #endif
+  });
+  return neuron;
 }
 
-+ (MPSCNNNeuronTanH*)tanh {
-// Remove this once we support iOS 11.3
-#if TARGET_OS_MACCATALYST
-  return nil;
-#else
++ (MPSCNNNeuron*)tanh {
+  static MPSCNNNeuron* neuron = nil;
   static dispatch_once_t onceToken;
-  static MPSCNNNeuronTanH* tanh = nil;
   dispatch_once(&onceToken, ^{
-    tanh = [[MPSCNNNeuronTanH alloc]
-        initWithDevice:[MetalContext sharedInstance].device
-                     a:1
-                     b:1];
-  });
-  return tanh;
+#if TARGET_OS_MACCATALYST
+    neuron = [[MPSCNNNeuron alloc] initWithDevice:[MetalContext sharedInstance].device neuronDescriptor:[MPSCNNNeuronOpDescriptor tanhDescriptor]];
+#else
+    neuron = [[MPSCNNNeuronTanH alloc]
+              initWithDevice:[MetalContext sharedInstance].device
+              a:1
+              b:1];
 #endif
+  });
+  return neuron;
 }
 
 @end
@@ -85,9 +83,9 @@ API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
   static MPSNNNeuronDescriptor* neuronDesc = nil;
   dispatch_once(&onceToken, ^{
     neuronDesc = [MPSNNNeuronDescriptor
-        cnnNeuronDescriptorWithType:MPSCNNNeuronTypeHardSigmoid
-                                  a:1.0 / 6.0
-                                  b:0.5];
+                  cnnNeuronDescriptorWithType:MPSCNNNeuronTypeHardSigmoid
+                  a:1.0 / 6.0
+                  b:0.5];
   });
   return neuronDesc;
 }
@@ -97,8 +95,8 @@ API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
   static MPSNNNeuronDescriptor* neuronDesc = nil;
   dispatch_once(&onceToken, ^{
     neuronDesc =
-        [MPSNNNeuronDescriptor cnnNeuronDescriptorWithType:MPSCNNNeuronTypeReLU
-                                                         a:0];
+    [MPSNNNeuronDescriptor cnnNeuronDescriptorWithType:MPSCNNNeuronTypeReLU
+                                                     a:0];
   });
   return neuronDesc;
 }
@@ -108,7 +106,7 @@ API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
   static MPSNNNeuronDescriptor* neuronDesc = nil;
   dispatch_once(&onceToken, ^{
     neuronDesc = [MPSNNNeuronDescriptor
-        cnnNeuronDescriptorWithType:MPSCNNNeuronTypeSigmoid];
+                  cnnNeuronDescriptorWithType:MPSCNNNeuronTypeSigmoid];
   });
   return neuronDesc;
 }
@@ -117,10 +115,9 @@ API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
   static dispatch_once_t onceToken;
   static MPSNNNeuronDescriptor* neuronDesc = nil;
   dispatch_once(&onceToken, ^{
-    neuronDesc =
-        [MPSNNNeuronDescriptor cnnNeuronDescriptorWithType:MPSCNNNeuronTypeTanH
-                                                         a:1.0
-                                                         b:1.0];
+    neuronDesc = [MPSNNNeuronDescriptor cnnNeuronDescriptorWithType:MPSCNNNeuronTypeTanH
+                                                                  a:1.0
+                                                                  b:1.0];
   });
   return neuronDesc;
 }
