@@ -364,6 +364,23 @@ def should_pad(key: str, ori_time, pad_time) -> bool:
     return should_pad
 
 
+def should_pad_mm_bf16(dtype, M, N, K):
+    # always force pad for mm with bf16 when the following are satisfied to avoid perf regression
+    large_k_threshold_to_pad = torch._inductor.config.post_grad_fusion_options[
+        "pad_aten_mm_pass"
+    ].get("k_threshold_to_pad", 8388608)
+    if (
+        dtype is torch.bfloat16
+        and K > M
+        and K > N
+        and N % 2 == 1
+        and K >= large_k_threshold_to_pad
+        and torch.cuda.get_device_capability() < (9, 0)
+    ):  # doesnt repro on h100s:
+        return True
+    return False
+
+
 def should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
@@ -408,6 +425,12 @@ def should_pad_bench(
             return False
 
         if torch._inductor.config.force_shape_pad:
+            return True
+
+        if (
+            "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
+            and should_pad_mm_bf16(mat1.dtype, m, n, k)
+        ):
             return True
 
         if not has_triton():
