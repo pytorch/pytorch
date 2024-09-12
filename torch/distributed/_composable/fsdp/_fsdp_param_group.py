@@ -73,12 +73,9 @@ class FSDPCommContext:
         self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
     def get_all_gather_streams(
-        self, async_op: bool, training_state: TrainingState
+        self, training_state: TrainingState
     ) -> Tuple[torch.cuda.Stream, torch.cuda.Stream]:
-        if not async_op and training_state in (
-            TrainingState.FORWARD,
-            TrainingState.PRE_BACKWARD,
-        ):
+        if training_state in (TrainingState.FORWARD, TrainingState.PRE_BACKWARD):
             # Use separate streams for implicit prefetching
             return self.all_gather_copy_in_stream, self.all_gather_stream
         current_stream = torch.cuda.current_stream()
@@ -158,10 +155,6 @@ class FSDPParamGroup:
         # Optional custom reduce-scatter reduce op (e.g. to divide by a
         # factor other than the shard world size)
         self.reduce_scatter_reduce_op: Optional[dist.ReduceOp] = None
-        # `async_op` arg used for pre-forward/pre-backward unshard; can be
-        # overridden to only do explicit prefetching and avoid inter-stream
-        # fragmentation from using separate unshard streams
-        self.unshard_async_op: bool = False
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -241,7 +234,7 @@ class FSDPParamGroup:
                 self.fsdp_params,
                 self._all_gather_process_group,
                 async_op,
-                *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
+                *self.comm_ctx.get_all_gather_streams(self._training_state),
                 self.device,
             )
 
@@ -256,7 +249,6 @@ class FSDPParamGroup:
         """
         if not self._all_gather_result:
             return  # no preceding unshard
-        async_op = self._all_gather_result.all_gather_work is not None
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
             if prev_all_gather_state := self.comm_ctx.all_gather_state:
                 self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
@@ -272,9 +264,7 @@ class FSDPParamGroup:
         self._to_unsharded()
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()
-        if not async_op and self._training_state == TrainingState.FORWARD:
-            # Defer free to allow for overlap of this copy-out with next
-            # all-gather collective
+        if self._training_state == TrainingState.FORWARD:
             self.comm_ctx.all_gather_state = AllGatherState(
                 self._all_gather_result, all_gather_copy_out_event
             )
@@ -307,7 +297,7 @@ class FSDPParamGroup:
             logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
             self._training_state = TrainingState.FORWARD
-            self.unshard(self.unshard_async_op)
+            self.unshard()
             self.wait_for_unshard()
             args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
@@ -335,7 +325,7 @@ class FSDPParamGroup:
             logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
-            self.unshard(self.unshard_async_op)  # no-op if prefetched
+            self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
             if default_prefetch and not ca.compiled_autograd_enabled:
                 self._backward_prefetch()
@@ -440,8 +430,7 @@ class FSDPParamGroup:
         with record_function(
             f"FSDP::{pass_type}_prefetch for {target_fqn}"
         ), target_fsdp_param_group.use_training_state(training_state):
-            async_op = target_fsdp_param_group.unshard_async_op
-            target_fsdp_param_group.unshard(async_op)
+            target_fsdp_param_group.unshard()
 
     # Utilities #
     def _to_sharded(self):
