@@ -5,14 +5,14 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CPUFunctions.h>
 #else
-#include <ATen/ops/mkldnn_rnn_layer_cpu_dispatch.h>
+#include <ATen/ops/onednn_rnn_layer_cpu_dispatch.h>
 #endif
 
 using namespace torch::aot_inductor;
 
 #if AT_ONEDNN_ENABLED()
 
-AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
+AOTITorchError aoti_torch_cpu_onednn_rnn_layer(
     AtenTensorHandle input,
     AtenTensorHandle weight0,
     AtenTensorHandle weight1,
@@ -35,7 +35,7 @@ AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
     AtenTensorHandle* ret2,
     AtenTensorHandle* ret3) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto tmp_result = at::cpu::mkldnn_rnn_layer(
+    auto tmp_result = at::cpu::onednn_rnn_layer(
         *tensor_handle_to_tensor_pointer(input),
         *tensor_handle_to_tensor_pointer(weight0),
         *tensor_handle_to_tensor_pointer(weight1),
