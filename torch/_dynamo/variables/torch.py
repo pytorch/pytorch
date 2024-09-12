@@ -446,6 +446,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Workaround dynamic shapes issue
                 return input.call_method(tx, "numel", [], {})
 
+        @register(torch.compile)
+        def handle_torch_compile(self, tx: "InstructionTranslator", *args, **kwargs):
+            if len(args) == 1:
+                # torch.compile is a no-op in dynamo
+                return args[0]
+
+            unimplemented("torch.compile is used as a decorator in the compiled frame")
+
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx: "InstructionTranslator", input):
             assert isinstance(input, TensorVariable)
