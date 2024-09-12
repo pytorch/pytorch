@@ -21,6 +21,7 @@ from ..ir import (
     InputBuffer,
     IRNode,
     StorageBox,
+    stride_order2fill_order,
     Subgraph,
     TensorBox,
 )
@@ -35,17 +36,20 @@ Expr = sympy.Expr
 
 def construct_strides(
     sizes: Sequence[int],
-    permutation_order: Sequence[int],
+    fill_order: Sequence[int],
 ) -> Sequence[int]:
     """From a list of sizes and a permutation order, construct the strides of the permuted tensor."""
     # Initialize strides
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
     strides = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
     current_stride = 1
 
     # Iterate through the permutation order from right to left (innermost to outermost)
-    for dim in reversed(permutation_order):
+    for dim in fill_order:
         strides[dim] = current_stride
         current_stride *= sizes[dim]
 
@@ -785,8 +789,9 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    permutation_order = get_stride_order(query.get_stride())
-    out_strides = construct_strides(out_size, permutation_order)
+    stride_order = get_stride_order(query.get_stride())
+    fill_order = stride_order2fill_order(stride_order)
+    out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
         query.get_device(),
