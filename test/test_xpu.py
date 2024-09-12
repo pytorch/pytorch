@@ -390,6 +390,13 @@ print(torch.xpu.device_count())
         self.assertEqual(torch.xpu.memory_allocated(), prev)
         torch.xpu.empty_cache()
         self.assertEqual(torch.xpu.memory_reserved(), 0)
+        # Activate 1kB memory
+        a = torch.randn(256, device="xpu")
+        # Detect if the current activate device memory is 1kB 
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 1024)
+        del a
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 0)
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 1024)
 
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
     def test_device_memory_allocated(self):
