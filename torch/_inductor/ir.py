@@ -6755,9 +6755,11 @@ class SequentialScan(ExternKernel):
                 subgraph_name=combine_subgraph.name,
             )
             with V.set_graph_handler(combine_subgraph.graph):
+                # dim could be a SymInt, we cast it to int since it's specialized and guarded.
+                specialized_dim = int(dim)
                 fake_sliced_inputs = (
                     [node.meta["val"] for node in fx_init]
-                    + [torch.select_copy(node.meta["val"], int(dim), 0) for node in fx_xs]
+                    + [node.meta["val"].select(int(dim), 0) for node in fx_xs]
                     + [node.meta["val"] for node in fx_additional_inputs]
                 )  # type: ignore[union-attr]
                 combine_subgraph.graph.run(*fake_sliced_inputs)
@@ -6807,7 +6809,7 @@ class SequentialScan(ExternKernel):
         ]
 
         def stacked_size_stride(y):
-            sizes = [*y.get_size()[:dim], scan_length, *y.get_size()[dim:]]
+            sizes = [scan_length, *y.get_size()]
             # TODO: this is a hacky way to get the stride of the stacked output
             # Semantic-wise this is correct because scan will torch.stack the intermediates, so
             # torch.stack will force the output become contingous.

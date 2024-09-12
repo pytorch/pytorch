@@ -157,7 +157,7 @@ def scan(
         final_carry (torch.Tensor or pytree with tensor leaves),
             the final carry of the scan operation with same pytree structure as init.
         out (torch.Tensor or pytree with tensor leaves),
-            each tensor leaf is a stacked output along dim, where each slice is the output of a scan iteration.
+            each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
 
     Example::
 
@@ -166,8 +166,8 @@ def scan(
             return next_carry, y
 
         i0 = torch.zeros(1)
-        xs = torch.arange(1, 5)
-        # returns torch.tensor([10]), torch.tensor([1., 3., 6., 10.])
+        xs = torch.arange(5)
+        # returns torch.tensor([10.]), torch.tensor([[0], [1.], [3.], [6.], [10.]])
         last_carry, cumsum = scan(add, init=i0, xs=xs)
 
 
@@ -290,17 +290,17 @@ def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=Non
         # Pre-alocate
         # outs -> Output matrix
         # idxs -> Index matrix for scatter_
-        # out: (M, N, num_elems, ...)
-        # idx: (M, N, 1, ...)
+        # out: (num_elems, M, N, ...)
+        # idx: (1, M, N)
         outs, idxs = zip(
             *[
                 [
                     torch.zeros(
-                        list(e.size())[:dim] + [num_elems] + list(e.size())[dim:],
+                        [num_elems] + list(e.size()),
                         dtype=e.dtype,
                         device=e.device,
                     ),
-                    torch.ones_like(e, dtype=torch.int64).unsqueeze(dim),
+                    torch.ones_like(e, dtype=torch.int64).unsqueeze(0),
                 ]
                 for i, e in enumerate(dummy_out)
             ]
@@ -309,10 +309,11 @@ def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=Non
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
             for o, x, idx in zip(outs, out, idxs):
-                # o: (M, N, num_elems, ...)
-                # x: (M, N, ...) -> (M, N, 1, ...)
-                # ind * idx: (M, N, 1, ...) with values to be ind
-                o.scatter_(dim, ind * idx, x.unsqueeze(dim))
+                # o: (num_elems, M, N ...)
+                # x: (M, N, ...) -> (1, M, N)
+                # ind * idx: (1, M, N,) with values to be ind
+                # essentially: o[ind][n][k] = x[0][n][k]
+                o.scatter_(0, ind * idx, x.unsqueeze(0))
 
         for i in range(num_elems):
             ind = i if not reverse else num_elems - i - 1
@@ -332,6 +333,21 @@ def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=Non
 
     scans = _scan(init, xs)
     return scans
+
+
+def first_slice_copy(t: torch.Tensor, dim: int) -> torch.Tensor:
+    return torch.select_copy(t, dim, 0)
+
+
+# We also do a clone with contiguous_format. This is to be consistent with
+# eager semantic of scan, which stacks the outputs. The result is contiguous
+# as a result of the stack operation.
+def stack_y(y: torch.Tensor, scan_length: int) -> torch.Tensor:
+    return (
+        y.unsqueeze(0)
+        .repeat(*([scan_length] + [1] * y.ndim))
+        .clone(memory_format=torch.contiguous_format)
+    )
 
 
 def trace_scan(
@@ -394,10 +410,7 @@ def trace_scan(
         )
         out = (
             *fake_carry,
-            *tuple(
-                expand_tensor(t, dim, scan_length)
-                for t in fake_outputs
-            ),
+            *(stack_y(t, scan_length) for t in fake_outputs),
         )
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
@@ -573,17 +586,14 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, dim, reverse, additional_i
         carry, outputs = _extract_carry_and_out(
             combine_fn(
                 *init,
-                *[torch.select_copy(inp, dim, 0) for inp in xs],
+                *[first_slice_copy(inp, dim) for inp in xs],
                 *additional_inputs,
             ),
             len(init),
         )
         out = (
             *carry,
-            *tuple(
-                expand_tensor(t, dim, scan_length)
-                for t in outputs
-            ),
+            *(stack_y(t, scan_length) for t in outputs),
         )
         return out
 
@@ -597,11 +607,13 @@ def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse, additional_input
         functional_combine_fn = ctx.functionalize(combine_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         sample_unwrapped_xs_sliced = [
-            torch.select_copy(inp, dim, 0) for inp in unwrapped_xs
+            first_slice_copy(inp, dim) for inp in unwrapped_xs
         ]
         sample_inputs = list(
             itertools.chain(
-                unwrapped_init, sample_unwrapped_xs_sliced, unwrapped_additional_inputs
+                unwrapped_init,
+                sample_unwrapped_xs_sliced,
+                unwrapped_additional_inputs,
             )
         )
         if _has_potential_branch_input_mutation(
@@ -659,7 +671,7 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         result_flat.append(y)
 
     results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+        torch.stack([e[leave_ind] for e in op(result_flat)])
         for leave_ind in range(num_leaves)
     ]
     return (

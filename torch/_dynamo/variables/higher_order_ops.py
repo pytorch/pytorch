@@ -988,8 +988,10 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             cond_node,
             body_node,
-            [operand.as_proxy() for operand in operands],
-            [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs,
+            tuple([operand.as_proxy() for operand in operands]),
+            tuple(
+                [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs
+            ),
         )
 
         flat_example_value = pytree.tree_map_only(
@@ -1131,7 +1133,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from torch._higher_order_ops.scan import (
             _extract_carry_and_out,
             first_slice_copy,
-            expand_tensor
+            stack_y,
         )
 
         from .builder import wrap_fx_proxy
@@ -1263,18 +1265,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         with tx.fake_mode:
-            # For the fake mode, we need to duplicate the init tensor along the dim
-            # to have the same size as the xs arguments
-            # We also do a clone with contiguous_format. This is to be consistent with
-            # eager semantic of scan, which stacks the outputs. The result is contiguous
-            # as a result of the stack operation.
             example_carry = [
                 init_p.node.meta["example_value"].clone() for init_p in init_proxy
             ]
-            example_out = [y.node.meta["example_value"] for y in y_proxies]
+            # For the fake mode, we need to duplicate the init tensor along the dim
+            # to have the same size as the xs arguments
             example_stacked_out = [
-                expand_tensor(out, dim_fake, scan_length, memory_format=torch.contiguous_format)
-                for out in example_out
+                stack_y(y.node.meta["example_value"], scan_length) for y in y_proxies
             ]
             out_meta = [*example_carry, *example_stacked_out]
 
