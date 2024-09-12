@@ -249,6 +249,31 @@ def sample_inputs_masked_select(
         )
 
 
+def sample_inputs_nn_functional_rms_norm(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        # normalize over non-ragged dims
+        for start_dim in range(2, njt.dim()):
+            normalized_shape = njt.shape[start_dim:]
+            weight = torch.randn(
+                normalized_shape,
+                device=device,
+                dtype=dtype,
+                requires_grad=requires_grad,
+            )
+
+            yield SampleInput(
+                njt,
+                kwargs={
+                    "normalized_shape": normalized_shape,
+                    "weight": weight,
+                },
+            )
+
+
 sample_inputs_nn_functional_threshold = partial(
     sample_inputs_elementwise_njt_unary,
     op_kwargs={"threshold": float.fromhex("0x1.3ap-3"), "value": -9},
@@ -264,6 +289,7 @@ sample_inputs_nn_functional_threshold = partial(
 njt_sample_inputs = {
     "clone": sample_inputs_clone,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
+    "nn.functional.rms_norm": sample_inputs_nn_functional_rms_norm,
     "nn.functional.threshold": sample_inputs_nn_functional_threshold,
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
     "special.polygamma.special_polygamma_n_0": sample_inputs_special_polygamma_n(n=0),

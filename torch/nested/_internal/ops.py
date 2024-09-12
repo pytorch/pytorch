@@ -1424,12 +1424,15 @@ def mean_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    if len(new_kwargs["dim"]) > 1:
-        raise RuntimeError(
-            "mean(): not supported across multiple dimensions for NestedTensor"
-        )
-
     inp = new_kwargs.pop("input")
+
+    if len(new_kwargs["dim"]) > 1 and (
+        inp._ragged_idx in new_kwargs["dim"] or 0 in new_kwargs["dim"]
+    ):
+        raise RuntimeError(
+            "mean(): not supported across multiple dimensions for NestedTensor "
+            "when either the batch dim or ragged dim is included"
+        )
 
     (
         new_kwargs["dim"],
