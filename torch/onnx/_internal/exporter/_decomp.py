@@ -82,7 +82,9 @@ def create_onnx_friendly_decomposition_table(
         decomposition functions.
     """
     # This table contains all CIA decomps, so we should filter out ONNX supported CIAs from it
-    decomposition_table: dict[torch._ops.OperatorBase, Callable] = torch._decomp._decomp_table_to_post_autograd_aten()
+    decomposition_table: dict[torch._ops.OperatorBase, Callable] = (
+        torch._decomp._decomp_table_to_post_autograd_aten()
+    )
     can_preserve = get_preserve_ops()
     for op in list(decomposition_table.keys()):
         if op in can_preserve:
@@ -101,5 +103,5 @@ def create_onnx_friendly_decomposition_table(
         if not hasattr(op_overload, "_schema"):
             continue
         decomposition_table[op_overload] = decomp_fn
-    
+
     return decomposition_table
