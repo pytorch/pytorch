@@ -5927,12 +5927,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = compile_outer(x)
         self.assertEqual(ref, res)
 
-    def test_torch_compile_in_compile_frame_different_compiler(self):
-        def gn(x, c=None):
-            if c is None:
-                c = 2
-            return c * x
-
         def outer_func(x):
             return torch.compile(gn, backend="aot_eager")(x)
 
@@ -5941,6 +5935,82 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         x = torch.randn(4)
         ref = outer_func(x)
         res = compile_outer(x)
+        self.assertGreaterEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
+
+    def test_torch_compile_in_compile_frame_nn_module(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, c=None):
+                if c is None:
+                    c = 2
+                return c * x
+
+        mod = Mod()
+
+        def outer_func(x):
+            return torch.compile(mod, backend="eager")(x)
+
+        compile_outer = torch.compile(outer_func, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = outer_func(x)
+        res = compile_outer(x)
+        self.assertEqual(ref, res)
+
+        def outer_func(x):
+            return torch.compile(mod, backend="aot_eager")(x)
+
+        torch._dynamo.utils.counters.clear()
+        compile_outer = torch.compile(outer_func, backend="eager")
+        x = torch.randn(4)
+        ref = outer_func(x)
+        res = compile_outer(x)
+        self.assertGreaterEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
+
+    def test_torch_compile_inlining_fn(self):
+        def inner(x):
+            return torch.sin(x)
+
+        opt_inner = torch.compile(inner, backend="eager")
+
+        def outer(x):
+            return x * opt_inner(x)
+
+        opt_outer_eager = torch.compile(outer, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = outer(x)
+        res = opt_outer_eager(x)
+        self.assertEqual(ref, res)
+
+        torch._dynamo.utils.counters.clear()
+        opt_outer_aot_eager = torch.compile(outer, backend="aot_eager")
+        ref = outer(x)
+        res = opt_outer_aot_eager(x)
+        self.assertEqual(ref, res)
+        self.assertGreaterEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
+
+    def test_torch_compile_inlining_module(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, c=None):
+                if c is None:
+                    c = 2
+                return c * x
+
+        inner = Mod()
+        opt_inner = torch.compile(inner, backend="eager")
+
+        def outer(x):
+            return x * opt_inner(x)
+
+        opt_outer_eager = torch.compile(outer, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = outer(x)
+        res = opt_outer_eager(x)
+        self.assertEqual(ref, res)
+
+        torch._dynamo.utils.counters.clear()
+        opt_outer_aot_eager = torch.compile(outer, backend="aot_eager")
+        ref = outer(x)
+        res = opt_outer_aot_eager(x)
+        self.assertEqual(ref, res)
         self.assertGreaterEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
 
 

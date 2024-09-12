@@ -986,6 +986,21 @@ class VariableBuilder:
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
         ):
+            # Check if this is a torch.compiled function. If it is and the
+            # backend match, then inline. If not, then graph break.
+            from ..eval_frame import innermost_backend
+
+            if new_backend := inspect.getattr_static(
+                value, "_torchdynamo_backend", False
+            ):
+                if innermost_backend(new_backend) != innermost_backend(
+                    self.tx.output.compiler_fn
+                ):
+                    unimplemented(
+                        "inner torch.compile has different backend than outer torch.compile"
+                    )
+
+            # Inline the function
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(
                 value, "_torchdynamo_inline", source=self.source
@@ -1329,6 +1344,20 @@ class VariableBuilder:
                 # continuation functions for such bytecodes. So, we delay the
                 # graph break to CALL_FUNCTION.
                 return DelayGraphBreakVariable(source=self.source)
+
+            # This is a torch.compiled nn module. Check the backends. If they
+            # match, then inline. If not, then graph break.
+            from ..eval_frame import innermost_backend
+
+            if new_backend := inspect.getattr_static(
+                value, "_torchdynamo_backend", False
+            ):
+                if innermost_backend(new_backend) != innermost_backend(
+                    self.tx.output.compiler_fn
+                ):
+                    unimplemented(
+                        "inner torch.compile has different backend than outer torch.compile"
+                    )
 
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.source = AttrSource(self.source, "_orig_mod")
