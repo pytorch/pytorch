@@ -6,6 +6,7 @@ import itertools
 import math
 import sys
 import unittest
+from contextlib import nullcontext
 from functools import partial
 from typing import Optional, Tuple
 
@@ -5070,11 +5071,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     ):
         """
         Mean on NestedTensor fails when trying to reduce across multiple dimensions
+        only if the batch or ragged dims are included
         """
         tensor_lists = self._get_example_tensor_lists(
             include_list_of_lists=False, include_requires_grad=components_require_grad
         )
-        reduce_dims = ((0, 1), (2, 3), (2, 3, 4))
+        reduce_dims = ((0, 1), (2, 3), (2, 3, 4), (0, 3), (1, 2))
 
         for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
             nt = torch.nested.nested_tensor(
@@ -5086,10 +5088,20 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )
 
             if nt.dim() > reduce_dim[-1]:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "not supported across multiple dimensions for NestedTensor",
-                ):
+                ragged_or_batch_included = (
+                    nt._ragged_idx in reduce_dim or 0 in reduce_dim
+                )
+
+                context = (
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "not supported across multiple dimensions for NestedTensor",
+                    )
+                    if ragged_or_batch_included
+                    else nullcontext()
+                )
+
+                with context:
                     out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
 
     @dtypes(torch.float32)
