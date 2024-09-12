@@ -84,7 +84,7 @@ except ImportError:
 try:
     from . import testing
 except ImportError:
-    import testing
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
 # The following import pattern matters as `test_export.export` is patched
 # in other files (like test_export_nonstrict.py). `torch.export.export`
 # will invalidate the patch.

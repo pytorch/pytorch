@@ -45,7 +45,7 @@ from torch.utils import _pytree as pytree
 
 
 if HAS_CUDA:
-    import triton
+    import triton  # @manual
 
     from torch.testing._internal.triton_utils import (
         add_kernel,
@@ -76,14 +76,20 @@ try:
         )
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
-        from test_aot_inductor_utils import AOTIRunnerUtil
-        from test_control_flow import (
+        from test_aot_inductor_utils import (
+            AOTIRunnerUtil,  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
+        )
+        from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
             prepend_counters,
             prepend_predicates,
             WhileLoopModels,
         )
-        from test_torchinductor import copy_tests, requires_multigpu, TestFailure
+        from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+            copy_tests,
+            requires_multigpu,
+            TestFailure,
+        )
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
