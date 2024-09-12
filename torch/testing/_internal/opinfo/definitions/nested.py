@@ -79,9 +79,10 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
 def unbind_reference(op, sample, wrap_output_as_njt=True):
     # first NJT in the arglist determines expected ragged structure
     nt_inp = (
-        sample.input if sample.input.is_nested
+        sample.input
+        if sample.input.is_nested
         # TODO: look in kwargs too?
-        else next((a for a in sample.args if a.is_nested))
+        else next(a for a in sample.args if a.is_nested)
     )
 
     out_ref_components = []
@@ -180,7 +181,7 @@ def sample_inputs_elementwise_njt_binary(
             (njt1.shape[0], 1, *njt1.shape[2:]),
             device=device,
             dtype=dtype,
-            requires_grad=requires_grad
+            requires_grad=requires_grad,
         )
         # (NT, T)
         yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
@@ -192,7 +193,7 @@ def sample_inputs_elementwise_njt_binary(
             [1 for _ in range(njt1.dim())],
             device=device,
             dtype=dtype,
-            requires_grad=requires_grad
+            requires_grad=requires_grad,
         )
         # (NT, T)
         yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
@@ -201,10 +202,7 @@ def sample_inputs_elementwise_njt_binary(
 
         # broadcasting case: (B, j0, ...) with (...)
         t = torch.randn(
-            njt1.shape[2:],
-            device=device,
-            dtype=dtype,
-            requires_grad=requires_grad
+            njt1.shape[2:], device=device, dtype=dtype, requires_grad=requires_grad
         )
         # (NT, T)
         yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
