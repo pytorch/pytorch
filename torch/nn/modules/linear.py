@@ -100,9 +100,11 @@ class Linear(Module):
     ) -> None:
         # validation checks for input types
         if not isinstance(in_features, int):
-            raise TypeError("Expected int for in_features but got", type(in_features))
+            raise TypeError(f"Expected int for in_features but got {type(in_features)}")
         if not isinstance(out_features, int):
-            raise TypeError("Expected int for out_features but got", type(out_features))
+            raise TypeError(
+                f"Expected int for out_features but got {type(out_features)}"
+            )
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in_features = in_features
@@ -207,11 +209,17 @@ class Bilinear(Module):
     ) -> None:
         # validation checks for input types
         if not isinstance(in1_features, int):
-            raise TypeError("Expected int for in1_features but got", type(in1_features))
+            raise TypeError(
+                f"Expected int for in1_features but got {type(in1_features)}"
+            )
         if not isinstance(in2_features, int):
-            raise TypeError("Expected int for in2_features but got", type(in2_features))
+            raise TypeError(
+                f"Expected int for in2_features but got {type(in2_features)}"
+            )
         if not isinstance(out_features, int):
-            raise TypeError("Expected int for out_features but got", type(out_features))
+            raise TypeError(
+                f"Expected int for out_features but got {type(out_features)}"
+            )
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in1_features = in1_features

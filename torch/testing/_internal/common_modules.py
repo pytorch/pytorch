@@ -3188,7 +3188,7 @@ def module_error_inputs_torch_nn_Linear(module_info, device, dtype, requires_gra
             ),
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
-            error_regex="Expected int for in_features but got <class 'str'>"
+            error_regex=r"Expected int for in_features but got <class 'str'>"
         ),
         ErrorModuleInput(
             ModuleInput(
@@ -3197,7 +3197,7 @@ def module_error_inputs_torch_nn_Linear(module_info, device, dtype, requires_gra
             ),
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
-            error_regex="Expected int for out_features but got <class 'float'>"
+            error_regex=r"Expected int for out_features but got <class 'float'>"
         ),
     ]
     return samples
@@ -3213,7 +3213,7 @@ def module_error_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_g
             ),
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
-            error_regex="Expected int for in1_features but got <class 'str'>"
+            error_regex=r"Expected int for in1_features but got <class 'str'>"
         ),
         ErrorModuleInput(
             ModuleInput(
@@ -3222,7 +3222,7 @@ def module_error_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_g
             ),
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
-            error_regex="Expected int for in2_features but got <class 'float'>"
+            error_regex=r"Expected int for in2_features but got <class 'float'>"
         ),
         ErrorModuleInput(
             ModuleInput(
@@ -3231,7 +3231,7 @@ def module_error_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_g
             ),
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
-            error_regex="Expected int for out_features but got <class 'str'>"
+            error_regex=r"Expected int for out_features but got <class 'str'>"
         ),
     ]
     return samples
