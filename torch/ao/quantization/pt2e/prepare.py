@@ -143,7 +143,10 @@ def _union_input_edge_with(
     # TODO: add assertions for types of root qspecs
     if (
         root_qspec is not None
-        and all(_has_same_attr(root_qspec, input_edge_root_qspec, attr) for attr in ["dtype", "is_dynamic", "quant_min", "quant_max", "qscheme", "ch_axis", "scale", "zero_point"])
+        and all(
+            _has_same_attr(root_qspec, input_edge_root_qspec, attr) for attr in
+            ["dtype", "is_dynamic", "quant_min", "quant_max", "qscheme", "ch_axis", "scale", "zero_point"]
+        )
     ):
         # the input arg to the node should reuse the existing output observer for arg
         # since dtype is the same (we may want to extend this to be a more strict check
