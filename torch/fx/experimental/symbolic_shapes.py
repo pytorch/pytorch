@@ -404,7 +404,7 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
         t = type(expr)
 
     def is_neg(t):
-        return t.is_negative or (isinstance(t, sympy.Mul) and t.args[0].is_negative)
+        return (t.is_Number and t.is_negative) or (isinstance(t, sympy.Mul) and t.args[0].is_Number and t.args[0].is_negative)
 
     lhs = 0
     rhs = _reduce_to_lowest_terms(rhs)
@@ -416,12 +416,14 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
                 neg.append(-term)
             else:
                 pos.append(term)
-        lhs = sympy.Add(*neg)
-        rhs = sympy.Add(*pos)
+        lhs = sympy.Add._from_args(neg)
+        rhs = sympy.Add._from_args(pos)
     elif is_neg(rhs):
         # lhs == 0
         lhs, rhs = -rhs, 0
-    return t(lhs, rhs)
+    # We don't have to evaluate here because lhs, rhs came from a Boolean
+    # and it was already simplified
+    return t(lhs, rhs, evaluate=False)
 
 
 def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
@@ -432,20 +434,33 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     Useful when an expression is == or != to 0.
     """
     def integer_coefficient(x):
-        if isinstance(x, sympy.Integer):
+        if x.is_Integer:
             return abs(int(x))
-        elif isinstance(x, sympy.Mul):
-            return math.prod([abs(int(arg)) for arg in x.args if isinstance(arg, sympy.Integer)])
+        elif x.is_Mul:
+            # If one of the args of a Mul is an Integer, it is the
+            # first arg. eg: args(2*x*3*y) == (6, x, y)
+            return abs(int(x.args[0])) if x.args[0].is_Integer else 1
         else:
             return 1
 
-    if isinstance(expr, sympy.Add):
+    def div_by_factor(x, factor):
+        if x.is_Integer:
+            return x / factor
+        elif x.is_Mul:
+            return sympy.Mul._from_args((x.args[0] / factor, *x.args[1:]), is_commutative=x.is_commutative)
+
+    if expr.is_Add:
         atoms = expr.args
         factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
+        if factor == 1:
+            return expr
         atoms = [x / factor for x in atoms]
-        return sympy.Add(*atoms)
-    else:
-        return expr / integer_coefficient(expr)
+        return sympy.Add._from_args(atoms)
+    elif expr.is_Integer:
+        return sympy.One
+    elif expr.is_Mul:
+        return div_by_factor(expr, integer_coefficient(expr))
+    return expr
 
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
@@ -4424,7 +4439,7 @@ class ShapeEnv:
     @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
-        expect_rational=True, size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None,
+        size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None,
         var_to_range: Optional[Tuple[Tuple[sympy.Symbol, ValueRanges]]] = None
     ) -> "Optional[sympy.Expr]":
         """
@@ -5117,18 +5132,18 @@ class ShapeEnv:
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
-                      expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
+                      size_oblivious: bool = False, *, forcing_spec: bool = False):
         try:
-            return self._evaluate_expr(orig_expr, hint, fx_node, expect_rational, size_oblivious, forcing_spec=forcing_spec)
+            return self._evaluate_expr(orig_expr, hint, fx_node, size_oblivious, forcing_spec=forcing_spec)
         except Exception:
             self.log.warning(
-                "failed during evaluate_expr(%s, hint=%s, expect_rational=%s, size_oblivious=%s, forcing_spec=%s",
-                orig_expr, hint, expect_rational, size_oblivious, forcing_spec
+                "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
+                orig_expr, hint, size_oblivious, forcing_spec
             )
             raise
 
     def _evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
-                       expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
+                       size_oblivious: bool = False, *, forcing_spec: bool = False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
@@ -5196,7 +5211,6 @@ class ShapeEnv:
             expr = orig_expr
 
             static_expr = self._maybe_evaluate_static(expr,
-                                                      expect_rational=expect_rational,
                                                       size_oblivious=size_oblivious)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
@@ -5216,7 +5230,6 @@ class ShapeEnv:
                     if not size_oblivious:
                         size_oblivious_result = self._maybe_evaluate_static(
                             expr,
-                            expect_rational=expect_rational,
                             size_oblivious=True
                         )
 
@@ -5590,8 +5603,17 @@ def _suggest_fixes_for_data_dependent_error_non_strict(e):
         # map symbol names reachable via frame locals to their source-level names
         src_map = defaultdict(list)
         for var, val in frame.f_locals.items():
+            try:
+                tree_leaves_with_path = pytree.tree_leaves_with_path(val)
+            except ValueError:
+                log.warning(
+                    "pytree.tree_leaves_with_path failed for value of type {%s} in local variable {%s}",
+                    type(val),
+                    var,
+                )
+                continue
             # figure out how to access any symbol inside `val` through `var`
-            for path, leaf in pytree.tree_leaves_with_path(val):
+            for path, leaf in tree_leaves_with_path:
                 name = var + pytree.keystr(path)
                 if isinstance(leaf, torch.SymInt):
                     src_map[str(leaf.node.expr)].append(name)
