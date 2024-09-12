@@ -991,7 +991,7 @@ def searchsorted(
     side: Optional[str] = None,
     sorter: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    # If the sorted_sequence is not one-dimensional, its shape must match that of vaflues
+    # If the sorted_sequence is not one-dimensional, its shape must match that of values
     # in all but the last dimension.
     torch._check(
         len(sorted_sequence.shape) <= 1

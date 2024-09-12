@@ -299,7 +299,7 @@ class OpsHandler(Protocol[T]):
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
-        offsets_indices,
+        offsets_indices: T,
         sorter_name: Optional[str] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
@@ -1025,9 +1025,9 @@ class OpCounterCSE:
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
-        offsets_indices,
+        offsets_indices: T,
         sorter_name: Optional[str] = None,
-    ):
+    ) -> T:
         val = self.parent_handler.bucketize(
             values,
             offsets_name,
