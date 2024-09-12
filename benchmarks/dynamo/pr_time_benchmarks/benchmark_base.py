@@ -1,5 +1,4 @@
 import csv
-import gc
 from abc import ABC, abstractmethod
 
 from fbscribelogger import make_scribe_logger
@@ -61,13 +60,6 @@ class BenchmarkBase(ABC):
     # TODO is there other parts we need to add ?
     _enable_compile_time_instruction_count = False
 
-    # number of iterations used to run when collecting instruction_count or compile_time_instruction_count.
-    _num_iterations = 5
-
-    def with_iterations(self, value):
-        self._num_iterations = value
-        return self
-
     def enable_instruction_count(self):
         self._enable_instruction_count = True
         return self
@@ -96,7 +88,7 @@ class BenchmarkBase(ABC):
     def _count_instructions(self):
         print(f"collecting instruction count for {self.name()}")
         results = []
-        for i in range(self._num_iterations):
+        for i in range(10):
             self._prepare()
             id = i_counter.start()
             self._work()
@@ -106,14 +98,12 @@ class BenchmarkBase(ABC):
         return min(results)
 
     def _count_compile_time_instructions(self):
-        gc.disable()
         print(f"collecting compile time instruction count for {self.name()}")
         config.record_compile_time_instruction_count = True
 
         results = []
-        for i in range(self._num_iterations):
+        for i in range(10):
             self._prepare()
-            gc.collect()
             # CompileTimeInstructionCounter.record is only called on convert_frame._compile_inner
             # hence this will only count instruction count spent in compile_inner.
             CompileTimeInstructionCounter.clear()
@@ -127,7 +117,6 @@ class BenchmarkBase(ABC):
             results.append(count)
 
         config.record_compile_time_instruction_count = False
-        gc.enable()
         return min(results)
 
     def append_results(self, path):
