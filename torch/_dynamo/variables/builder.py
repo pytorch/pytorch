@@ -2307,6 +2307,8 @@ def wrap_fx_proxy_cls(
             # This always wants to be in the graph, even if the constraint
             # results in a constant int
             torch._constrain_as_size,
+            torch._C._functorch._vmap_increment_nesting,
+            torch._C._functorch._vmap_decrement_nesting,
         ]
         or (
             # TODO: this is a little sus, because we didn't check what the self is

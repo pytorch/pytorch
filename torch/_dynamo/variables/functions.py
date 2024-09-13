@@ -375,7 +375,7 @@ class GeneratorFunctionVariable(UserFunctionVariable):
         try:
             # inline_call_ has a try/except block that does the same thing
             # TODO: figure it out why it is not working for this usecase
-            return tracer.inline_call_()
+            return tracer.inline_call_().next_variable(tx)
         except exc.ObservedUserStopIteration as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise

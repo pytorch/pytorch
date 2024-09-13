@@ -77,7 +77,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.profiler.profile,
         torch.autograd.profiler.record_function,
         torch._C.DisableTorchFunctionSubclass,
-        torch._functorch.vmap.vmap_increment_nesting,
+        # torch._functorch.vmap.vmap_increment_nesting,
         torch._functorch.eager_transforms.grad_increment_nesting,
         torch._functorch.eager_transforms.jvp_increment_nesting,
         torch._functorch.eager_transforms.enable_inplace_requires_grad,
@@ -290,12 +290,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)
-        elif self.value is torch._functorch.vmap.vmap_increment_nesting:
-            assert len(args) == 2
-            return VmapIncrementNestingCtxManagerVariable.create(
-                tx,
-                [guard_if_dyn(x) for x in args],
-            )
+        # elif self.value is torch._functorch.vmap.vmap_increment_nesting:
+        #     assert len(args) == 2
+        #     return VmapIncrementNestingCtxManagerVariable.create(
+        #         tx,
+        #         [guard_if_dyn(x) for x in args],
+        #     )
         elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
             assert len(args) == 0
             return JvpIncrementNestingCtxManagerVariable.create(tx)

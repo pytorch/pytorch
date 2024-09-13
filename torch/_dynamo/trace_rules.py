@@ -237,6 +237,8 @@ manual_torch_name_rule_map = {
     "torch._functorch.vmap.unwrap_batched": UserFunctionVariable,
     "torch._functorch.vmap.vmap_impl": FunctorchHigherOrderVariable,
     "torch._functorch.vmap.wrap_batched": UserFunctionVariable,
+    "torch._C._functorch._vmap_increment_nesting": TorchInGraphFunctionVariable,
+    "torch._C._functorch._vmap_decrement_nesting": TorchInGraphFunctionVariable,
     # functorch/grad
     "torch._functorch.eager_transforms.grad_impl": FunctorchHigherOrderVariable,
     "torch._functorch.apis.grad_and_value": UserFunctionVariable,
