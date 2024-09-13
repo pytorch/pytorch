@@ -366,14 +366,15 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
   }
 };
 
-// figure out clean up policy
+// refactor and simplify this into some struct
 static std::vector<std::function<variable_list(variable_list)>> lambdas;
 static std::vector<at::IValue> lambda_idxs;
 static std::vector<std::vector<std::optional<VariableInfo>>>
     lambda_output_infos;
 static size_t next_lambdas_idx = 0;
 static size_t offset_lambdas_idx = 0;
-static std::unordered_set<std::shared_ptr<Node>> lifted_nodes; // deferred free
+static std::unordered_map<size_t, std::shared_ptr<Node>> lifted_nodes; // deferred free
+static std::unordered_map<std::shared_ptr<Node>, size_t> reverse_lifted_nodes; // deferred free
 
 static at::IValue* lambda_collect(
     CompiledNodeArgs& args,
@@ -381,7 +382,6 @@ static at::IValue* lambda_collect(
     std::function<variable_list(variable_list)>&& lambda,
     const std::vector<bool>& is_variable_input,
     const std::vector<VariableInfo>& output_info) {
-  lifted_nodes.emplace(args.get_node_call()->node);
   lambdas.emplace_back(std::move(lambda));
   std::vector<std::optional<VariableInfo>> output_info_for_vars;
   for (auto i : c10::irange(is_variable_input.size())) {
@@ -393,6 +393,11 @@ static at::IValue* lambda_collect(
   }
   lambda_output_infos.emplace_back(std::move(output_info_for_vars));
   size_t idx = lambdas.size() - 1;
+  std::shared_ptr<Node> node = args.get_node_call()->node;
+  TORCH_INTERNAL_ASSERT(lifted_nodes.find(idx) == lifted_nodes.end())
+  lifted_nodes[idx] = node;
+  TORCH_INTERNAL_ASSERT(reverse_lifted_nodes.find(node) == reverse_lifted_nodes.end())
+  reverse_lifted_nodes[node] = idx;
   lambda_idxs.emplace_back(at::IValue(static_cast<int64_t>(idx)));
   for (auto i : c10::irange(output_info.size())) {
     if (is_variable_input[i]) {
@@ -484,9 +489,13 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   TORCH_INTERNAL_ASSERT(PyLong_Check(idx));
   size_t cppidx = PyLong_AsSize_t(idx);
   variable_list outs = lambdas[cppidx](std::move(cppinputs));
-  // TODO: free properly
-  // lambdas[cppidx] = {};
-  // also free the node itself
+  auto it = lifted_nodes.find(cppidx);
+  TORCH_INTERNAL_ASSERT(it != lifted_nodes.end());
+  std::shared_ptr<Node> node = it->second;
+  auto it2 = reverse_lifted_nodes.find(node);
+  TORCH_INTERNAL_ASSERT(it2 != reverse_lifted_nodes.end());
+  lifted_nodes.erase(it);
+  reverse_lifted_nodes.erase(it2);
   return THPVariable_WrapList(outs);
   END_HANDLE_TH_ERRORS;
 }
@@ -805,7 +814,7 @@ CacheNode* _compiled_autograd_impl(
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
     for (auto& call : calls) {
-      if (lifted_nodes.find(call->node) == lifted_nodes.end()) {
+      if (reverse_lifted_nodes.find(call->node) == reverse_lifted_nodes.end()) {
         call->node->release_variables();
       }
     }

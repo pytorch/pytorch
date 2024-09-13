@@ -2075,7 +2075,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         def fn():
             torch.ops.test_autograd_cpp_node_data_dependent.reset()
-            for i in [10, 10, 10, 10]:
+            for i in [10, 100, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
                 (
@@ -2088,7 +2088,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 1)
+        self.check_output_and_recompiles(fn, 2)
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_free_activation_memory(self):
