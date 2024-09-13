@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 
 # shellcheck disable=SC2034
 # shellcheck source=./macos-common.sh
