@@ -108,7 +108,7 @@ class GeneralizedPareto(Distribution):
         k = self.concentration
         m = self.loc
         s = self.scale
-        is_k_zero = torch.isclose(k, torch.tensor(0.0))
+        is_k_zero = torch.isclose(k, torch.zeros_like(k))
         safe_k = torch.where(is_k_zero, torch.ones_like(k), k)
         neglog1mp = -torch.log1p(-value)
         return m + s * torch.where(
@@ -121,19 +121,16 @@ class GeneralizedPareto(Distribution):
     @property
     def mean(self):
         concentration = self.concentration
-        dtype = self.concentration.dtype
         valid = concentration < 1
-        safe_conc = torch.where(valid, concentration, torch.tensor(0.5, dtype=dtype))
+        safe_conc = torch.where(valid, concentration, 0.5)
         result = self.loc + self.scale / (1 - safe_conc)
         return torch.where(valid, result, torch.full_like(result, nan))
 
     @property
     def variance(self):
         concentration = self.concentration
-        dtype = self.concentration.dtype
-        lim = torch.tensor(0.5, dtype=dtype)
-        valid = concentration < lim
-        safe_conc = torch.where(valid, concentration, torch.tensor(0.25, dtype=dtype))
+        valid = concentration < 0.5
+        safe_conc = torch.where(valid, concentration, 0.25)
         result = self.scale**2 / (
             (1 - safe_conc) ** 2 * (1 - 2 * safe_conc)
         ) + torch.zeros_like(self.loc)
