@@ -85,13 +85,15 @@ class DebugPrinterManager:
                 arg_signatures[i], torch_dtype
             ):
                 continue
-            if (
-                len(self.filtered_kernel_names_to_print) > 0
-                and self.filtered_kernel_names_to_print[0]
-                != self.DEBUG_FILTER_DEFAULT_PRINT_ALL
-                and kernel_name.lower() not in self.filtered_kernel_names_to_print
-            ):
-                continue
+            if self.debug_printer_level == IntermediateValueDebuggingLevel.PRINT_ONLY:
+                # when debug printing is enabled i.e. IntermediateValueDebuggingLevel.PRINT_ONLY,
+                # check if filtered kernel name list is provided
+                if (
+                    len(self.filtered_kernel_names_to_print) > 0
+                    and kernel_name.lower() not in self.filtered_kernel_names_to_print
+                ):
+                    continue
+
             launch_prefix = "before_launch" if before_launch else "after_launch"
             if V.graph.cpp_wrapper:
                 if config.abi_compatible:
