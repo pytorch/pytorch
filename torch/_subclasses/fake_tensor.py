@@ -1926,7 +1926,11 @@ class FakeTensorMode(TorchDispatchMode):
                     and not isinstance(real_out, torch.Tensor)
                     and type(fake_out) != type(real_out)
                 ):
-                    tree_map_(go, tuple(fake_out), tuple(real_out))
+                    tree_map_(
+                        go,
+                        tuple(pytree.tree_flatten(fake_out)),
+                        tuple(pytree.tree_flatten(real_out)),
+                    )
                 else:
                     tree_map_(go, fake_out, real_out)
 

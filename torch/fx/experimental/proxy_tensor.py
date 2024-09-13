@@ -610,7 +610,9 @@ def track_tensor_tree(
     # observed that some extra unbacked bindings were needed to handle some
     # higher order operator code.  But actually it looks like this was
     # just an unrelated bug that needed to be fixed separately.
-    _set_unbacked_bindings(inner_res, proxy_res)
+    fake_mode = torch._guards.detect_fake_mode()
+    if fake_mode and (shape_env := fake_mode.shape_env):
+        shape_env.pending_fresh_unbacked_symbols.clear()
 
     def wrap_with_proxy(
         e: object, proxy: _NestedProxys, constant: Optional[_NestedTensors]
@@ -905,10 +907,6 @@ def proxy_call(
 
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
-
-    fake_mode = torch._guards.detect_fake_mode(flat_args_kwargs)
-    if fake_mode and (shape_env := fake_mode.shape_env):
-        shape_env.pending_fresh_unbacked_symbols.clear()
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
