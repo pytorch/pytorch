@@ -5913,16 +5913,15 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         )
 
     def test_torch_compile_in_compile_frame(self):
-        # TODO(anijain2305/yanboliang) - Dont graph break on torch.compile.
         def gn(x, c=None):
             if c is None:
                 c = 2
             return c * x
 
         def outer_func(x):
-            return torch.compile(gn)(x)
+            return torch.compile(gn, backend="eager")(x)
 
-        compile_outer = torch.compile(outer_func, backend="eager")
+        compile_outer = torch.compile(outer_func, backend="eager", fullgraph=True)
         x = torch.randn(4)
         ref = outer_func(x)
         res = compile_outer(x)
