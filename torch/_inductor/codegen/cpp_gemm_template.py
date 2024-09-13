@@ -764,6 +764,8 @@ class CppPackedGemmTemplate(CppTemplate):
             or self.maybe_k_slicing()
         )
 
+        use_local_acc = True
+
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
         # but we'd better move it here to align with fp.
         if inp is not None and self.beta != 0 and not int8_gemm:

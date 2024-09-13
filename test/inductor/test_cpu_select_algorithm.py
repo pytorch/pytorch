@@ -906,6 +906,141 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    # TODO: this UT can pass
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("batch_size", (8,))
+    @parametrize("in_features", (512,))
+    @parametrize("image_size", (56,))
+    @parametrize("out_features", (128,))
+    @parametrize(
+        "bias",
+        (
+            # False,
+            True,
+        ),
+    )
+    @parametrize(
+        "has_non_epilogue_users",
+        (
+            True,
+            # False,
+        ),
+    )
+    @dtypes(torch.float32)
+    def test_linear_reindexer(
+        self,
+        batch_size,
+        in_features,
+        image_size,
+        out_features,
+        bias,
+        has_non_epilogue_users,
+        dtype,
+    ):
+        # Reproducer from the jx_nest_base model in timm
+        class M(torch.nn.Module):
+            def __init__(self, bias, has_non_epilogue_users):
+                super().__init__()
+                # self.linear2 = torch.nn.Linear(128, 128, bias=True)
+                
+                self._frozen_param2 = torch.randn(1, 16, 196, 128)
+                
+                self.linear = torch.nn.Linear(512, 128, bias=False)
+                self.linear2 = torch.nn.Linear(128, 128, bias=False)
+                self.conv = torch.nn.Conv2d(
+                    128,
+                    256,
+                    kernel_size=3,
+                    padding=1,
+                    stride=1,
+                    dilation=1,
+                    groups=1,
+                )
+
+                self._frozen_param398 = torch.randn(batch_size, out_features, 1, 1)
+
+                self._frozen_param414 = torch.randn(384, 128)
+                self._frozen_param415 = torch.randn(1982689, 1)
+
+                self._frozen_param15 = torch.randn(128)
+                self._frozen_param16 = torch.randn(128)
+
+                self.has_non_epilogue_users = has_non_epilogue_users
+
+            # def forward(self, mul_239, view_426, view_414, view_410, view_398):
+            def forward(self, mul_239, view_425, view_414, view_410, view_398, add_180, add_177, add_184):
+                # add_177 = torch.ops.aten.add.Tensor(view_398, self._frozen_param2);  view_398 = _frozen_param2 = None
+                
+                
+                # add_180 = torch.ops.aten.add.Tensor(add_177, view_410);  add_177 = view_410 = None
+
+                _mkl_linear_91 = self.linear2(view_425)  # [25088, 128]
+                view_426 = torch.ops.aten.reshape.default(_mkl_linear_91, [8, 16, 196, 128]);  _mkl_linear_91 = None
+
+                # return view_426
+
+                # add_184 = torch.ops.aten.add.Tensor(add_180, view_414);  add_180 = view_414 = None
+
+
+                # add_184
+                add_187 = torch.ops.aten.add.Tensor(add_184, view_426);  add_184 = view_426 = None
+
+
+                view_429 = torch.ops.aten.reshape.default(mul_239, [25088, 512]);  mul_239 = None
+                
+                _mkl_linear_89 = self.linear(view_429)
+                
+                view_430 = torch.ops.aten.reshape.default(_mkl_linear_89, [8, 16, 196, 128]);  _mkl_linear_89 = None
+                
+                # add_187
+                add_191 = torch.ops.aten.add.Tensor(add_187, view_430);  add_187 = view_430 = None  # [8, 16, 196, 128]
+
+                # return add_191  # pass
+                
+                view_431 = torch.ops.aten.reshape.default(add_191, [8, 4, 4, 14, 14, 128]);  add_191 = None
+                permute_203 = torch.ops.aten.permute.default(view_431, [0, 1, 3, 2, 4, 5]);  view_431 = None
+                clone_188 = torch.ops.aten.clone.default(permute_203, memory_format = torch.contiguous_format);  permute_203 = None
+                view_432 = torch.ops.aten.reshape.default(clone_188, [8, 56, 56, 128]);  clone_188 = None
+                permute_204 = torch.ops.aten.permute.default(view_432, [0, 3, 1, 2]);  view_432 = None
+
+                return permute_204
+
+                _convolution_pointwise_default_1 = self.conv(permute_204)
+                                
+                return _convolution_pointwise_default_1 
+
+        mul_239 = torch.randn(batch_size, 16, 196, 512)
+        view_425 = torch.randn(25088, 128)
+        view_414 = torch.randn(batch_size, 16, 196, 128)
+        view_410 = torch.randn(batch_size, 16, 196, 128)
+        view_398 = torch.randn(batch_size, 16, 196, 128)
+        add_180 = torch.randn(batch_size, 16, 196, 128)
+        add_177 = torch.randn(batch_size, 16, 196, 128)
+        add_184 = torch.randn(batch_size, 16, 196, 128)
+        # view_414 = torch.randn(batch_size, 128, 56, 56).to(memory_format=torch.channels_last)
+
+        mod = M(bias=bias, has_non_epilogue_users=has_non_epilogue_users).eval()
+        with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast(enabled = dtype == torch.bfloat16):
+            self.common(
+                mod,
+                (
+                    mul_239,
+                    view_425,
+                    view_414,
+                    view_410,
+                    view_398,
+                    add_180,
+                    add_177,
+                    add_184,
+                ),
+                atol=atol,
+                rtol=rtol,
+            )
+        # self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        # self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
