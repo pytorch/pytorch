@@ -157,12 +157,12 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # backend needs to provide a custom Scheduling for its unique kernel code generation. Currently,
 # CppScheduling and TritonScheduling serve the C++/OpenMP and Triton backends, respectively.
 #
-# For the Wrapper, Inductor provides a WrapperCodeGen class to generate the Python wrapper code
-# that bridges kernels. This allows out-of-tree backends to inherit from WrapperCodeGen,
+# For the Wrapper, Inductor provides a PythonWrapperCodegen class to generate the Python wrapper code
+# that bridges kernels. This allows out-of-tree backends to inherit from PythonWrapperCodegen,
 # and override specific member functions to create backend-specific Python wrapper code.
 #
 # Other classes, such as CppKernel and TritonKernel, used for code generation, typically form part
-# of the logic for either Scheduling or WrapperCodeGen. So the Scheduling and WrapperCodeGen interfaces
+# of the logic for either Scheduling or PythonWrapperCodegen. So the Scheduling and PythonWrapperCodegen interfaces
 # provide flexibility to the backend. A backend can choose to implement these classes from scratch,
 # or reuse them by extending and overriding as necessary. And Inductor provides the registration API,
 # register_backend_for_device, to equip a new backend at runtime.
@@ -236,14 +236,14 @@ def init_backend_registration():
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .triton import TritonScheduling
-    from .wrapper import WrapperCodeGen
+    from .wrapper import PythonWrapperCodegen
 
     if get_scheduling_for_device("cpu") is None:
         cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
         register_backend_for_device(
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
-            WrapperCodeGen,
+            PythonWrapperCodegen,
             CppWrapperCpu,
         )
 
@@ -253,7 +253,7 @@ def init_backend_registration():
         register_backend_for_device(
             "cuda",
             lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
-            WrapperCodeGen,
+            PythonWrapperCodegen,
             CppWrapperGpu,
         )
 
@@ -261,7 +261,7 @@ def init_backend_registration():
         register_backend_for_device(
             "xpu",
             TritonScheduling,
-            WrapperCodeGen,
+            PythonWrapperCodegen,
         )
 
     private_backend = torch._C._get_privateuse1_backend_name()
@@ -273,8 +273,8 @@ def init_backend_registration():
 
         try:
             device_scheduling = _get_custom_mod_func("Scheduling")
-            wrapper_codegen = _get_custom_mod_func("WrapperCodeGen")
-            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodeGen")
+            wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
+            cpp_wrapper_codegen = _get_custom_mod_func("CppPythonWrapperCodegen")
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 register_backend_for_device(
                     private_backend,

@@ -115,7 +115,7 @@ class ROCmTemplateKernel(ROCmKernel):
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
-        used from within torch._inductor.wrapper.WrapperCodeGen
+        used from within torch._inductor.wrapper.PythonWrapperCodegen
 
         name: Name of kernel function.
         node: The ROCmTemplateBuffer node which contains information about the kernel, it's fused epilogue nodes

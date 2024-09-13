@@ -158,7 +158,7 @@ def user_defined_kernel_grid_fn_code(
     name: str,
     configs: List[triton.Config],  # type: ignore[name-defined]
     grids: List[TritonGrid],
-    wrapper: Optional[WrapperCodeGen] = None,
+    wrapper: Optional[PythonWrapperCodegen] = None,
 ) -> Tuple[str, str]:
     output = IndentedBuffer()
 
@@ -272,7 +272,7 @@ class WrapperLine:
 
 @dataclasses.dataclass
 class EnterSubgraphLine(WrapperLine):
-    wrapper: WrapperCodeGen
+    wrapper: PythonWrapperCodegen
     graph: GraphLowering
 
     def __post_init__(self) -> None:
@@ -285,7 +285,7 @@ class EnterSubgraphLine(WrapperLine):
 
 @dataclasses.dataclass
 class ExitSubgraphLine(WrapperLine):
-    wrapper: WrapperCodeGen
+    wrapper: PythonWrapperCodegen
 
     def __post_init__(self) -> None:
         self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
@@ -350,7 +350,7 @@ class ExitDeviceContextManagerLine(WrapperLine):
 
 @dataclasses.dataclass
 class MemoryPlanningLine(WrapperLine):
-    wrapper: WrapperCodeGen
+    wrapper: PythonWrapperCodegen
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         """First pass to find reuse"""
@@ -455,7 +455,7 @@ class NullLine(MemoryPlanningLine):
 BufferName = str
 
 
-class WrapperCodeGen(CodeGen):
+class PythonWrapperCodegen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
     """
@@ -861,7 +861,7 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
     def generate(self, is_inference):
-        with dynamo_timed("WrapperCodeGen.generate"):
+        with dynamo_timed("PythonWrapperCodegen.generate"):
             return self._generate(is_inference)
 
     def _generate(self, is_inference):
@@ -2064,7 +2064,7 @@ class WrapperCodeGen(CodeGen):
     def statically_known_list_of_ints_or_none(lst):
         result = []
         for x in lst:
-            num = WrapperCodeGen.statically_known_int_or_none(x)
+            num = PythonWrapperCodegen.statically_known_int_or_none(x)
             if num is None:
                 return None
             result.append(num)
@@ -2072,12 +2072,16 @@ class WrapperCodeGen(CodeGen):
 
     @staticmethod
     def is_statically_known_list_of_ints(lst):
-        return WrapperCodeGen.statically_known_list_of_ints_or_none(lst) is not None
+        return (
+            PythonWrapperCodegen.statically_known_list_of_ints_or_none(lst) is not None
+        )
 
     @staticmethod
     def static_shape_for_buffer_or_none(buffer):
-        return WrapperCodeGen.statically_known_list_of_ints_or_none(buffer.get_size())
+        return PythonWrapperCodegen.statically_known_list_of_ints_or_none(
+            buffer.get_size()
+        )
 
     @staticmethod
     def can_prove_buffer_has_static_shape(buffer):
-        return WrapperCodeGen.static_shape_for_buffer_or_none(buffer) is not None
+        return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None

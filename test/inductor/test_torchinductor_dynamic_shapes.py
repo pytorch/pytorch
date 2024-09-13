@@ -15,7 +15,7 @@ from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import metrics
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
-from torch._inductor.codegen.wrapper import WrapperCodeGen
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
@@ -874,20 +874,20 @@ class TestInductorDynamic(TestCase):
             if call_count == 1:
                 # testing fn_1
                 assert (
-                    WrapperCodeGen.statically_known_int_or_none(batch_dim) is None
+                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) is None
                 ), "Should not be statically known on first call"
             elif call_count == 2:
                 # testing fn_2
                 assert (
-                    WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
+                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
                 ), "Should be limited to exactly 5 on second call due to multiple constraints"
             elif call_count == 2:
                 # testing fn_3
                 assert (
-                    WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
+                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
                 ), "Should be exactly 5 on third call"
 
-        class TestWrapperCodegen(WrapperCodeGen):
+        class TestWrapperCodegen(PythonWrapperCodegen):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
 
@@ -896,7 +896,7 @@ class TestInductorDynamic(TestCase):
                 return super().generate(is_inference, *args, **kwargs)
 
         if "cpu" not in device_codegens:
-            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+            register_backend_for_device("cpu", CppScheduling, PythonWrapperCodegen)
         orig_cpu_codegens = device_codegens["cpu"]
         try:
             register_backend_for_device(

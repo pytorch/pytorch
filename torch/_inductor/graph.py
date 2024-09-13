@@ -63,7 +63,7 @@ from .codegen.common import (
     init_backend_registration,
 )
 from .exc import (
-    CppWrapperCodeGenError,
+    CppPythonWrapperCodegenError,
     LoweringException,
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
@@ -104,7 +104,7 @@ from .virtualized import NullHandler, V
 
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
-    from .codegen.wrapper import WrapperCodeGen
+    from .codegen.wrapper import PythonWrapperCodegen
 
 from torch._inductor.codecache import output_code_log
 
@@ -388,7 +388,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
-        self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
+        self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
 
@@ -1661,10 +1661,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def validate_can_generate_cpp_wrapper(self) -> None:
         if config.disable_cpp_codegen:
-            raise CppWrapperCodeGenError("C++ codegen is disabled")
+            raise CppPythonWrapperCodegenError("C++ codegen is disabled")
 
         if sys.platform not in ["linux", "darwin", "win32"]:
-            raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
+            raise CppPythonWrapperCodegenError(f"Unsupported platform {sys.platform}")
 
         for value in self.graph_inputs.values():
             dtype = None
@@ -1676,7 +1676,7 @@ class GraphLowering(torch.fx.Interpreter):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
-                raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
+                raise CppPythonWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self) -> None:
         device_types = self.device_types.copy()

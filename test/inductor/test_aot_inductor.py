@@ -17,7 +17,7 @@ import torch.nn as nn
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.exc import CppWrapperCodeGenError
+from torch._inductor.exc import CppPythonWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
@@ -1750,7 +1750,7 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10).to(self.device),
         )
         with self.assertRaisesRegex(
-            CppWrapperCodeGenError, "Unsupported input dtype torch.float32"
+            CppPythonWrapperCodegenError, "Unsupported input dtype torch.float32"
         ):
             torch._export.aot_compile(Model(), example_inputs)
 
