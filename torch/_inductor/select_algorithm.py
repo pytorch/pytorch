@@ -523,7 +523,7 @@ class TritonTemplateKernel(TritonKernel):
                 ):
                     nonlocal prologue_called
                     prologue_called = True
-                    V.kernel.compute.writeline(f"{output_name} = {value})")
+                    V.kernel.compute.writeline(f"{output_name} = {value}")
 
             self.ops_handler = StoreOutputSubstitution
 
@@ -544,19 +544,6 @@ class TritonTemplateKernel(TritonKernel):
 
         def hook():
             with self.set_subgraph_body(hook_key):
-                # theres only one shared compute, etc,
-                # Body is separate right now..... but not self.compute, etc
-                #  self.indexing_code
-                #    or self.loads
-                #    or self.stores
-                #    or self.compute
-                #    or self.suffix
-                #
-                #
-                #
-                #
-                if self.compute:
-                    breakpoint()
                 self.codegen_body()
                 if not prologue_called:
                     self.body.writeline(load_code)
