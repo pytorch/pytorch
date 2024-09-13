@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, ClassVar, Dict, Optional
 
 from torch.distributed import Store
-from torch.distributed.elastic.utils.distributed import get_free_port as _get_free_port
+from torch.distributed.elastic.utils.distributed import get_free_port
 
 
 __all__ = [
@@ -83,7 +83,7 @@ class RendezvousStoreInfo:
         # TODO swap to collectives comms API
         if rank == 0:
             addr = local_addr or socket.getfqdn()
-            port = _get_free_port()
+            port = get_free_port()
             store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
             store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
 

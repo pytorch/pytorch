@@ -1176,7 +1176,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         self._record(message=msg, rank=rank)
         logger.info(msg)
 
-        # opt-out option of TCP store sharing
+        # opt-out option of TCPStore sharing
         if os.getenv("TORCH_DISABLE_SHARE_RDZV_TCP_STORE", "0") == "1":
             bootstrap_store_info = RendezvousStoreInfo.build(
                 rank, store, local_addr=self._this_node.addr
@@ -1188,25 +1188,19 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 bootstrap_store_info,
             )
 
+        # This will only be hit when TCPStore sharing is enabled.
         if self._bootstrap_store_info is None:
-            if isinstance(self._store, dist.TCPStore):
-                addr = self._store.host
-                port = self._store.port
-                self._bootstrap_store_info = RendezvousStoreInfo(
-                    master_addr=addr, master_port=port
+            # To ensure no race for each retry. We always create a TCPStore and this requries
+            # bootstrapping info across ranks
+            self._bootstrap_store_info = RendezvousStoreInfo.build(
+                rank, store, local_addr=self._this_node.addr
+            )
+            if rank == 0:
+                # Since we create TCPStore with `multi_tenant = True`, we won't create
+                # a new TCPStore service if there is already one running.
+                self._shared_tcp_store_server = self._create_tcp_store_server(
+                    self._bootstrap_store_info
                 )
-                if rank == 0:
-                    self._shared_tcp_store_server = self._store
-            else:
-                # If the store is not type of TCPStore start TCPStore server, which requries
-                # bootstrapping info across ranks
-                self._bootstrap_store_info = RendezvousStoreInfo.build(
-                    rank, store, local_addr=self._this_node.addr
-                )
-                if rank == 0:
-                    self._shared_tcp_store_server = self._create_tcp_store_server(
-                        self._bootstrap_store_info
-                    )
 
         assert self._bootstrap_store_info is not None
         if rank == 0:
