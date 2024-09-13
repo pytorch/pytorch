@@ -78,6 +78,7 @@ from .sym_node import SymNode
 
 if TYPE_CHECKING:
     import types
+    from collections.abc import MutableMapping
 
     import sympy
 
@@ -201,9 +202,11 @@ def set_proxy_slot(
     if isinstance(obj, Tensor):
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
+        assert isinstance(proxy, _ProxyTensor)
         tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
+        assert isinstance(proxy, Proxy)
         tracer.script_object_tracker[obj] = proxy
     else:
         # NB: Never clobber pre-existing proxy.  Although the proxies
@@ -593,6 +596,19 @@ def track_tensor_tree(
     constant: Optional[_NestedTensors],
     tracer: _ProxyTracer,
 ) -> T:
+    # NB: We call set_unbacked_bindings only on the *topmost* call to
+    # track_tensor_tree, not recursive calls.  This is because there must
+    # be only ONE unbacked_binding proxy call, and it should be the one
+    # where all of the unbacked SymInts actually first come into existence.
+    # If you call this again on the inner proxies for the tuple projections,
+    # you will have multiple unbacked_bindings for the same symbol, but
+    # they're not going to show up anywhere.
+    #
+    # I was briefly deceived into setting unbacked bindings recursively when
+    # working on https://github.com/pytorch/pytorch/pull/133585 because I
+    # observed that some extra unbacked bindings were needed to handle some
+    # higher order operator code.  But actually it looks like this was
+    # just an unrelated bug that needed to be fixed separately.
     _set_unbacked_bindings(inner_res, proxy_res)
 
     def wrap_with_proxy(
@@ -987,7 +1003,12 @@ class _SymNodeDict:
 
 
 class PythonKeyTracer(Tracer):
+    script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
+    symnode_tracker: _SymNodeDict
+    sympy_expr_tracker: Dict[sympy.Symbol, object]
+    tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     torch_fn_counts: Dict[OpOverload, int]
+    enable_thunkify: bool = False
 
     def __init__(self) -> None:
         super().__init__(autowrap_modules=())  # type: ignore[arg-type]
@@ -996,7 +1017,7 @@ class PythonKeyTracer(Tracer):
         self.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
-        self.sympy_expr_tracker: Dict[sympy.Symbol, object] = dict()
+        self.sympy_expr_tracker = dict()
 
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None
@@ -1363,13 +1384,27 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
 
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
-    script_object_tracker: WeakKeyDictionary
-    symnode_tracker: WeakKeyDictionary
-    tensor_tracker: WeakTensorKeyDictionary
+    script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
+    symnode_tracker: MutableMapping[PySymType, _PySymProxyType]
+    tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: Dict[sympy.Symbol, object]
     torch_fn_metadata: Optional[OpOverload]
     torch_fn_counts: Dict[OpOverload, int]
     enable_thunkify: bool = False
+
+    def __init__(self, graph: fx.graph.Graph) -> None:
+        super().__init__(graph)
+        self.symnode_tracker = weakref.WeakKeyDictionary()
+        self.tensor_tracker = WeakTensorKeyDictionary()
+        self.sympy_expr_tracker = {}
+        self.script_object_tracker = WeakIdKeyDictionary(
+            dict=None, ref_type=_WeakHashRef
+        )
+        # Stores the torch function that was called during tracing
+        self.torch_fn_metadata = None
+        # Stores the counts for every torch function called. This is to help
+        # distinguish between different calls to the same torch function.
+        self.torch_fn_counts = {}
 
 
 # TODO: I'm not sure what the point of this class is; you can just
@@ -1386,17 +1421,8 @@ class DecompositionInterpreter(fx.Interpreter):
         self.new_graph = new_graph
         self.tracer = _GraphAppendingTracerEx(self.new_graph)
         # Blegh
-        self.tracer.tensor_tracker = WeakTensorKeyDictionary()
-        self.tracer.symnode_tracker = weakref.WeakKeyDictionary()
-        self.tracer.sympy_expr_tracker = dict()
         self.decomposition_table = decomposition_table or {}
         self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
-
-        # Stores the torch function that was called during tracing
-        self.tracer.torch_fn_metadata = None
-        # Stores the counts for every torch function called. This is to help
-        # distinguish between different calls to the same torch function.
-        self.tracer.torch_fn_counts = {}
 
     def placeholder(
         self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]  # type: ignore[override]
@@ -1552,6 +1578,9 @@ class _ModuleStackTracer(PythonKeyTracer):
                         attr_val, tracer.proxy_paths[self] + "." + name
                     )
                 return tracer.attr_proxy_map[attr_val]
+
+            def get_base(self) -> Module:
+                return tracer.proxy_modules[self]
 
             @property
             def _modules(self) -> Dict[str, AttrProxy]:
@@ -2182,5 +2211,5 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
-            assert isinstance(out_proxy, Proxy)
+            assert isinstance(out_proxy, Proxy), out_proxy
             out_proxy.node.meta["unbacked_bindings"] = symbol_to_path

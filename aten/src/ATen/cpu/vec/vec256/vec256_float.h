@@ -636,6 +636,21 @@ inline void transpose_mxn<float, 8, 8>(
   _mm256_storeu_ps(&dst[7 * ld_dst], th);
 }
 
+template<>
+inline void transpose_mxn<float, 16, 16>(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst) {
+  transpose_mxn<float, 8, 8>(
+          src , ld_src, dst, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8, ld_src, dst + 8 * ld_dst, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8 * ld_src, ld_src, dst + 8, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8 * ld_src + 8, ld_src, dst + 8 * ld_dst + 8, ld_dst);
+}
 #endif
 
 }} // namespace at::vec::CPU_CAPABILITY

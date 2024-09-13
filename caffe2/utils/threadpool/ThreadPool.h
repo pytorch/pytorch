@@ -1,15 +1,11 @@
 #ifndef CAFFE2_UTILS_THREADPOOL_H_
 #define CAFFE2_UTILS_THREADPOOL_H_
 
-#include "ThreadPoolCommon.h"
-
-#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <vector>
 
-#include "caffe2/core/common.h"
+#include <c10/macros/Macros.h>
 
 //
 // A work-stealing threadpool loosely based off of pthreadpool

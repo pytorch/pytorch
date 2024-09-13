@@ -421,11 +421,17 @@ struct ConvParams {
   // cudnn and miopen are guaranteed not to be on mobile, and T102591915 / T110194934 suggest
   // that maybe the compiledWithCuDNN() check sometimes segfaults (though I can't imagine how)
 #if !defined(C10_MOBILE)
-    if (needs_64bit_indexing_no_split(input, weight)) {
-      return false;
-    }
     if (!detail::getCUDAHooks().compiledWithCuDNN()) {
       return false;
+    }
+    if (needs_64bit_indexing_no_split(input, weight)) {
+      static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+      if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
+        TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
+                        " if the V8 API is not enabled or before cuDNN version 9.3+."
+                        " Consider upgrading cuDNN and/or enabling the V8 API for better efficiency.");
+        return false;
+      }
     }
     if (!input.is_cuda() || !cudnn_enabled) {
       return false;
