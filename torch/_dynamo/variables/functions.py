@@ -689,14 +689,9 @@ class SkipFunctionVariable(VariableTracker):
             return variables.LambdaVariable(wraps)
         else:
             try:
-                print("here")
-                print(self.value)
-                print(self.value.__module__)
-                print(self.value.__qualname__)
                 path = inspect.getfile(self.value)
                 msg = f"'skip function {self.value.__qualname__} in file {path}'"
             except TypeError:
-                print("in error")
                 known_python_builtin_modules = {"_abc", "_warnings"}
                 if self.value.__module__ in known_python_builtin_modules:
                     msg = (
