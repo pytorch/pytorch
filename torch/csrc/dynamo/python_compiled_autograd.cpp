@@ -1,8 +1,10 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
+#include <torch/csrc/Size.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -11,8 +13,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <torch/csrc/autograd/utils/wrap_outputs.h>
-#include <torch/csrc/Size.h>
 
 /*
 [Note: Compiled Autograd]
@@ -369,14 +369,19 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
 // figure out clean up policy
 static std::vector<std::function<variable_list(variable_list)>> lambdas;
 static std::vector<at::IValue> lambda_idxs;
-static std::vector<std::vector<std::optional<VariableInfo>>> lambda_output_infos;
+static std::vector<std::vector<std::optional<VariableInfo>>>
+    lambda_output_infos;
 static size_t next_lambdas_idx = 0;
 static size_t offset_lambdas_idx = 0;
-static std::unordered_set<const NodeCall*> lifted_node_calls;  // do not free these immediately
+static std::unordered_set<std::shared_ptr<Node>> lifted_nodes; // deferred free
 
-static at::IValue* lambda_collect(CompiledNodeArgs& args, Node* fn, std::function<variable_list(variable_list)>&& lambda, const std::vector<bool>& is_variable_input, const std::vector<VariableInfo>& output_info) {
-  lifted_node_calls.emplace(args.get_node_call());
-  std::cout << "storing lambdas[" << lambdas.size() << "], should output " << output_info.size() << " grads" << std::endl;
+static at::IValue* lambda_collect(
+    CompiledNodeArgs& args,
+    Node* fn,
+    std::function<variable_list(variable_list)>&& lambda,
+    const std::vector<bool>& is_variable_input,
+    const std::vector<VariableInfo>& output_info) {
+  lifted_nodes.emplace(args.get_node_call()->node);
   lambdas.emplace_back(std::move(lambda));
   std::vector<std::optional<VariableInfo>> output_info_for_vars;
   for (auto i : c10::irange(is_variable_input.size())) {
@@ -387,8 +392,6 @@ static at::IValue* lambda_collect(CompiledNodeArgs& args, Node* fn, std::functio
     }
   }
   lambda_output_infos.emplace_back(std::move(output_info_for_vars));
-  std::cout << "inserted lambda_output_infos at idx=" << (lambda_output_infos.size()-1) << std::endl;
-  // _compiler.lifted_lambdas.emplace_back(lambda);
   size_t idx = lambdas.size() - 1;
   lambda_idxs.emplace_back(at::IValue(static_cast<int64_t>(idx)));
   for (auto i : c10::irange(output_info.size())) {
@@ -399,7 +402,6 @@ static at::IValue* lambda_collect(CompiledNodeArgs& args, Node* fn, std::functio
       args.collect(output_info[i].size);
     }
   }
-  std::cout << "done storing lambdas[" << idx << "]" << std::endl;
   return &lambda_idxs[idx];
 }
 
@@ -423,17 +425,19 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
   return ret.release();
 }
 
-static variable_list lambda_lift(SwapSavedVariables& ssv, PyObject* py_compiler, variable_list&& inputs) {
-  std::cout << "try lift" << std::endl;
+static variable_list lambda_lift(
+    SwapSavedVariables& ssv,
+    PyObject* py_compiler,
+    variable_list&& inputs) {
   // c10::SymInt idx = lambda_idxs[next_lambdas_idx++].toSymInt();
   // need to before(at::IValue) but with the proper next_proxy idx.
   at::IValue& idx = lambda_idxs[next_lambdas_idx++];
   int hackidx = idx.toInt();
   ssv.before(idx);
-  static PyObject* method_name = PyUnicode_InternFromString("proxy_call_lambda");
+  static PyObject* method_name =
+      PyUnicode_InternFromString("proxy_call_lambda");
   THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
   auto lambda_output_info = lambda_output_infos[hackidx];
-  std::cout << "lifting lambdas[" << idx << "], expecting " << lambda_output_info.size() << " outputs" << std::endl;
   THPObjectPtr pyoutputmetas(
       PyTuple_New(static_cast<Py_ssize_t>(lambda_output_info.size())));
   for (auto i : c10::irange(lambda_output_info.size())) {
@@ -441,29 +445,28 @@ static variable_list lambda_lift(SwapSavedVariables& ssv, PyObject* py_compiler,
       PyTuple_SET_ITEM(pyoutputmetas.get(), i, Py_None);
       continue;
     }
-    THPObjectPtr pyoutputmeta(
-      PyTuple_Pack(
+    THPObjectPtr pyoutputmeta(PyTuple_Pack(
         4,
         autograd::utils::wrap(lambda_output_info[i]->layout),
         THPDevice_New(lambda_output_info[i]->device),
         autograd::utils::wrap(lambda_output_info[i]->scalar_type),
-        to_py_size(lambda_output_info[i]->size)
-      )
-    );
-    if (!pyoutputmeta) throw python_error();
+        to_py_size(lambda_output_info[i]->size)));
+    if (!pyoutputmeta)
+      throw python_error();
     PyTuple_SET_ITEM(pyoutputmetas.get(), i, pyoutputmeta.release());
   }
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
-    py_compiler,
-    method_name,
-    PyLong_FromSsize_t(hackidx-offset_lambdas_idx),  // doesnt work when there's 2 lifted in same graph
-    pyinputs.get(),
-    pyoutputmetas.get(),
-    nullptr)));
+      py_compiler,
+      method_name,
+      PyLong_FromSsize_t(
+          hackidx - offset_lambdas_idx), // doesnt work when there's 2 lifted in
+                                         // same graph
+      pyinputs.get(),
+      pyoutputmetas.get(),
+      nullptr)));
   ssv.after(idx);
   return THPVariable_UnpackList(pyresult.get());
 }
-
 
 static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
@@ -598,7 +601,7 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
-  next_lambdas_idx = lambdas.size();  // cache hit will not lift
+  next_lambdas_idx = lambdas.size(); // cache hit will not lift
   offset_lambdas_idx = lambdas.size();
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
@@ -630,7 +633,6 @@ CacheNode* _compiled_autograd_impl(
       CompiledNodeArgs node_args(compiler_call, call);
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
-        std::cout << "compiled_args on " << call.node->name() << std::endl;
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
@@ -745,9 +747,7 @@ CacheNode* _compiled_autograd_impl(
           set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
-      std::cout << "apply_with_saved on " << call.node->name() << std::endl;
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
-      std::cout << call.node->name() << " returned " << outputs.size() << " outputs" << std::endl;
 
       saved.debug_asserts();
       saved.before(call.node->next_edges());
@@ -805,11 +805,8 @@ CacheNode* _compiled_autograd_impl(
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
     for (auto& call : calls) {
-      if (lifted_node_calls.find(call) == lifted_node_calls.end()) {
-        std::cout << "freeing " << call->node->name() << std::endl;
+      if (lifted_nodes.find(call->node) == lifted_nodes.end()) {
         call->node->release_variables();
-      } else {
-        std::cout << "not freeing " << call->node->name() << std::endl;
       }
     }
   }

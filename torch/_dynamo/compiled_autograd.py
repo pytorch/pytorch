@@ -62,6 +62,7 @@ def maybe_clone(x):
 saved_scalars = []
 next_op = 0
 
+
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
@@ -172,10 +173,18 @@ class AutogradCompilerInstance:
             tagged_tensor = torch.tensor(0)
             tagged_tensor._compiled_autograd_is_none = True
             global next_op
-            @torch.library.custom_op(f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=())
-            def cpp_node_op_i(inputs: List[torch.Tensor], idx: int) -> List[torch.Tensor]:
+
+            @torch.library.custom_op(
+                f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=()
+            )
+            def cpp_node_op_i(
+                inputs: List[torch.Tensor], idx: int
+            ) -> List[torch.Tensor]:
                 outs = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
-                return [out.clone() if out is not None else tagged_tensor.clone() for out in outs]
+                return [
+                    out.clone() if out is not None else tagged_tensor.clone()
+                    for out in outs
+                ]
 
             @cpp_node_op_i.register_fake
             def _(inputs, idx):
@@ -188,7 +197,9 @@ class AutogradCompilerInstance:
 
                     layout, device, dtype, size = output_metadata
                     grad_ins.append(
-                        torch.empty(size=size, dtype=dtype, layout=layout, device=device)
+                        torch.empty(
+                            size=size, dtype=dtype, layout=layout, device=device
+                        )
                     )
                 return grad_ins
 
@@ -209,9 +220,8 @@ class AutogradCompilerInstance:
         with disable_proxy_modes_tracing():
             self.bind_tensors_to_proxies(grad_ins, proxies)
 
-
         # with disable_proxy_modes_tracing():
-            # create fake Tensors
+        # create fake Tensors
         # return list(grad_ins)
         return list(grad_ins)
 
@@ -305,14 +315,14 @@ class AutogradCompilerInstance:
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
-        proxies = self.proxy_call_hook(
+        proxy = self.proxy_call_hook(
             hook,
             input,
             hook_type="post_acc_grad_hook",
         )
         with disable_proxy_modes_tracing():
             input = [maybe_clone(input)]
-            self.bind_tensors_to_proxies(input, proxies)
+            self.bind_tensors_to_proxies(input, [proxy])
         return input
 
     # Note: [Compiled autograd and cudagraphs]
