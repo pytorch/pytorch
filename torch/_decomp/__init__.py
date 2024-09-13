@@ -289,10 +289,10 @@ def _is_cia_op(op: "OpOverload") -> bool:
     )
 
 
-_ALL_VALID_CIA_OPS_IN_EXPORT: Optional[Set["OpOverload"]] = None
+_ALL_VALID_CIA_OPS_IN_EXPORT: Optional[frozenset["OpOverload"]] = None
 
 
-def _collect_all_valid_cia_ops() -> Set["OpOverload"]:
+def _collect_all_valid_cia_ops() -> frozenset["OpOverload"]:
     """
     This is an util function that gets the all CIA functional ops.
 
@@ -304,6 +304,8 @@ def _collect_all_valid_cia_ops() -> Set["OpOverload"]:
       2. Sometimes, handful of ops have CIA registered in python dispatcher
          but not on the C++ side, these can't be caught at the first step.
          So we walk again to get the final list.
+
+    We need a frozenset as output because the set can be modified by user.
     """
 
     # This is an expensive operation, so we cache the result
@@ -337,10 +339,10 @@ def _collect_all_valid_cia_ops() -> Set["OpOverload"]:
             op_overload = getattr(op_packet, overload)
             if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
                 cia_ops.add(op_overload)
-    _ALL_VALID_CIA_OPS_IN_EXPORT = cia_ops
+    _ALL_VALID_CIA_OPS_IN_EXPORT = frozenset(cia_ops)
     # For typing purposes :(
     assert _ALL_VALID_CIA_OPS_IN_EXPORT is not None
-    return cia_ops
+    return _ALL_VALID_CIA_OPS_IN_EXPORT
 
 
 def _get_decomp_for_cia(op):
