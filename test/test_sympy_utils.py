@@ -425,41 +425,83 @@ class TestSympyInterp(TestCase):
                     gm(*args)
                 )
 
-    @parametrize("fn", UNARY_OPS + BINARY_OPS + COMPARE_OPS)
+    @parametrize("fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS)
     def test_tensor_interp(self, fn):
-        # Skip tests for operations that are not implemented or not applicable
-        if fn in ("truncdiv", "mod", "int_truediv", "round_decimal"):
+        # Skip operations not implemented or not applicable for tensors
+        if fn in ("div", "truncdiv", "int_truediv", "mod", "round_decimal"):
             return
 
-        # Use scalar tensors to avoid ValueError
-        x = torch.tensor(1.0, dtype=torch.float64)
-        y = torch.tensor(4.0, dtype=torch.float64)
+        is_integer = None
+        if fn == "pow_by_natural":
+            is_integer = True
+
+        x = sympy.Symbol('x', integer=is_integer)
+        y = sympy.Symbol('y', integer=is_integer)
+
+        vals = CONSTANTS
+        if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
+            vals = [True, False]
+
+        arity = 1
+        if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
+            arity = 2
 
         symbols = [x]
-        if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
+        if arity == 2:
             symbols = [x, y]
 
-        try:
-            sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
-            tensor_result = sympy_interp(TensorReferenceAnalysis, dict(zip(symbols, symbols)), sympy_expr)
+        for args in itertools.product(vals, repeat=arity):
+            if arity == 1 and not valid_unary(fn, *args):
+                continue
+            elif arity == 2 and not valid_binary(fn, *args):
+                continue
 
-            # Check that the result is a tensor
-            self.assertIsInstance(tensor_result, torch.Tensor)
+            with self.subTest(args=args):
+                # Convert arguments to tensors
+                tensor_args = [torch.tensor(a, dtype=torch.double if isinstance(a, float) else torch.int64) for a in args]
 
-            # For operations that change dtype, we just check that the result is a tensor
-            if fn in ("truediv", "floor", "ceil", "sqrt", "exp", "log"):
-                return
+                try:
+                    # Get the TensorReferenceAnalysis function
+                    tensor_fn = getattr(TensorReferenceAnalysis, fn)
 
-            # For boolean operations, check that the result is a boolean tensor
-            if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
-                self.assertEqual(tensor_result.dtype, torch.bool)
-            else:
-                # For other operations, check that the dtype is preserved
-                self.assertEqual(tensor_result.dtype, x.dtype)
+                    # Create the symbolic expression
+                    sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
 
-        except NotImplementedError:
-            # Some operations are not implemented in TensorReferenceAnalysis
-            pass
+                    # Apply the function directly
+                    direct_result = tensor_fn(*tensor_args)
+
+                    # Apply the function using sympy_interp
+                    interp_result = sympy_interp(TensorReferenceAnalysis, dict(zip(symbols, tensor_args)), sympy_expr)
+
+                    # Ensure both results are of the same dtype for comparison
+                    if direct_result.dtype != interp_result.dtype:
+                        if direct_result.dtype == torch.bool or interp_result.dtype == torch.bool:
+                            direct_result = direct_result.to(torch.bool)
+                            interp_result = interp_result.to(torch.bool)
+                        else:
+                            direct_result = direct_result.to(torch.double)
+                            interp_result = interp_result.to(torch.double)
+
+                    # Compare results
+                    self.assertTrue(torch.allclose(direct_result, interp_result, rtol=1e-5, atol=1e-8),
+                                    f"Mismatch for {fn}{args}: direct={direct_result}, interp={interp_result}")
+
+                    # For operations that should return boolean tensors, check dtype
+                    if fn in UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS:
+                        self.assertEqual(direct_result.dtype, torch.bool)
+                        self.assertEqual(interp_result.dtype, torch.bool)
+
+                    # For integer operations, check that the result is integer
+                    if fn in ("floor_to_int", "ceil_to_int", "round_to_int", "trunc_to_int"):
+                        self.assertTrue(direct_result.dtype in (torch.int32, torch.int64))
+                        self.assertTrue(interp_result.dtype in (torch.int32, torch.int64))
+
+                except NotImplementedError:
+                    # Some operations might not be implemented for TensorReferenceAnalysis
+                    print(f"Operation {fn} not implemented for TensorReferenceAnalysis")
+                except Exception as e:
+                    self.fail(f"Unexpected error for {fn}{args}: {str(e)}")
+
 
 def type_name_fn(type: Type) -> str:
     return type.__name__

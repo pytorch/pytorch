@@ -318,11 +318,11 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def or_(a, b):
-        return torch.ops.aten.logical_or.Tensor(a, b)
+        return torch.ops.aten.logical_or.default(a, b)
 
     @staticmethod
     def and_(a, b):
-        return torch.ops.aten.logical_and.Tensor(a, b)
+        return torch.ops.aten.logical_and.default(a, b)
 
     @staticmethod
     def eq(a, b):
@@ -354,12 +354,12 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def reciprocal(x):
-        return torch.ops.aten.reciprocal.Tensor(x)
+        return torch.ops.aten.reciprocal.default(x)
 
     @staticmethod
     def square(x):
         # TODO: maybe composite implicit autograd doesn't work here?
-        return torch.ops.aten.square.Tensor(x)
+        return torch.ops.aten.square.default(x)
 
     @staticmethod
     def trunc_to_int(x, dtype):
@@ -402,7 +402,7 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def truediv(a, b):
-        return torch.ops.aten.true_divide.default(a, b)
+        return torch.ops.aten.true_divide.Tensor(a, b)
 
     @staticmethod
     def int_truediv(a, b):
@@ -453,7 +453,7 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def pow(a, b):
-        return torch.ops.aten.pow.default(a, b)
+        return torch.ops.aten.pow.Tensor_Tensor(a, b)
 
     @staticmethod
     def pow_by_natural(a, b):
