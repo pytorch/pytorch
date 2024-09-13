@@ -6,9 +6,9 @@ from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
-from torch import dtype as torch_dtype, uint8
+from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
-from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
+from torch._inductor.runtime.triton_heuristics import grid as default_grid
 
 from .. import config
 from ..codecache import CudaKernelParamCache
@@ -88,11 +88,11 @@ class DeferredGpuDefaultGrid:
         grid = self.grid
         assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
         grid = self._process_grid(grid)
-        assert self.grid_callable is not None, "grid_callable can't be None"
+        grid_callable = self.grid_callable or default_grid
         if not self.grid_extra_kwargs:
-            grid_fn = self.grid_callable(*grid)
+            grid_fn = grid_callable(*grid)
         else:
-            grid_fn = self.grid_callable(*grid, **self.grid_extra_kwargs)
+            grid_fn = grid_callable(*grid, **self.grid_extra_kwargs)
 
         params = CudaKernelParamCache.get(self.kernel_name)
         assert (
@@ -102,7 +102,6 @@ class DeferredGpuDefaultGrid:
             "XBLOCK": params["x_block"],
             "YBLOCK": params["y_block"],
             "ZBLOCK": params["z_block"],
-            "RBLOCK": params["r_block"],
         }
         return grid_fn(block_cfg)
 
@@ -339,7 +338,7 @@ class CppWrapperGpu(CppWrapperCpu):
         kernel_name: str,
         grid: List[Any],
         gpu: bool = True,
-        grid_callable: Optional[Callable[..., Any]] = default_grid_fn,
+        grid_callable: Optional[Callable[..., Any]] = None,
         **grid_extra_kwargs,
     ):
         """
@@ -441,22 +440,3 @@ class CppWrapperGpu(CppWrapperCpu):
                 ),
             )
             self.writeline("}")
-
-    def generate_workspace_allocation(self, nbytes, device, zero_fill):
-        line = self.make_allocation(
-            "workspace", device, uint8, shape=(nbytes,), stride=(1,)
-        )
-        self.writeline(line)
-        if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.writeline(line)
-        if zero_fill:
-            if config.abi_compatible:
-                # TODO: remove this function to use the default WrapperCodegen behavior after service platform has zero_() symbol
-                # default behavior is f"workspace.zero_(){self.ending}"
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(workspace.get())){self.ending}"
-                )
-            else:
-                self.writeline(f"workspace.zero_(){self.ending}")
-            if config.triton.autotune_at_compile_time:
-                self.kernel_autotune_calls.writeline(f"workspace.zero_(){self.ending}")
