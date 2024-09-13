@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_cuda,
     run_tests,
-    skipIfCrossRef,
+    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1618,6 +1618,7 @@ def forward(self, pred_1, x_1):
                     result_exp_PT = op_pt(x, rnd_scan_dim)
                     self.assertEqual(result[1], result_exp_PT)
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1693,6 +1694,7 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result, expected_result)
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1724,6 +1726,7 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result1, expected_result)
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
@@ -2985,7 +2988,6 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
-    @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_simple_with_linear_compile_check_graph(self):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
@@ -3248,7 +3250,6 @@ def forward(self, arg0_1):
         self._check_compile(fn, inp, backend=backend)
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
-    @skipIfCrossRef  # Arg order changes with cross ref
     def test_while_loop_simple_with_linear_compile_check_graph(self):
         fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
         from torch._dynamo.testing import EagerAndRecordGraphs
