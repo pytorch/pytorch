@@ -3289,7 +3289,9 @@
   autogen: native_layer_norm_backward.out
   tags: core
 
-- func: rms_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor
+- func: rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: rms_norm_symint
 
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   variants: function, method

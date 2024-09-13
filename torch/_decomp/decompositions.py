@@ -1179,6 +1179,31 @@ def dropout(input: Tensor, p: float, train: Optional[bool]):
         return input.clone()
 
 
+# From aten/src/ATen/native/layer_norm.h
+def _check_layer_norm_inputs(input: Tensor, normalized_shape: List[int], weight_opt: Optional[Tensor: Optional[Tensor]):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
+    normalized_ndim = len(normalized_shape)
+    torch._check(normalized_ndim >= 1, lambda: f"Expected normalized_shape to be at least 1-dimensional, i.e., containing at least one element, but got normalized_shape = {normalized_shape}")
+    if weight is not None:
+        torch._check(sym_eq(weight.size(), normalized_shape), lambda: f"Expected weight to be of same shape as normalized_shape, but got weight of shape {weight.size()} and normalized_shape = {normalized_shape}")
+    if bias is not None:
+        torch._check(sym_eq(bias.size(), normalized_shape), lambda: f"Expected bias to be of same shape as normalized_shape, but got bias of shape {bias.size()} and normalized_shape = {normalized_shape}")
+
+    input_shape = input.size()
+    input_ndim = input.dim()
+
+    def err_msg():
+        return f"Given normalized_shape={normalized_shape}, expected input with shape {normalized_shape}, but got input of size {input_shape}"
+
+    torch._check(input_ndim >= normalized_ndim, err_msg)
+
+
+# From aten/src/ATen/native/layer_norm.cpp
+def rms_norm(input: Tensor, normalized_shape: List[int], weight_opt: Optional[Tensor], eps: Optional[float]) -> Tensor:
+    pass
+
+
 @register_decomposition(aten.native_dropout)
 @out_wrapper("out0", "out1")
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
