@@ -29,8 +29,8 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
         # Need OOM check
         # for BT in [2**i for i in range(12, 16)]:
         for BT in [2**12]:
-            _input = torch.randn(BT, H, requires_grad=True, dtype=benchmark_config.dtype, device=benchmark_config.device)
-            target = torch.randint(V, (BT, 1), dtype=torch.long, device=benchmark_config.device).squeeze(1)
+            _input = torch.randn(BT, H, requires_grad=True, dtype=benchmark_config.dtype, device=benchmark_config.device.value)
+            target = torch.randint(V, (BT, 1), dtype=torch.long, device=benchmark_config.device.value).squeeze(1)
             cls.example_inputs_list.append((_input, target))
 
     def forward(self, *input):

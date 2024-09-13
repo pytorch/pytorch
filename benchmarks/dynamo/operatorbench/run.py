@@ -1,12 +1,13 @@
 import operators
 from operators import BaseOperator
-from utils.common import BenchmarkConfig
+from utils.common import BenchmarkConfig, Device, Phase, dtype_mapping
+from utils.metrics import Metrics, get_execution_time
 import click
 import torch
 QUANTILES = [0.2, 0.5, 0.8]
 
 
-def benchmark_operator(OperatorClass: BaseOperator, device, dtype, phase, max_samples, repeat, single_run):
+def benchmark_operator(OperatorClass: BaseOperator, device, dtype, phase, max_samples, repeat, single_run, metrics):
     print(f"Benchmarking {OperatorClass.name} {OperatorClass.variant}")
     benchmark_config = BenchmarkConfig(
         device=device,
@@ -18,9 +19,9 @@ def benchmark_operator(OperatorClass: BaseOperator, device, dtype, phase, max_sa
     )
     operator = OperatorClass(benchmark_config)
     operator.generate_inputs(benchmark_config)
-    if phase == "forward":
+    if phase == Phase.FORWARD:
         phase_fn = operator.forward
-    elif phase == "backward":
+    elif phase == Phase.BACKWARD:
         phase_fn = operator.backward
     else:
         phase_fn = operator.full
@@ -31,26 +32,31 @@ def benchmark_operator(OperatorClass: BaseOperator, device, dtype, phase, max_sa
 
     durations = []
 
-    from triton.testing import do_bench
     for sample in range(max_samples):
         for _ in range(repeat):
             for i in range(input_count):
                 input, target = operator.get_inputs()[i]
+                if phase == Phase.BACKWARD:
+                    grad_to_none = [input]
+                else:
+                    grad_to_none = None
 
-                def fn():  # Adding a blank line before the nested function definition
+                def fn():
                     return phase_fn(input, target)
-                durations.append(do_bench(fn, quantiles=QUANTILES))
+                durations.append(get_execution_time(fn, quantiles=QUANTILES, grad_to_none=grad_to_none, device=device))
     print(durations)
 
 
 @click.command()
 @click.option("--op", help="operator overload to benchmark. split by ','.")
 @click.option("--dtype", help="dtype to benchmark. [bfloat16, float16, float32]", default="bfloat16")
-@click.option("--max-samples", help="max samples per op", default=5)
-@click.option("--device", help="device to benchmark", default="cuda")
+@click.option("--max-samples", help="max samples per op", default=1)
+@click.option("--device", help=f"device to benchmark, {[device.value for device in Device]}. ", default=Device.CUDA.value)
 @click.option("--phase", help="phase to benchmark", default="forward")
-@click.option("--repeat", help="repeat", default=3)
+@click.option("--repeat", help="repeat", default=1)
 @click.option("--single-run", help="run with the first input size", default=False)
+@click.option("--metrics", help=f"metrics to benchmark. {[metric.value for metric in Metrics]}. split by ','", default=Metrics.EXECUTION_TIME.value)
+@click.option("--skip-variants", help="variants to be skipped, [liger, baseline, inductor]", default="")
 def run_benchmarks(
     op,
     dtype,
@@ -59,6 +65,8 @@ def run_benchmarks(
     phase,
     repeat,
     single_run,
+    metrics,
+    skip_variants
 ):
     # This is a list of classes, not instances
     operators_list: list[BaseOperator] = operators.list_operators()
@@ -68,16 +76,21 @@ def run_benchmarks(
     else:
         desired_op_names = [operator.name for operator in operators_list]
 
-    dtype_mapping = {
-        "bfloat16": torch.bfloat16,
-        "float16": torch.float16,
-        "float32": torch.float32,
-    }
     dtype = dtype_mapping.get(dtype, torch.float32)  # Default to float32 if not found
-
+    metrics = [Metrics[metric.strip().upper()] for metric in metrics.split(",")
+               if metric.strip().upper() in Metrics.__members__]
+    device = Device[device.upper()]
+    if device != Device.CUDA and Metrics.GPU_PEAK_MEM in metrics:
+        print(f"{Metrics.GPU_PEAK_MEM.value} is only supported on cuda")
+        metrics.remove(Metrics.GPU_PEAK_MEM)
+    skip_variants = skip_variants.split(",")
+    skip_variants = [variant.lower().strip() for variant in skip_variants if variant.strip()]
+    phase = Phase[phase.upper()]
     for operator in operators_list:
         if operator.name in desired_op_names:
-            benchmark_operator(operator, device, dtype, phase, max_samples, repeat, single_run)
+            if operator.variant.lower().strip() in skip_variants:
+                continue
+            benchmark_operator(operator, device, dtype, phase, max_samples, repeat, single_run, metrics)
 
 
 if __name__ == "__main__":

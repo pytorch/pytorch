@@ -27,4 +27,4 @@ class Operator(FusedLinearCrossEntropyOperator):
 
     def __init__(self, benchmark_config: BenchmarkConfig):
         super().__init__(benchmark_config)
-        self.operator = LigerLMHeadCE(H=H, V=V, dtype=self.benchmark_config.dtype).to(self.benchmark_config.device)
+        self.operator = LigerLMHeadCE(H=H, V=V, dtype=self.benchmark_config.dtype).to(self.benchmark_config.device.value)
