@@ -1672,9 +1672,8 @@ class WrapperCodeGen(CodeGen):
 
         gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
-        triton: Defines whether the GPU backend uses Triton for codegen.
-                Otherwise it uses the CUDA language for codegen.
-                Only valid when gpu == True.
+        triton: Defines whether the backend uses Triton for codegen. Otherwise it uses the CUDA language when gpu=True,
+                and C++ when gpu=False.
         """
         if not (triton or gpu):
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
