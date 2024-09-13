@@ -1521,34 +1521,26 @@ def manually_close_merged_pr(
     merge_commit_sha: str,
     dry_run: bool,
 ) -> None:
+    def _comment_and_close(pr: GitHubPR, comment: str) -> None:
+        pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
+        if not pr.is_closed():
+            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, comment, dry_run)
+            gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
+
     pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
-    if not pr.is_closed():
-        message = (
-            f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
-            "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra."
-        )
-        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, message, dry_run)
-        gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
+    message = (
+        f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
+        "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra."
+    )
+    _comment_and_close(pr, message)
     for additional_pr in additional_merged_prs:
-        additional_pr = GitHubPR(
-            additional_pr.org, additional_pr.project, additional_pr.pr_num
+        message = (
+            f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
+            "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
+            "If you think this is a mistake, please feel free to reopen and contact Dev Infra."
         )
-        if not additional_pr.is_closed():
-            message = (
-                f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
-                "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
-                "If you think this is a mistake, please feel free to reopen and contact Dev Infra."
-            )
-            gh_post_pr_comment(
-                additional_pr.org,
-                additional_pr.project,
-                additional_pr.pr_num,
-                message,
-                dry_run,
-            )
-            gh_close_pr(
-                additional_pr.org, additional_pr.project, additional_pr.pr_num, dry_run
-            )
+        _comment_and_close(additional_pr, message)
+
     print(f"PR {pr.pr_num} and all additional PRs in the stack have been closed.")
 
 
