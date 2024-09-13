@@ -1552,10 +1552,15 @@ Example::
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "collect_client_counters",
+          &::c10d::TCPStore::collectClientCounters,
+          "Return a dict of counters for tcp store client")
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
           R"(Gets the hostname on which the store listens for requests.)")
+
       .def_property_readonly(
           "port",
           &::c10d::TCPStore::getPort,
@@ -2537,8 +2542,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::call_guard<py::gil_scoped_release>())
           .def(
               "eager_connect_single_device",
-              &::c10d::Backend::eagerConnectSingleDevice,
-              py::call_guard<py::gil_scoped_release>())
+              &::c10d::Backend::eagerConnectSingleDevice)
           .def(
               "_get_backend_name",
               &::c10d::Backend::getBackendName,

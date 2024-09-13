@@ -30,16 +30,19 @@ struct HostBlock {
   ska::flat_hash_set<S> streams_; // streams on which the block was used
 };
 
+/**
+ * ComparatorSize is used for lookup support in the set of host memory blocks
+ * using the block size.
+ */
 template <typename B>
-struct alignas(64) FreeBlockList {
-  std::mutex mutex_;
-  std::deque<B*> list_;
+struct ComparatorSize {
+  bool operator()(const B* a, const B* b) const {
+    if (a->size_ != b->size_) {
+      return a->size_ < b->size_;
+    }
+    return (uintptr_t)a->ptr_ < (uintptr_t)b->ptr_;
+  }
 };
-
-namespace {
-  // Max cached block sizes: (1 << MAX_SIZE_INDEX) bytes
-  constexpr size_t MAX_SIZE_INDEX = 64;
-}
 
 /**
  * Note [HostAllocator design]
@@ -78,7 +81,8 @@ namespace {
  * to abstract the caching mechanism. Any backend needs to provide a customized
  * implementation by specializing its own public functions and the related
  * runtime functions. Its template parameter S represents runtime Stream, E
- * denotes runtime Event, B indicates the fundamental memory block.
+ * denotes runtime Event, B indicates the fundamental memory block, and C
+ * signifies the sorting compartor algorithm for the memory blocks.
  *
  * For the interface, we provide a CachingHostAllocatorInterface struct as an
  * interface. Any backend needs to derive its own host allocator from this
@@ -107,7 +111,8 @@ namespace {
 template <
     typename S,
     typename E,
-    typename B = HostBlock<S>>
+    typename B = HostBlock<S>,
+    typename C = ComparatorSize<B>>
 struct CachingHostAllocatorImpl {
   virtual ~CachingHostAllocatorImpl() = default;
 
@@ -127,7 +132,6 @@ struct CachingHostAllocatorImpl {
     }
 
     // Round up the allocation to the nearest power of two to improve reuse.
-    // These power of two sizes are also used to index into the free list.
     size_t roundSize = c10::llvm::PowerOf2Ceil(size);
     void* ptr = nullptr;
     allocate_host_memory(roundSize, &ptr);
@@ -167,9 +171,8 @@ struct CachingHostAllocatorImpl {
     }
 
     if (!events) {
-      auto index = size_index(block->size_);
-      std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-      free_list_[index].list_.push_back(block);
+      std::lock_guard<std::mutex> g(free_list_mutex_);
+      free_list_.insert(block);
     } else {
       // restore these events that record by used streams.
       std::lock_guard<std::mutex> g(events_mutex_);
@@ -215,26 +218,20 @@ struct CachingHostAllocatorImpl {
 
     // Remove all elements from the free list, remove them from the blocks
     // list, and free the associated pinned memory allocation. This requires
-    // concurrently holding both the free list mutexes and the blocks mutex, and
+    // concurrently holding both the free list mutex and the blocks mutex, and
     // is the only function that concurrently holds multiple mutexes.
-    for (size_t i = 0; i < free_list_.size(); ++i) {
-      std::lock(free_list_[i].mutex_, blocks_mutex_);
-      std::lock_guard<std::mutex> gf(free_list_[i].mutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
+    std::lock(free_list_mutex_, blocks_mutex_);
+    std::lock_guard<std::mutex> gf(free_list_mutex_, std::adopt_lock);
+    std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
 
-      std::vector<B*> blocks_to_remove(free_list_[i].list_.begin(), free_list_[i].list_.end());
-      free_list_[i].list_.clear();
-      for (auto* block : blocks_to_remove) {
-        blocks_.erase(block);
-        ptr_to_block_.erase(block->ptr_);
-        free_block(block);
-        delete block;
-      }
+    std::vector<B*> blocks_to_remove(free_list_.begin(), free_list_.end());
+    free_list_.clear();
+    for (auto* block : blocks_to_remove) {
+      blocks_.erase(block);
+      ptr_to_block_.erase(block->ptr_);
+      free_block(block);
+      delete block;
     }
-  }
-
-  inline size_t size_index(size_t size) {
-    return c10::llvm::Log2_64_Ceil(size);
   }
 
   virtual void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const {
@@ -249,12 +246,13 @@ struct CachingHostAllocatorImpl {
   }
 
   virtual B* get_free_block(size_t size) {
-    auto index = size_index(size);
-    std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-    if (free_list_[index].list_.size() > 0) {
-      B* block = free_list_[index].list_.back();
-      free_list_[index].list_.pop_back();
+    std::lock_guard<std::mutex> g(free_list_mutex_);
+    B key(size);
+    auto it = free_list_.lower_bound(&key);
+    if (it != free_list_.end()) {
+      B* block = *it;
       block->allocated_ = true;
+      free_list_.erase(it);
       return block;
     }
     return nullptr;
@@ -306,9 +304,8 @@ struct CachingHostAllocatorImpl {
       }
 
       if (available) {
-        auto index = size_index(block->size_);
-        std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-        free_list_[index].list_.push_back(block);
+        std::lock_guard<std::mutex> g(free_list_mutex_);
+        free_list_.insert(block);
       }
     }
   }
@@ -340,11 +337,12 @@ struct CachingHostAllocatorImpl {
   ska::flat_hash_set<B*> blocks_; // block list
   ska::flat_hash_map<void*, B*> ptr_to_block_;
 
-  // We keep free list as a vector of free lists, one for each power of two
-  // size. This allows us to quickly find a free block of the right size.
-  // We use deque to store per size free list and guard the list with its own
-  // mutex.
-  alignas(64) std::vector<FreeBlockList<B>> free_list_ = std::vector<FreeBlockList<B>>(MAX_SIZE_INDEX);
+  // Note: sharding this mutex seems to be profitable in heavily multi-threaded
+  // scenarios.
+  alignas(64) std::mutex free_list_mutex_;
+  // Note: an alternative datastructure can yield significant wins here in
+  // microbenchmarks.
+  std::set<B*, C> free_list_; // free list
 
   alignas(64) std::mutex events_mutex_;
   std::deque<std::pair<E, B*>> events_; // event queue paired with block

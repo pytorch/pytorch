@@ -1,5 +1,5 @@
 
-#include <torch/csrc/autograd/profiler_kineto.h>  // @manual
+#include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/torch.h>
 #include <string>
 

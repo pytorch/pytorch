@@ -28,9 +28,6 @@ from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
 logger = logging.getLogger(__name__)
 
-# default port for the TCP store
-DEFAULT_PORT = 29400
-
 
 class C10dRendezvousBackend(RendezvousBackend):
     """Represents a C10d-backed rendezvous backend.
@@ -135,7 +132,7 @@ class C10dRendezvousBackend(RendezvousBackend):
 
 
 def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
-    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=DEFAULT_PORT)
+    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=29400)
 
     cfg_is_host = params.get_as_bool("is_host")
     # If the user has explicitly specified whether our process should host the
@@ -146,6 +143,8 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     # and IP address.
     else:
         is_host = _matches_machine_hostname(host)
+
+    use_libuv = params.get_as_bool("use_libuv", False)
 
     # The timeout
     read_timeout = cast(int, params.get_as_int("read_timeout", 60))
@@ -162,6 +161,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                 is_master=is_server,
                 multi_tenant=True,
                 timeout=timedelta(seconds=read_timeout),
+                use_libuv=use_libuv,
             )
 
             if is_server:

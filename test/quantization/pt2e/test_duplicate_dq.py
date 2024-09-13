@@ -4,6 +4,7 @@ import unittest
 from typing import Any, Dict
 
 import torch
+from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization.observer import (
     HistogramObserver,
     MinMaxObserver,
@@ -23,7 +24,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     OP_TO_ANNOTATOR,
     QuantizationConfig,
 )
-from torch.export import export_for_training
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
 
@@ -100,10 +100,10 @@ class TestDuplicateDQPass(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = export_for_training(
+        m = capture_pre_autograd_graph(
             m,
             example_inputs,
-        ).module()
+        )
 
         m = prepare_pt2e(m, quantizer)
         # Calibrate

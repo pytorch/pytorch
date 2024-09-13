@@ -71,12 +71,6 @@ inline T expm1(T a) {
 template <
     typename T,
     typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline bool isfinite(T a) {
-  return std::isfinite(float(a));
-}
-template <
-    typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline T log(T a) {
   return std::log(float(a));
 }
@@ -243,9 +237,10 @@ C10_HOST_DEVICE inline T nextafter(T from, T to) {
   // Reference:
   // https://git.musl-libc.org/cgit/musl/tree/src/math/nextafter.c
   using int_repr_t = uint16_t;
+  using float_t = T;
   constexpr uint8_t bits = 16;
   union {
-    T f;
+    float_t f;
     int_repr_t i;
   } ufrom = {from}, uto = {to};
 

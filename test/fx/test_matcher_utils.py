@@ -6,7 +6,6 @@ from typing import Callable
 
 import torch
 import torch.nn.functional as F
-from torch.export import export_for_training
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -168,13 +167,13 @@ class TestMatcher(JitTestCase):
             relu_mul_by_two = relu * 2
             return relu, relu_mul_by_two, {"conv": conv, "relu": relu}
 
+        from torch._export import capture_pre_autograd_graph
+
         example_inputs = (
             torch.randn(1, 3, 3, 3) * 10,
             torch.randn(3, 3, 3, 3),
         )
-        pattern_gm = export_for_training(
-            WrapperModule(pattern), example_inputs
-        ).module()
+        pattern_gm = capture_pre_autograd_graph(WrapperModule(pattern), example_inputs)
         before_split_res = pattern_gm(*example_inputs)
         pattern_gm, name_node_map = _split_to_graph_and_name_node_map(pattern_gm)
         after_split_res = pattern_gm(*example_inputs)
@@ -199,17 +198,17 @@ class TestMatcher(JitTestCase):
             relu_mul_by_two = relu * 2
             return relu, relu_mul_by_two, {"conv": conv, "relu": relu}
 
+        from torch._export import capture_pre_autograd_graph
+
         example_inputs = (
             torch.randn(1, 3, 3, 3) * 10,
             torch.randn(3, 3, 3, 3),
         )
-        pattern_gm = export_for_training(
-            WrapperModule(pattern), example_inputs
-        ).module()
+        pattern_gm = capture_pre_autograd_graph(WrapperModule(pattern), example_inputs)
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
-        target_gm = export_for_training(
+        target_gm = capture_pre_autograd_graph(
             WrapperModule(target_graph), example_inputs
-        ).module()
+        )
         internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
             name_node_map = internal_match.name_node_map
@@ -247,10 +246,12 @@ class TestMatcher(JitTestCase):
                 # nn.Parameter is not an allowed output type in dynamo
                 return linear, {"linear": linear, "x": x}
 
+        from torch._export import capture_pre_autograd_graph
+
         example_inputs = (torch.randn(3, 5),)
-        pattern_gm = export_for_training(Pattern(), example_inputs).module()
+        pattern_gm = capture_pre_autograd_graph(Pattern(), example_inputs)
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
-        target_gm = export_for_training(M(), example_inputs).module()
+        target_gm = capture_pre_autograd_graph(M(), example_inputs)
         internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
             name_node_map = internal_match.name_node_map

@@ -4,7 +4,9 @@
 
 #include <memory>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 // see .cpp for docs
 TORCH_API void CastAllConstantToFloating(const std::shared_ptr<Graph>& graph);
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

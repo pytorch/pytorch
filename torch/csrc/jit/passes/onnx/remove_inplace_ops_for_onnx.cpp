@@ -13,7 +13,8 @@
 
 #include <limits>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -367,7 +368,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
   }
 }
 
-static void PrepareForRemoveMutations(const std::shared_ptr<Graph>& graph) {
+static void PrepareForRemoveMutations(std::shared_ptr<Graph> graph) {
   MutationRemover mr(graph);
   PrepareForRemoveMutations(mr, graph->block());
   GRAPH_DUMP("After PrepareForRemoveMutations: ", graph);
@@ -437,23 +438,23 @@ std::string InplaceConverter::ValueTracker::toString() const {
 
   // ss << "Current graph: " << graph_->toString() << std::endl;
   ss << "Tracking " << value_to_sorted_aliases_.size() << " individual values."
-     << '\n';
-  ss << "value_to_sorted_aliases_: " << '\n';
+     << std::endl;
+  ss << "value_to_sorted_aliases_: " << std::endl;
   size_t idx = 0;
   for (const auto& it : value_to_sorted_aliases_) {
-    ss << "Value[" << idx << "]: " << it.first->debugName() << '\n';
+    ss << "Value[" << idx << "]: " << it.first->debugName() << std::endl;
     ss << "  Mapping to ";
     for (auto v : it.second) {
       ss << v->debugName() << " ";
     }
-    ss << '\n';
+    ss << std::endl;
     idx++;
   }
 
-  ss << "alias_to_value_: " << '\n';
+  ss << "alias_to_value_: " << std::endl;
   for (auto it : alias_to_value_) {
     ss << "  Alias " << it.first->debugName();
-    ss << " map to " << it.second->debugName() << '\n';
+    ss << " map to " << it.second->debugName() << std::endl;
   }
 
   return ss.str();
@@ -889,4 +890,5 @@ void RemoveInplaceOpsForONNX(
   ic.convertMutationForONNX();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

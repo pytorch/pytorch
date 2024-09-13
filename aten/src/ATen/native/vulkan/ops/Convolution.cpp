@@ -53,7 +53,7 @@ inline bool is_pointwise(const IntArrayRef weight_size) {
   return true;
 }
 
-static Conv2dMethod determine_method(
+Conv2dMethod determine_method(
     const IntArrayRef weight_size,
     const IntArrayRef stride,
     const IntArrayRef padding,
@@ -359,7 +359,7 @@ struct Params final {
   api::utils::vec2 clamp;
 };
 
-static void record_op(
+void record_op(
     api::Context* const context,
     api::ShaderInfo& compute_shader,
     vTensor& v_output,
@@ -432,7 +432,7 @@ struct QParams final {
   api::utils::vec2 clamp;
 };
 
-static void record_quantized_op(
+void record_quantized_op(
     api::Context* const context,
     api::ShaderInfo& compute_shader,
     vTensor& v_output,
@@ -787,11 +787,56 @@ Tensor convolution(
       input, c10::make_intrusive<Conv2dPackedContext>(conv_context));
 }
 
+Tensor quantized_convolution(
+    const Tensor& input,
+    const Tensor& weight,
+    const std::optional<Tensor>& bias,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const bool transposed,
+    const IntArrayRef output_padding,
+    const int64_t groups,
+    const double out_scale,
+    const int64_t out_zero_point) {
+  if (transposed) {
+    return run_tconv2d_context(
+        input,
+        c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            false,
+            output_padding,
+            groups)));
+  }
+
+  Conv2dPackedContext conv_context = Conv2dPackedContext(
+      weight,
+      bias,
+      stride,
+      padding,
+      dilation,
+      transposed,
+      true,
+      output_padding,
+      groups);
+
+  return run_qconv2d_context(
+      input,
+      out_scale,
+      out_zero_point,
+      c10::make_intrusive<Conv2dPackedContext>(conv_context));
+}
+
 } // namespace
 
 namespace conv1d {
 
-static vTensor pack_weights_using_width_packing(const Tensor& weight_arg) {
+vTensor pack_weights_using_width_packing(const Tensor& weight_arg) {
   Tensor weight = weight_arg;
 
   if (weight.is_cpu()) {
@@ -817,7 +862,7 @@ static vTensor pack_weights_using_width_packing(const Tensor& weight_arg) {
  * This is a full implementation. For algorithm details, refer to the shader
  * kernel code.
  */
-static Tensor run_conv1d_context_impl(
+Tensor run_conv1d_context_impl(
     const Tensor& input_arg,
     const Tensor& weight_arg,
     const std::optional<Tensor>& bias_arg_opt,
@@ -1105,7 +1150,7 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
       output_max));
 }
 
-static Tensor run_conv2d_context_impl(
+Tensor run_conv2d_context_impl(
     const Tensor& input_arg,
     const c10::intrusive_ptr<Conv2dPackedContext>& conv_context,
     double scale,
@@ -1246,6 +1291,30 @@ Tensor run_qconv2d_context(
   return run_conv2d_context_impl(input_arg, conv_context, scale, zero_point);
 }
 
+Tensor quantized_conv2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const std::optional<Tensor>& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    double out_scale,
+    int64_t out_zero_point) {
+  return quantized_convolution(
+      input,
+      weight,
+      bias,
+      stride,
+      padding,
+      dilation,
+      false,
+      {{0, 0}},
+      groups,
+      out_scale,
+      out_zero_point);
+}
+
 /* Backwards compatibility */
 Conv2dOpContext::Conv2dOpContext(Conv2dPackedContext conv_context)
     : conv_context_{std::move(conv_context)} {}
@@ -1375,7 +1444,7 @@ c10::intrusive_ptr<Conv1dPackedContext> create_conv1d_context(
       Conv1dPackedContext(weight, bias, stride, padding, dilation, groups));
 }
 
-static Tensor convolution1d(
+Tensor convolution1d(
     const Tensor& input,
     const Tensor& weight,
     const std::optional<Tensor>& bias,

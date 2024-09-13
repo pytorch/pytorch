@@ -30,7 +30,9 @@ std::mutex& fusionBackendLock() {
 }
 } // namespace
 
-namespace torch::jit::fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
 getFusionBackends() {
@@ -295,4 +297,6 @@ std::shared_ptr<FusedKernel> compileKernel(
       spec.hasRandom());
 }
 
-} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

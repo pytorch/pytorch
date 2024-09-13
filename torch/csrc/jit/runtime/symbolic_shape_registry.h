@@ -52,7 +52,7 @@ struct BoundedShapeGraphs {
 
 TORCH_API void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
-    const std::shared_ptr<Graph>& g);
+    std::shared_ptr<Graph> g);
 
 TORCH_API std::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
     const FunctionSchema& schema);

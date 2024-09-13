@@ -22,6 +22,7 @@
 #include <qnnpack_func.h>
 
 #include "test_utils.h"
+using namespace qnnpack::testing;
 
 class DeconvolutionOperatorTester {
  public:
@@ -345,7 +346,7 @@ class DeconvolutionOperatorTester {
     return this->iterations_;
   }
 
-  void testQ8(const qnnpack::testing::Mode mode = qnnpack::testing::Mode::Static) const {
+  void testQ8(const Mode mode = Mode::Static) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -513,7 +514,7 @@ class DeconvolutionOperatorTester {
               &deconvolution));
 
       switch (mode) {
-        case qnnpack::testing::Mode::Static: {
+        case Mode::Static: {
           ASSERT_EQ(
               pytorch_qnnp_status_success,
               pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
@@ -537,7 +538,7 @@ class DeconvolutionOperatorTester {
           deconvolution = nullptr;
         } break;
 
-        case qnnpack::testing::Mode::Runtime:
+        case Mode::Runtime:
         {
           auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
               new qnnpack::PrePackConvWeights(

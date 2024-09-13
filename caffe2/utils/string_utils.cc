@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <sstream>
 #include <vector>
-#include <cstdint>
 
 namespace caffe2 {
 
@@ -51,7 +50,7 @@ size_t editDistance(
       (c)=(uint8_t)(s)[(i)++]; \
   }
 
-size_t editDistanceHelper(const char* s1,
+int32_t editDistanceHelper(const char* s1,
   size_t s1_len,
   const char* s2,
   size_t s2_len,

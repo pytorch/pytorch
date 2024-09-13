@@ -9,8 +9,7 @@ from torch.fx import GraphModule, Node
 from torch.nn import functional as F
 
 
-NUMERIC_DEBUG_HANDLE_KEY = "numeric_debug_handle"
-CUSTOM_KEY = "custom"
+NUMERIC_DEBUG_HANDLE_KEY = "_numeric_debug_handle"
 
 log = logging.getLogger(__name__)
 
@@ -21,14 +20,8 @@ def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
     """
     unique_id = 0
     for node in graph_module.graph.nodes:
-        if node.op in ["output", "placeholder"]:
-            continue
-
-        if CUSTOM_KEY not in node.meta:
-            node.meta[CUSTOM_KEY] = {}
-
-        if NUMERIC_DEBUG_HANDLE_KEY not in node.meta[CUSTOM_KEY]:
-            node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = unique_id
+        if node.op != "placeholder" and NUMERIC_DEBUG_HANDLE_KEY not in node.meta:
+            node.meta[NUMERIC_DEBUG_HANDLE_KEY] = unique_id
             unique_id += 1
 
 
@@ -105,12 +98,9 @@ def prepare_for_propagation_comparison(model: GraphModule) -> GraphModule:
     # don't change the original model
     model = copy.deepcopy(model)
     for n in model.graph.nodes:
-        if (
-            CUSTOM_KEY not in n.meta
-            or NUMERIC_DEBUG_HANDLE_KEY not in n.meta[CUSTOM_KEY]
-        ):
+        if NUMERIC_DEBUG_HANDLE_KEY not in n.meta:
             continue
-        numeric_debug_handle = n.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY]
+        numeric_debug_handle = n.meta[NUMERIC_DEBUG_HANDLE_KEY]
         _insert_logger(model, n, numeric_debug_handle)
 
     model.recompile()

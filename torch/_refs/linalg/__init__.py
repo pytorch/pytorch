@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch._prims as prims
@@ -15,6 +15,7 @@ from torch._prims_common import (
     DimsType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
+    NumberType,
     TensorLikeType,
 )
 from torch._prims_common.wrappers import (

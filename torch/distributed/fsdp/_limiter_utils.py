@@ -12,20 +12,20 @@ class _FreeEventQueue:
     """
 
     def __init__(self) -> None:
-        self._queue: Deque[torch.Event] = collections.deque()
+        self._queue: Deque[torch.cuda.Event] = collections.deque()
         self._max_num_inflight_all_gathers = 2  # empirically chosen
 
-    def enqueue(self, free_event: torch.Event) -> None:
+    def enqueue(self, free_event: torch.cuda.Event) -> None:
         """Enqueues a free event."""
         self._queue.append(free_event)
 
-    def dequeue_if_needed(self) -> Optional[torch.Event]:
+    def dequeue_if_needed(self) -> Optional[torch.cuda.Event]:
         """Dequeues a single event if the limit is reached."""
         if len(self._queue) >= self._max_num_inflight_all_gathers:
             return self._dequeue()
         return None
 
-    def _dequeue(self) -> Optional[torch.Event]:
+    def _dequeue(self) -> Optional[torch.cuda.Event]:
         """Dequeues a free event if possible."""
         if self._queue:
             event = self._queue.popleft()

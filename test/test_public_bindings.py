@@ -3,14 +3,13 @@
 import importlib
 import inspect
 import json
-import logging
 import os
 import pkgutil
 import unittest
 from typing import Callable
 
 import torch
-from torch._utils_internal import get_file_path_2  # @manual
+from torch._utils_internal import get_file_path_2
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
@@ -19,9 +18,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-
-
-log = logging.getLogger(__name__)
 
 
 class TestPublicBindings(TestCase):
@@ -271,9 +267,7 @@ class TestPublicBindings(TestCase):
         failures = []
 
         def onerror(modname):
-            failures.append(
-                (modname, ImportError("exception occurred importing package"))
-            )
+            failures.append((modname, ImportError))
 
         for mod in pkgutil.walk_packages(torch.__path__, "torch.", onerror=onerror):
             modname = mod.name
@@ -285,8 +279,8 @@ class TestPublicBindings(TestCase):
                 importlib.import_module(modname)
             except Exception as e:
                 # Some current failures are not ImportError
-                log.exception("import_module failed")
-                failures.append((modname, e))
+
+                failures.append((modname, type(e)))
 
         # It is ok to add new entries here but please be careful that these modules
         # do not get imported by public code.
@@ -447,16 +441,14 @@ class TestPublicBindings(TestCase):
         }
 
         errors = []
-        for mod, exc in failures:
+        for mod, excep_type in failures:
             if mod in public_allowlist:
                 # TODO: Ensure this is the right error type
 
                 continue
             if mod in private_allowlist:
                 continue
-            errors.append(
-                f"{mod} failed to import with error {type(exc).__qualname__}: {str(exc)}"
-            )
+            errors.append(f"{mod} failed to import with error {excep_type}")
         self.assertEqual("", "\n".join(errors))
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'

@@ -1,13 +1,16 @@
 # mypy: allow-untyped-defs
+import contextlib
+import itertools
 import operator
+import weakref
 from enum import Enum
 from functools import partial, reduce
-from typing import Callable, List, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Type, Union
 
 import torch
 import torch._prims_common as utils
 import torch.library
-from torch import sym_float, Tensor
+from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._higher_order_ops.effects import new_token_tensor
 from torch._library.utils import is_functional_schema

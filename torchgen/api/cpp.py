@@ -94,7 +94,6 @@ def valuetype_type(
     t: Type,
     *,
     binds: ArgName,
-    mutable: bool = True,
     remove_non_owning_ref_types: bool = False,
     symint: bool = False,
 ) -> NamedCType | None:
@@ -114,7 +113,7 @@ def valuetype_type(
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
-        elem = valuetype_type(t.elem, binds=binds, mutable=mutable, symint=symint)
+        elem = valuetype_type(t.elem, binds=binds, symint=symint)
         if elem is None:
             return None
         return NamedCType(binds, OptionalCType(elem.type))
@@ -144,7 +143,6 @@ def argumenttype_type(
     r = valuetype_type(
         t,
         binds=binds,
-        mutable=mutable,
         symint=symint,
         remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
@@ -233,7 +231,7 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
     # placeholder is ignored
     # NB: symint is ALWAYS respected for return types.  So symint argument
     # here is IGNORED
-    r = valuetype_type(t, binds="__placeholder__", mutable=mutable, symint=True)
+    r = valuetype_type(t, binds="__placeholder__", symint=True)
     if r is not None:
         return r.type
 

@@ -261,8 +261,7 @@ class Unpickler:
                     self.append(cls.__new__(cls, *args))
                 else:
                     raise UnpicklingError(
-                        "Can only create new object for nn.Parameter or classes allowlisted "
-                        f"via `add_safe_globals` but got {cls}"
+                        f"Trying to instantiate unsupported class {cls}"
                     )
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
@@ -292,8 +291,7 @@ class Unpickler:
                         inst.__dict__.update(state)
                 else:
                     raise UnpicklingError(
-                        "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
-                        f"via `add_safe_globals`, but got {type(inst)}"
+                        f"Can only build Tensor, parameter or OrderedDict objects, but got {type(inst)}"
                     )
             # Stack manipulation
             elif key[0] == APPEND[0]:

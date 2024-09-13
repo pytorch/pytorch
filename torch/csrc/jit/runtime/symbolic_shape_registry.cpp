@@ -219,7 +219,7 @@ void checkInputAndOutputTypes(
 
 void transformShapeFunction(
     const FunctionSchema* schema_string,
-    const std::shared_ptr<Graph>& graph) {
+    std::shared_ptr<Graph> graph) {
   Inline(*graph);
 
   // ATEN operators can return multiple unboxed values, this in contrast to
@@ -411,7 +411,7 @@ TORCH_API std::optional<BoundedShapeGraphs> boundedGraphsForSchema(
 
 void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
-    const std::shared_ptr<Graph>& g) {
+    std::shared_ptr<Graph> g) {
   std::lock_guard<std::mutex> guard(lock);
   if (cached_schema_to_graph.empty()) {
     loadFunctions();

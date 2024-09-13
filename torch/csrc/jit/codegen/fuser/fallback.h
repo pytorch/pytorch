@@ -4,8 +4,12 @@
 
 #include <cstdlib>
 
-namespace torch::jit::fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 void runFallback(int64_t key, Stack& stack);
 
-} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

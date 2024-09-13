@@ -7,6 +7,7 @@
 namespace torch::jit {
 
 struct TORCH_API GraphFunction : public Function {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphFunction(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,

@@ -6,6 +6,5 @@
 namespace openreg {
 
     void set_impl_registry(PyObject* registry);
-    py::function get_method(const char* name);
 
 }

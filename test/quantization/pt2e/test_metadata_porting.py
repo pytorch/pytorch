@@ -99,10 +99,10 @@ class TestMetaDataPorting(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = torch.export.export_for_training(
+        m = torch._export.capture_pre_autograd_graph(
             m,
             example_inputs,
-        ).module()
+        )
 
         m = prepare_pt2e(m, quantizer)
         # Calibrate

@@ -157,7 +157,7 @@ class ROCmTemplateKernel(ROCmKernel):
             name,
             kernel_args,
             device_index=current_device.index,
-            gpu=True,
+            cuda=True,
             triton=False,
             arg_types=arg_types,
         )

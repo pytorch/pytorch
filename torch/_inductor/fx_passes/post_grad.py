@@ -22,7 +22,6 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..codegen.common import BackendFeature, has_backend_feature
-from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -77,9 +76,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     The IR here has been normalized and functionalized.
     """
-    if not torch._dynamo.config.skip_fsdp_hooks:
-        remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
-
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
@@ -672,11 +668,7 @@ def register_noop_decomp(targets, nop_arg=0):
 def slice_noop(self, dim=0, start=None, end=None, step=1):
     if start is None or end is None:
         return False
-    if (
-        statically_known_true(sym_eq(start, 0))
-        and statically_known_true(end >= 2**63 - 1)
-        and statically_known_true(sym_eq(step, 1))
-    ):
+    if start == 0 and end >= 2**63 - 1 and step == 1:
         return True
     return False
 
@@ -802,20 +794,13 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
 
 def decompose_auto_functionalized(graph):
-    """Decomposes auto_functionalized and triton_kernel_wrapper_functional
-    nodes into clones and the underlying mutation node.
-
-    We assume that the reinplacing pass runs before this; the reinplacing pass
-    tells us (via rewriting the arguments or .meta to those nodes) which
-    Tensors we should clone and which Tensors are safe to reinplace.
-    """
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
         pass_dict=graph_pass,
     )
-    def _(match: Match, *args, **kwargs):
+    def replacement(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
         only_clone_these_tensors = tuple(
@@ -831,69 +816,13 @@ def decompose_auto_functionalized(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
-
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            triton_kernel_wrapper_functional_dense,
-        )
-
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
-
-        # NB: we combine (args, kwargs) into flat args for replacing.
-        # This is replace_by_example uses make_fx which does not support
-        # tracing a function with kwargs.
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
-
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
-
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.auto_functionalize import (
-            auto_functionalized_v2_dense,
-        )
-
-        only_clone_these_bases = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
-
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
-
-        # NB: we combine (args, kwargs) into flat args for replacing.
-        # This is replace_by_example uses make_fx which does not support
-        # tracing a function with kwargs.
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return auto_functionalized_v2_dense(*args, only_clone_these_bases, **kwargs)
-
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
-
     for node in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
     ):
         raise AssertionError("auto_functionalized was not removed")
-
-    for node in graph.find_nodes(
-        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
-    ):
-        raise AssertionError("auto_functionalized_v2 was not removed")
-
-    for node in graph.find_nodes(
-        op="call_function",
-        target=torch.ops.higher_order.triton_kernel_wrapper_functional,
-    ):
-        raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
 @register_lowering_pattern(
@@ -1104,7 +1033,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     # if the value we are putting is a cpu scalar.
     # Therefore, when inductor sees an index_put_ with byte tensor indices,
     # it should *not* convert the cpu scalar value into a gpu tensor.
-    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)  # type: ignore[misc]
+    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:

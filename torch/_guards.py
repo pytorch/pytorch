@@ -26,7 +26,6 @@ from typing import (
     TypeVar,
 )
 
-from torch._C._dynamo.eval_frame import set_context_frame  # noqa: F401
 from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -130,7 +129,6 @@ class GuardSource(enum.Enum):
             GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
             GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
-            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
 
@@ -782,15 +780,6 @@ def compile_context(context: Optional[CompileContext]):
     try:
         yield context
     finally:
-        if context is not None:
-            if context.compile_id is not None:
-                set_context_frame(
-                    (
-                        context.compile_id.frame_id,
-                        context.compile_id.frame_compile_id,
-                        context.attempt,
-                    )
-                )
         _TLS.compile_context = old_context
 
 

@@ -65,7 +65,6 @@ post_grad_pass_names = [
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
     "shape_padding_multiplier",
-    "pad_aten_mm_pass",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -194,7 +193,7 @@ def normalize_split_base(
         new_split_node = graph.call_function(
             torch.split,
             args=new_args,
-            kwargs=new_kwargs,  # type: ignore[arg-type]
+            kwargs=new_kwargs,
         )
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
@@ -379,7 +378,7 @@ def normalize_stack_default(match: Match, *args, **kwargs):
 
     with graph.inserting_after(node):
         new_node = graph.call_function(
-            node.target,  # type: ignore[arg-type]
+            node.target,
             args=(tensors,),
             kwargs={"dim": dim},
         )
@@ -530,7 +529,7 @@ def merge_splits(
 
     to_remove = []
 
-    with graph.inserting_before(first_split):  # type: ignore[arg-type]
+    with graph.inserting_before(first_split):
         # Add the new split node
         new_split = graph.call_function(
             torch.split,
@@ -1536,7 +1535,7 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
             # case 1: the cat uses all getitems from the split
             if len(split_sections) == len(cat_user.args[0]):  # type: ignore[arg-type]
                 # replace the users of the cat node to be the input of the split node
-                cat_user.replace_all_uses_with(split_node.args[0])  # type: ignore[arg-type]
+                cat_user.replace_all_uses_with(split_node.args[0])
                 # remove the cat node
                 graph.erase_node(cat_user)
                 counters["inductor"]["mutate_cat_pass"] += 1
@@ -1948,7 +1947,7 @@ def remove_split_unbind_children(graph: torch.fx.Graph, inputs: List[torch.fx.No
     # check the split node to remove if it has no users
     for node in nodes:
         if len(node.users.keys()) == 0:  # type: ignore[union-attr]
-            graph.erase_node(node)  # type: ignore[arg-type]
+            graph.erase_node(node)
 
 
 # ############pattern to be optimized is#########

@@ -8,7 +8,9 @@
 #include <memory>
 #include <vector>
 
-namespace torch::jit::fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 // Descriptor for chunk-ing an input tensor into subtensors
 // OR concat-ing an output tensor from subtensors
@@ -20,6 +22,7 @@ struct TORCH_API PartitionDesc {
   PartitionDesc(const TensorDesc& _desc, size_t _nSubTensors, size_t _dim)
       : nSubTensors_{_nSubTensors}, dim_{_dim} {
     AT_ASSERT(nSubTensors_ > 1);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<bool> cont = _desc.contiguity;
     if (dim_ > 0) {
       // when we narrow the concatenated output/chunked input
@@ -28,7 +31,8 @@ struct TORCH_API PartitionDesc {
       // so dim - 1 is no longer contiguous
       cont[dim_ - 1] = false;
     }
-    subTensorDesc_ = std::make_shared<TensorDesc>(_desc.scalar_type, cont);
+    // NOLINTNEXTLINE(modernize-make-shared)
+    subTensorDesc_.reset(new TensorDesc(_desc.scalar_type, cont));
   }
 
   bool isNoop() const {
@@ -55,4 +59,6 @@ struct TORCH_API PartitionDesc {
       subTensorDesc_; // descriptor for the subtensor, if it exists
 };
 
-} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

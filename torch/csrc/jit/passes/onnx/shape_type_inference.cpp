@@ -22,15 +22,16 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 inline bool PyNone_Check(PyObject* o) {
   return o == Py_None;
 }
 
 std::pair<TypePtr, bool> MergeInferredType(
-    const TypePtr& existing_type,
-    const TypePtr& inferred_type) {
+    TypePtr existing_type,
+    TypePtr inferred_type) {
   auto new_list_type = inferred_type->cast<ListType>();
   auto use_inferred_type = false;
   if (new_list_type) {
@@ -74,8 +75,8 @@ std::pair<TypePtr, bool> MergeInferredType(
 
 void MergeInferredTypeAndSetMap(
     Value* dest_v,
-    const TypePtr& existing_type,
-    const TypePtr& inferred_type) {
+    TypePtr existing_type,
+    TypePtr inferred_type) {
   auto [mergedType, inferred] = MergeInferredType(existing_type, inferred_type);
   dest_v->setType(mergedType);
   ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
@@ -255,7 +256,7 @@ bool CustomSettype(Node* node) {
 
 Value* CloneValueFromListConstruct(
     Value* v,
-    const std::shared_ptr<Graph>& n_graph,
+    std::shared_ptr<Graph> n_graph,
     int opset_version) {
   auto lc_node = v->node();
   TORCH_INTERNAL_ASSERT(lc_node->kind() == ::c10::prim::ListConstruct);
@@ -354,7 +355,7 @@ Node* CloneNodeToGraph(
   return clone_node;
 }
 
-bool HasValidType(const TypePtr& type, const std::string& name) {
+bool HasValidType(TypePtr type, std::string name) {
   if (auto t_type = type->cast<TensorType>()) {
     if (!t_type->scalarType().has_value()) {
       GRAPH_UPDATE("Input ", name, " is missing tensor datatype.");
@@ -370,7 +371,7 @@ bool HasValidType(const TypePtr& type, const std::string& name) {
   return true;
 }
 
-bool IsGraphValidForInference(const std::shared_ptr<Graph>& graph) {
+bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
   // Verify if every input has type (either Tensor, Sequence or Optional) and
   // scalar type. This is a requirement for ONNX graph inputs.
   for (auto in : graph->inputs()) {
@@ -380,7 +381,7 @@ bool IsGraphValidForInference(const std::shared_ptr<Graph>& graph) {
 }
 
 void ConvertGraphToONNXProto(
-    const std::shared_ptr<Graph>& graph,
+    std::shared_ptr<Graph> graph,
     std::shared_ptr<onnx::ModelProto>& model_proto,
     SymbolDimMap& symbol_dim_map,
     DimSymbolMap& dim_symbol_map,
@@ -1651,8 +1652,7 @@ void SpecialPostProcess(Node* n) {
       auto seq_node = n->input(0)->node();
       auto t_type = n->input(1)->type()->cast<TensorType>();
 
-      auto update_sequence_empty_dtype = [](Node* n,
-                                            const TensorTypePtr& t_type) {
+      auto update_sequence_empty_dtype = [](Node* n, TensorTypePtr t_type) {
         TORCH_INTERNAL_ASSERT(n && n->kind() == ::c10::onnx::SequenceEmpty);
         TORCH_INTERNAL_ASSERT(t_type && t_type->scalarType().has_value());
         auto scalar_type = t_type->scalarType().value();
@@ -1711,7 +1711,7 @@ void SpecialPostProcess(Node* n) {
           return nullptr;
         };
         return find_sequence_empty_impl(
-            input, std::move(t_type), find_sequence_empty_impl);
+            input, t_type, find_sequence_empty_impl);
       };
 
       if (seq_node && t_type && t_type->scalarType()) {
@@ -2122,9 +2122,9 @@ void ONNXShapeTypeInference(
           case ::c10::onnx::Gather: {
             auto* schema_registry = onnx::OpSchemaRegistry::Instance();
             onnx::ShapeInferenceOptions options{
-                /*check_type_val=*/false,
-                /*strict_mode_val=*/0,
-                /*data_prop_val=*/true};
+                /*check_type=*/false,
+                /*error_mode=*/false,
+                /*enable_data_propagation=*/true};
             onnx::shape_inference::InferShapes(
                 *model_proto, schema_registry, options, &inferred_shape_data);
             break;
@@ -2509,4 +2509,5 @@ void UpdateShapeConstantIfReliable(torch::jit::Value* node_output) {
   }
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -18,7 +18,9 @@
 #include <tuple>
 #include <vector>
 
-namespace torch::jit::fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 // Template for computing the offset into the tensor to access a value
 static auto dim_calc = at::jit::CodeTemplate(R"(
@@ -536,7 +538,7 @@ std::string generateKernel(
   //       places where the constant None node is used
   // Note: No need to iterate over reference as n is a pointer
   for (const auto n : graph.nodes()) {
-    static_assert(std::is_pointer_v<decltype(n)>, "n must be a pointer");
+    static_assert(std::is_pointer<decltype(n)>::value, "n must be a pointer");
     // Note: FusedConcat nodes work by narrowing the output Tensors before the
     // kernel runs
     if (n->kind() == prim::FusedConcat)
@@ -678,9 +680,11 @@ std::string generateKernel(
   }
 
   if (debugFuser()) {
-    std::cerr << "fusion code:" << code_string << '\n';
+    std::cerr << "fusion code:" << code_string << std::endl;
   }
   return code_string;
 }
 
-} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

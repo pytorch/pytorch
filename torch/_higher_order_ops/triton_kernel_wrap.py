@@ -158,13 +158,15 @@ def generate_ttir(kernel, kwargs):
     ]
     specialization = kernel._get_config(*ordered_args.values())
     constants = {
-        name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
+        i: arg
+        for i, arg in enumerate(ordered_args.values())
+        if not isinstance(arg, Tensor)
     }
 
     # Build kernel signature -- doesn't include constexpr arguments.
     signature = {
-        name: kernel._type_of(kernel._key_of(arg))
-        for i, (name, arg) in enumerate(ordered_args.items())
+        i: kernel._type_of(kernel._key_of(arg))
+        for i, arg in enumerate(ordered_args.values())
         if i not in kernel.constexprs
     }
 
@@ -177,18 +179,13 @@ def generate_ttir(kernel, kwargs):
 
     src = ASTSource(kernel, signature, constants, specialization)
 
-    # Triton changes ASTSource.make_ir to take 3/4 arguments. Handle
+    # Triton changes ASTSource.make_ir to take 3 arguments. Handle
     # backward compatibility here.
-    make_ir_sig_params = len(inspect.signature(src.make_ir).parameters)
-    if make_ir_sig_params == 2:
+    if len(inspect.signature(src.make_ir).parameters) == 2:
         ttir_module = src.make_ir(options, context)
-    elif make_ir_sig_params == 3:
-        codegen_fns = backend.get_codegen_implementation()
-        ttir_module = src.make_ir(options, codegen_fns, context)
     else:
         codegen_fns = backend.get_codegen_implementation()
-        module_map = backend.get_module_map()
-        ttir_module = src.make_ir(options, codegen_fns, module_map, context)
+        ttir_module = src.make_ir(options, codegen_fns, context)
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
@@ -525,14 +522,6 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation")
 
-    def __call__(self, kernel_idx, constant_args_idx, grid, kwargs):
-        return super().__call__(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            kwargs=kwargs,
-        )
-
 
 triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
@@ -541,15 +530,6 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 class TritonKernelWrapperFunctional(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional")
-
-    def __call__(self, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone):
-        return super().__call__(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            kwargs=kwargs,
-            tensors_to_clone=tensors_to_clone,
-        )
 
 
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
@@ -624,23 +604,19 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     return None
 
 
-def get_mutated_tensors(kernel_idx, constant_args_idx, kwargs):
-    kernel = kernel_side_table.get_kernel(kernel_idx)
-    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
-    return identify_mutated_tensors(kernel, {**kwargs, **constant_args})
-
-
 @triton_kernel_wrapper_mutation.py_functionalize_impl
 def triton_kernel_wrapper_mutation_functionalize(
     ctx, kernel_idx, constant_args_idx, grid, kwargs
 ):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+    kernel = kernel_side_table.get_kernel(kernel_idx)
+    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
-    tensors_to_clone = get_mutated_tensors(
-        kernel_idx, constant_args_idx, unwrapped_kwargs
+    tensors_to_clone = identify_mutated_tensors(
+        kernel, {**unwrapped_kwargs, **constant_args}
     )
     with ctx.redispatch_to_next():
         unwrapped_outputs = triton_kernel_wrapper_functional(

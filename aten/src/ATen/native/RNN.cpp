@@ -15,9 +15,6 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 #include <ATen/Config.h>
-#if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/Utils.h>
-#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -100,10 +97,7 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
   };
   return input.options().backend() == at::Backend::CPU &&
       is_cpu_backend(params) && is_cpu_backend(hx) &&
-      (input.scalar_type() == kFloat ||
-       (input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) ||
-       (input.scalar_type() == kHalf && !at::GradMode::is_enabled() &&
-        mkldnn_fp16_device_check())) &&
+      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16) &&
       input.numel() != 0;
 #endif
   return false;

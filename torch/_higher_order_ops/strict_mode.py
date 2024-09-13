@@ -32,9 +32,6 @@ class StrictMode(HigherOrderOperator):
     def __init__(self):
         super().__init__("strict_mode")
 
-    def __call__(self, callable, operands):
-        return super().__call__(callable, operands)
-
 
 strict_mode_op = StrictMode()
 

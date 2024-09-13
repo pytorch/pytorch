@@ -4993,9 +4993,6 @@ def construct_sum_pyop():
         def __init__(self):
             super().__init__("mysum")
 
-        def __call__(self, *args, **kwargs):
-            return super().__call__(*args, **kwargs)
-
     mysum = MySum()
 
     @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
@@ -5176,6 +5173,7 @@ class TestCompileTransforms(TestCase):
         self.assertEqual(actual, expected)
 
     # torch.compile is not supported on Windows
+    @expectedFailureIf(IS_WINDOWS)
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_grad_deprecated_api(self, device):
         x = torch.randn((), device=device)
