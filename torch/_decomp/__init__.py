@@ -3,7 +3,17 @@ import inspect
 from collections import defaultdict
 from functools import partial, wraps
 from itertools import chain
-from typing import Callable, Dict, List, Optional, Sequence, Set, TypeVar, Union
+from typing import (
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    TypeVar,
+    Union,
+)
 from typing_extensions import ParamSpec
 
 import torch
@@ -289,10 +299,10 @@ def _is_cia_op(op: "OpOverload") -> bool:
     )
 
 
-_ALL_VALID_CIA_OPS_IN_EXPORT: Optional[frozenset["OpOverload"]] = None
+_ALL_VALID_CIA_OPS_IN_EXPORT: Optional[FrozenSet["OpOverload"]] = None
 
 
-def _collect_all_valid_cia_ops() -> frozenset["OpOverload"]:
+def _collect_all_valid_cia_ops() -> FrozenSet["OpOverload"]:
     """
     This is an util function that gets the all CIA functional ops.
 
