@@ -89,13 +89,13 @@ class ConstantFolder(torch.fx.Interpreter):
         if (
             node.target == torch.ops.prims.convert_element_type.default
             and (
-                is_const_source(node.args[0], self.lifted_constants)
+                is_const_source(node.args[0], self.lifted_constants)  # type: ignore[arg-type]
                 or (
                     isinstance(node.args[0], torch.fx.Node)
                     and node.args[0].target == torch.ops.aten.permute.default
-                    and is_const_source(node.args[0].args[0], self.lifted_constants)
+                    and is_const_source(node.args[0].args[0], self.lifted_constants)  # type: ignore[arg-type]
                 )
-            )  # type: ignore[arg-type]
+            )
             and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
             and node.args[1] == torch.bfloat16
         ):
