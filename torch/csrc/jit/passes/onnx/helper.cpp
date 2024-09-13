@@ -12,7 +12,8 @@
 
 #include <onnx/onnx_pb.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace onnx {
 using namespace ::c10::onnx;
 
@@ -295,4 +296,5 @@ void ONNXLintGraph(const std::shared_ptr<Graph>& graph) {
       " constants.");
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -253,11 +253,6 @@ class TestSourceMatcher(JitTestCase):
         gm = torch.export.export(M(), inputs, strict=strict).module()
         gm.graph.eliminate_dead_code()
 
-        # Remove "source_fn_stack" meta to let partitioner use "torch_fn" only.
-        # TODO: remove this after we fix "torch_fn". T199561090
-        for node in gm.graph.nodes:
-            node.meta["source_fn_stack"] = None
-
         module_partitions = get_source_partitions(gm.graph, ["linear", "relu"])
 
         self.assertEqual(len(module_partitions), 2)
@@ -314,11 +309,6 @@ class TestSourceMatcher(JitTestCase):
             M(torch.ones(1, 16, 256, 256)), inputs, strict=strict
         ).module()
         gm.graph.eliminate_dead_code()
-
-        # Remove "source_fn_stack" meta to let partitioner use "torch_fn" only.
-        # TODO: remove this after we fix "torch_fn". T199561090
-        for node in gm.graph.nodes:
-            node.meta["source_fn_stack"] = None
 
         module_partitions = get_source_partitions(
             gm.graph, ["conv2d", "relu", "max_pool2d"]
@@ -400,11 +390,6 @@ class TestSourceMatcher(JitTestCase):
         gm = torch.export.export(M(), inputs, strict=strict).module()
         gm.graph.eliminate_dead_code()
 
-        # Remove "source_fn_stack" meta to let partitioner use "torch_fn" only.
-        # TODO: remove this after we fix "torch_fn". T199561090
-        for node in gm.graph.nodes:
-            node.meta["source_fn_stack"] = None
-
         module_partitions = get_source_partitions(gm.graph, ["conv2d"])
 
         self.assertEqual(len(module_partitions), 1)
@@ -431,11 +416,6 @@ class TestSourceMatcher(JitTestCase):
         inputs = (torch.randn(1, 5), torch.rand((5, 5)), torch.zeros(5))
         gm = torch.export.export(M(), inputs, strict=strict).module()
         gm.graph.eliminate_dead_code()
-
-        # Remove "source_fn_stack" meta to let partitioner use "torch_fn" only.
-        # TODO: remove this after we fix "torch_fn". T199561090
-        for node in gm.graph.nodes:
-            node.meta["source_fn_stack"] = None
 
         module_partitions = get_source_partitions(gm.graph, ["linear", "relu"])
 

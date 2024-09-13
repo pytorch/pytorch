@@ -4,10 +4,7 @@
 import contextlib
 import copy
 import functools
-import itertools
-import logging
 import unittest
-from collections import defaultdict
 from unittest import mock
 
 import torch
@@ -33,11 +30,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils._triton import has_triton
 
 
-log = logging.getLogger(__name__)
-
-
-def _count_op_in_graph(graph, op):
-    return sum(1 for node in graph.nodes if node.target is op)
+def _is_op_in_graph(graph, op):
+    return any(node.target is op for node in graph.nodes)
 
 
 def _is_fallback_op_in_snodes(snodes, op):
@@ -136,7 +130,7 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
-    def test_trace_fsdp_copy_(self):
+    def test_trace_fsdp_set_(self):
         @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
         def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:
             torch.add(x, 1, out=out)
@@ -146,7 +140,7 @@ class TestFullyShardCompile(FSDPTest):
             buf_view = buf.view(-1)
             torch.ops.mylib.add_one_out(x, out=buf_view)
             buf_view2 = buf.view(-1)
-            torch.ops.fsdp.copy_(x, buf_view2)
+            torch.ops.fsdp.set_(x, buf_view2)
 
         ref_x = torch.zeros(2)
         x = copy.deepcopy(ref_x)
@@ -154,80 +148,26 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
-    def _assert_no_aliased_graph_inputs(self, graph: torch.fx.Graph) -> None:
-        storage_id_to_graph_inputs = defaultdict(list)
-        for node in graph.nodes:
-            if node.op == "placeholder" and isinstance(
-                node.meta.get("val", None), torch.Tensor
-            ):
-                storage_id_to_graph_inputs[
-                    id(node.meta["val"].untyped_storage())
-                ].append(node)
-        no_aliased_graph_inputs = True
-        err_msg = ""
-        for aliased_graph_inputs in storage_id_to_graph_inputs.values():
-            if len(aliased_graph_inputs) > 1:
-                no_aliased_graph_inputs = False
-                err_msg += f"""\n
-Found aliased graph inputs: {aliased_graph_inputs},
-val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
-"""
-        self.assertTrue(no_aliased_graph_inputs, err_msg)
-
-    def _check_fsdp_copy_and_resize_ops_count_in_graph(
-        self,
-        graph,
-        *,
-        fwd_copy_count,
-        fwd_resize_count,
-        bwd_copy_count,
-        bwd_resize_count,
-    ):
-        def _check_count(copy_count, resize_count):
-            actual_copy_count = _count_op_in_graph(graph, torch.ops.fsdp.copy_.default)
-            self.assertEqual(
-                actual_copy_count,
-                copy_count,
-                f"Unexpected number of `fsdp.copy_` ops (expected {copy_count}, got {actual_copy_count}) in graph: {graph}",
-            )
-
-            actual_resize_count = _count_op_in_graph(
-                graph, torch.ops.inductor.resize_storage_bytes_.default
-            )
-            self.assertEqual(
-                actual_resize_count,
-                resize_count,
-                f"Unexpected number of `inductor.resize_storage_bytes_` ops (expected {resize_count}, got {actual_resize_count}) in graph: {graph}",  # noqa: B950
-            )
-
-        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-            _check_count(fwd_copy_count, fwd_resize_count)  # fwd graph
-        else:
-            _check_count(bwd_copy_count, bwd_resize_count)  # bwd graph
-
     def _reinplace_all_gather_with_optional_checks(self, fullgraph):
         def _run_with_checks(graph, orig_fn):
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor.default
-                ),
-                0,
+            self.assertTrue(
+                _is_op_in_graph(
+                    graph,
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                )
             )
-
             orig_fn(graph)
-
-            self.assertEqual(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor.default
-                ),
-                0,
+            self.assertFalse(
+                _is_op_in_graph(
+                    graph,
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                )
             )
-
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default
-                ),
-                0,
+            self.assertTrue(
+                _is_op_in_graph(
+                    graph,
+                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                )
             )
 
         if fullgraph:
@@ -326,6 +266,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self,
         file_check,
         overlapped_compute_op_str,
+        num_resize,
+        num_set,
         last_all_gather=False,
     ):
         file_check = file_check.check("torch.ops.fsdp.all_gather_copy_in.")
@@ -336,9 +278,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         # Checks that AGWait is delayed, making the AG overlap with some compute op.
         if overlapped_compute_op_str is not None:
             file_check = file_check.check(f"{overlapped_compute_op_str}")
+        file_check = file_check.check_count(
+            "inductor_ops.resize_storage_bytes_(", num_resize, exactly=True
+        )
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
         file_check = file_check.check("torch.ops.fsdp.split_with_sizes_copy.")
+        file_check = self.inductor_code_check_no_compute_op(file_check)
+        file_check = file_check.check_count(
+            "torch.ops.aten.set_.", num_set, exactly=True
+        )
         if not last_all_gather:
             # Checks that there is no compute op between this AGWait and next AG.
             file_check = self.inductor_code_check_no_compute_op(file_check)
@@ -358,6 +307,20 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
+    @torch._dynamo.config.patch(
+        inline_inbuilt_nn_modules=True,
+        skip_fsdp_hooks=False,
+    )
+    @torch._functorch.config.patch(recompute_views=True)
+    @torch._functorch.config.patch(cse=False)
+    @torch._inductor.config.patch(
+        reorder_for_compute_comm_overlap=True,
+        reorder_for_compute_comm_overlap_passes=[
+            "sink_waits",
+            "raise_comms",
+            "reorder_compute_for_overlap",
+        ],
+    )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
     ):
@@ -371,12 +334,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
             return _fn
 
-        def run_iters(
-            model,
-            optim,
-            n_iter=10,
-            compiled_autograd_backend=None,
-        ):
+        def run_iters(model, optim, n_iter=10, compiled_autograd_backend=None):
             torch.manual_seed(42)
             losses = []
             for i in range(n_iter):
@@ -402,11 +360,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             run_iters(model, optim, n_iter=1)
 
             model_compiled = torch.compile(model, backend=backend, fullgraph=fullgraph)
-            res = run_iters(
-                model_compiled,
-                optim,
-                compiled_autograd_backend=backend,
-            )
+            res = run_iters(model_compiled, optim, compiled_autograd_backend=backend)
             return res
 
         def test_eager():
@@ -417,23 +371,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             res = run_iters(model, optim)
             return res
 
-        with torch._dynamo.config.patch(
-            inline_inbuilt_nn_modules=True,
-            skip_fsdp_hooks=False,
-        ), torch._functorch.config.patch(
-            recompute_views=True, cse=False
-        ), torch._inductor.config.patch(
-            reorder_for_compute_comm_overlap=True,
-            reorder_for_compute_comm_overlap_passes=[
-                "sink_waits",
-                "raise_comms",
-                "reorder_compute_for_overlap",
-            ],
-            post_grad_custom_pre_pass=self._assert_no_aliased_graph_inputs
-            if fullgraph
-            else None,
-        ):
-            losses_compiled = test_compiled()
+        losses_compiled = test_compiled()
         losses_eager = test_eager()
         if not self.fake_pg:
             for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
@@ -510,9 +448,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 )
 
             def forward(self, x):
-                ret = torch.matmul(x, self.param1)
                 if not fullgraph:
                     torch._dynamo.graph_break()
+                ret = torch.matmul(x, self.param1)
                 ret = ret * self.param2
                 ret = torch.relu(ret)
                 return ret
@@ -581,19 +519,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         for fullgraph in [True, False]:
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
-            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
-                fullgraph
-            ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=functools.partial(
-                    self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                    fwd_copy_count=0,
-                    fwd_resize_count=0,
-                    bwd_copy_count=0,
-                    bwd_resize_count=0,
-                )
-                if fullgraph
-                else None
-            ):
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(fullgraph):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
                         *self._create_nested_fully_shard_factory_fns(
@@ -611,30 +537,46 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 fwd_code = triton_codes[0]
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None),
+                    dict(overlapped_compute_op_str=None, num_resize=0, num_set=2),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                         last_all_gather=True,
                     ),
                 ]:
@@ -646,12 +588,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 bwd_code = triton_codes[1]
                 file_check = FileCheck().check("def call(args):")
                 for bwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None),
+                    dict(overlapped_compute_op_str=None, num_resize=0, num_set=2),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
+                        num_set=2,
                         last_all_gather=True,
                     ),
                 ]:
@@ -659,7 +605,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         file_check, **bwd_ag_block_info
                     )
                 for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.addmm("),
+                    dict(overlapped_compute_op_str="extern_kernels.mm("),
                     dict(
                         overlapped_compute_op_str=None
                     ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
@@ -677,10 +623,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
-    def _create_transformer_factory_fns(self, all_requires_grad):
+    def _create_transformer_factory_fns(self):
         seq_len = 16
         vocab_size = 8
-        n_layers = 3
 
         def model_init_fn():
             torch.manual_seed(self.rank)
@@ -688,20 +633,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             mesh = init_device_mesh("cuda", (self.world_size,))
             model_args = ModelArgs(
                 vocab_size=vocab_size,
-                n_layers=n_layers,
+                n_layers=3,
             )
             model = Transformer(model_args)
-            if not all_requires_grad:
-                requires_grad_params = ["attention.wq", "attention.wv"]
-                requires_grad_param_count = 0
-                for k, v in model.named_parameters():
-                    for substring in requires_grad_params:
-                        if substring in k:
-                            v.requires_grad_(True)
-                            requires_grad_param_count += 1
-                        else:
-                            v.requires_grad_(False)
-                assert requires_grad_param_count == n_layers * len(requires_grad_params)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
@@ -738,16 +672,12 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
-        for fullgraph, all_requires_grad in itertools.product(
-            [True, False], [True, False]
-        ):
+        for fullgraph in [True, False]:
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(fullgraph):
                 self._test_traceable_fsdp(
-                    *self._create_transformer_factory_fns(
-                        all_requires_grad=all_requires_grad
-                    ),
+                    *self._create_transformer_factory_fns(),
                     "aot_eager",
                     fullgraph=fullgraph,
                 )
@@ -757,14 +687,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
-        for fullgraph, all_requires_grad in itertools.product(
-            [True, False], [True, False]
-        ):
+        for fullgraph in [True, False]:
             with self._maybe_add_graph_break_to_sdpa(fullgraph):
                 self._test_traceable_fsdp(
-                    *self._create_transformer_factory_fns(
-                        all_requires_grad=all_requires_grad
-                    ),
+                    *self._create_transformer_factory_fns(),
                     "aot_eager_decomp_partition",
                     fullgraph=fullgraph,
                 )
@@ -774,36 +700,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
-        # TODO: enable fullgraph=False case
-        for fullgraph, all_requires_grad in itertools.product([True], [True, False]):
-            log.warning(
-                f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}"  # noqa: G004, G001
-            )
+        for fullgraph in [True, False]:
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
                 fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
                 fullgraph
-            ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=functools.partial(
-                    self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                    # NOTE: For the root unsharded params, we don't reshard after forward since for training,
-                    # the parameters would be freed and all-gathered immediately. Hence we still have
-                    # their resize and copy ops in the graph.
-                    fwd_copy_count=4,
-                    fwd_resize_count=4,
-                    bwd_copy_count=0,
-                    bwd_resize_count=4,
-                )
-                if fullgraph
-                else None
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
-                        *self._create_transformer_factory_fns(
-                            all_requires_grad=all_requires_grad
-                        ),
+                        *self._create_transformer_factory_fns(),
                         "inductor",
                         fullgraph=fullgraph,
                     )
@@ -816,19 +723,21 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 fwd_code = triton_codes[0]
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
-                    dict(
-                        overlapped_compute_op_str="triton_"
-                        if all_requires_grad
-                        else None,
-                    ),
+                    dict(overlapped_compute_op_str="triton_", num_resize=0, num_set=4),
                     dict(
                         overlapped_compute_op_str="aten.native_dropout.",
+                        num_resize=0,
+                        num_set=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        num_resize=12,
+                        num_set=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        num_resize=12,
+                        num_set=12,
                         last_all_gather=True,
                     ),
                 ]:
@@ -842,33 +751,35 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 for bwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
+                        num_set=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        num_resize=0,
+                        num_set=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        num_resize=0,
+                        num_set=12,
                         last_all_gather=True,
                     ),
                 ]:
-                    if bwd_ag_block_info is not None:
-                        file_check = self.inductor_code_check_fsdp_all_gather(
-                            file_check, **bwd_ag_block_info
-                        )
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **bwd_ag_block_info
+                    )
                 for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.mm(")
-                    if all_requires_grad
-                    else None,
+                    dict(overlapped_compute_op_str="extern_kernels.mm("),
                     dict(
                         overlapped_compute_op_str=None
                     ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
                     dict(overlapped_compute_op_str=None),
-                    dict(overlapped_compute_op_str=None) if all_requires_grad else None,
+                    dict(overlapped_compute_op_str=None),
                 ]:
-                    if bwd_rs_block_info is not None:
-                        file_check = self.inductor_code_check_fsdp_reduce_scatter(
-                            file_check, **bwd_rs_block_info
-                        )
+                    file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                        file_check, **bwd_rs_block_info
+                    )
                 file_check.run(bwd_code)
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,

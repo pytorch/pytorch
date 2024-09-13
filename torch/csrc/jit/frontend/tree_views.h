@@ -920,11 +920,13 @@ struct Const : public Expr {
   double asFloatingPoint() const {
     // We can't pass in nullptr as the dummy pointer gets dereferenced for
     // Android version of strtod_c().
-    char* dummy = nullptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    char* dummy;
     return torch::jit::strtod_c(subtree(0)->stringValue().c_str(), &dummy);
   }
   c10::complex<double> asComplex() const {
-    char* dummy = nullptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    char* dummy;
     auto str = subtree(0)->stringValue();
     // Complex numbers (a+bj, where a is non-zero) are parsed as an addition
     // between float/int a and a complex number "bj". When a is 0, a complex

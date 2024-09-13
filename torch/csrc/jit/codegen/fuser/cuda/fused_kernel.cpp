@@ -16,9 +16,13 @@
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
-namespace torch::jit::fuser::cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 // See NOTE [ USE OF NVRTC AND DRIVER API ]
 const at::cuda::NVRTC& nvrtc() {
@@ -81,6 +85,7 @@ void codegenOutputQuery(
 }
 
 // Compiles the specified kernel and stores the metadata required to run it
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FusedKernelCUDA::FusedKernelCUDA(
     at::DeviceIndex device,
     std::string name,
@@ -109,14 +114,15 @@ FusedKernelCUDA::FusedKernelCUDA(
 
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
-  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   prop_ = at::cuda::getCurrentDeviceProperties();
-  int major = 0, minor = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int major, minor;
   bool compile_to_sass = false;
   codegenOutputQuery(prop_, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
-  nvrtcProgram program{};
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  nvrtcProgram program;
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
@@ -138,14 +144,17 @@ FusedKernelCUDA::FusedKernelCUDA(
       "compute_" +
 #endif
       std::to_string(major) + std::to_string(minor);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const std::vector<const char*> args = {
       "--std=c++17", compute.c_str(), "-default-device"};
 #endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
   if (result != NVRTC_SUCCESS) {
-    size_t logsize = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<char> log(logsize);
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
@@ -155,7 +164,8 @@ FusedKernelCUDA::FusedKernelCUDA(
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
-  size_t ptx_size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  size_t ptx_size;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
@@ -193,7 +203,8 @@ static int ceilDiv(const int a, const int b) {
 void FusedKernelCUDA::launch_raw(
     const uint32_t numel,
     std::vector<void*>& arguments) const {
-  at::cuda::CUDAGuard guard{device_};
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  at::cuda::CUDAGuard{device_};
   // Hacked at::DeviceGuard (see note above)
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(device_);
@@ -264,4 +275,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
 
 RegisterFusionBackend reg(DeviceType::CUDA, createFusionKernel);
 
-} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

@@ -35,9 +35,9 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
 try:
-    from .mock_cache import global_stats, PatchCaches
+    from .mock_cache import PatchCaches
 except ImportError:
-    from mock_cache import global_stats, PatchCaches  # @manual
+    from mock_cache import PatchCaches  # @manual
 
 
 torch.set_float32_matmul_precision("high")
@@ -258,7 +258,7 @@ class TestMaxAutotune(TestCase):
             op: str,
             inputs: str,
             benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
-        ) -> Optional[Dict[ChoiceCaller, float]]:
+        ) -> Dict[ChoiceCaller, float]:
             if benchmark is not None:
                 return benchmark(choices)
 
@@ -375,22 +375,6 @@ class TestMaxAutotune(TestCase):
         counters.clear()
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
-
-    @skipIfRocm
-    @fresh_inductor_cache()
-    @config.patch(search_autotune_cache=True)
-    def test_search_autotune_cache(self):
-        def fn(a, b, c):
-            a = (a @ b) @ c
-            a, b, c = (t.to(torch.float16) for t in [a, b, c])
-            return (a @ b) @ c
-
-        fn_c = torch.compile()(fn)
-        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
-        from torch._dynamo.utils import counters
-
-        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @skipIfRocm
@@ -739,6 +723,9 @@ class TestMaxAutotuneRemoteCache(TestCase):
     def test_max_autotune_remote_caching(self, dynamic: bool):
         from unittest.mock import patch
 
+        if not config.is_fbcode():
+            self.skipTest("Redis for autotune is currently broken")
+
         def mm(a, b):
             a = torch.sin(a)
             return a @ b
@@ -769,20 +756,22 @@ class TestMaxAutotuneRemoteCache(TestCase):
                         torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
 
-                global_stats.report()
-                self.assertEqual(global_stats.autotune.num_get_hit, 3)
-                self.assertEqual(global_stats.autotune.num_get_miss, 1)
-                self.assertEqual(global_stats.autotune.num_put, 1)
+                PatchCaches.update()
+                PatchCaches.report()
+                self.assertEqual(PatchCaches.num_get_hit, 3)
+                self.assertEqual(PatchCaches.num_get_miss, 1)
+                self.assertEqual(PatchCaches.num_put, 1)
 
-            global_stats.reset()
+            PatchCaches.reset()
             for _ in range(4):
                 with fresh_inductor_cache():
                     torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
-            global_stats.report()
-            self.assertEqual(global_stats.autotune.num_get_hit, 3)
-            self.assertEqual(global_stats.autotune.num_get_miss, 1)
-            self.assertEqual(global_stats.autotune.num_put, 1)
+            PatchCaches.update()
+            PatchCaches.report()
+            self.assertEqual(PatchCaches.num_get_hit, 3)
+            self.assertEqual(PatchCaches.num_get_miss, 1)
+            self.assertEqual(PatchCaches.num_put, 1)
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
@@ -807,7 +796,6 @@ class TestBenchmarkRequest(BenchmarkRequest):
         if not self.multi_device:
             assert visible_devices == self.parent_visible_devices
         else:
-            assert self.parent_visible_devices is not None
             valid_devices = self.parent_visible_devices.split(",")
             assert visible_devices in valid_devices
 

@@ -27,6 +27,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._state_dict_utils import _gather_state_dict
+from torch.distributed._tensor import DTensor, Replicate
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -52,7 +53,6 @@ from torch.distributed.fsdp.api import (
     StateDictSettings,
     StateDictType,
 )
-from torch.distributed.tensor import DTensor, Replicate
 from torch.utils._pytree import tree_map_only
 
 

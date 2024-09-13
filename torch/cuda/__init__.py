@@ -1122,8 +1122,7 @@ def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    clk_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
-    return clk_info["clk"] if "clk" in clk_info else clk_info["cur_clk"]
+    return amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)["cur_clk"]
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
@@ -1629,7 +1628,6 @@ __all__ = [
     "memory_usage",
     "MemPool",
     "MemPoolContext",
-    "use_mem_pool",
     "temperature",
     "power_draw",
     "clock_rate",

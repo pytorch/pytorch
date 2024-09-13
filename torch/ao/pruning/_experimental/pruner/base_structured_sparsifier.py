@@ -311,4 +311,4 @@ class BaseStructuredSparsifier(BaseSparsifier):
 
         self.traced.graph.lint()
         self.traced.recompile()
-        return self.traced  # type: ignore[return-value]
+        return self.traced

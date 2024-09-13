@@ -4,7 +4,9 @@
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 namespace {
 
 struct ITTMethods : public ProfilerStubs {
@@ -49,5 +51,7 @@ struct RegisterITTMethods {
 RegisterITTMethods reg;
 
 } // namespace
-} // namespace torch::profiler::impl
-C10_DIAGNOSTIC_POP()
+} // namespace impl
+} // namespace profiler
+} // namespace torch
+C10_CLANG_DIAGNOSTIC_POP()

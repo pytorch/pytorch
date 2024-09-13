@@ -17,7 +17,6 @@ from torch.distributed.pipelining.schedules import (
     ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
-    ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -87,7 +86,6 @@ class ComposabilityTest(MultiProcessTestCase):
             ScheduleInterleaved1F1B,
             ScheduleLoopedBFS,
             ScheduleFlexibleInterleaved1F1B,
-            ScheduleInterleavedZeroBubble,
         ],
     )
     @parametrize("use_new_runtime", [False, True])
@@ -235,9 +233,7 @@ class ComposabilityTest(MultiProcessTestCase):
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
                     self.assertTrue(isinstance(p.grad, DTensor))
-                    torch.testing.assert_close(
-                        ref_p.grad, p.grad.full_tensor(), rtol=1e-5, atol=5e-5
-                    )
+                    self.assertEqual(ref_p.grad, p.grad.full_tensor())
         elif dp_type == "DDP":
             for partial_model, offset in zip(partial_models, offsets):
                 for name, p in partial_model.named_parameters():
@@ -245,7 +241,7 @@ class ComposabilityTest(MultiProcessTestCase):
                     parts[0] = str(int(parts[0]) + offset)
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
-                    torch.testing.assert_close(ref_p.grad, p.grad, rtol=1e-5, atol=5e-5)
+                    self.assertEqual(ref_p.grad, p.grad)
 
         torch.distributed.destroy_process_group()
 

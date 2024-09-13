@@ -21,7 +21,7 @@ on:
 jobs:
   stale:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: linux.large
+    runs-on: linux.large.arc
     permissions:
       contents: read
       pull-requests: write

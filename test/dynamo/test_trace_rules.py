@@ -22,7 +22,6 @@ from torch._dynamo.trace_rules import (
 )
 from torch._dynamo.utils import hashable, is_safe_constant, istype
 from torch._dynamo.variables import TorchInGraphFunctionVariable, UserFunctionVariable
-from torch.testing._internal.common_utils import skipIfWindows
 
 
 try:
@@ -438,9 +437,6 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(
         not torch.distributed.is_available(),
         "need to import MLP module from distributed",
-    )
-    @skipIfWindows(
-        msg="AssertionError: False is not true : MLP did not survive skip files"
     )
     def test_module_survive_skip_files(self):
         from torch.testing._internal.common_fsdp import MLP

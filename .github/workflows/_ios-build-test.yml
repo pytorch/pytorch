@@ -292,7 +292,7 @@ jobs:
           bundler-cache: true
 
       - name: Download arm64 artifacts
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@v3
         with:
           name: pytorch-ios-build-artifacts-arm64
 

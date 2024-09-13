@@ -293,28 +293,16 @@ std::string strListToStr(const std::vector<std::string>& types) {
     return "[" + rc + "]";
   }
 }
-std::string ivalueToStr(const c10::IValue& val, bool isString) {
+std::string ivalueToStr(const c10::IValue& val) {
   std::stringstream ss;
   if (val.isNone()) {
     return "\"None\"";
   } else {
     ss.str("");
-    if (isString) {
-      ss << "\"";
-    }
+    ss << "\"";
     ss << val;
-    if (isString) {
-      ss << "\"";
-    }
+    ss << "\"";
     std::string mystr = ss.str();
-
-    // For boolean the values that ivalue gives is "True" and "False" but
-    // json only takes "true" and "false" so we convert the string to lower case
-    if (val.isBool()) {
-      for (char& c : mystr) {
-        c = std::tolower(c);
-      }
-    }
 
     // A double quote can cause issues with the chrome tracing so force
     // all inputs to not contain more than the 2 we add in this function

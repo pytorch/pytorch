@@ -271,7 +271,8 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   while (any_changed) {
     any_changed = false;
     for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
-      bool changed = false;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      bool changed;
       std::tie(it, changed) = scanNode(*it, aliasDb);
       any_changed |= changed;
     }

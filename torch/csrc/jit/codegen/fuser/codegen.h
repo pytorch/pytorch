@@ -9,7 +9,9 @@
 #include <string>
 #include <vector>
 
-namespace torch::jit::fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 // Creates a CPU or CUDA kernel for the given graph.
 // Returns the C++ or CUDA string implementing the kernel.
@@ -21,4 +23,6 @@ TORCH_API std::string generateKernel(
     const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda);
 
-} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

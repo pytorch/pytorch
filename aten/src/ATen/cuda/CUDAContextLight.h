@@ -15,10 +15,6 @@
 #include <cusolverDn.h>
 #endif
 
-#if defined(USE_CUDSS)
-#include <cudss.h>
-#endif
-
 #if defined(USE_ROCM)
 #include <hipsolver/hipsolver.h>
 #endif
@@ -90,10 +86,6 @@ TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 
 #if defined(CUDART_VERSION) || defined(USE_ROCM)
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
-#endif
-
-#if defined(USE_CUDSS)
-TORCH_CUDA_CPP_API cudssHandle_t getCurrentCudssHandle();
 #endif
 
 } // namespace at::cuda

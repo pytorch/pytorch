@@ -43,6 +43,7 @@ def check(path):
             else:
                 report_violation(line, num, "off-class parametrize")
             if not src[nn - 1].startswith("@instantiate_parametrized_tests"):
+                # breakpoint()
                 report_violation(
                     line, num, f"missing instantiation of parametrized tests in {ln}?"
                 )

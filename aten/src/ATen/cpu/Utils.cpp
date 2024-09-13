@@ -9,7 +9,7 @@
 #endif
 
 namespace at::cpu {
-bool is_avx2_supported() {
+bool is_cpu_support_avx2() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_avx2();
 #else
@@ -17,7 +17,7 @@ bool is_avx2_supported() {
 #endif
 }
 
-bool is_avx512_supported() {
+bool is_cpu_support_avx512() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_avx512f() && cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512bw() && cpuinfo_has_x86_avx512dq();
 #else
@@ -25,7 +25,7 @@ bool is_avx512_supported() {
 #endif
 }
 
-bool is_avx512_vnni_supported() {
+bool is_cpu_support_avx512_vnni() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_avx512vnni();
 #else
@@ -33,15 +33,7 @@ bool is_avx512_vnni_supported() {
 #endif
 }
 
-bool is_avx512_bf16_supported() {
-#if !defined(__s390x__) && !defined(__powerpc__)
-  return cpuinfo_initialize() && cpuinfo_has_x86_avx512bf16();
-#else
-  return false;
-#endif
-}
-
-bool is_amx_tile_supported() {
+bool is_cpu_support_amx_tile() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_amx_tile();
 #else
@@ -50,7 +42,7 @@ bool is_amx_tile_supported() {
 }
 
 bool init_amx() {
-  if (!is_amx_tile_supported()) {
+  if (!is_cpu_support_amx_tile()) {
     return false;
   }
 

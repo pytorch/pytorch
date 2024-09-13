@@ -16,7 +16,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
@@ -471,17 +470,11 @@ class PContext(abc.ABC):
 
     def start(self) -> None:
         """Start processes using parameters defined in the constructor."""
-        if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGTERM, _terminate_process_handler)
-            signal.signal(signal.SIGINT, _terminate_process_handler)
-            if not IS_WINDOWS:
-                signal.signal(signal.SIGHUP, _terminate_process_handler)
-                signal.signal(signal.SIGQUIT, _terminate_process_handler)
-        else:
-            logger.warning(
-                "Failed to register signal handlers since torchelastic is running on a child thread. "
-                "This could lead to orphaned worker processes if the torchrun is terminated."
-            )
+        signal.signal(signal.SIGTERM, _terminate_process_handler)
+        signal.signal(signal.SIGINT, _terminate_process_handler)
+        if not IS_WINDOWS:
+            signal.signal(signal.SIGHUP, _terminate_process_handler)
+            signal.signal(signal.SIGQUIT, _terminate_process_handler)
         self._start()
         self._stdout_tail.start()
         self._stderr_tail.start()

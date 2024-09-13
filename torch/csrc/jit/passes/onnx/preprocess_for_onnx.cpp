@@ -6,7 +6,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -228,4 +229,5 @@ void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After fuseListAndListUnpack: ", graph);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

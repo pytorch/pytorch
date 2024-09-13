@@ -1,5 +1,4 @@
 """Utility to lazily import modules."""
-
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
@@ -30,7 +29,6 @@ class _LazyModule:
 if TYPE_CHECKING:
     import onnx
     import onnxscript
-    import onnxscript._framework_apis.torch_2_5 as onnxscript_apis
 
     onnxscript_ir = onnxscript.ir
 
@@ -38,4 +36,3 @@ else:
     onnx = _LazyModule("onnx")
     onnxscript = _LazyModule("onnxscript")
     onnxscript_ir = _LazyModule("onnxscript.ir")
-    onnxscript_apis = _LazyModule("onnxscript._framework_apis.torch_2_5")

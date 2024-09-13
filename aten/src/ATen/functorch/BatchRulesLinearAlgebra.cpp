@@ -496,11 +496,6 @@ _scaled_dot_product_flash_attention_batch_rule(
   bool return_debug_mask,
   c10::optional<double> scale
 ) {
-  if (dropout_p > 0) {
-    auto maybe_layer = maybeCurrentDynamicLayer();
-    RandomnessType randomness = maybe_layer->randomness();
-    check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
-  }
   auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
   auto query_ = moveBatchDimToFront(query, query_bdim);
   auto key_ = moveBatchDimToFront(key, key_bdim);
@@ -545,11 +540,6 @@ fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
   bool is_causal,
   c10::optional<double> scale
 ) {
-  if (dropout_p > 0) {
-    auto maybe_layer = maybeCurrentDynamicLayer();
-    RandomnessType randomness = maybe_layer->randomness();
-    check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
-  }
   auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
   auto query_ = moveBatchDimToFront(query, query_bdim);
   auto key_ = moveBatchDimToFront(key, key_bdim);
@@ -587,11 +577,6 @@ _scaled_dot_product_cudnn_attention_batch_rule(
   bool return_debug_mask,
   c10::optional<double> scale
 ) {
-  if (dropout_p > 0) {
-    auto maybe_layer = maybeCurrentDynamicLayer();
-    RandomnessType randomness = maybe_layer->randomness();
-    check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
-  }
   auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
   auto query_ = moveBatchDimToFront(query, query_bdim);
   auto key_ = moveBatchDimToFront(key, key_bdim);

@@ -1,4 +1,5 @@
 #include "miniz.h"
+#include <iostream>
 
 #include "caffe2/serialize/crc_alt.h"
 

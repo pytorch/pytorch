@@ -27,17 +27,6 @@ function install_cusparselt_052 {
     rm -rf tmp_cusparselt
 }
 
-function install_cusparselt_062 {
-    # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
-    mkdir tmp_cusparselt && pushd tmp_cusparselt
-    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.6.2.3-archive.tar.xz
-    tar xf libcusparse_lt-linux-x86_64-0.6.2.3-archive.tar.xz
-    cp -a libcusparse_lt-linux-x86_64-0.6.2.3-archive/include/* /usr/local/cuda/include/
-    cp -a libcusparse_lt-linux-x86_64-0.6.2.3-archive/lib/* /usr/local/cuda/lib64/
-    popd
-    rm -rf tmp_cusparselt
-}
-
 function install_118 {
     echo "Installing CUDA 11.8 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.4.0"
     rm -rf /usr/local/cuda-11.8 /usr/local/cuda
@@ -132,7 +121,7 @@ function install_124 {
   cd ..
   rm -rf nccl
 
-  install_cusparselt_062
+  install_cusparselt_052
 
   ldconfig
 }

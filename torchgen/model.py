@@ -323,18 +323,6 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
     }
 
 
-# XPU specific dispatcy keys
-def is_xpu_dispatch_key(dk: DispatchKey) -> bool:
-    return dk in {
-        DispatchKey.XPU,
-        DispatchKey.QuantizedXPU,
-        DispatchKey.SparseXPU,
-        DispatchKey.SparseCsrXPU,
-        DispatchKey.NestedTensorXPU,
-        DispatchKey.AutogradXPU,
-    }
-
-
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:

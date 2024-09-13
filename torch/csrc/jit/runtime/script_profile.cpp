@@ -147,7 +147,7 @@ const ScriptProfile::SourceMap& ScriptProfile::dumpStats() {
   for (const auto& datapoint : datapoints_) {
     if (const auto& source = datapoint->sourceRange.source()) {
       if (auto fileLineCol = datapoint->sourceRange.file_line_col()) {
-        auto it = sourceMap_.find(*source);
+        auto it = sourceMap_.find(*source.get());
         if (it == sourceMap_.end()) {
           it = sourceMap_.emplace(SourceRef{source}, LineMap{}).first;
         }

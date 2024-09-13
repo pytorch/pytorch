@@ -96,10 +96,6 @@ class HalidePrinter(PythonPrinter):
     def _print_Float(self, expr):
         return f"hl.f32({expr})"
 
-    def _print_ToFloat(self, expr):
-        assert len(expr.args) == 1
-        return f"hl.f32({self._print(expr.args[0])})"
-
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.floor({self._print(expr.args[0])})")
@@ -1638,7 +1634,7 @@ class HalideKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            gpu=False,  # grid/stream is handled internally in halide
+            cuda=False,  # grid/stream is handled internally in halide
         )
 
     def generate_assert(self, check):

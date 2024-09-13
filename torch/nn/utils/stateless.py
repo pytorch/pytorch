@@ -186,7 +186,7 @@ def _reparametrize_module(
 def functional_call(
     module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
-    args: Optional[Union[Any, Tuple]] = None,
+    args: Union[Any, Tuple],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
@@ -264,7 +264,7 @@ def functional_call(
 def _functional_call(
     module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
-    args: Optional[Union[Any, Tuple]] = None,
+    args: Union[Any, Tuple],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
@@ -290,9 +290,7 @@ def _functional_call(
         )
     if kwargs is None:
         kwargs = {}
-    if args is None:
-        args = ()
-    elif not isinstance(args, tuple):
+    if not isinstance(args, tuple):
         args = (args,)
     with _reparametrize_module(
         module, parameters_and_buffers, tie_weights=tie_weights, strict=strict

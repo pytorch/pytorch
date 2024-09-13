@@ -94,12 +94,7 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             # For int8_weight -> dq -> bf16_weight
             return True
-
-        quant_registered = (
-            getattr(torch.ops.quantized_decomposed, "dequantize_per_channel", None)
-            is not None
-        )
-        if quant_registered and node.target in [
+        if node.target in [
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
@@ -227,7 +222,7 @@ class ConstantFolder(torch.fx.Interpreter):
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor
 
-    def run(self) -> Any:  # type: ignore[override]
+    def run(self) -> Any:
         env: Dict[torch.fx.Node, Any] = {}
         self.insert_placerholder_values(env)
         return super().run(initial_env=env)

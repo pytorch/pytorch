@@ -14,10 +14,7 @@ from torch.utils import _pytree as pytree
 
 class ExportTracepoint(HigherOrderOperator):
     def __init__(self):
-        super().__init__("_export_tracepoint")
-
-    def __call__(self, *args, **kwargs):
-        return super().__call__(*args, **kwargs)
+        super().__init__("export_tracepoint")
 
 
 _export_tracepoint = ExportTracepoint()
