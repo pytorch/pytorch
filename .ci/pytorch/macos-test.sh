@@ -167,6 +167,9 @@ test_torchbench_perf() {
   python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --inference --output=$(TEST_REPORTS_DIR)/torchbench_inference.csv
 
   echo "Pytorch benchmark on mps device completed"
+  # TEMP_DEBUG
+  cat $(TEST_REPORTS_DIR)/torchbench_training.csv
+  cat $(TEST_REPORTS_DIR)/torchbench_inference.csv
 }
 
 test_hf_perf() {
@@ -181,6 +184,10 @@ test_hf_perf() {
   python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/hf_inference.csv
 
   echo "HuggingFace benchmark on mps device completed"
+
+  # TEMP_DEBUG
+  cat $(TEST_REPORTS_DIR)/hf_training.csv
+  cat $(TEST_REPORTS_DIR)/hf_inference.csv
 }
 
 test_timm_perf() {
@@ -195,23 +202,41 @@ test_timm_perf() {
   python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/timm_inference.csv
 
   echo "timm benchmark on mps device completed"
+
+  # TEMP_DEBUG
+  cat $(TEST_REPORTS_DIR)/timm_inference.csv
+  cat $(TEST_REPORTS_DIR)/timm_training.csv
 }
 
 install_tlparse
 
-if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
-  test_python_shard "${SHARD_NUMBER}"
-  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+if [[ $TEST_CONFIG == *"test_mps"* ]]; then
+  if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+    test_python_shard "${SHARD_NUMBER}"
+    if [[ "${SHARD_NUMBER}" == 1 ]]; then
+      test_libtorch
+      test_custom_script_ops
+    elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+      test_jit_hooks
+      test_custom_backend
+    fi
+  else
+    test_python_all
     test_libtorch
     test_custom_script_ops
-  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
     test_jit_hooks
     test_custom_backend
   fi
-else
-  test_python_all
-  test_libtorch
-  test_custom_script_ops
-  test_jit_hooks
-  test_custom_backend
+fi
+
+if [[ $TEST_CONFIG == *"perf_all"* ]]; then
+  test_torchbench_perf
+  test_hf_perf
+  test_timm_perf
+elif [[ $TEST_CONFIG == *"perf_torchbench"* ]]; then
+  test_torchbench_perf
+elif [[ $TEST_CONFIG == *"perf_hf"* ]]; then
+  test_hf_perf
+elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
+  test_timm_perf
 fi
