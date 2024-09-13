@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Quantized convolution modules."""
 
-from typing import ClassVar, List, Optional
+from typing import ClassVar, List, Optional, Type
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -386,11 +386,11 @@ class Conv1d(_ConvNd):
 
     """
 
-    _FLOAT_MODULE: ClassVar = nn.Conv1d
-    _NNIQAT_CONV_BN_MODULE: ClassVar = nniqat.ConvBn1d
-    _NNI_CONV_RELU_MODULE: ClassVar = nni.ConvReLU1d
-    _NNI_CONV_ADD_MODULE: ClassVar = None
-    _NNI_CONV_ADD_RELU_MODULE: ClassVar = None
+    _FLOAT_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
+    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = nniqat.ConvBn1d
+    _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nni.ConvReLU1d
+    _NNI_CONV_ADD_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
+    _NNI_CONV_ADD_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
 
     def __init__(
         self,
@@ -518,11 +518,11 @@ class Conv2d(_ConvNd):
         >>> output = m(q_input)
 
     """
-    _FLOAT_MODULE: ClassVar = nn.Conv2d
-    _NNIQAT_CONV_BN_MODULE: ClassVar = nniqat.ConvBn2d
-    _NNI_CONV_RELU_MODULE: ClassVar = nni.ConvReLU2d
-    _NNI_CONV_ADD_MODULE: ClassVar = nni.ConvAdd2d
-    _NNI_CONV_ADD_RELU_MODULE: ClassVar = nni.ConvAddReLU2d
+    _FLOAT_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
+    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = nniqat.ConvBn2d
+    _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nni.ConvReLU2d
+    _NNI_CONV_ADD_MODULE: ClassVar[Type[nni.ConvAdd2d]] = nni.ConvAdd2d
+    _NNI_CONV_ADD_RELU_MODULE: ClassVar[Type[nni.ConvAddReLU2d]] = nni.ConvAddReLU2d
 
     def __init__(
         self,
@@ -647,11 +647,11 @@ class Conv3d(_ConvNd):
         >>> output = m(q_input)
 
     """
-    _FLOAT_MODULE: ClassVar = nn.Conv3d
-    _NNIQAT_CONV_BN_MODULE: ClassVar = nniqat.ConvBn3d
-    _NNI_CONV_RELU_MODULE: ClassVar = nni.ConvReLU3d
-    _NNI_CONV_ADD_MODULE: ClassVar = None
-    _NNI_CONV_ADD_RELU_MODULE: ClassVar = None
+    _FLOAT_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
+    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = nniqat.ConvBn3d
+    _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nni.ConvReLU3d
+    _NNI_CONV_ADD_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
+    _NNI_CONV_ADD_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
 
     def __init__(
         self,
@@ -744,7 +744,7 @@ MOD = ClassVar("MOD", bound=nn.modules.conv._ConvNd)
 
 
 class _ConvTransposeNd(_ConvNd):
-    _FLOAT_MODULE: ClassVar = MOD
+    _FLOAT_MODULE: ClassVar[Type[nn.modules.conv._ConvNd]] = MOD
 
     def __init__(
         self,
@@ -914,7 +914,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         torch.Size([1, 16, 12])
     """
 
-    _FLOAT_MODULE: ClassVar = nn.ConvTranspose1d
+    _FLOAT_MODULE: ClassVar[Type[nn.ConvTranspose1d]] = nn.ConvTranspose1d
 
     def __init__(
         self,
@@ -1037,7 +1037,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         torch.Size([1, 16, 12, 12])
     """
 
-    _FLOAT_MODULE: ClassVar = nn.ConvTranspose2d
+    _FLOAT_MODULE: ClassVar[Type[nn.ConvTranspose2d]] = nn.ConvTranspose2d
 
     def __init__(
         self,
@@ -1162,7 +1162,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         torch.Size([1, 16, 12, 12, 12])
     """
 
-    _FLOAT_MODULE: ClassVar = nn.ConvTranspose3d
+    _FLOAT_MODULE: ClassVar[Type[nn.ConvTranspose3d]] = nn.ConvTranspose3d
 
     def __init__(
         self,
