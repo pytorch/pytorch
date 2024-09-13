@@ -27,6 +27,7 @@ import torch
 import torch._logging
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
+from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
@@ -2647,7 +2648,7 @@ class TritonKernel(SIMDKernel):
         mutated_args = sorted(mutated_args)
 
         triton_meta_signature = signature_to_meta(
-            signature, size_dtype=self.index_dtype
+            signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
         triton_meta = {
             "signature": triton_meta_signature,
@@ -2675,7 +2676,7 @@ class TritonKernel(SIMDKernel):
         for tree in self.active_range_trees():
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
             signature.append(sizearg)
-            triton_meta_signature[len(argdefs)] = signature_of(
+            triton_meta_signature[sizearg.name] = signature_of(
                 sizearg, size_dtype=self.index_dtype
             )
             argdefs.append(f"{tree.prefix}numel")
@@ -2693,7 +2694,7 @@ class TritonKernel(SIMDKernel):
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
         # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
 
         self.triton_meta = triton_meta
 
@@ -2797,8 +2798,11 @@ class TritonKernel(SIMDKernel):
             if tree.prefix == "x" and self.no_x_dim:
                 code.writeline("XBLOCK: tl.constexpr = 1")
 
-    def _get_grid_fn(self):
+    def _get_grid_fn_str(self):
         return "grid"
+
+    def _get_grid_fn(self):
+        return default_grid_fn
 
     def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
@@ -2828,7 +2832,9 @@ class TritonKernel(SIMDKernel):
                 ws.nbytes, current_device, ws.zero_fill
             )
 
-        grid = wrapper.generate_default_grid(name, grid)
+        grid = wrapper.generate_default_grid(
+            name, grid, grid_callable=self._get_grid_fn()
+        )
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -2837,7 +2843,7 @@ class TritonKernel(SIMDKernel):
             gpu=True,
             triton=True,
             arg_types=arg_types,
-            grid_fn=self._get_grid_fn(),
+            grid_fn=self._get_grid_fn_str(),
             triton_meta=self.triton_meta,
         )
 

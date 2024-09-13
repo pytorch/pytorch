@@ -1003,6 +1003,12 @@ def flex_attention(
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
 
+    if query.device != block_mask.kv_num_blocks.device:
+        raise RuntimeError(
+            f"Expect q/k/v and block_mask to be on the same device "
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."
+        )
+
     kernel_options = _apply_kernel_options(
         query,
         key,
