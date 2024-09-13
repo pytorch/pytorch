@@ -148,7 +148,7 @@ static void im2col_out_mps_template(Tensor& output,
       std::array<int64_t, 4> input_sizes = {input_width, input_height, n_input_plane, batch_size};
       std::array<int64_t, 4> input_strides = {input.stride(3), input.stride(2), input.stride(1), input.stride(0)};
       std::array<int64_t, 4> output_strides = {output.stride(2), output.stride(1), output.stride(0), output_width};
-      getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input});
+      getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input, output});
 
       if (getMPSProfiler().isCaptureEnabled()) {
         getMPSProfiler().startCapture("im2col", stream);
