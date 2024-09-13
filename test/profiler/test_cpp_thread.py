@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: profiler"]
 
 import os
-import shutil
-import subprocess
 from unittest import skipIf
 
 import torch
@@ -11,14 +9,7 @@ from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
 def remove_build_path():
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        if IS_WINDOWS:
-            # rmtree returns permission error: [WinError 5] Access is denied
-            # on Windows, this is a word-around
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
-        else:
-            shutil.rmtree(default_build_root)
+    torch.utils.cpp_extension.remove_default_build_root()
 
 
 def is_fbcode():

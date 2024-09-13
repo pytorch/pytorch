@@ -80,6 +80,14 @@ class TestCompiledAutograd(TestCase):
         config.compiled_autograd = False
         compiled_autograd.reset()
 
+    @classmethod
+    def setUpClass(cls):
+        torch.utils.cpp_extension.remove_default_build_root()
+
+    @classmethod
+    def tearDownClass(cls):
+        torch.utils.cpp_extension.remove_default_build_root()
+
     def check_output_and_recompiles(
         self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
     ):

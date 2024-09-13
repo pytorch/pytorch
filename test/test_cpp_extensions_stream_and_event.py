@@ -1,8 +1,6 @@
 # Owner(s): ["module: mtia"]
 
 import os
-import shutil
-import sys
 import tempfile
 import unittest
 
@@ -27,12 +25,7 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 
 
 def remove_build_path():
-    if sys.platform == "win32":
-        # Not wiping extensions build folder because Windows
-        return
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root, ignore_errors=True)
+    torch.utils.cpp_extension.remove_default_build_root()
 
 
 # Since we use a fake MTIA device backend to test generic Stream/Event, device backends are mutual exclusive to each other.
