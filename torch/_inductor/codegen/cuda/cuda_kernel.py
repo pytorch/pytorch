@@ -2,8 +2,6 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
-from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
-
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
     Buffer,
@@ -98,9 +96,6 @@ class CUDATemplateKernel(CUDAKernel):
         )
         return res.getvalue()
 
-    def get_signature(self) -> str:
-        return self.signature
-
     def def_kernel(
         self,
         inputs: List[IRNode],
@@ -146,11 +141,7 @@ class CUDATemplateKernel(CUDAKernel):
                 self.args.output_buffers[node.get_name()] = name
 
         arg_defs, *_ = self.args.cpp_argdefs()
-        signature = (
-            f"int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
-        )
-        self.signature = signature
-        return signature
+        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
         self,
@@ -166,60 +157,30 @@ class CUDATemplateKernel(CUDAKernel):
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
-
-        if V.graph.cpp_wrapper:
-            # Make sure we initialize these kernels since they're exported as
-            # C-style symbol names.
-            assert isinstance(wrapper, CppWrapperCpu)
-            wrapper.initialized_kernels[name] = self
-            # Kinda hacky because we always originally initialize name with "KERNEL_NAME"
-            # So, we replace with the real kernel name passed as an arg to this function.
-            self.signature = self.signature.replace("KERNEL_NAME", name)
-
-        # NOTE:
-        # We have to use python_argdefs even for cpp wrapper because python_argdefs
-        # gives us torch.dtype which is useful when calling
-        # generate_args_decl(call_args, arg_types) in generate_kernel_call()
-
-        if V.graph.cpp_wrapper:
-            _, call_args, arg_types = self.args.cpp_argdefs()
-        else:
-            _, call_args, _, arg_types = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
             else:
-                call_args[i] = (
-                    call_args[i]
-                    if V.graph.cpp_wrapper
-                    else f"c_void_p({call_args[i]}.data_ptr())"
-                )
+                call_args[i] = f"c_void_p({call_args[i]}.data_ptr())"
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
-        # workspace_size is here.
-        call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
-        if V.graph.cpp_wrapper:
-            arg_types.append("size_t*")
+        call_args.append("None")
 
         if node.get_workspace_size() > 0:
             wrapper.generate_workspace_allocation(
                 node.get_workspace_size(), V.graph.scheduler.current_device, False
             )
-            data_ptr = "workspace.data_ptr()"
-            call_args.append(
-                data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
-            )
+            call_args.append("c_void_p(workspace.data_ptr())")
         else:
-            call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
-        if V.graph.cpp_wrapper:
-            arg_types.append("uint8_t*")
+            call_args.append("None")
 
         wrapper.generate_kernel_call(
             name,
             call_args,
-            cuda=True,
+            gpu=True,
             triton=False,
             arg_types=arg_types,
         )

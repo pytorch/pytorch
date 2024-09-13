@@ -28,11 +28,11 @@ try:
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
-        import test_cpu_repro
-        import test_cpu_select_algorithm
-        import test_mkldnn_pattern_matcher
-        import test_torchinductor
-        import test_torchinductor_dynamic_shapes
+        import test_cpu_repro  # @manual=fbcode//caffe2/test/inductor:test_cpu_repro-library
+        import test_cpu_select_algorithm  # @manual=fbcode//caffe2/test/inductor:cpu_select_algorithm_cpu-library
+        import test_mkldnn_pattern_matcher  # @manual
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+        import test_torchinductor_dynamic_shapes  # @manual=fbcode//caffe2/test/inductor:test_inductor-library_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -87,30 +87,7 @@ if TEST_WITH_ROCM:
         }
     )
 if config.abi_compatible:
-    xfail_list = [
-        "test_conv2d_binary_inplace_fusion_failed_cpu",
-        "test_conv2d_binary_inplace_fusion_pass_cpu",
-        "test_dynamic_qlinear_cpu",
-        "test_dynamic_qlinear_qat_cpu",
-        "test_lstm_packed_change_input_sizes_cpu",
-        "test_qconv2d_add_cpu",
-        "test_qconv2d_add_relu_cpu",
-        "test_qconv2d_cpu",
-        "test_qconv2d_dequant_promotion_cpu",
-        "test_qconv2d_maxpool2d_linear_dynamic_cpu",
-        "test_qconv2d_relu_cpu",
-        "test_qlinear_cpu",
-        "test_qlinear_add_cpu",
-        "test_qlinear_add_relu_cpu",
-        "test_qlinear_dequant_promotion_cpu",
-        "test_qlinear_gelu_cpu",
-        "test_qlinear_relu_cpu",
-        *[
-            func
-            for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
-            if func.startswith("test_linear_with_pointwise")
-        ],
-    ]
+    xfail_list = []
     for test_name in xfail_list:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cpp_wrapper",), is_skip=False
@@ -120,6 +97,11 @@ if config.abi_compatible:
         ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
     skip_list = [
         "test_multihead_attention_cpu",
+        *[
+            func
+            for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+            if func.startswith("test_linear_with_pointwise")
+        ],
     ]
     for test_name in skip_list:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
@@ -147,7 +129,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -209,8 +191,12 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["op_mkldnn__convolution_pointwise_binary.call"],
-                ["op_mkldnn__convolution_pointwise__binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise_binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise__binary.call"],
             ],
         ),
         BaseTest(
@@ -219,8 +205,12 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["op_mkldnn__convolution_pointwise__binary.call"],
-                ["op_mkldnn__convolution_pointwise_binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise__binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise_binary.call"],
             ],
         ),
         BaseTest(
@@ -319,11 +309,13 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
-                [
+                None
+                if config.abi_compatible
+                else [
                     "op_onednn_qconv2d_pointwise_.call",
                     "op_quantized_max_pool2d_.call",
                     "op_onednn_qlinear_pointwise_tensor.call",
-                ]
+                ],
             ],
         ),
         BaseTest(

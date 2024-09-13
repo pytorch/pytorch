@@ -206,8 +206,7 @@ class GradientHelper {
     } else if (node->kind() == prim::ConstantChunk) {
       auto* g = node->owningGraph();
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* input_list;
+      Value* input_list = nullptr;
       if (grad_values.size() == 1 &&
           grad_values[0]->type()->isSubtypeOf(*ListType::ofTensors())) {
         input_list = grad_values[0];
@@ -575,8 +574,7 @@ static void foldSizeIfNotEqual(Node* node) {
     // insert in front of _grad_sum_to_size
     WithInsertPoint guard(node);
     IValue ival{};
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* size;
+    Value* size = nullptr;
     if (input_size != output_size) {
       size = node->owningGraph()->insertConstant(*input_size);
     } else {

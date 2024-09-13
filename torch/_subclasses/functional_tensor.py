@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import contextlib
 import warnings
+import weakref
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
+from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -110,7 +111,10 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
     ]
 
-    def __new__(cls, elem):
+    # Used by auto_functionalize to determine base of tensors during inference mode.
+    _inference_mode_base: Optional["FunctionalTensor"] = None
+
+    def __new__(cls, elem, mode):
         assert torch._is_functional_tensor(elem)
 
         # In general, we'd like our functional tensor subclass to only be in charge of functionalization,
@@ -141,9 +145,9 @@ class FunctionalTensor(torch.Tensor):
             cls,
             elem.shape,  # sizes
             elem.stride() if not is_sparse_any(elem) else None,  # strides
-            elem.storage_offset()
-            if not is_sparse_any(elem)
-            else None,  # storage_offset
+            (
+                elem.storage_offset() if not is_sparse_any(elem) else None
+            ),  # storage_offset
             None,  # memory_format
             elem.dtype,  # dtype
             elem.layout,  # layout
@@ -157,6 +161,21 @@ class FunctionalTensor(torch.Tensor):
         )
         torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
+
+        if (
+            torch.is_inference_mode_enabled()
+            and torch._inductor.config.enable_auto_functionalized_v2
+        ):
+            if out.is_base_tensor():
+                out._inference_mode_base = None
+                # This assumes that the FunctionalTensor.elem does not change its storage after this point.
+                # Otherwise this would be invalid.
+                mode._storage_to_base[out.elem.untyped_storage()] = out
+            else:
+                out._inference_mode_base = mode._storage_to_base[
+                    out.elem.untyped_storage()
+                ]
+                assert out._inference_mode_base is not None
         return out
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -208,6 +227,7 @@ class FunctionalTensor(torch.Tensor):
     @staticmethod
     def to_functional(x):
         # We will do the wrapping for the user.
+
         assert not torch._is_functional_tensor(x)
         # The only autograd metadata we care about on the FunctionalTensor is:
         # - requires_grad (so autograd runs)
@@ -225,13 +245,16 @@ class FunctionalTensor(torch.Tensor):
 
         with functional_mode:
             torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
-            out = FunctionalTensor(x_functional)
+            out = FunctionalTensor(x_functional, functional_mode)
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
         return out
 
     def from_functional(self):
         torch._sync(self)
         return torch._from_functional_tensor(self.elem)
+
+    def is_base_tensor(self) -> bool:
+        return torch._is_functional_tensor_base(self.elem)
 
     def replace_(self, output) -> None:
         torch._functionalize_replace(self.elem, output)
@@ -278,6 +301,10 @@ class FunctionalTensor(torch.Tensor):
     int = _conversion_method_template(dtype=torch.int32)
     long = _conversion_method_template(dtype=torch.int64)
 
+    # TODO(sparse-team): fixes #133174 but can we do without the relay?
+    def to_dense(self):
+        return self.elem.to_dense()
+
     @property
     def layout(self):
         return self.elem.layout
@@ -299,6 +326,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         # track of the ordering between side effectful operations.
         self._tokens: Dict[Any, torch.Tensor] = {}
 
+        # Filled after forward tracing.
+        self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
+
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to
         # see which tensors need to be functionalized and discover how many
@@ -307,6 +337,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         # side-effectful ops. In the second stage there should be no token
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
+
+        self._storage_to_base: weakref.WeakKeyDictionary[
+            torch.storage.UntypedStorage, Optional[FunctionalTensor]
+        ] = weakref.WeakKeyDictionary()
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
@@ -335,12 +369,30 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        if self.export:
+            # We need to make sure that we don't decompose to() as usual in export mode,
+            # because it can get optimized away. Instead we always replace it with _to_copy().
+            if func == torch.ops.aten.to.dtype_layout:
+                kwargs.pop("copy", None)
+                return self.__torch_dispatch__(
+                    torch.ops.aten._to_copy.default, types, args, kwargs
+                )
+            if func == torch.ops.aten.to.dtype:
+                schema = tuple(arg.name for arg in func._schema.arguments)
+                for arg, name in zip(args[1:], schema[1:]):
+                    kwargs[name] = arg
+                kwargs.pop("copy", None)
+                return self.__torch_dispatch__(
+                    torch.ops.aten._to_copy.default, types, args[:1], kwargs
+                )
+
         unrecognized_types = [
             t
             for t in types
             if not issubclass(t, torch._subclasses.FakeTensor)
             and t not in [torch.Tensor, FunctionalTensor]
         ]
+
         if unrecognized_types:
             not_implemented_log.debug(
                 "FunctionalTensor unrecognized subclass(es): %s", unrecognized_types
@@ -392,16 +444,13 @@ class FunctionalTensorMode(TorchDispatchMode):
                 if r is not NotImplemented:
                     return r
 
-        def assert_is_functional(x):
-            assert torch._is_functional_tensor(x)
-
         def wrap(x):
             # Only wrap our outputs in subclasses if the inner functionalization call
             # also wrapped outputs into FunctionalTensorWrappers.
             # When can this happen? e.g. `torch.div(2, 2)`
             assert not isinstance(x, FunctionalTensor)
             if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
-                return FunctionalTensor(x)
+                return FunctionalTensor(x, self)
             return x
 
         def unwrap(x):
@@ -410,6 +459,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         from torch._higher_order_ops.auto_functionalize import (
             can_auto_functionalize,
             do_auto_functionalize,
+            do_auto_functionalize_v2,
         )
 
         if can_auto_functionalize(
@@ -420,7 +470,12 @@ class FunctionalTensorMode(TorchDispatchMode):
             # it doesn't matter what mode we use here because
             # the implementation of do_auto_functionalize doesn't
             # interact with FunctionalTensorMode at all
-            return do_auto_functionalize(func, args, kwargs)
+            import torch._inductor.config as inductor_config
+
+            if self.export or not inductor_config.enable_auto_functionalized_v2:
+                return do_auto_functionalize(func, args, kwargs)
+            else:
+                return do_auto_functionalize_v2(func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
@@ -587,7 +642,7 @@ class BaseFunctionalizeAPI(ABC):
     @abstractmethod
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+    ) -> Any:
         pass
 
     @abstractmethod
@@ -630,8 +685,8 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
             )
 
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]
+    ) -> Any:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
@@ -724,9 +779,11 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
     def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(
             inner_f,
-            remove="mutations_and_views"
-            if self.interpreter.functionalize_add_back_views()
-            else "mutations",
+            remove=(
+                "mutations_and_views"
+                if self.interpreter.functionalize_add_back_views()
+                else "mutations"
+            ),
         )
 
     def redispatch_to_next(self) -> ContextManager:

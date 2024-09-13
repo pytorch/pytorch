@@ -445,6 +445,7 @@ aten::_nested_from_padded
 aten::_nested_from_padded.out
 aten::_nested_from_padded_and_nested_example
 aten::_nested_from_padded_and_nested_example.out
+aten::_nested_from_padded_tensor
 aten::_nested_get_jagged_dummy
 aten::_nested_get_lengths
 aten::_nested_get_max_seqlen
@@ -555,6 +556,7 @@ aten::_sparse_sum_backward
 aten::_sparse_sum_backward.out
 aten::_spdiags
 aten::_spdiags.out
+aten::_spsolve
 aten::_stack
 aten::_stack.out
 aten::_standard_gamma
@@ -1300,8 +1302,6 @@ aten::to_padded_tensor.out
 aten::topk
 aten::topk.values
 aten::transpose_
-aten::transpose_copy.int
-aten::transpose_copy.int_out
 aten::triangular_solve
 aten::triangular_solve.X
 aten::unbind_copy.int

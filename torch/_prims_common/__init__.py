@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import operator
 import warnings
-import weakref
 from contextlib import nullcontext
 from enum import Enum
-from functools import cmp_to_key, reduce
+from functools import reduce
 from typing import (
     Any,
     Callable,
