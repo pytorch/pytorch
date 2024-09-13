@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import sys
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
@@ -117,6 +118,16 @@ except AttributeError:
     pass  # register_at_fork does not exists on windows
 
 
+def get_worker_start_method() -> str:
+    """
+    Temporary for internal subprocess pool rollout. Assign config.worker_start_method
+    lazily and return it. TODO: remove after rollout.
+    """
+    if config.worker_start_method is None:
+        config.worker_start_method = config.decide_worker_start_method()
+    return config.worker_start_method
+
+
 class AsyncCompile:
     def __init__(self) -> None:
         pass
@@ -128,16 +139,21 @@ class AsyncCompile:
         return ThreadPoolExecutor(config.compile_threads)
 
     @staticmethod
+    def _get_ready():
+        """No-op function to help mark when the subprocess pool is ready."""
+        return "ready"
+
+    @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
         assert config.compile_threads > 1
         pool: AnyPool
-        if config.worker_start_method == "subprocess":
+        if get_worker_start_method() == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
             pool = SubprocPool(config.compile_threads)
         else:
             pre_fork_setup()
-            ctx = multiprocessing.get_context(config.worker_start_method)
+            ctx = multiprocessing.get_context(get_worker_start_method())
             pool = ProcessPoolExecutor(
                 config.compile_threads,
                 mp_context=ctx,
@@ -149,6 +165,8 @@ class AsyncCompile:
             # kill the worker thread that sends the shutdown message to the workers...
             multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
+        # Set an attribute we can check to see if the pool is ready.
+        pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
         _pool_set.add(pool)
         return pool
 
@@ -166,13 +184,19 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
+    def _use_process_pool(self):
+        return (
+            config.compile_threads > 1
+            and self.process_pool().ready_future.done()  # type: ignore[union-attr]
+        )
+
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         kernel_code_log.info("Triton Kernel:\n%s", source_code)
         _compile_start()
         _set_triton_ptxas_path()
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
-        if config.compile_threads > 1:
+        if self._use_process_pool():
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
@@ -258,7 +282,15 @@ class AsyncCompile:
                 if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                     pbar.set_postfix_str(key)
                 if isinstance(result, (Future, CodeCacheFuture)):
-                    scope[key] = result.result()
+                    try:
+                        scope[key] = result.result()
+                    except BrokenProcessPool as e:
+                        raise RuntimeError(
+                            "A compilation subprocess exited unexpectedly. This "
+                            "is likely due to a crash. To facilitate debugging, "
+                            "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
+                            "to cause compilation to occur in the main process."
+                        ) from e
                     pbar.update(1)
 
         _compile_end()
@@ -269,6 +301,9 @@ if (
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
     # The subprocess pool is only used for the Triton backend
     or not has_triton_package()
+    # Skip for fbcode so we can query the worker_start_method lazily.
+    # TODO: remove once "subprocess" has rolled out internally.
+    or config.is_fbcode()
 ):
     pass
 else:

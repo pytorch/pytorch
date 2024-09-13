@@ -15,7 +15,11 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.runtime.hints import DeviceProperties
-from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
+from torch._inductor.utils import (
+    run_and_get_code,
+    run_and_get_graph_lowering,
+    run_fw_bw_and_get_code,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
@@ -34,15 +38,15 @@ from torch.testing._internal.inductor_utils import skipCUDAIf
 
 try:
     try:
-        import triton
-        from triton import language as tl
+        import triton  # @manual
+        from triton import language as tl  # @manual
     except ImportError:
         raise unittest.SkipTest("requires triton")  # noqa: B904
 
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -429,7 +433,11 @@ class CudaReproTests(TestCase):
                 triton.Config({"XBLOCK": 2}),
             ],
             meta={
-                "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+                "signature": {
+                    "in_out_ptr0": "*fp32",
+                    "in_ptr0": "*fp32",
+                    "xnumel": "i32",
+                },
                 "device": DeviceProperties.create(torch.device("cuda")),
                 "configs": [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())],
                 "constants": {},
@@ -1239,6 +1247,20 @@ class CudaReproTests(TestCase):
         idxs = remove_unaligned_input_idxs(inputs, [0, 2])
         self.assertEqual(idxs, [0])
 
+    @config.patch("triton.cudagraphs", True)
+    def test_unused_cpu_input_cudagraphs(self):
+        def fn(x, y):
+            return x.sin().sin().sin().sin().cos() + 1
+
+        fx_graph = torch.fx.symbolic_trace(fn)
+        inp = [torch.randn(64, device="cuda"), torch.randn(64, device="cpu")]
+        compiled_fn, (graph,) = run_and_get_graph_lowering(
+            torch._inductor.compile, fx_graph, inp
+        )
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+        self.assertEqual(compiled_fn(*inp), fn(*inp))
+
     def test_epilogue_fusion_with_view(self):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -1262,6 +1284,27 @@ class CudaReproTests(TestCase):
             out2 = m(input_tensor)
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
 
+    @config.patch("triton.cudagraphs", True)
+    def test_cpu_index(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x[torch.arange(32)]
+
+        result, (graph,) = run_and_get_graph_lowering(
+            fn, torch.randn(64, device="cuda")
+        )
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+
+        inp = torch.randn(64, device="cuda", requires_grad=True)
+        result, (graph,) = run_and_get_graph_lowering(fn, inp)
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+
+        result, (graph,) = run_and_get_graph_lowering(lambda: result.sum().backward())
+        self.assertEqual(graph.disable_cudagraphs_reason, None)
+        self.assertEqual(graph.device_types, {"cuda"})
+
     def test_reflection_pad_loop_order(self):
         def fn(x, y):
             a = torch.nn.functional.pad(x, (5, 5, 5, 5), mode="reflect")
@@ -1276,7 +1319,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        kernel_code = "\n".join(code[0].split("\n")[58:72])
+        kernel_code = "\n".join(code[0].split("\n")[60:74])
         self.assertExpectedInline(
             kernel_code,
             """\

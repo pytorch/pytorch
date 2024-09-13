@@ -1,4 +1,4 @@
-#include <torch/csrc/api/include/torch/types.h>
+#include <torch/csrc/api/include/torch/types.h>  // @manual=fbcode//caffe2:libtorch
 
 #include <cstdint>
 #include <iostream>
@@ -26,9 +26,9 @@ Tensor fn_with_all_inputs_impl(
     at::ArrayRef<at::Scalar> scalars,
     const std::string& string,
     const std::vector<std::string>& strings,
-    const c10::ScalarType& dtype,
-    const MemoryFormat& memory_format,
-    const Layout& layout,
+    // const c10::ScalarType& dtype,
+    // const MemoryFormat& memory_format,
+    // const Layout& layout,
     const Device& device,
     // optional
     const std::optional<Tensor>& o_tensor,
@@ -45,9 +45,9 @@ Tensor fn_with_all_inputs_impl(
     const std::optional<at::ArrayRef<at::Scalar>>& o_scalars,
     const std::optional<std::string>& o_string,
     const std::optional<std::vector<std::string>>& o_strings,
-    const std::optional<c10::ScalarType>& o_dtype,
-    const std::optional<MemoryFormat>& o_memory_format,
-    const std::optional<Layout>& o_layout,
+    // const std::optional<c10::ScalarType>& o_dtype,
+    // const std::optional<MemoryFormat>& o_memory_format,
+    // const std::optional<Layout>& o_layout,
     const std::optional<Device>& o_device) {
   std::cout << "tensor shape: " << tensor.sizes() << std::endl;
 
@@ -79,9 +79,9 @@ Tensor fn_with_all_inputs_impl(
   std::cout << "scalars " << c10::IValue(scalars) << std::endl;
   std::cout << "string " << c10::IValue(string) << std::endl;
   std::cout << "strings " << c10::IValue(strings) << std::endl;
-  std::cout << "dtype " << c10::IValue(dtype) << std::endl;
-  std::cout << "memory_format " << c10::IValue(memory_format) << std::endl;
-  std::cout << "layout " << c10::IValue(layout) << std::endl;
+  // std::cout << "dtype " << c10::IValue(dtype) << std::endl;
+  // std::cout << "memory_format " << c10::IValue(memory_format) << std::endl;
+  // std::cout << "layout " << c10::IValue(layout) << std::endl;
   std::cout << "device " << c10::IValue(device) << std::endl;
 
   std::cout << "o_tensor "
@@ -135,17 +135,17 @@ Tensor fn_with_all_inputs_impl(
   std::cout << "o_strings "
             << (o_strings.has_value() ? c10::IValue(o_strings.value()) : "None")
             << std::endl;
-  std::cout << "o_dtype "
-            << (o_dtype.has_value() ? c10::IValue(o_dtype.value()) : "None")
-            << std::endl;
-  std::cout << "o_memory_format "
-            << (o_memory_format.has_value()
-                    ? c10::IValue(o_memory_format.value())
-                    : "None")
-            << std::endl;
-  std::cout << "o_layout "
-            << (o_layout.has_value() ? c10::IValue(o_layout.value()) : "None")
-            << std::endl;
+  // std::cout << "o_dtype "
+  //           << (o_dtype.has_value() ? c10::IValue(o_dtype.value()) : "None")
+  //           << std::endl;
+  // std::cout << "o_memory_format "
+  //           << (o_memory_format.has_value()
+  //                   ? c10::IValue(o_memory_format.value())
+  //                   : "None")
+  //           << std::endl;
+  // std::cout << "o_layout "
+  //           << (o_layout.has_value() ? c10::IValue(o_layout.value()) : "None")
+  //           << std::endl;
   std::cout << "o_device "
             << (o_device.has_value() ? c10::IValue(o_device.value()) : "None")
             << std::endl;
@@ -236,9 +236,9 @@ Tensor fn_with_all_inputs_meta(
     at::ArrayRef<at::Scalar> scalars,
     const std::string& string,
     const std::vector<std::string>& strings,
-    const c10::ScalarType& dtype,
-    const MemoryFormat& memory_format,
-    const Layout& layout,
+    // const c10::ScalarType& dtype,
+    // const MemoryFormat& memory_format,
+    // const Layout& layout,
     const Device& device,
     // optional
     const std::optional<Tensor>& o_tensor,
@@ -255,9 +255,9 @@ Tensor fn_with_all_inputs_meta(
     const std::optional<at::ArrayRef<at::Scalar>>& o_scalars,
     const std::optional<std::string>& o_string,
     const std::optional<std::vector<std::string>>& o_strings,
-    const std::optional<c10::ScalarType>& o_dtype,
-    const std::optional<MemoryFormat>& o_memory_format,
-    const std::optional<Layout>& o_layout,
+    // const std::optional<c10::ScalarType>& o_dtype,
+    // const std::optional<MemoryFormat>& o_memory_format,
+    // const std::optional<Layout>& o_layout,
     const std::optional<Device>& o_device) {
   return tensor;
 }
@@ -313,9 +313,9 @@ TORCH_LIBRARY(aoti_custom_ops, m) {
       "float f64, float[] f64s, "
       "Scalar scalar, Scalar[] scalars, "
       "str string, str[] strings, "
-      "ScalarType dtype, "
-      "MemoryFormat memory_format, "
-      "Layout layout, "
+      // "ScalarType dtype, "
+      // "MemoryFormat memory_format, "
+      // "Layout layout, "
       "Device device, "
       "*, "
       "Tensor? o_tensor, Tensor[]? o_tensors, "
@@ -325,9 +325,9 @@ TORCH_LIBRARY(aoti_custom_ops, m) {
       "float? o_f64, float[]? o_f64s, "
       "Scalar? o_scalar, Scalar[]? o_scalars, "
       "str? o_string, str[]? o_strings, "
-      "ScalarType? o_dtype, "
-      "MemoryFormat? o_memory_format, "
-      "Layout? o_layout, "
+      // "ScalarType? o_dtype, "
+      // "MemoryFormat? o_memory_format, "
+      // "Layout? o_layout, "
       "Device? o_device) -> Tensor");
 
   m.def("fn_with_default_input(Tensor t, int i=3) -> Tensor");
