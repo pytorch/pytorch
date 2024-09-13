@@ -42,6 +42,7 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
         if from_.device.type == to_.device.type:
             assert from_.device.type == "openreg"
             op = torch.ops.aten.copy_.default
+            args = to_, from_
             # handled below as a regular copy
         elif from_.device.type == "openreg":
             args, _ = prepare_for_sending((from_,), {})
