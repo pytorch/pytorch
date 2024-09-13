@@ -32,6 +32,9 @@ from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 
 if HAS_CUDA:
+    import triton  # @manual
+    import triton.language as tl  # @manual
+
     from torch.testing._internal.triton_utils import add_kernel
 
 aten = torch.ops.aten
@@ -84,7 +87,6 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
 
 class TestCase(InductorTestCase):
     device = DEVICE
-    pass
 
 
 class NumBytesMetricTests(TestCase):
@@ -860,6 +862,99 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
     @requires_cuda
+    def test_inplace_triton_kernel_training(self):
+        @triton.jit
+        def sin_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            output = tl.sin(x)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def sin_triton(x, out):
+            n_elements = x.numel()
+            sin_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=4)
+
+        factory_op = torch.empty_like
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = factory_op(x)
+                sin_triton(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = factory_op(grad)
+                sin_triton(saved, out)
+                return out
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel_train(f, x), """9""")
+
+    @requires_cuda
+    def test_inplace_custom_op_training_two_mutated_inputs(self):
+        @torch.library.custom_op(
+            "_reinplacing::sin_cos", mutates_args={"out_sin", "out_cos"}
+        )
+        def sin_cos(
+            x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor
+        ) -> None:
+            out_sin.copy_(x.sin())
+            out_cos.copy_(x.cos())
+
+        def f(x):
+            out0 = torch.empty_like(x)
+            out1 = torch.empty_like(x)
+            sin_cos(x, out0, out1)
+            return x.clone(), out0, out1
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel(f, x), """21""")
+
+    @requires_cuda
+    def test_inplace_custom_op_training(self):
+        @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
+        def sin(x: torch.Tensor, result: torch.Tensor) -> None:
+            result.copy_(x.sin())
+
+        factory_op = torch.empty_like
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = factory_op(x)
+                sin(x, out)
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (saved,) = ctx.saved_tensors
+                out = factory_op(grad)
+                sin(saved, out)
+                return out
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        self.assertExpectedInline(count_numel_train(f, x), """9""")
+
+    @requires_cuda
     def test_inplace_custom_op(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor x, Tensor(a!) out) -> ()")
@@ -887,7 +982,7 @@ class InplacingTests(TestCase):
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 0)
 
-            self.assertExpectedInline(count_numel(f, x, out), """6""")
+            self.assertExpectedInline(count_numel(f, x, out), """21""")
 
     @requires_cuda
     def test_inplace_custom_op_intermediate(self):
@@ -918,7 +1013,7 @@ class InplacingTests(TestCase):
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 1)
 
-            self.assertExpectedInline(count_numel(f, x, out), """6""")
+            self.assertExpectedInline(count_numel(f, x, out), """21""")
 
     @requires_cuda
     def test_inplace_custom_op_two_mutated_inputs(self):
@@ -950,7 +1045,7 @@ class InplacingTests(TestCase):
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 1)
 
-            self.assertExpectedInline(count_numel(f), """21""")
+            self.assertExpectedInline(count_numel(f), """39""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v1(self):
@@ -962,7 +1057,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """40""")
+        self.assertExpectedInline(count_numel(f, *inp), """50""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v2(self):
@@ -975,7 +1070,7 @@ class InplacingTests(TestCase):
             return output, tmp
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """70""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v3(self):
@@ -988,7 +1083,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v4(self):
@@ -1002,7 +1097,7 @@ class InplacingTests(TestCase):
             return output, output2
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """70""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v5(self):
@@ -1016,7 +1111,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v6(self):
@@ -1029,7 +1124,7 @@ class InplacingTests(TestCase):
 
         t = T(10)
         inp = (t, t.view(-1))
-        self.assertExpectedInline(count_numel(f, *inp), """40""")
+        self.assertExpectedInline(count_numel(f, *inp), """50""")
 
     def test_inplace_randperm_scatter(self):
         def scaled_index_add(x, y, scale_y):
@@ -1038,7 +1133,7 @@ class InplacingTests(TestCase):
             return out
 
         inp = (T(10, 10), T(5, 10), T(10))
-        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """240""")
+        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """250""")
 
 
 # Test cases where we don't do the right thing yet.

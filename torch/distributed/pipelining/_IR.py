@@ -13,7 +13,6 @@ import torch
 import torch.fx as fx
 from torch.distributed import ProcessGroup
 from torch.export import ExportedProgram
-from torch.export._trace import _export
 from torch.export.unflatten import (
     _assign_attr,
     _AttrKind,
@@ -416,8 +415,8 @@ class _LinearNodeList:
     def __init__(self, node_list):
         self.serialize_node_list = []
         for node in node_list:
-            node_args = fx.node.map_arg(node.args, lambda n: _NodeReference(n.name))  # type: ignore[arg-type, return-value]
-            node_kwargs = fx.node.map_arg(node.kwargs, lambda n: _NodeReference(n.name))  # type: ignore[arg-type, return-value]
+            node_args = fx.node.map_arg(node.args, lambda n: _NodeReference(n.name))  # type: ignore[arg-type,return-value]
+            node_kwargs = fx.node.map_arg(node.kwargs, lambda n: _NodeReference(n.name))  # type: ignore[arg-type,return-value]
             serialize_node = fx.Node(
                 graph=None,  # type: ignore[arg-type]
                 name=node.name,
@@ -1005,14 +1004,11 @@ class Pipe(torch.nn.Module):
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
-            with torch.no_grad():
-                ep = _export(
-                    mod,
-                    example_args,
-                    example_kwargs,
-                    strict=True,
-                    pre_dispatch=False,
-                )
+            ep = torch.export.export(
+                mod,
+                example_args,
+                example_kwargs,
+            )
         except Exception as e:
             raise RuntimeError(
                 "It seems that we cannot capture your model as a full graph. "

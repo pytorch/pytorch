@@ -34,6 +34,7 @@ from torch._prims_common.wrappers import (
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 
+
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 # None of these functions are publicly accessible; get at them
@@ -420,6 +421,15 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
+@register_decomposition(aten._safe_softmax)
+def safe_softmax(self, dim, dtype=None):
+    out = torch.softmax(self, dim=dim, dtype=dtype)
+    masked = self.eq(float("-inf"))
+    masked_rows = torch.all(masked, dim=dim, keepdim=True)
+    zeros = torch.zeros_like(out)
+    return torch.where(masked_rows, zeros, out)
+
+
 @register_decomposition(aten.smooth_l1_loss)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -755,18 +765,18 @@ def slice_forward(
     start_val = start if start is not None else 0
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val += sizes[dim]
 
-    if end_val < 0:
+    if guard_size_oblivious(end_val < 0):
         end_val += sizes[dim]
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val = 0
-    elif start_val > sizes[dim]:
+    elif guard_size_oblivious(start_val > sizes[dim]):
         start_val = sizes[dim]
 
-    if end_val < start_val:
+    if guard_size_oblivious(end_val < start_val):
         end_val = start_val
     elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
         end_val > sizes[dim]
@@ -1399,20 +1409,17 @@ def split_with_sizes(
         sum(split_sizes) == self.shape[dim],
         lambda: f"Split sizes add up to {sum(split_sizes)} but got the tensor's size of {self.shape[dim]}",
     )
-    num_splits = len(split_sizes)
+
     splits = []
-    start_idx = 0
+    offset = self.storage_offset()
 
-    # Avoid importing sympy at a module level
-    from torch.fx.experimental.symbolic_shapes import expect_true
-
-    for i in range(num_splits):
-        length = split_sizes[i]
-        # We know this is true thanks to the sum, but this assertion helps
-        # out our internal reasoning
-        expect_true(start_idx + length <= self.shape[dim])
-        splits.append(self.narrow(dim, start_idx, length))
-        start_idx += length
+    for split_size in split_sizes:
+        new_shape = list(self.shape)
+        new_shape[dim] = split_size
+        # We reimplement narrow here to avoid a lot of checks in the
+        # decomposition of narrow which calls slice_in_dim and slice
+        splits.append(self.as_strided(new_shape, self.stride(), offset))
+        offset = offset + self.stride()[dim] * split_size
     return splits
 
 
@@ -1575,7 +1582,7 @@ def native_group_norm_backward(
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
     torch._check(
         input.numel() == N * C * HxW,
-        lambda: f"Expect input to have { N * C * HxW} elements",
+        lambda: f"Expect input to have {N * C * HxW} elements",
     )
     torch._check(
         mean.shape == (N, group),
@@ -3800,6 +3807,11 @@ def _unsafe_index(x, indices):
     return aten.index(x, indices)
 
 
+@register_decomposition([aten._unsafe_index_put])
+def _unsafe_index_put(x, indices, value, accumulate=False):
+    return aten.index_put(x, indices, value, accumulate)
+
+
 @register_decomposition([aten._unsafe_masked_index])
 def _unsafe_masked_index(x, mask, indices, fill):
     for index in indices:
@@ -4896,9 +4908,7 @@ def scaled_dot_product_flash_attention_for_cpu(
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
     # * flash_attention.
-    # flash_attention allocates output tensor as (N, L, H, E)
-    #   it then transposes that to get (N, H, L, E) which is supposed to be the return
-    # tensor dim for scaled_dot_product_attention
+    # flash_attention allocates output tensor as (N, H, L, E) (see PR #134656)
     # assume x: [N, H, L, E] is the output sdpa
     # In MHA code, this output is then permuted via (2, 0, 1, 3) to get
     # (L, N, H, E) dim tensor
@@ -4914,20 +4924,16 @@ def scaled_dot_product_flash_attention_for_cpu(
     # subsequent view is not valid and the export fails
     # solution is to maintain the return tensor view from the decomp to be
     # exactly same as *flash* variant.
-    # flash variants output is contiguous as [N, L, H, E]
-    # _match variant out is contiguous as [N, H, L, E]
-    # out = out.transpose(1, 2).contiguous gets output as contiguous
-    # in [N, L, H, E].
-    # Subsrequent transpose(1, 2) then returns a view on which
-    # aforementioned code snippet, as showm below, is valid
-    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
-    # x = x.view(L * N, H * E)
 
     # Really the invariant you want to maintain is:
     # pre-dispatch op-output and its decomposed representation must
     # return tensor with same view and dims
-    output = output.transpose(1, 2).contiguous(memory_format=torch.contiguous_format)
-    return (output.transpose(1, 2), attn)
+    output = (
+        output.permute(2, 0, 1, 3)
+        .contiguous(memory_format=torch.contiguous_format)
+        .permute(1, 2, 0, 3)
+    )
+    return output, attn
 
 
 def register_inplace(aten_op, outplace_op):
@@ -4982,6 +4988,10 @@ def sum_default(
 
 @register_decomposition([aten.squeeze.default, aten.squeeze.dim])
 def squeeze_default(self: Tensor, dim: Optional[int] = None):
+    # handle a scalar directly
+    if not isinstance(self, torch.Tensor):
+        return self
+    # perform squeeze
     if dim is None:
         return aten.squeeze.dims(self, list(range(self.dim())))
     else:

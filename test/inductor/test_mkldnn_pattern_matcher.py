@@ -607,6 +607,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
         )
         out_feature = 30
+
         for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
             # addmm(mm) + (linear+add)
@@ -732,7 +733,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
                 self.unary_fn = copy.deepcopy(unary_op)
-                self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(
+                    128, 128, kernel_size=3, stride=1, bias=False
+                )
                 self.unary_fn2 = copy.deepcopy(unary_op)
 
             def forward(self, x):
@@ -888,8 +891,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
                 self.add_fn = add_fn
                 self.relu = torch.nn.ReLU()
-                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1, bias=False)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1, bias=False)
                 self.add_fn2 = add_fn
                 self.relu2 = torch.nn.ReLU()
                 self.use_relu = use_relu
@@ -1799,12 +1802,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
                         mod,
                         (v,),
                         [
-                            "op_qlinear_pointwise.call",
-                            "op_qlinear_pointwise_binary.call",
+                            "torch.ops.onednn.qlinear_pointwise.tensor",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
+                        ]
+                        if config.abi_compatible
+                        else [
+                            "op_onednn_qlinear_pointwise_tensor.call",
+                            "op_onednn_qlinear_pointwise_binary_tensor.call",
                         ],
                         [],
                         check_quantization=True,
-                        num_include_ops=[2, 2],
+                        num_include_ops=[4, 4] if config.abi_compatible else [2, 2],
                     )
                 else:
                     # For python wrapper
@@ -2160,7 +2168,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv_transpose = torch.nn.ConvTranspose2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2182,7 +2190,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     def test_leaky_relu_pattern_fallback(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2202,7 +2210,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     # https://github.com/pytorch/pytorch/issues/99838.
     def test_conv2d_add_scalar(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2222,7 +2230,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self, include_ops=None, exclude_ops=None
     ):
         class Model_v1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2233,7 +2241,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return torch.add(conv_out, other.relu())
 
         class Model_v2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2274,7 +2282,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     ):
         # Written buffer is graph input, we can't fuse inplace.
         class Model_v1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2286,7 +2294,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         # Written buffer is an alias tensor, we can't fuse inplace.
         class Model_v2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2297,7 +2305,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return torch.add(conv_out, other[1:2, :, :, :]), other
 
         class Model_v3(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2316,7 +2324,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         # Written buffer is an ReinterpretView, we can't fuse inplace.
         class Model_v4(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 32, 3, padding=1, bias=True)
                 self.linear = torch.nn.Linear(32 * 28, 32 * 28)
@@ -2325,12 +2333,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x, y):
                 x = self.conv(self.relu(x))
                 y = self.linear(y)
-                y = torch.cat((y, y), 1)
+                y = torch.cat((y, y + 1), 1)
                 y = torch.ops.aten.permute.default(y, [0, 2, 1]).reshape(1, 32, 28, 28)
                 return x + y
 
         class Model_v5(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.relu = torch.nn.ReLU()
@@ -2364,7 +2372,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv2d_binary_fusion_failed(self):
         # we don't support alpha !=1 case or other has different size with conv's output.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2377,7 +2385,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # https://github.com/pytorch/pytorch/issues/100802.
         # we can't do the fusion when add's inputs are same tensor.
         class Model2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
@@ -2391,7 +2399,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # https://github.com/pytorch/pytorch/issues/101374.
         # we can't do the fusion when add's inputs are mixed dtype.
         class Model3(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
@@ -2427,7 +2435,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     def test_reproduce_99842_issue(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
 
@@ -2619,7 +2627,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
     def test_conv_transpose2d_dynamic_shapes(self):
         # We don't support conv_transpose2d for now.
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv_transpose2d = torch.nn.ConvTranspose2d(
                     3, 16, 3, stride=2, padding=1
