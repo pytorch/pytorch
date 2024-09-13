@@ -334,11 +334,15 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
 
 class GeneratorFunctionVariable(UserFunctionVariable):
-    """functions that behaves like iterators"""
+    """functions that behaves like iterators
+
+    .. note::
+
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
 
     def __init__(self, fn, is_constant=False, **kwargs) -> types.NoneType:
         super().__init__(fn, is_constant, **kwargs)
-        self.exhausted = False
         self.inline_tracer = None
 
     def call_function(
@@ -357,15 +361,6 @@ class GeneratorFunctionVariable(UserFunctionVariable):
         )
 
         return self
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        raise unimplemented("abcd")
 
     def next_variable(self, tx):
         from torch._dynamo import exc

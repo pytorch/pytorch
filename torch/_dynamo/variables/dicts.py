@@ -221,7 +221,7 @@ class ConstDictVariable(VariableTracker):
     ):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
-            raise_observed_exception(KeyError, tx, self)
+            raise_observed_exception(KeyError, tx)
         return self.items[key]
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):

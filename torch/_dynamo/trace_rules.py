@@ -3099,7 +3099,6 @@ def is_numpy_type_info(obj) -> bool:
 BUILTIN_SKIPLIST = (
     abc,
     collections,
-    # contextlib,
     copy,
     copyreg,
     dataclasses,

@@ -293,7 +293,10 @@ class ReturnValueOp(Exception):
 
 
 class YieldValueOp(Exception):
-    pass
+    """
+    Signal to the symbolic tracer to stop and return control flow to the
+    caller
+    """
 
 
 def stack_op(fn: typing.Callable[..., object]):
@@ -3390,7 +3393,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def RETURN_VALUE(self, inst):
         # RETURN_VALUE in a generator raises StopIteration instead of actually
         # returning a value
-        exc.raise_observed_exception(StopIteration, self, None)
+        exc.raise_observed_exception(StopIteration, self)
 
     def YIELD_FROM(self, inst):
         assert len(self.stack) >= 2

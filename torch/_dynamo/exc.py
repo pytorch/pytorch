@@ -216,7 +216,7 @@ observed_exception_map = {
 }
 
 
-def raise_observed_exception(e, tx, vt):
+def raise_observed_exception(e, tx):
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception

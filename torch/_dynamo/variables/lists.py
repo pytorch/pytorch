@@ -837,7 +837,7 @@ class ListIteratorVariable(IteratorVariable):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            raise_observed_exception(StopIteration, tx, self)
+            raise_observed_exception(StopIteration, tx)
 
         tx.output.side_effects.mutation(self)
         self.index += 1
