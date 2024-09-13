@@ -418,7 +418,7 @@ PyObject* wrap_node_origins(
       uint32_t node_id = vec[i];
       PyObject* pyorigin = PyTuple_Pack(
           2,
-          PyLong_FromLong(node_id),
+          THPUtils_packUInt32(node_id),
           PyUnicode_FromString(
               compiler.node_calls.lookup(node_id).node->name().c_str()));
       PyList_SET_ITEM(pyorigins, i, pyorigin);

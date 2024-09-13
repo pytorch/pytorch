@@ -487,7 +487,9 @@ main()
         param = torch.ones(100)
         activ = torch.ones(100) * 2
         inputs = [param, activ]
-        proxies, _, _ = compiler.begin_capture(inputs=inputs, sizes=[], scalars=[], origins=[[], [], []])
+        proxies, _, _ = compiler.begin_capture(
+            inputs=inputs, sizes=[], scalars=[], origins=[[], [], []]
+        )
         param_proxy, activ_proxy = proxies
         buf = activ_proxy * 2
         torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
