@@ -1527,7 +1527,6 @@ def manually_close_merged_pr(
             gh_post_pr_comment(pr.org, pr.project, pr.pr_num, comment, dry_run)
             gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
 
-    pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
     message = (
         f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
         "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra."
