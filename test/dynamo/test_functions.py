@@ -315,6 +315,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             combs.append(torch.ones(size))
         return combs
 
+    @unittest.skipIf(
+        sys.version_info < (3, 10),
+        "itertools.pairwise was added at Python 3.10",
+    )
+    @make_test
+    def test_itertools_pairwise(a):
+        pairs = []
+        for size in itertools.pairwise((1, 2, 3, 4)):
+            pairs.append(torch.ones(size))
+        return pairs
+
     @make_test
     def test_np_iinfo(a):
         max_dim = np.iinfo(np.int16).max
@@ -687,6 +698,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
         else:
             return x - 1
+
+    @make_test
+    def test_dict_update_kwargs(x):
+        d = {"a": 2}
+        d.update(b=4)
+        return x * d["a"] * d["b"]
 
     @make_test
     def test_defaultdict_setdefault1(x):
