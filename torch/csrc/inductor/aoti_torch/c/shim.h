@@ -528,8 +528,6 @@ aoti_torch_cpu__wrapped_quantized_linear_prepacked(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_zero_(AtenTensorHandle self);
-
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
     int64_t* output_size,
