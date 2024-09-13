@@ -131,8 +131,7 @@ class Benchmark(BenchmarkBase):
 
     def _prepare_once(self):
         self.m = self.ModuleClass()
-        torch.set_float32_matmul_precision("high")
-        self.input = torch.ones(10, device="cuda" if self._is_gpu else "cpu")
+        self.input = torch.ones(10)
 
     def _prepare(self):
         torch._dynamo.reset()
