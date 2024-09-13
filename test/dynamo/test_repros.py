@@ -5476,15 +5476,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
-            return tuple(map(f, x, y))
+            return map(f, x, y)
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")
 
         inps = gen_inps(3, 3)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
         inps = gen_inps(3, 5)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
     def test_staticmethod_allow_in_graph(self):
         class MyClass:
@@ -5555,7 +5557,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             z0 = x.sin()
             z1 = x.sin()
             y = x + 1
-            torch.ops.fsdp.set_.default(x, y)
+            torch.ops.fsdp.copy_.default(x, y)
             # z3 and z3 can be CSEd with each other,
             # but *not* with z0/z1 (they cross a mutation boundary)
             z2 = x.sin()
@@ -5587,7 +5589,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             z = x.sin()
             y = x + 1
             # graph input has its storage mutated
-            torch.ops.fsdp.set_.default(x, y)
+            torch.ops.fsdp.copy_.default(x, y)
             z2 = x.sin()
             return z2, l**2
 
@@ -5751,6 +5753,179 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.sin(x)
 
         fn(torch.randn(4))
+
+    @requires_cuda
+    # This test will fail as flip in combination with particular input lenghts
+    # produces weird results.
+    # This is under investigations in
+    # https://github.com/pytorch/pytorch/issues/131805
+    @unittest.skip("Skip this flip test for the moment. It is under investigation")
+    def test_flip_bad_accuracy(self):
+        import torch
+        import torch._dynamo.config
+        import torch._functorch.config
+        import torch._inductor.config
+        import torch._inductor.inductor_prims
+        import torch.fx.experimental._config
+
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, arg0_1):
+                rev = torch.ops.prims.rev.default(arg0_1, [0])
+                arg0_1 = None
+                slice_1 = torch.ops.aten.slice.Tensor(rev, 0, 0, -1, 2)
+                slice_2 = torch.ops.aten.slice.Tensor(rev, 0, 1, 9223372036854775807, 2)
+                add_1 = torch.ops.aten.add.Tensor(slice_1, slice_2)
+                slice_1 = slice_2 = None
+                slice_3 = torch.ops.aten.slice.Tensor(add_1, 0, 0, -1, 2)
+                slice_4 = torch.ops.aten.slice.Tensor(
+                    add_1, 0, 1, 9223372036854775807, 2
+                )
+                add_2 = torch.ops.aten.add.Tensor(slice_3, slice_4)
+                slice_3 = slice_4 = None
+                slice_5 = torch.ops.aten.slice.Tensor(add_2, 0, 0, -1, 2)
+                slice_6 = torch.ops.aten.slice.Tensor(
+                    add_2, 0, 1, 9223372036854775807, 2
+                )
+                add_3 = torch.ops.aten.add.Tensor(slice_5, slice_6)
+                slice_5 = slice_6 = None
+                slice_9 = torch.ops.aten.slice.Tensor(add_2, 0, 0, 1)
+                add_2 = None
+                unsqueeze = torch.ops.aten.unsqueeze.default(slice_9, 1)
+                slice_9 = None
+                unsqueeze_1 = torch.ops.aten.unsqueeze.default(add_3, 1)
+                add_3 = None
+                cat = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
+                unsqueeze = unsqueeze_1 = None
+                view = torch.ops.aten.view.default(cat, [2])
+                cat = None
+                slice_10 = torch.ops.aten.slice.Tensor(view, 0, 0, -1)
+                slice_11 = torch.ops.aten.slice.Tensor(
+                    add_1, 0, 2, 9223372036854775807, 2
+                )
+                add_5 = torch.ops.aten.add.Tensor(slice_10, slice_11)
+                slice_10 = slice_11 = None
+                slice_12 = torch.ops.aten.slice.Tensor(add_1, 0, 0, 1)
+                add_1 = None
+                cat_1 = torch.ops.aten.cat.default([slice_12, add_5])
+                slice_12 = add_5 = None
+                unsqueeze_2 = torch.ops.aten.unsqueeze.default(cat_1, 1)
+                cat_1 = None
+                unsqueeze_3 = torch.ops.aten.unsqueeze.default(view, 1)
+                view = None
+                cat_2 = torch.ops.aten.cat.default([unsqueeze_2, unsqueeze_3], 1)
+                unsqueeze_2 = unsqueeze_3 = None
+                view_1 = torch.ops.aten.view.default(cat_2, [4])
+                cat_2 = None
+                slice_13 = torch.ops.aten.slice.Tensor(
+                    rev, 0, 2, 9223372036854775807, 2
+                )
+                add_6 = torch.ops.aten.add.Tensor(view_1, slice_13)
+                slice_13 = None
+                slice_14 = torch.ops.aten.slice.Tensor(rev, 0, 0, 1)
+                rev = None
+                cat_3 = torch.ops.aten.cat.default([slice_14, add_6])
+                slice_14 = add_6 = None
+                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                    view_1, [0, 1], 0.0
+                )
+                view_1 = None
+                unsqueeze_4 = torch.ops.aten.unsqueeze.default(cat_3, 1)
+                cat_3 = None
+                unsqueeze_5 = torch.ops.aten.unsqueeze.default(constant_pad_nd, 1)
+                constant_pad_nd = None
+                cat_4 = torch.ops.aten.cat.default([unsqueeze_4, unsqueeze_5], 1)
+                unsqueeze_4 = unsqueeze_5 = None
+                view_2 = torch.ops.aten.view.default(cat_4, [10])
+                cat_4 = None
+                slice_15 = torch.ops.aten.slice.Tensor(view_2, 0, 0, 9)
+                view_2 = None
+                rev_1 = torch.ops.prims.rev.default(slice_15, [0])
+                slice_15 = None
+                return (rev_1,)
+
+        mod = Repro()
+        x = torch.arange(9, device=torch.device("cuda"))
+
+        @torch.compile
+        def f(x):
+            return mod(x)
+
+        out = f(x)
+        self.assertEqual(torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0]), out[0])
+
+    # https://github.com/pytorch/pytorch/issues/88813
+    def test_return_value_duplication_tensor(self) -> None:
+        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            return val * 2, val * 2
+
+        x = torch.randn(2, requires_grad=True)
+
+        expect = fn(x)
+        self.assertNotEqual(
+            expect[0].untyped_storage().data_ptr(),
+            expect[1].untyped_storage().data_ptr(),
+        )
+
+        actual = torch.compile(fn, backend="aot_eager")(x)
+        self.assertNotEqual(
+            actual[0].untyped_storage().data_ptr(),
+            actual[1].untyped_storage().data_ptr(),
+        )
+
+    # https://github.com/pytorch/pytorch/issues/114344
+    def test_return_value_duplication_mixed_grad(self) -> None:
+        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            with torch.no_grad():
+                out0 = val + 1
+            out1 = val + 1
+            return out0, out1
+
+        x = torch.randn(2, requires_grad=True)
+
+        with torch.enable_grad():
+            expect = fn(x)
+            actual = torch.compile(fn, backend="aot_eager")(x)
+
+            self.assertEqual(expect[0].requires_grad, actual[0].requires_grad)
+            self.assertEqual(expect[1].requires_grad, actual[1].requires_grad)
+
+    # https://github.com/pytorch/pytorch/pull/134726#discussion_r1738774371
+    def test_return_value_duplication_scalar(self) -> None:
+        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            x, y = val * 2, val * 2
+            return x[0], y[0]
+
+        x = torch.randn(2, requires_grad=True)
+
+        expect = fn(x)
+        self.assertNotEqual(
+            expect[0].untyped_storage().data_ptr(),
+            expect[1].untyped_storage().data_ptr(),
+        )
+
+        actual = torch.compile(fn, backend="aot_eager")(x)
+        self.assertNotEqual(
+            actual[0].untyped_storage().data_ptr(),
+            actual[1].untyped_storage().data_ptr(),
+        )
+
+    def test_torch_compile_in_compile_frame(self):
+        def gn(x, c=None):
+            if c is None:
+                c = 2
+            return c * x
+
+        def outer_func(x):
+            return torch.compile(gn, backend="eager")(x)
+
+        compile_outer = torch.compile(outer_func, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = outer_func(x)
+        res = compile_outer(x)
+        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(ReproTests)

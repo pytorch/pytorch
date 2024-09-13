@@ -90,9 +90,9 @@ def is_with_effects_wait_tensor(node: torch.fx.Node) -> bool:
 
 def is_wait_tensor(node: torch.fx.Node) -> bool:
     return (
-        node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.wait_tensor.default
-    ) or is_with_effects_op(node, torch.ops._c10d_functional.wait_tensor.default)
+        node.target == torch.ops._c10d_functional.wait_tensor.default
+        or is_with_effects_op(node, torch.ops._c10d_functional.wait_tensor.default)
+    )
 
 
 def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
