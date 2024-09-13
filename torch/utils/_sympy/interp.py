@@ -169,7 +169,7 @@ def sympy_interp(
 ):
     if isinstance(expr, torch.Tensor):
         return expr
-        
+
     # Handle base cases
     dtype = None
     if isinstance(expr, BooleanAtom):
