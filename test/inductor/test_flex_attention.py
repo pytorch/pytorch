@@ -3,6 +3,7 @@
 
 import functools
 import string
+import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
 from typing import Callable, Optional, Tuple
@@ -28,7 +29,7 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
 from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
@@ -1951,6 +1952,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_qkv_and_block_mask_on_the_same_device(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (2, 2, 256, 32),
+            device="cuda:0",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device="cuda:1")
+        with self.assertRaisesRegex(
+            RuntimeError, "Expect q/k/v and block_mask to be on the same device"
+        ):
+            torch.compile(flex_attention)(query, key, value, block_mask=block_mask)
 
     @supported_platform
     def test_fw_bw_graph_correctness(self):
