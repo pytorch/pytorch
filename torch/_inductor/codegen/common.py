@@ -109,6 +109,21 @@ class DeviceOpOverrides:
     def device_guard(self, device_idx):
         raise NotImplementedError
 
+    def cpp_device_guard(self):
+        raise NotImplementedError
+
+    def cpp_aoti_device_guard(self):
+        raise NotImplementedError
+
+    def cpp_stream_guard(self):
+        raise NotImplementedError
+
+    def cpp_aoti_stream_guard(self):
+        raise NotImplementedError
+
+    def cpp_getStreamFromExternal(self):
+        raise NotImplementedError
+
 
 device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 
@@ -208,11 +223,6 @@ def init_backend_registration():
             "halide": HalideScheduling,
             "triton": TritonScheduling,
         }
-        if config.cpu_backend == "triton":
-            import os
-            assert (
-                os.environ.get("TRITON_CPU_BACKEND", "0") == "1"
-            ), "TRITON_CPU_BACKEND=1 must be set if you are using Triton on the CPU"
         register_backend_for_device(
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
@@ -231,7 +241,11 @@ def init_backend_registration():
         )
 
     if get_scheduling_for_device("xpu") is None:
-        register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
+        register_backend_for_device(
+            "xpu",
+            TritonScheduling,
+            WrapperCodeGen,
+        )
 
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
@@ -281,8 +295,8 @@ def get_device_op_overrides(device: str):
 @functools.lru_cache(None)
 def boolean_ops():
     return (
-        "is_inf",
-        "is_nan",
+        "isinf",
+        "isnan",
         "logical_not",
         "signbit",
         "le",
@@ -354,6 +368,8 @@ def deduce_output_dtype_by_name(
     ):
         buf_name = args[1]
         return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+    elif op_name == "to_dtype_bitcast":
+        return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
 
 
@@ -447,7 +463,7 @@ class DataTypePropagation:
 
     @classmethod
     def propagate_scheduler_node(cls, node):
-        from ..ir import LoopBody
+        from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
         assert isinstance(node, SchedulerNode)
@@ -1778,7 +1794,7 @@ class Kernel(CodeGen):
         if mask:
             cond = f"({cond}) | ~({mask})"
 
-        return ""
+        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool

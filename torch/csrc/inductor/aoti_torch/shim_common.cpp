@@ -26,6 +26,8 @@
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
+#include <ATen/ops/_wrapped_linear_prepack.h>
+#include <ATen/ops/_wrapped_quantized_linear_prepacked.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
@@ -42,8 +44,6 @@
 #include <ATen/ops/scatter_reduce.h>
 #include <ATen/ops/view_as_real_ops.h>
 #include <ATen/ops/view_ops.h>
-#include <ATen/ops/wrapped_linear_prepack.h>
-#include <ATen/ops/wrapped_quantized_linear_prepacked.h>
 
 #endif
 
@@ -814,7 +814,7 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
   });
 }
 
-AOTITorchError aoti_torch_cpu_wrapped_linear_prepack(
+AOTITorchError aoti_torch_cpu__wrapped_linear_prepack(
     AtenTensorHandle weight,
     AtenTensorHandle weight_scale,
     AtenTensorHandle weight_zero_point,
@@ -828,7 +828,7 @@ AOTITorchError aoti_torch_cpu_wrapped_linear_prepack(
         tensor_handle_to_tensor_pointer(weight_zero_point);
     at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
 
-    *out = new_tensor_handle(at::wrapped_linear_prepack(
+    *out = new_tensor_handle(at::_wrapped_linear_prepack(
         *weight_tensor,
         *weight_scale_tensor,
         *weight_zero_point_tensor,
@@ -852,7 +852,7 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
   });
 }
 
-AOTITorchError aoti_torch_cpu_wrapped_quantized_linear_prepacked(
+AOTITorchError aoti_torch_cpu__wrapped_quantized_linear_prepacked(
     AtenTensorHandle input,
     AtenTensorHandle input_scale,
     AtenTensorHandle input_zero_point,
@@ -871,7 +871,7 @@ AOTITorchError aoti_torch_cpu_wrapped_quantized_linear_prepacked(
     at::Tensor* out_scale_tensor = tensor_handle_to_tensor_pointer(out_scale);
     at::Tensor* out_zeropoint_tensor =
         tensor_handle_to_tensor_pointer(out_zeropoint);
-    *out = new_tensor_handle(at::wrapped_quantized_linear_prepacked(
+    *out = new_tensor_handle(at::_wrapped_quantized_linear_prepacked(
         *input_tensor,
         *input_scale_tensor,
         *input_zero_point_tensor,
@@ -1007,11 +1007,13 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   std::string cwd = fs::current_path().string();
   std::string tmp_folder = cwd + "/tmp/aoti_torch/";
   if (!fs::exists(tmp_folder)) {
-    std::cout << "Path does not exist, creating it..." << tmp_folder
-              << std::endl;
+    std::cout
+        << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
+        << tmp_folder << std::endl;
 
     if (!fs::create_directories(tmp_folder)) {
-      std::cout << "Error creating directory: " << tmp_folder << std::endl;
+      std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
+                << tmp_folder << std::endl;
       return;
     }
   }
@@ -1022,6 +1024,9 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
   fout.write(bytes.data(), bytes.size());
   fout.close();
+
+  std::cout << "aoti_torch_save_tensor_handle: Saved tensor to: "
+            << tensor_filepath_to_save << std::endl;
 #endif // !defined(C10_MOBILE)
 }
 
@@ -1046,15 +1051,31 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
 
   // Print summary stats of the tensor
   std::cout << "Number of elements: " << numel << std::endl;
+  std::cout << "Dtype: " << t->dtype() << std::endl;
   if (numel > 0) {
-    std::cout << "Mean value: " << t->mean().item() << std::endl;
-    std::cout << "Min value: " << t->min().item<float>() << std::endl;
-    std::cout << "Max value: " << t->max().item<float>() << std::endl;
+    // torch/aten `mean()` function only supports float and complex dtypes
+    // See:
+    // https://github.com/pytorch/pytorch/blob/a0e062c6f1a03ec93e87413e42c4d0b336518131/aten/src/ATen/native/ReduceOps.cpp#L304-L309
+    auto mean_value = [t](at::ScalarType dtype) {
+      return t->to(dtype).mean().item();
+    };
+    bool is_complex_type =
+        at::isComplexType(at::typeMetaToScalarType(t->dtype()));
+    at::ScalarType float_dtype =
+        is_complex_type ? at::kComplexFloat : at::kFloat;
+    std::cout << "Mean value: " << mean_value(float_dtype) << std::endl;
+    if (!is_complex_type) {
+      // "min_all_cuda" function is not implemented for 'ComplexFloat' type.
+      // (similar for max) Skip printing min/max value for complex type tensors
+      // here If encountered complex dtypes (rare occasions), suggest to print
+      // out the whole value of the tensor.
+      std::cout << "Min value: " << t->min().item<float>() << std::endl;
+      std::cout << "Max value: " << t->max().item<float>() << std::endl;
+    }
   }
   std::cout << "Device: " << t->device() << std::endl;
   std::cout << "Size: " << t->sizes() << std::endl;
   std::cout << "Stride: " << t->strides() << std::endl;
-  std::cout << "Dtype: " << t->dtype() << std::endl;
   std::cout << "Layout: " << t->layout() << std::endl;
   std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
   std::cout << "Requires grad: " << t->requires_grad() << std::endl;

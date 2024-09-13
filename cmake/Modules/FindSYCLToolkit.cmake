@@ -49,12 +49,14 @@ find_file(
   )
 
 # Find SYCL library fullname.
-find_library(
-  SYCL_LIBRARY
-  NAMES sycl-preview
-  HINTS ${SYCL_LIBRARY_DIR}
-  NO_DEFAULT_PATH
-)
+if(LINUX)
+  find_library(
+    SYCL_LIBRARY
+    NAMES sycl-preview
+    HINTS ${SYCL_LIBRARY_DIR}
+    NO_DEFAULT_PATH
+  )
+endif()
 # On Windows, currently there's no sycl.lib. Only sycl7.lib with version suffix,
 # where the current version of the SYCL runtime is 7.
 # Until oneAPI adds support to sycl.lib without the version suffix,

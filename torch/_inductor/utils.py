@@ -1257,10 +1257,14 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
         num_threads=parallel_num_threads(),
     )
 
+    def is_last_dim_stride1(x):
+        x.freeze_layout()
+        return x.get_stride()[-1] == 1
+
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
+        and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
     )
@@ -1365,6 +1369,25 @@ def run_and_get_triton_code(fn, *args, **kwargs):
         1 <= len(source_codes) <= 2
     ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
+
+
+def run_and_get_graph_lowering(fn, *args, **kwargs):
+    from torch._inductor.codecache import CompiledFxGraph
+    from torch._inductor.graph import GraphLowering
+
+    real_init = CompiledFxGraph.__init__
+    graph_lowerings = []
+
+    def fake_init(*args, **kwargs):
+        real_init(*args, **kwargs)
+        graph = args[2]
+        assert isinstance(graph, GraphLowering)
+        graph_lowerings.append(graph)
+
+    with mock.patch.object(CompiledFxGraph, "__init__", fake_init):
+        result = fn(*args, **kwargs)
+
+    return result, graph_lowerings
 
 
 @contextlib.contextmanager

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+import contextlib
 import cProfile
 import dis
 import functools
@@ -32,6 +33,7 @@ from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
+    justknobs_check,
     maybe_upload_prof_stats_to_manifold,
     signpost_event,
 )
@@ -67,8 +69,10 @@ from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
+    CacheLimitExceeded,
     format_error_msg,
     InternalTorchDynamoError,
+    SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
     unimplemented,
@@ -206,10 +210,16 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
+
+            exit_stack = contextlib.ExitStack()
+            exit_stack.enter_context(
+                torch.fx._symbolic_trace._maybe_revert_all_patches()
+            )
             try:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
+                exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
                 torch.use_deterministic_algorithms(
@@ -843,7 +853,13 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            unimplemented(f"{limit_type} reached")
+            if config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
+                "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
+            ):
+                raise CacheLimitExceeded(f"{limit_type} reached")
+            else:
+                # do not recursively skip frames
+                unimplemented(f"{limit_type} reached")
 
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
@@ -907,34 +923,35 @@ def _compile(
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
-        except (
-            Unsupported,
-            TorchRuntimeError,
-            BackendCompilerFailed,
-            AssertionError,
-            ConstraintViolationError,
-            GuardOnDataDependentSymNode,
-            ValidationException,
-            UncapturedHigherOrderOpError,
-            BisectValidationException,
-        ) as e:
-            fail_type = str(type(e))
-            fail_reason = str(e)
-            exception_handler(e, code, frame, export=export)
-            fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
-                e, compile_id
-            )
-            raise
         except Exception as e:
-            fail_type = str(type(e))
+            fail_type = type(e).__qualname__
             fail_reason = str(e)
+            # NB: e's msg is mutated here to add user stack, but we DON'T want
+            # that stack in the Scuba logged fail_reason
             exception_handler(e, code, frame, export=export)
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
-            raise InternalTorchDynamoError(str(e)).with_traceback(
-                e.__traceback__
-            ) from None
+            if isinstance(
+                e,
+                (
+                    Unsupported,
+                    TorchRuntimeError,
+                    BackendCompilerFailed,
+                    AssertionError,
+                    ConstraintViolationError,
+                    GuardOnDataDependentSymNode,
+                    ValidationException,
+                    UncapturedHigherOrderOpError,
+                    BisectValidationException,
+                ),
+            ):
+                raise
+            else:
+                # Rewrap for clarity
+                raise InternalTorchDynamoError(
+                    f"{type(e).__qualname__}: {str(e)}"
+                ).with_traceback(e.__traceback__) from None
         finally:
             if tracer:
                 tracer.output.local_scope = {}
@@ -1039,7 +1056,9 @@ class ConvertFrame:
         hooks: Hooks,
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
-    ) -> Optional[GuardedCode]:
+    ) -> Optional[
+        Union[GuardedCode, torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag]
+    ]:
         counters["frames"]["total"] += 1
         try:
             result = self._inner_convert(
@@ -1104,6 +1123,12 @@ class ConvertFrame:
                 log.info(error_msg, exc_info=True)
             else:
                 log.warning(error_msg, exc_info=True)
+
+            # If we encounter SkipCodeRecursiveException, return skip_code_recursive_flag
+            # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
+            if isinstance(e, SkipCodeRecursiveException):
+                return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+
         return None
 
 
