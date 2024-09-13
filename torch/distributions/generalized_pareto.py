@@ -24,7 +24,7 @@ class GeneralizedPareto(Distribution):
     Example::
 
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
-        >>> m = GeneralizedPareto(torch.tensor([1.0]), torch.tensor([1.0]), torch.tensor([1.0]))
+        >>> m = GeneralizedPareto(torch.tensor([0.1]), torch.tensor([2.0]), torch.tensor([0.4]))
         >>> m.sample()  # sample from a Generalized Pareto distribution with loc=1, scale=1, and concentration=1
         tensor([ 1.5623])
 
