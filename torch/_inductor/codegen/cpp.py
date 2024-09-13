@@ -22,6 +22,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
+from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -1640,6 +1641,11 @@ class CppVecOverrides(CppOverrides):
                 "signbit",
             )
             octype = "bool" if output_mask else cdtype
+            octype = (
+                DTYPE_TO_CPP[args[-2]]
+                if (scalar_func.__name__ == "to_dtype_bitcast")
+                else octype
+            )
             with code.indent():
                 for argidx, arg in enumerate(args):
                     if isinstance(arg, CppCSEVariable):
@@ -1668,9 +1674,9 @@ class CppVecOverrides(CppOverrides):
                 else:
                     load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
                     if n_vec == 1:
-                        load_fn = f"at::vec::Vectorized<{cdtype}>::loadu"
+                        load_fn = f"at::vec::Vectorized<{octype}>::loadu"
                     else:
-                        load_fn = f" at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu"
+                        load_fn = f" at::vec::VectorizedN<{octype}, {n_vec}>::loadu"
                 code.writeline(f"return {load_fn}({load_args});")
             code.writeline("()")
             return code
@@ -2140,9 +2146,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if V.graph.aot_mode:
-            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
-            # compared with JIT Inductor which uses TORCH_CHECK
+        if config.abi_compatible:
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -3086,10 +3090,7 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = (
-                f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}"
-                f"[{cexpr_index(self.outer_num_elems * self.inner_num_elems)}];"
-            )
+            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -3184,7 +3185,7 @@ class CppTile2DKernel(CppVecKernel):
         )
 
 
-def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Tuple[Optional[torch.dtype], bool]:
+def get_loop_body_lowp_fp(_body: LoopBody) -> Tuple[Optional[torch.dtype], bool]:
     """
     Returns the low precision data type (torch.float16/torch.bfloat16) contained in the nodes
     and if all the nodes can codegen with this data type without converting to float.
@@ -3260,7 +3261,13 @@ class TilingSelect:
         tiling_indices = self._select_tiling_indices(
             fn_list, var_sizes_list, tiling_factor
         )
+
         if tiling_indices:
+            group, reduction_group = max(
+                var_sizes_list, key=lambda sizes: len(sizes[1])
+            )
+            call_ranges = tuple(group) + tuple(reduction_group)
+
             if config.cpp.enable_tiling_heuristics:
 
                 def _try_get_stride(
@@ -3296,10 +3303,6 @@ class TilingSelect:
                         < len(itervars)
                     )
 
-                group, reduction_group = max(
-                    var_sizes_list, key=lambda sizes: len(sizes[1])
-                )
-                call_ranges = tuple(group) + tuple(reduction_group)
                 itervars = [
                     sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
                     for n in range(len(call_ranges))
@@ -3376,6 +3379,27 @@ class TilingSelect:
                     # when needed.
                     return [], []
 
+            if dtype in DTYPE_LOWP_FP:
+                # For lower precision data type, if the call_range is not long enough,
+                # use tiling_factor // 2 for better performance
+                factor_lowp = cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype)
+                for tiling_indice in tiling_indices:
+                    if tiling_indice < 0:
+                        tiling_indice = tiling_indice + len(call_ranges)
+                    if tiling_indice < 0 or tiling_indice >= len(call_ranges):
+                        continue
+                    if has_free_symbols(call_ranges):
+                        call_range = V.graph.sizevars.size_hint(
+                            call_ranges[tiling_indice], fallback=0
+                        )
+                        if call_range < factor_lowp:
+                            V.graph.sizevars.guard_lt(call_range, factor_lowp)
+                            tiling_factor = factor_lowp // 2
+                            break
+                    elif call_ranges[tiling_indice] < factor_lowp:
+                        tiling_factor = factor_lowp // 2
+                        break
+
             if len(tiling_indices) == 1:
                 return [tiling_factor], tiling_indices
             if len(tiling_indices) == 2:
@@ -3446,7 +3470,7 @@ class CppKernelProxy(CppKernel):
 
     # Check if all the nodes of a given fx graph can support BF16/FP16
     def is_lowp_fp_scheduler(self, scheduler_node: SchedulerNode):
-        if not isinstance(scheduler_node._body, ir.LoopBody):
+        if not isinstance(scheduler_node._body, LoopBody):
             return True
         # Propagate the dtype to check if all the fx node is bf16/fp16
         DataTypePropagation.propagate_scheduler_node(scheduler_node)
@@ -3455,7 +3479,7 @@ class CppKernelProxy(CppKernel):
             and not get_loop_body_lowp_fp(scheduler_node._body)[1]
         )
 
-    def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
+    def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def is_lowp_fp_load(node: torch.fx.Node):
                 if node.target not in ["load"]:
@@ -3622,18 +3646,9 @@ class CppKernelProxy(CppKernel):
 
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
-            assert isinstance(_node._body, ir.LoopBody)
-            node: SchedulerNode = _node
-
-            def is_memory_copy_scheduler_node(node: SchedulerNode):
-                op_counts = node.read_writes.op_counts
-                return (
-                    len(op_counts) == 2 and "load" in op_counts and "store" in op_counts
-                )
-
-            should_legalize = not is_memory_copy_scheduler_node(node)
-            if should_legalize:
-                body: ir.LoopBody = node._body
+            assert isinstance(_node._body, LoopBody)
+            body: LoopBody = _node._body
+            if not body.is_memory_copy():
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list):
@@ -4187,6 +4202,7 @@ class CppScheduling(BaseScheduling):
                     if (
                         isinstance(split_number, sympy.core.numbers.Integer)
                         and isinstance(split_var, sympy.core.symbol.Symbol)
+                        and split_var in original_body.iter_vars
                         and divide_index_name is not None
                         and all(
                             stride_at_vec_range(expr, split_var) == 1
@@ -4319,9 +4335,9 @@ class CppScheduling(BaseScheduling):
                             ):
                                 contiguous_index_expr += stride * var
                                 stride *= range
-                            write_index_expr = scheduler_node._body.writes_name2expr[
+                            write_index_expr = scheduler_node._body.get_write_expr(
                                 scheduler_buffer.get_name()
-                            ]
+                            )
 
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
@@ -4329,9 +4345,9 @@ class CppScheduling(BaseScheduling):
                             return is_contiguous_index(write_index_expr) and all(
                                 isinstance(user.node, SchedulerNode)
                                 and is_contiguous_index(
-                                    user.node._body.reads_name2expr[
+                                    user.node._body.get_read_expr(
                                         scheduler_buffer.get_name()
-                                    ],
+                                    ),
                                 )
                                 for user in scheduler_buffer.users
                             )
@@ -4546,7 +4562,7 @@ class CppScheduling(BaseScheduling):
         compile_wrapper.splice(src_code, strip=True)
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline("''')")
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), cuda=False)
+        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), gpu=False)
         return kernel_name
 
     def flush(self):
@@ -4627,7 +4643,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, cuda=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, arg_types=arg_types
         )
 
 

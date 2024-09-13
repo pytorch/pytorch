@@ -205,12 +205,6 @@ def build_collectives(
         profiling_name = entries[0]["profiling_name"]
         pg_name = _pg_guids[(pg_name, first_rank)]
         collective_seq_id = entries[0]["collective_seq_id"]
-        print(
-            "collective_seq_id ",
-            collective_seq_id,
-            " p2p_seq_id ",
-            entries[0]["p2p_seq_id"],
-        )
         record_id = entries[0]["record_id"]
         input_sizes = entries[0]["input_sizes"]
         output_sizes = entries[0]["output_sizes"]
