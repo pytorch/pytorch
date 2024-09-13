@@ -216,5 +216,5 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
     def forward(self, x: Tensor) -> Tensor:
         return x
 
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type:ignore[override]
         return self.derive_qparams_fn(self.obs_or_fqs)

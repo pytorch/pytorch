@@ -364,7 +364,7 @@ class DetachExecutor(fx.Interpreter):
         super().__init__(module, garbage_collect_values)
         self.value_remap = {}
 
-    def run(self, *args, initial_env=None):
+    def run(self, *args, initial_env=None):  # type: ignore[override]
         self.value_remap = {}
         return super().run(*args, initial_env=initial_env)
 

@@ -71,7 +71,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             # add data with default config here
             [self.add_data(name, data, **self.defaults) for name, data in data_list]
 
-    def prepare(self):
+    def prepare(self, model, config):
         raise NotImplementedError("this function is undefined for this class")
 
     def _extract_weight(self, data):
