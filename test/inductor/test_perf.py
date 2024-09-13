@@ -32,8 +32,8 @@ from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 
 if HAS_CUDA:
-    import triton
-    import triton.language as tl
+    import triton  # @manual
+    import triton.language as tl  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel
 
