@@ -466,6 +466,7 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
+    "torch/csrc/inductor/aoti_package/model_package_loader.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_cpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
@@ -841,6 +842,7 @@ libtorch_python_core_sources = [
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
+    "torch/csrc/inductor/aoti_package/pybind.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_meta_info.cpp",

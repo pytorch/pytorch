@@ -373,8 +373,10 @@ static std::vector<std::vector<std::optional<VariableInfo>>>
     lambda_output_infos;
 static size_t next_lambdas_idx = 0;
 static size_t offset_lambdas_idx = 0;
-static std::unordered_map<size_t, std::shared_ptr<Node>> lifted_nodes; // deferred free
-static std::unordered_map<std::shared_ptr<Node>, size_t> reverse_lifted_nodes; // deferred free
+static std::unordered_map<size_t, std::shared_ptr<Node>>
+    lifted_nodes; // deferred free
+static std::unordered_map<std::shared_ptr<Node>, size_t>
+    reverse_lifted_nodes; // deferred free
 
 static at::IValue* lambda_collect(
     CompiledNodeArgs& args,
@@ -396,9 +398,10 @@ static at::IValue* lambda_collect(
   std::shared_ptr<Node> node = args.get_node_call()->node;
   TORCH_INTERNAL_ASSERT(lifted_nodes.find(idx) == lifted_nodes.end())
   lifted_nodes[idx] = node;
-  TORCH_INTERNAL_ASSERT(reverse_lifted_nodes.find(node) == reverse_lifted_nodes.end())
+  TORCH_INTERNAL_ASSERT(
+      reverse_lifted_nodes.find(node) == reverse_lifted_nodes.end())
   reverse_lifted_nodes[node] = idx;
-  lambda_idxs.emplace_back(at::IValue(static_cast<int64_t>(idx)));
+  lambda_idxs.emplace_back(static_cast<int64_t>(idx));
   for (auto i : c10::irange(output_info.size())) {
     if (is_variable_input[i]) {
       args.collect(output_info[i].layout);
@@ -437,7 +440,7 @@ static variable_list lambda_lift(
   // c10::SymInt idx = lambda_idxs[next_lambdas_idx++].toSymInt();
   // need to before(at::IValue) but with the proper next_proxy idx.
   at::IValue& idx = lambda_idxs[next_lambdas_idx++];
-  int hackidx = idx.toInt();
+  int64_t hackidx = idx.toInt();
   ssv.before(idx);
   static PyObject* method_name =
       PyUnicode_InternFromString("proxy_call_lambda");
@@ -463,7 +466,7 @@ static variable_list lambda_lift(
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       py_compiler,
       method_name,
-      PyLong_FromSsize_t(
+      PyLong_FromUnsignedLong(
           hackidx - offset_lambdas_idx), // doesnt work when there's 2 lifted in
                                          // same graph
       pyinputs.get(),

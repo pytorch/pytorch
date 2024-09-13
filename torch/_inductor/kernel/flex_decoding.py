@@ -474,6 +474,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
+    # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function

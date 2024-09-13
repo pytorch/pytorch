@@ -1324,6 +1324,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
