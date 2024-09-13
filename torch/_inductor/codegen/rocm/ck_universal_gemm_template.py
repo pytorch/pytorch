@@ -58,8 +58,8 @@ class CKGemmTemplate(CKTemplate):
             std::array<ck::index_t, {{1 if has_bias else 0}}>{ {{'LDD' if has_bias else ''}} },
             LDC,
             1, // kBatch
-            PassThrough {}, // a_elementwise_op
-            PassThrough {}, // b_elementwise_op
+            {{a_elementwise_op}},
+            {{b_elementwise_op}},
             {{epilogue}} // c_elementwise_op
         );
         if (!gemm.IsSupportedArgument(argument)) {
@@ -254,11 +254,13 @@ class CKGemmTemplate(CKTemplate):
         Y = self.output_node
         Bias = self.input_nodes[2] if 3 == len(self.input_nodes) else None
 
+        op = copy.deepcopy(op)
+
         if len(self.input_nodes) == 4:
             scale_x = self.input_nodes[2]
             scale_w = self.input_nodes[3]
-
-        op = copy.deepcopy(op)
+            op.a_elementwise_op = "Scale"
+            op.b_elementwise_op = "Scale"
 
         # This parameter is converted into tuple because of change
         # from DeviceGemm_Xdl_CShuffleV3 to DeviceGemmMultiD_Xdl_CShuffle_V3.
@@ -322,6 +324,8 @@ class CKGemmTemplate(CKTemplate):
             bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
             alpha=self.alpha,
             beta=self.beta,
+            a_elementwise_op="Scale { inv_scale_x ? *inv_scale_x : 1.0f }" if scale_x is not None else "PassThrough {}",
+            b_elementwise_op="Scale { inv_scale_w ? *inv_scale_w : 1.0f }" if scale_w is not None else "PassThrough {}",
             epilogue=f"Bilinear {{ {self.alpha}, {self.beta} }}"
             if Bias is not None
             else "PassThrough {}",
@@ -395,7 +399,6 @@ class CKGemmTemplate(CKTemplate):
         """
         Add Composable Kernel Universal GEMM instance choices to the auto-tuning list.
         """
-        print(f"{input_nodes=}")
         template = CKGemmTemplate(
             input_nodes,
             layout,
