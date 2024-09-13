@@ -31,4 +31,4 @@ end=`date +%s`
 runtime=$((end-start))
 echo "total time to run benchmarks is:"
 echo $runtime
-python log_benchmarking_time.py $runtime
+python benchmarks/dynamo/pr_time_benchmarks/log_benchmarking_time.py $runtime
