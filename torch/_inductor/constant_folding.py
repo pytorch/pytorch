@@ -86,18 +86,22 @@ class ConstantFolder(torch.fx.Interpreter):
         return super().run_node(node)
 
     def is_impure(self, node: torch.fx.node.Node) -> bool:
-        if (
-            node.target == torch.ops.prims.convert_element_type.default
-            and (
-                is_const_source(node.args[0], self.lifted_constants)  # type: ignore[arg-type]
-                or (
-                    isinstance(node.args[0], torch.fx.Node)
-                    and node.args[0].target == torch.ops.aten.permute.default
-                    and is_const_source(node.args[0].args[0], self.lifted_constants)  # type: ignore[arg-type]
-                )
+        def is_woq_int8_pattern(node: torch.fx.node.Node) -> bool:
+            return (
+                node.target == torch.ops.prims.convert_element_type.default  # type: ignore[return-value]
+                and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
+                and node.args[1] == torch.bfloat16
             )
-            and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
-            and node.args[1] == torch.bfloat16
+
+        if (
+            is_woq_int8_pattern(node)
+            or (
+                node.target == torch.ops.aten.permute.default
+                and len(node.users) == 1
+                and is_woq_int8_pattern(next(iter(node.users)))
+            )
+        ) and is_const_source(
+            node.args[0], self.lifted_constants  # type: ignore[arg-type]
         ):
             # Case 1: int8_weight -> dq -> bf16_weight
             # Case 2: int8_weight -> permute -> dq -> bf16_weight
