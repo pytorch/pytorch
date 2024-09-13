@@ -246,30 +246,15 @@ def _unlift_graph(mod, gm, graph_signature):
     return unlifted_gm
 
 
-def _get_subgraph_names(gm):
-    for node in sorted(
-        itertools.chain(
-            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.cond),
-            gm.graph.find_nodes(
-                op="call_function", target=torch.ops.higher_order.while_loop
-            ),
-        )
-    ):
-        if node.target == torch.ops.higher_order.cond:
-            true_subgraph_name = node.args[1].name
-            false_subgraph_name = node.args[2].name
-            yield true_subgraph_name
-            yield false_subgraph_name
-        elif node.target == torch.ops.higher_order.while_loop:
-            cond_subgraph_name = node.args[0].name
-            body_subgraph_name = node.args[1].name
-            yield cond_subgraph_name
-            yield body_subgraph_name
+def _get_subgraphs(gm):
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        yield module.graph
 
 
 def _recursive_pre_grad_passes(gm, example_inputs):
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
+    for subgraph in _get_subgraphs(gm):
         # as we don't have recursive example inputs, passing None here
         new_subgraph = _recursive_pre_grad_passes(subgraph, example_inputs=None)
         setattr(gm, subgraph_name, new_subgraph)
@@ -277,15 +262,13 @@ def _recursive_pre_grad_passes(gm, example_inputs):
 
 
 def _recursive_joint_graph_passes(gm):
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
+    for subgraphs in _get_subgraph(gm):
         _recursive_joint_graph_passes(subgraph)
     joint_graph_passes(gm)
 
 
 def _recursive_post_grad_passes(gm, is_inference: bool = False):
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
+    for subgraph in _get_subgraphs(gm):
         _recursive_post_grad_passes(subgraph, is_inference)
     post_grad_passes(gm, is_inference)
 
