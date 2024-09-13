@@ -1928,7 +1928,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
         )
 
         def fn():
-            for y in [1, 2]:
+            for y in [1, 2, 3, 1]:
                 x = torch.ones(10, 10, requires_grad=True)
                 out = torch.ops.test_autograd_cpp_node_saved_int.custom_op_backed_by_autograd_fn(
                     x, y
