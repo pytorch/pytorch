@@ -117,9 +117,9 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
     else:
         if (
             config.warmup_runs > 0
+            # NOTE: Warmup for compiled autograd Dynamo tracing is handled in compiled_autograd.py _EnableContext.
             and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
         ):
-            # NOTE: Warmup for compiled autograd Dynamo tracing is handled in compiled_autograd.py _EnableContext.
             if state == "enter":
                 if context_id_to_warmup_count[context_id] < config.warmup_runs:
                     return set_eval_frame(None)
