@@ -62,19 +62,28 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 # while we trace out the joint.
 # If runtime specfied tangents will not have the same memory format as predicted traced tangents,
 # we coerce them at runtime to traced tangents memory format.
-def coerce_tangent(x, memory_format=torch.contiguous_format):
+
+
+# Coercing and collecting traced tangents memory format in one recursive traversal
+# mypy: ignore-errors
+def coerce_tangent_and_suggest_memory_format(x: Tensor):
     updated = False
     if not isinstance(x, Tensor):
-        return x, updated
+        return x, None, updated
 
     out = x.detach()
 
+    suggest_memory_format = torch._prims_common.suggest_memory_format
     is_subclass = is_traceable_wrapper_subclass(out)
-    mem_format = memory_format[0] if is_subclass else memory_format
-    if not out.is_contiguous(memory_format=mem_format):
-        was = out
-        out = out.contiguous(memory_format=mem_format)
-        updated = out is not was
+
+    memory_format = suggest_memory_format(out)
+
+    was = out
+    out = out.contiguous(memory_format=memory_format)
+    updated = out is not was
+
+    # For subclass we keep memory format of outer strides at the beggining of the list
+    out_memory_format = [memory_format] if is_subclass else memory_format
 
     # Note [Tangents memory format, Part 2]
     # In the same way that "what strides do we assigns to our tangents" is a question
@@ -95,48 +104,6 @@ def coerce_tangent(x, memory_format=torch.contiguous_format):
     #     placement into one with a Shard() placement, in the case that we "guessed wrong",
     #     and traced tangents with a Shard() placement at compile time.
     #
-    if is_traceable_wrapper_subclass(out) and hasattr(
-        out, "__coerce_tangent_metadata__"
-    ):
-        out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
-
-    # Coerce subclasses elements to memory_format too.
-    if is_traceable_wrapper_subclass(out):
-        attrs = out.__tensor_flatten__()[0]
-
-        assert isinstance(memory_format, list)
-        for i, attr in enumerate(attrs):
-            elem = getattr(out, attr)
-            new_elem, updated = coerce_tangent(elem, memory_format[1 + i])
-            if updated:
-                setattr(out, attr, new_elem)
-
-    return out, updated
-
-
-# Coercing and collecting traced tangents memory format in one recursive traversal
-# mypy: ignore-errors
-def coerce_tangent_and_suggest_memory_format(
-    x: Tensor, force_memory_format: Optional[torch.memory_format] = None
-):
-    updated = False
-    if not isinstance(x, Tensor):
-        return x, None, updated
-
-    out = x.detach()
-
-    suggest_memory_format = torch._prims_common.suggest_memory_format
-    is_subclass = is_traceable_wrapper_subclass(out)
-
-    memory_format = force_memory_format or suggest_memory_format(out)
-    if not out.is_contiguous(memory_format=memory_format):
-        was = out
-        out = out.contiguous(memory_format=memory_format)
-        updated = out is not was
-
-    # For subclass we keep memory format of outer strides at the beggining of the list
-    out_memory_format = [memory_format] if is_subclass else memory_format
-
     if is_subclass and hasattr(out, "__coerce_tangent_metadata__"):
         out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
 
@@ -149,7 +116,7 @@ def coerce_tangent_and_suggest_memory_format(
                 new_elem,
                 new_elem_memory_format,
                 elem_updated,
-            ) = coerce_tangent_and_suggest_memory_format(elem, force_memory_format)
+            ) = coerce_tangent_and_suggest_memory_format(elem)
             out_memory_format.append(new_elem_memory_format)
             if elem_updated:
                 setattr(out, attr, new_elem)
@@ -727,12 +694,7 @@ from a multi-output view call"
         output_tangents_start_idx = len(f_input_tangents)
         output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
         tangents_and_memory_formats = [
-            coerce_tangent_and_suggest_memory_format(
-                tt,
-                None
-                if (output_tangents_start_idx <= i and i < output_tangents_end_idx)
-                else torch.contiguous_format,
-            )
+            coerce_tangent_and_suggest_memory_format(tt)
             for i, tt in enumerate(traced_tangents)
         ]
         traced_tangents = [t[0] for t in tangents_and_memory_formats]

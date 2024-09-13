@@ -20,7 +20,7 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .. import config
-from .collect_metadata_analysis import coerce_tangent
+from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .schemas import (
     BackwardSignature,
     GraphSignature,
@@ -228,11 +228,15 @@ def create_synthetic_base_metadata(
             )
         )
 
-    inner_mutated_tangents = [
+    inner_mutated_tangents_and_memory_formats = [
         # See Note [Tangents memory format]
-        coerce_tangent(x)[0]
+        coerce_tangent_and_suggest_memory_format(x)
         for inner_idx, x in enumerate(inner_args)
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
+    ]
+    inner_mutated_tangents = [x[0] for x in inner_mutated_tangents_and_memory_formats]
+    inner_mutated_tangents_memory_formats = [
+        x[1] for x in inner_mutated_tangents_and_memory_formats
     ]
 
     output_info = existing_output_infos + input_metadata_output_info
@@ -241,9 +245,10 @@ def create_synthetic_base_metadata(
         inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents) :]
     )
     assert m.traced_tangent_memory_formats is not None
-    traced_tangent_memory_formats = [torch.contiguous_format] * len(
-        inner_mutated_tangents
-    ) + m.traced_tangent_memory_formats[len(inner_mutated_tangents) :]
+    traced_tangent_memory_formats = (
+        inner_mutated_tangents_memory_formats
+        + m.traced_tangent_memory_formats[len(inner_mutated_tangents) :]
+    )
 
     return (
         ViewAndMutationMeta(
