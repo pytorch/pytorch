@@ -39,7 +39,6 @@ class GeneralizedPareto(Distribution):
         "scale": constraints.positive,
         "concentration": constraints.real,
     }
-    support = constraints.real
     has_rsample = False
 
     def __init__(self, loc, scale, concentration, validate_args=None):
