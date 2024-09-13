@@ -1272,7 +1272,7 @@ class FxGraphCache:
         for module in gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
                 continue
-            for node in module.nodes:
+            for node in module.graph.nodes:
                 if (
                     isinstance(node.target, torch._ops.HigherOrderOperator)
                     and not node.target.cacheable()
