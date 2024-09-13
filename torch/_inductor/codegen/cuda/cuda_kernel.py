@@ -180,7 +180,7 @@ class CUDATemplateKernel(CUDAKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            cuda=True,
+            gpu=True,
             triton=False,
             arg_types=arg_types,
         )
