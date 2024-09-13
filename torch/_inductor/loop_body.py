@@ -11,6 +11,7 @@ import sympy
 
 import torch.fx
 from torch._dynamo.utils import identity
+from torch.fx.proxy import Scope, TracerBase
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -43,6 +44,16 @@ class InterpreterShim(torch.fx.Interpreter):
     def run(self, *args, **kwargs):
         with V.set_interpreter_handler(self):
             return super().run(*args, **kwargs)
+
+
+# We don't need the nn.Module and constant handling in Tracer
+class LightTracer(TracerBase):
+    def __init__(self):
+        super().__init__()
+        self.graph = torch.fx.Graph(tracer_cls=self.__class__)  # type: ignore[arg-type]
+        self.scope = Scope("", None)
+        self.module_stack = {}  # type: ignore[assignment]
+        self.node_name_to_scope = {}
 
 
 class MemoryEntry(NamedTuple):
@@ -545,8 +556,7 @@ class LoopBodyBlock:
             def output(result):
                 tracer.create_proxy("output", "output", (result,), {})
 
-        tracer = torch.fx.Tracer()
-        tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
+        tracer = LightTracer()
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
 
         from .index_propagation import IndexPropagation

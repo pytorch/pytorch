@@ -3,6 +3,7 @@
 
 import functools
 import string
+import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
 from typing import Callable, Optional, Tuple
@@ -28,7 +29,7 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
 from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
@@ -1666,6 +1667,52 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
+    @common_utils.parametrize("mode", ["eager", "inductor"])
+    @common_utils.parametrize(
+        "permute_order",
+        [
+            (0, 1, 2, 3),  # Default order
+            (1, 0, 2, 3),  # Reverse order
+            (0, 2, 1, 3),  # Mixed order
+            (2, 0, 1, 3),  # Another mixed order
+        ],
+    )
+    @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
+    def test_flex_attention_stride_ordering(self, mode, permute_order, shape):
+        from torch._inductor.ir import get_stride_order
+
+        # Setup
+        make_tensor = functools.partial(
+            torch.randn,
+            shape,
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+
+        # Create and permute tensors
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query = query.permute(permute_order)
+        key = key.permute(permute_order)
+        value = value.permute(permute_order)
+
+        if mode == "inductor":
+            func = torch.compile(flex_attention, backend=mode, fullgraph=True)
+        else:
+            func = flex_attention
+
+        out = func(query, key, value)
+
+        out_stride_order = get_stride_order(out.stride())
+        query_stride_order = get_stride_order(query.stride())
+
+        self.assertEqual(
+            out_stride_order,
+            query_stride_order,
+            f"Stride order mismatch: out {out_stride_order}, query {query_stride_order}",
+        )
+
+    @supported_platform
     @common_utils.parametrize("compile", [True, False])
     def test_fully_masked_out_rows_0_check(self, compile: bool):
         # Ensure fully masked out rows won't cause NaNs.
@@ -1951,6 +1998,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_qkv_and_block_mask_on_the_same_device(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (2, 2, 256, 32),
+            device="cuda:0",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 256, 256, device="cuda:1")
+        with self.assertRaisesRegex(
+            RuntimeError, "Expect q/k/v and block_mask to be on the same device"
+        ):
+            torch.compile(flex_attention)(query, key, value, block_mask=block_mask)
 
     @supported_platform
     def test_fw_bw_graph_correctness(self):
