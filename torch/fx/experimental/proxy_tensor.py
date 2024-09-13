@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
 import logging
@@ -904,6 +905,10 @@ def proxy_call(
 
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
+
+    fake_mode = torch._guards.detect_fake_mode(flat_args_kwargs)
+    if fake_mode and (shape_env := fake_mode.shape_env):
+        shape_env.pending_fresh_unbacked_symbols.clear()
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if

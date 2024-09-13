@@ -1922,10 +1922,11 @@ class FakeTensorMode(TorchDispatchMode):
 
             if real_out is not nil:
                 if (
-                    isinstance(fake_out, tuple)
-                    and isinstance(real_out, list)
+                    not isinstance(fake_out, torch.Tensor)
+                    and not isinstance(real_out, torch.Tensor)
+                    and type(fake_out) != type(real_out)
                 ):
-                    tree_map_(go, tuple(fake_out), real_out)
+                    tree_map_(go, tuple(fake_out), tuple(real_out))
                 else:
                     tree_map_(go, fake_out, real_out)
 

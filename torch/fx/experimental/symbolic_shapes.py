@@ -3345,6 +3345,7 @@ class ShapeEnv:
         """
         symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
         if not self._ignore_fresh_unbacked_symbols_tls():
+            print("create_unbacked_symint")
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
@@ -3369,6 +3370,8 @@ class ShapeEnv:
         """
         symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
         if not self._ignore_fresh_unbacked_symbols_tls():
+            # print("create_unbacked_symbool")
+            # breakpoint()
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
