@@ -17,6 +17,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch.fx
 import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import (
     compiled_autograd,
     config as dynamo_config,
@@ -399,20 +400,22 @@ def fake_tensor_prop(
 
     The created fake mode will be returned.
     """
-    fake_mode = detect_fake_mode(example_inputs)
-    if not fake_mode:
-        fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-        FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
-    else:
-        ctx = (
-            contextlib.nullcontext()
-            if not force_allow_non_fake_inputs
-            else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-        )
-        with ctx:  # type: ignore[attr-defined]
-            FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
-                *example_inputs
+    # Ensure that decomps that support symbolic shapes are used
+    with enable_python_dispatcher():
+        fake_mode = detect_fake_mode(example_inputs)
+        if not fake_mode:
+            fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+            FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+        else:
+            ctx = (
+                contextlib.nullcontext()
+                if not force_allow_non_fake_inputs
+                else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
             )
+            with ctx:  # type: ignore[attr-defined]
+                FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
+                    *example_inputs
+                )
 
     return fake_mode
 

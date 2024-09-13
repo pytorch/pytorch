@@ -3294,6 +3294,40 @@ class AOTInductorTestsTemplate:
             Model(), example_inputs, options=dict(max_autotune=max_autotune)
         )
 
+    @skip_if_no_torchvision
+    def test_torchvision_transforms_functional_tensor_resize(self):
+        import torchvision
+
+        # https://fb.workplace.com/groups/1075192433118967/permalink/1501860707118802/
+        class A(torch.nn.Module):
+            def forward(self, image: torch.Tensor, target_size: torch.Tensor):
+                target_h, target_w = target_size.tolist()
+                torch._check(target_h > 0)
+                torch._check(target_w > 0)
+                torch._check(target_h <= 4000)
+                torch._check(target_w <= 4000)
+
+                return torchvision.transforms._functional_tensor.resize(
+                    image,
+                    size=[target_h, target_w],
+                    interpolation="bilinear",
+                    antialias=False,
+                )
+
+        model = A()
+        example_inputs = (
+            torch.ones([3, 800, 600], device=self.device),
+            torch.tensor([448, 336], device=self.device),
+        )
+        dynamic_shapes = {
+            "image": {
+                1: torch.export.Dim("height", min=1, max=4000),
+                2: torch.export.Dim("width", min=1, max=4000),
+            },
+            "target_size": None,
+        }
+        self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
+
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -3624,6 +3658,7 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
+    "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
