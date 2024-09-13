@@ -2146,9 +2146,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if V.graph.aot_mode:
-            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
-            # compared with JIT Inductor which uses TORCH_CHECK
+        if config.abi_compatible:
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -4564,7 +4562,7 @@ class CppScheduling(BaseScheduling):
         compile_wrapper.splice(src_code, strip=True)
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline("''')")
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), cuda=False)
+        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), gpu=False)
         return kernel_name
 
     def flush(self):
@@ -4645,7 +4643,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, cuda=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, arg_types=arg_types
         )
 
 

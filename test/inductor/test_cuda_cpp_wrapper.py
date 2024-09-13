@@ -26,11 +26,11 @@ try:
     except ImportError:
         import test_combo_kernels
 
-        import test_foreach
-        import test_pattern_matcher
-        import test_select_algorithm
-        import test_torchinductor
-        import test_torchinductor_dynamic_shapes
+        import test_foreach  # @manual=fbcode//caffe2/test/inductor:foreach-library
+        import test_pattern_matcher  # @manual=fbcode//caffe2/test/inductor:pattern_matcher-library
+        import test_select_algorithm  # @manual=fbcode//caffe2/test/inductor:select_algorithm-library
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+        import test_torchinductor_dynamic_shapes  # @manual=fbcode//caffe2/test/inductor:test_inductor-library_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -188,6 +188,7 @@ if RUN_CUDA:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_unspec_inputs"),
+        BaseTest("test_consecutive_split_cumprod"),
         BaseTest("test_pointwise_hermite_polynomial_he"),
         BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
