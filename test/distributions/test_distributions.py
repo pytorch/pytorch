@@ -58,6 +58,7 @@ from torch.distributions import (
     FisherSnedecor,
     Gamma,
     Geometric,
+    GeneralizedPareto,
     Gumbel,
     HalfCauchy,
     HalfNormal,
@@ -339,6 +340,16 @@ def _get_examples():
                 {
                     "concentration": torch.randn(1).exp().requires_grad_(),
                     "rate": torch.randn(1).exp().requires_grad_(),
+                },
+            ],
+        ),
+        Example(
+            GeneralizedPareto,
+            [
+                {
+                    "loc": torch.randn(5, 5, requires_grad=True),
+                    "scale": torch.randn(5, 5).abs().requires_grad_(),
+                    "concentration": torch.randn(5, 5).requires_grad_(),
                 },
             ],
         ),
@@ -944,6 +955,21 @@ def _get_bad_examples():
                 },
             ],
         ),
+        Example(
+            GeneralizedPareto,
+            [
+                {
+                    "loc": torch.tensor([0.0, 0.0], requires_grad=True),
+                    "scale": torch.tensor([-1.0, -100.0], requires_grad=True),
+                    "concentration": torch.tensor([0.0, 0.0], requires_grad=True),
+                },
+                {
+                    "loc": torch.tensor([1.0, 1.0], requires_grad=True),
+                    "scale": torch.tensor([0.0, 0.0], requires_grad=True),
+                    "concentration": torch.tensor([-1.0, -100.0], requires_grad=True),
+                },
+            ],
+        )
         Example(
             Gumbel,
             [
@@ -3498,6 +3524,39 @@ class TestDistributions(DistributionsTestCase):
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_generalized_pareto(self):
+        scale = torch.randn(2, 3).abs().requires_grad_()
+        concentration = torch.randn(2, 3).requires_grad_()
+        scale_1d = torch.randn(1).abs().requires_grad_()
+        concentration_1d = torch.randn(1).requires_grad_()
+        self.assertEqual(GeneralizedPareto(scale_1d, 0.5).mean, inf)
+        self.assertEqual(GeneralizedPareto(scale_1d, 0.5).variance, inf)
+        self.assertEqual(GeneralizedPareto(scale, concentration).sample().size(), (2, 3))
+        self.assertEqual(GeneralizedPareto(scale, concentration).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(GeneralizedPareto(scale_1d, concentration_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(GeneralizedPareto(scale_1d, concentration_1d).sample().size(), (1,))
+        self.assertEqual(GeneralizedPareto(1.0, 1.0).sample().size(), ())
+        self.assertEqual(GeneralizedPareto(1.0, 1.0).sample((1,)).size(), (1,))
+        
+
+        def ref_log_prob(idx, x, log_prob):
+            s = scale.view(-1)[idx].detach()
+            c = concentration.view(-1)[idx].detach()
+            expected = scipy.stats.genpareto.logpdf(x, c, scale=s)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
+
+        self._check_log_prob(GeneralizedPareto(scale, concentration), ref_log_prob)
+    
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_generalized_pareto_sample(self):
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        for scale, concentration in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(
+                GeneralizedPareto(scale, concentration),
+                scipy.stats.genpareto(concentration, scale=scale),
+                f"GeneralizedPareto(scale={scale}, concentration={concentration})",
+            )
+    
     def test_gumbel(self):
         loc = torch.randn(2, 3, requires_grad=True)
         scale = torch.randn(2, 3).abs().requires_grad_()

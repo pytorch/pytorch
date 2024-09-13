@@ -131,6 +131,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`GeneralizedPareto`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.generalized_pareto
+.. autoclass:: GeneralizedPareto
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Gumbel`
 ~~~~~~~~~~~~~~~~
 

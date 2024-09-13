@@ -87,6 +87,7 @@ from .exponential import Exponential
 from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
+from .generalized_pareto import GeneralizedPareto
 from .gumbel import Gumbel
 from .half_cauchy import HalfCauchy
 from .half_normal import HalfNormal
@@ -136,6 +137,7 @@ __all__ = [
     "FisherSnedecor",
     "Gamma",
     "Geometric",
+    "GeneralizedPareto",
     "Gumbel",
     "HalfCauchy",
     "HalfNormal",
