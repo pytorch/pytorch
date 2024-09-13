@@ -438,6 +438,7 @@ def mps_ops_modifier(ops):
         'logical_not',
         'logical_or',
         'logical_xor',
+        'logsumexp',
         'long',
         'masked_fill',
         'masked.mean',
@@ -445,6 +446,7 @@ def mps_ops_modifier(ops):
         'masked.std',
         'masked.sum',
         'masked.var',
+        'masked.logsumexp',
         'matmul',
         'mean',
         'mm',
@@ -1201,6 +1203,29 @@ class MpsMemoryLeakCheck:
 
             raise RuntimeError(msg)
 
+class TestAutocastMPS(TestCase):
+
+    def test_matmul_autocast(self):
+        autocast_tensor_A = torch.rand((8, 8), device="mps")
+        autocast_tensor_B = torch.rand((8, 8), device="mps")
+        tensor_A = autocast_tensor_A.clone().detach()
+        tensor_B = autocast_tensor_B.clone().detach()
+        autocast_output_tensor = torch.empty(8, 8)
+        output_tensor = autocast_output_tensor.clone().detach()
+
+        with torch.autocast(device_type="mps"):
+            autocast_output_tensor = torch.mm(autocast_tensor_A, autocast_tensor_B)
+            autocast_output_tensor = torch.mm(autocast_tensor_A, autocast_output_tensor)
+
+        output_tensor = torch.mm(tensor_A, tensor_B)
+        output_tensor = torch.mm(tensor_A, output_tensor)
+
+        self.assertEqual(autocast_output_tensor.dtype, torch.float16, "Autocast output tensor was not expected type float16")
+        self.assertEqual(autocast_output_tensor,
+                         output_tensor.to(torch.float16),
+                         f"Autocast & non-autocast tensors did not match, \
+                         got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
+
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
@@ -1913,6 +1938,20 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
+
+    @xfailIf(product_version < 15.0)
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_large_bmm(self, dtype):
+        batch1 = torch.randn(11, 20064, 128, dtype=dtype, device='mps')
+        batch2 = torch.randn(11, 128, 20064, dtype=dtype, device='mps')
+        output_cpu = torch.bmm(batch1.cpu(), batch2.cpu())
+        output_mps = torch.bmm(batch1, batch2)
+
+        # Using the low precision comparison for FP16
+        tol = 1e-2 if dtype == torch.float16 else None
+        self.assertEqual(output_cpu, output_mps, atol=tol, rtol=tol)
+        self.assertEqual(output_cpu.size(), output_mps.size())
+
 
     def test_addr(self):
         A = torch.ones(5, 10).to("mps")
@@ -2692,6 +2731,12 @@ class TestMPS(TestCaseMPS):
 
         # Expecting the inverted to yield the original signal
         self.assertEqual(ifft_result, signal)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/135223
+    def test_fftfreq(self):
+        freq_cpu = torch.fft.fftfreq(10**4, device='cpu')
+        freq_mps = torch.fft.fftfreq(10**4, device='mps')
+        self.assertEqual(freq_cpu, freq_mps)
 
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
@@ -6526,6 +6571,18 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+    def test_logsumexp(self):
+        def helper(shape):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            x = cpu_x.detach().clone().to('mps')
+
+            log_result = torch.logsumexp(x, -1)
+            log_result_cpu = torch.logsumexp(cpu_x, -1)
+
+            self.assertEqual(log_result, log_result_cpu)
+
+        helper((2, 8, 4, 5))
+
     # Test concat forward
     def test_cat2(self):
 
@@ -9360,17 +9417,36 @@ class TestSDPA(TestCaseMPS):
         err = ((y - ref).abs() / denom).mean().item()
         self.assertLess(err, 0.01)
 
-    def _test_sdpa_no_mask(self, is_causal: bool, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int = 32, HS: int = 128):
+    def _test_sdpa_no_mask(
+        self,
+        is_causal: bool,
+        dtype: torch.dtype,
+        L: int = 1,
+        S: int = 72,
+        NH: int = 32,
+        HS: int = 128,
+        requires_grad: bool = False
+    ):
+
         torch.manual_seed(1729)
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
-            q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
+            q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps", requires_grad=requires_grad)
             k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
             v = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
+            q_cpu = q.cpu().detach().cpu().requires_grad_(requires_grad)
+            k_cpu = k.cpu()
+            v_cpu = v.cpu()
 
             y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=is_causal)
-            y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=is_causal)
+            y_ref = F.scaled_dot_product_attention(q_cpu, k_cpu, v_cpu, dropout_p=0.0, is_causal=is_causal)
 
             self._compare_tensors(y.cpu(), y_ref)
+
+            if requires_grad and torch.is_grad_enabled():
+                y.sum().backward()
+                y_ref.sum().backward()
+
+                self._compare_tensors(q.grad.cpu(), q_cpu.grad)
 
     def test_sdpa_no_mask_no_causal_fp32(self):
         self._test_sdpa_no_mask(False, torch.float32)
@@ -9392,6 +9468,12 @@ class TestSDPA(TestCaseMPS):
 
     def test_sdpa_no_mask_causal_fp16_L7_S17_NH23_HS121(self):
         self._test_sdpa_no_mask(True, torch.float16, 7, 17, 23, 121)
+
+    def test_sdpa_no_mask_no_causal_fp32_grad(self):
+        self._test_sdpa_no_mask(False, torch.float32, requires_grad=True)
+
+        with torch.no_grad():
+            self._test_sdpa_no_mask(False, torch.float32, requires_grad=True)
 
     def _test_sdpa_mask(self, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int = 32, HS: int = 128):
         torch.manual_seed(1729)
@@ -9421,7 +9503,7 @@ class TestSDPA(TestCaseMPS):
         self._test_sdpa_mask(torch.float16, 6)
 
     def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
-        self._test_sdpa_no_mask(True, torch.float16, 7, 17, 23, 121)
+        self._test_sdpa_mask(torch.float16, 7, 17, 23, 121)
 
 
 class TestGatherScatter(TestCaseMPS):

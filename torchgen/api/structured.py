@@ -48,7 +48,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # CompositeExplicitAutograd and the meta function (which could
     # hypothetically be SymInt), but for simplicity we plan for these to just
     # be handled in Python
-    r = cpp.valuetype_type(t, symint=False, binds=binds)
+    r = cpp.valuetype_type(t, symint=False, binds=binds, mutable=mutable)
     if r is not None:
         return r
 

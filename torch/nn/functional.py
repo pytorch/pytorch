@@ -5620,7 +5620,7 @@ scaled_dot_product_attention = _add_docstr(
                 is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
             L, S = query.size(-2), key.size(-2)
             scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
-            attn_bias = torch.zeros(L, S, dtype=query.dtype)
+            attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
             if is_causal:
                 assert attn_mask is None
                 temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
@@ -5631,7 +5631,7 @@ scaled_dot_product_attention = _add_docstr(
                 if attn_mask.dtype == torch.bool:
                     attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
                 else:
-                    attn_bias += attn_mask
+                    attn_bias = attn_mask + attn_bias
 
             if enable_gqa:
                 key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
@@ -5745,7 +5745,7 @@ scaled_dot_product_attention = _add_docstr(
         >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
         >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
         >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
-        >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
+        >>> with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
         >>>     F.scaled_dot_product_attention(query,key,value)
 
 

@@ -1025,9 +1025,14 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
         emb = torch.nn.Embedding(100, 8, device=device)
         y = emb(x)
-        ys = y.unbind()
-        for i, inp in enumerate(inputs):
-            self.assertEqual(emb(inp), ys[i])
+
+        @torch._dynamo.disable
+        def check(inputs, y):
+            ys = y.unbind()
+            for i, inp in enumerate(inputs):
+                self.assertEqual(emb(inp), ys[i])
+
+        check(inputs, y)
 
     @skipMeta
     @torch.inference_mode()
@@ -5950,6 +5955,37 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertFalse(clone.is_contiguous())
         check_nt_equality(detached, transposed)
 
+    def test_permute(self, device):
+        nt = random_nt_from_dims(
+            [2, None, 3, 5], device, torch.float32, layout=torch.jagged
+        )
+        nt_shape = nt.shape
+        nt_inner_shape = nt.values().shape
+        with self.assertRaisesRegex(
+            ValueError,
+            r"permute\(\): number of dimensions in the tensor input \(4\) "
+            + r"does not match the length of the desired ordering of dimensions \(3\).",
+        ):
+            nt.permute(0, 2, 1)
+        with self.assertRaisesRegex(
+            ValueError, r"permute\(\): duplicate dims are not allowed."
+        ):
+            nt.permute(0, 2, -2, 3)
+        with self.assertRaisesRegex(
+            ValueError, "Permute is not supported on the batch dimension for jagged NT"
+        ):
+            nt.permute(1, 0, 2, 3)
+        nt_permute = nt.permute(0, 2, 1, -1)
+        self.assertEqual(
+            nt_permute.shape, (nt_shape[0], nt_shape[2], nt_shape[1], nt_shape[3])
+        )
+        self.assertEqual(
+            nt_permute.values().shape,
+            (nt_inner_shape[1], nt_inner_shape[0], nt_inner_shape[2]),
+        )
+        self.assertEqual(nt_permute._ragged_idx, 2)
+        self.assertEqual(nt_permute.permute(0, 2, 1, 3), nt)
+
     def test_to_dtype(self, device):
         nt = random_nt_from_dims(
             [2, None, 3], device, torch.float32, layout=torch.jagged
@@ -6680,6 +6716,38 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad)
         self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Platform doesn't support flash or mem-efficient attention",
+    )
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @skipIfTorchDynamo()
+    def test_sdpa_flop_counter(self, device):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        def get_flops(nt):
+            flop_counter = FlopCounterMode(display=False)
+            with flop_counter:
+                ret = torch.nn.functional.scaled_dot_product_attention(nt, nt, nt)
+                ret.values().sum().backward()
+            return flop_counter.get_total_flops()
+
+        values = torch.randn(
+            (8 * 16, 4, 16), requires_grad=True, device=device, dtype=torch.float16
+        )
+        offsets = torch.arange(0, 8 * 16 + 1, 16, device=device, dtype=torch.int32)
+        nt = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+
+        values_meta = torch.randn(
+            (8 * 16, 4, 16), requires_grad=True, device="meta", dtype=torch.float16
+        )
+        offsets_meta = torch.arange(0, 8 * 16 + 1, 16, device="meta", dtype=torch.int32)
+        nt_meta = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
+
+        self.assertEqual(get_flops(nt), get_flops(nt_meta))
+
     @skipIfTorchDynamo()
     def test_nested_tensor_activation_checkpoint(self, device):
         values = torch.randn(
@@ -7088,9 +7156,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         a, b, c = nt.unbind()
         b.sum().backward()
 
-        expected_grad = torch.zeros_like(nt)
-        expected_grad.unbind()[1].add_(1.0)
-        torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
+        @torch._dynamo.disable
+        def check(nt):
+            expected_grad = torch.zeros_like(nt)
+            expected_grad.unbind()[1].add_(1.0)
+            self.assertEqual(nt.grad, expected_grad)
+
+        check(nt)
 
 
 FORWARD_FAILURES = {
