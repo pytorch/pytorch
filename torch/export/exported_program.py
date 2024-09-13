@@ -248,11 +248,7 @@ def _override_decomp_aten_to_variants():
 def _split_decomp_table_to_cia_and_python_decomp(
     decomp_table: Dict[torch._ops.OperatorBase, Callable]
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
-    from torch._decomp import (
-        _collect_all_valid_cia_ops,
-        _get_decomp_for_cia,
-        decomposition_table as whole_python_decomp_table,
-    )
+    from torch._decomp import _collect_all_valid_cia_ops, _get_decomp_for_cia
 
     all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
     cia_ops_to_callable = {}
@@ -279,7 +275,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
             # TODO this is annpying case where aten.item has
             # prim decomposition which later calls into aten.item
             # and recurses infinitely. (https://github.com/pytorch/pytorch/issues/136050)
-            if op in whole_python_decomp_table:
+            if op == torch.ops.aten.item.default:
                 cia_ops_to_callable[op] = _get_decomp_for_cia(op)
             else:
                 cia_ops_to_callable[op] = decomp_table[op]
