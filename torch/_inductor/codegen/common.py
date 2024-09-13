@@ -1420,6 +1420,7 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
+            arg_types.append(torch.uint8)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):

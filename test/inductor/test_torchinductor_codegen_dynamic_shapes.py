@@ -20,14 +20,14 @@ importlib.import_module("filelock")
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import (
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     CommonTemplate,
     copy_tests,
     run_and_get_cpp_code,
     run_and_get_triton_code,
     TestFailure,
 )
-from inductor.test_torchinductor_dynamic_shapes import (
+from inductor.test_torchinductor_dynamic_shapes import (  # @manual
     make_dynamic_cls,
     test_failures as dynamic_shapes_test_failures,
 )

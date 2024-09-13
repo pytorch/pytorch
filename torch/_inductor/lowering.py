@@ -2109,12 +2109,12 @@ def _searchsorted_with_positional_sorter(
             )
 
     else:
-        strides = sorted_sequence.get_stride()
 
         def inner_fn(idx):
             val = values_loader(idx)
             # Get index to the beginning of the sorted sequence within a flattened
             # version of the array.
+            strides = sorted_sequence.get_stride()
             subsequence_index = ops.index_expr(
                 functools.reduce(
                     operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))

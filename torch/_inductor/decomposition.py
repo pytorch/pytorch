@@ -1029,7 +1029,7 @@ def searchsorted(
 @register_decomposition(aten.searchsorted.Scalar)
 def searchsorted_scalar(
     sorted_sequence: torch.Tensor,
-    self: Any,
+    self: torch.types.Number,
     *,
     out_int32: bool = False,
     right: bool = False,
