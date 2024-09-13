@@ -64,10 +64,21 @@ if args.output_directory:
     out_dir = args.output_directory
 
 includes = [
+    "caffe2/operators/*",
+    "caffe2/sgd/*",
+    "caffe2/image/*",
+    "caffe2/transforms/*",
+    "caffe2/video/*",
+    "caffe2/distributed/*",
+    "caffe2/queue/*",
+    "caffe2/contrib/aten/*",
     "binaries/*",
     "caffe2/**/*_test*",
     "caffe2/core/*",
+    "caffe2/db/*",
     "caffe2/utils/*",
+    "caffe2/contrib/gloo/*",
+    "caffe2/contrib/nccl/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
     "modules/*",
@@ -107,6 +118,8 @@ for new_dir in args.extra_include_dir:
         includes.append(abs_new_dir)
 
 ignores = [
+    "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
+    "caffe2/operators/pool_op_cudnn.cu",
     "*/hip/*",
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
