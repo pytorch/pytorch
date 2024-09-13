@@ -1455,11 +1455,7 @@ def compile_fx(
         def bw_compiler(
             model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
         ):
-            with dynamo_utils.dynamo_timed(
-                "compile_fx.<locals>.bw_compiler"
-            ), config.patch(
-                get_cpp_wrapper_config()
-            ) if config.cpp_wrapper else contextlib.nullcontext:
+            with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
                 user_visible_outputs = {}
 
                 if config.bw_outputs_user_visible:
@@ -1469,16 +1465,19 @@ def compile_fx(
                         n.name for n in model_outputs if isinstance(n, torch.fx.Node)
                     )
                 fixed = count_tangents(model)
-                return inner_compile(
-                    model,
-                    example_inputs,
-                    static_input_idxs=list(range(fixed)),
-                    cudagraphs=cudagraphs,
-                    is_backward=True,
-                    graph_id=graph_id,
-                    boxed_forward_device_index=forward_device,
-                    user_visible_outputs=user_visible_outputs,
-                )
+                with config.patch(
+                    get_cpp_wrapper_config()
+                ) if config.cpp_wrapper else contextlib.nullcontext():
+                    return inner_compile(
+                        model,
+                        example_inputs,
+                        static_input_idxs=list(range(fixed)),
+                        cudagraphs=cudagraphs,
+                        is_backward=True,
+                        graph_id=graph_id,
+                        boxed_forward_device_index=forward_device,
+                        user_visible_outputs=user_visible_outputs,
+                    )
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
