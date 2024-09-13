@@ -151,9 +151,6 @@ def map_successor_nodes_with_predecessor_buffers(
             if input_buf:
                 node.mpi.pred_buffers.append(input_buf)
                 input_buf.mpi.succ_nodes.add(node)
-        print(
-            f"node {node.get_name()}: {[x.get_name() for x in node.mpi.pred_buffers]}"
-        )
 
 
 def estimate_peak_memory(
@@ -243,11 +240,7 @@ def assign_predcessor_and_successor_nodes_to_nodes(
     """
     Assign to each scheduler node its predecessor and successor nodes.
     """
-    print("-----------")
     for node in nodes:
-        print(
-            f"node {node.get_name()}: {[x.get_name() for x in node.mpi.pred_buffers]}"
-        )
         node.mpi.pred_nodes = list(
             {
                 name_to_fused_node[pred_buffer.defining_op.get_name()]
@@ -484,11 +477,6 @@ def reorder_for_peak_memory(
     )
     compute_size_for_scheduler_buffer(name_to_buf)
     map_successor_nodes_with_predecessor_buffers(nodes, name_to_input_buf, name_to_buf)
-    print("-----AGAIN------")
-    for node in nodes:
-        print(
-            f"node {node.get_name()}: {[x.get_name() for x in node.mpi.pred_buffers]}"
-        )
     assign_predcessor_and_successor_nodes_to_nodes(nodes, name_to_fused_node)
 
     # keep track of the peak memory estimates of different methods
