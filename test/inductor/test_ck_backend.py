@@ -43,7 +43,7 @@ class TestCKBackend(TestCase):
 
         torch.random.manual_seed(1234)
         try:
-            import ck4inductor
+            import ck4inductor  # @manual
 
             self.ck_dir = os.path.dirname(ck4inductor.__file__)
             os.environ["TORCHINDUCTOR_CK_DIR"] = self.ck_dir
