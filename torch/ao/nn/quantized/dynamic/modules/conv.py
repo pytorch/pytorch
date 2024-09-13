@@ -2,6 +2,7 @@
 r"""Dynamically quantized convolution modules."""
 
 import warnings
+from typing import ClassVar
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -47,7 +48,7 @@ class Conv1d(nnq.Conv1d):
 
     """
 
-    _FLOAT_MODULE = nn.Conv1d
+    _FLOAT_MODULE: ClassVar = nn.Conv1d
     _NNIQAT_CONV_BN_MODULE = None  # type: ignore[assignment]
     _NNI_CONV_RELU_MODULE = None  # type: ignore[assignment]
 
@@ -308,7 +309,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
         torch.Size([1, 16, 12])
     """
 
-    _FLOAT_MODULE = nn.ConvTranspose1d
+    _FLOAT_MODULE: ClassVar = nn.ConvTranspose1d
 
     def __init__(
         self,
@@ -390,7 +391,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
         torch.Size([1, 16, 12, 12])
     """
 
-    _FLOAT_MODULE = nn.ConvTranspose2d
+    _FLOAT_MODULE: ClassVar = nn.ConvTranspose2d
 
     def __init__(
         self,
@@ -472,7 +473,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
         torch.Size([1, 16, 12, 12, 12])
     """
 
-    _FLOAT_MODULE = nn.ConvTranspose3d
+    _FLOAT_MODULE: ClassVar = nn.ConvTranspose3d
 
     def __init__(
         self,
