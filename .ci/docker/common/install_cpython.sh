@@ -7,7 +7,7 @@ PYTHON_DOWNLOAD_GITHUB_BRANCH=https://github.com/python/cpython/archive/refs/hea
 GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 
 # Python versions to be installed in /opt/$VERSION_NO
-CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.8.1 3.9.0 3.10.1 3.11.0 3.12.0 3.13.0"}
+CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.8.1 3.9.0 3.10.1 3.11.0 3.12.0 3.13.0 3.13.0t"}
 
 function check_var {
     if [ -z "$1" ]; then
@@ -37,8 +37,13 @@ function do_cpython_build {
         local openssl_flags="--with-openssl=${WITH_OPENSSL} --with-openssl-rpath=auto"
     fi
 
+    local additional_flags=""
+    if [[ ${py_ver} == "3.13.0t" ]]; then
+        additional_flags=" --disable-gil"
+    fi
+
     # -Wformat added for https://bugs.python.org/issue17547 on Python 2.6
-    CFLAGS="-Wformat" ./configure --prefix=${prefix} ${openssl_flags} ${shared_flags} > /dev/null
+    CFLAGS="-Wformat" ./configure --prefix=${prefix} ${openssl_flags} ${shared_flags} ${additional_flags} > /dev/null
 
     make -j40 > /dev/null
     make install > /dev/null
@@ -66,10 +71,17 @@ function do_cpython_build {
 
 function build_cpython {
     local py_ver=$1
+    local extra_py_flag=""
     check_var $py_ver
     check_var $PYTHON_DOWNLOAD_URL
     local py_ver_folder=$py_ver
-    if [ "$py_ver" = "3.13.0" ]; then
+
+    if [ "$py_ver" = "3.13.0t" ]; then
+        PY_VER_SHORT="3.13"
+        check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
+        wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
+        do_cpython_build $py_ver cpython-${PY_VER_SHORT}t
+    else if [ "$py_ver" = "3.13.0" ]; then
         PY_VER_SHORT="3.13"
         check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
         wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
