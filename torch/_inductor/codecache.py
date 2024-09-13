@@ -1267,10 +1267,10 @@ class FxGraphCache:
         for node in gm.graph.nodes:
             if (
                 isinstance(node.target, torch._ops.HigherOrderOperator)
-                and not node.target.pure()
+                and not node.target.cacheable()
             ):
                 raise BypassFxGraphCache(
-                    f"Can't cache HigherOrderOperators: {node.target.name()}"
+                    f"Can't cache HigherOrderOperator: {node.target.name()}"
                 )
             if node.op == "getattr" and isinstance(
                 getattr(gm, node.target), torch._C.ScriptObject

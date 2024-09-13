@@ -107,7 +107,7 @@ class WrapActivationCheckpoint(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("wrap_activation_checkpoint")
+        super().__init__("wrap_activation_checkpoint", cacheable=False)
 
     def __call__(self, function, *args, **kwargs):
         # use_reentrant is set to False because this op is going to be traced.
@@ -121,9 +121,6 @@ class WrapActivationCheckpoint(HigherOrderOperator):
         # Using interpreter allows preservation of metadata through torch.compile stack.
         with fx_traceback.preserve_node_meta():
             return checkpoint(Interpreter(function).run, *args, **kwargs)
-
-    def pure(self):
-        return False
 
 
 wrap_activation_checkpoint = WrapActivationCheckpoint()
@@ -149,7 +146,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("tag_activation_checkpoint")
+        super().__init__("tag_activation_checkpoint", cacheable=False)
 
     @staticmethod
     def divide_kwargs(kwargs):
@@ -238,9 +235,6 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
             with fx_traceback.preserve_node_meta():
                 return Interpreter(gmod).run(*args)
-
-    def pure(self):
-        return False
 
 
 tag_activation_checkpoint = TagActivationCheckpoint()

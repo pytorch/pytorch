@@ -376,8 +376,15 @@ class TestFxGraphCache(TestCase):
         def fn(q, k, v):
             return flex_attention(q, k, v, score_mod=score_mod, block_mask=block_mask)
 
+        def score_mod2(score, b, h, q, kv):
+            return score
+
+        def fn2(q, k, v):
+            return flex_attention(q, k, v, score_mod=score_mod2, block_mask=block_mask)
+
         a, b, c = (torch.randn(1, 4, 512, 64).cuda() for _ in range(3))
         compiled_fn = torch.compile(fn)
+        compiled_fn2 = torch.compile(fn2)
 
         # A first call should miss in the cache.
         self.assertEqual(fn(a, b, c), compiled_fn(a, b, c))
@@ -392,6 +399,15 @@ class TestFxGraphCache(TestCase):
         self.reset()
         self.assertEqual(fn(a, b, c), compiled_fn(a, b, c))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+        # A third call with different score_mod should have a cache miss
+        for m in torch._inductor.codecache.PyCodeCache.cache.values():
+            os.remove(m.__file__)
+        self.reset()
+        self.assertEqual(fn2(a, b, c), compiled_fn2(a, b, c))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
