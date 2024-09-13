@@ -1598,8 +1598,7 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # @parametrize("autograd", [False, True])
-    @parametrize("autograd", [True])
+    @parametrize("autograd", [False, True])
     def test_scan_dim(self, reverse, compile_mode, device, autograd):
         import random
 
@@ -2481,13 +2480,10 @@ def forward(self, pred_1, x_1):
 
     @requires_cuda
     @parametrize("reverse", [False, True])
-    # @parametrize("reverse", [True])
-    # @parametrize("reverse", [False])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # @parametrize("autograd", [False, True])
-    @parametrize("autograd", [True])
-    def test_scan_init2(self, reverse, compile_mode, device, autograd):
+    @parametrize("autograd", [False, True])
+    def test_scan_init(self, reverse, compile_mode, device, autograd):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Only init and no input
@@ -2614,10 +2610,12 @@ def forward(self, pred_1, x_1):
         if autograd:
             result_flatten, _ = pytree.tree_flatten(result)
             result_exp_flatten, _ = pytree.tree_flatten(result_exp)
-            grad_out = [torch.ones_like(el) for el in result_exp_flatten]
+            grad_out_expected = [torch.ones_like(el) for el in result_exp_flatten]
             expected_grads = torch.autograd.grad(
-                result_exp_flatten, (init, x), grad_out
+                result_exp_flatten, (init, x), grad_out_expected
             )
+
+            grad_out = [torch.ones_like(el) for el in result_flatten]
             grads = torch.autograd.grad(result_flatten, (init, x), grad_out)
             self.assertEqual(grads, expected_grads)
 
@@ -2859,15 +2857,53 @@ def forward(self, pred_1, x_1):
 
     @parametrize("autograd", [False, True])
     def test_scan_RNN(self, autograd):
-        dim = 0
+        # dim = 0
+        # device = torch.device("cpu")
+
+        # rnn = torch.nn.RNN(
+        #     input_size=5,
+        #     hidden_size=7,
+        # )
+        # rnn = rnn.to(device=device)
+        # x = torch.randn(2, 1, 5, device=device, requires_grad=autograd)
+        # h = torch.randn(1, 7, device=device, requires_grad=autograd)
+
+        # W_ih = rnn.weight_ih_l0.T.clone()
+        # b_ih = rnn.bias_ih_l0.clone()
+        # W_hh = rnn.weight_hh_l0.T.clone()
+        # b_hh = rnn.bias_hh_l0.clone()
+
+        # def RNN(x: torch.Tensor, y: torch.Tensor):
+        #     c_new = y @ W_ih + b_ih
+        #     h_new = torch.tanh(c_new + x @ W_hh + b_hh)
+        #     return h_new, h_new
+
+        # expected_result = rnn(x, torch.unsqueeze(h, 0))
+        # expected_result_out = expected_result[0]
+        # expected_result_state = expected_result[1][0, :]
+        # result = scan(RNN, h, x, dim=dim, reverse=False)
+        # self.assertEqual(result[0], expected_result_state)
+        # self.assertEqual(result[1], expected_result_out)
+
+        # if autograd:
+        #     result_flat = pytree.tree_leaves(result)
+        #     result_exp_flat = [expected_result_state, expected_result_out]
+
+        #     grad_out = [torch.ones_like(r) for r in result_exp_flat]
+        #     expected_grads = torch.autograd.grad(result_exp_flat, (h, x), grad_out)
+        #     grads = torch.autograd.grad(result_flat, (h, x), grad_out)
+        #     self.assertEqual(grads, expected_grads)
+
+        dim = 1
         device = torch.device("cpu")
 
         rnn = torch.nn.RNN(
             input_size=5,
             hidden_size=7,
+            batch_first=True,
         )
         rnn = rnn.to(device=device)
-        x = torch.randn(2, 1, 5, device=device, requires_grad=autograd)
+        x = torch.randn(1, 2, 5, device=device, requires_grad=autograd)
         h = torch.randn(1, 7, device=device, requires_grad=autograd)
 
         W_ih = rnn.weight_ih_l0.T.clone()
@@ -2881,17 +2917,23 @@ def forward(self, pred_1, x_1):
             return h_new, h_new
 
         expected_result = rnn(x, torch.unsqueeze(h, 0))
-        expected_result_state = torch.permute(expected_result[1], (1, 0, 2))
-        result = scan(RNN, h, x, dim=dim)
-        self.assertEqual(result[0].unsqueeze(0), expected_result_state)
-        self.assertEqual(result[1], expected_result[0])
+        expected_result_out = expected_result[0]
+        expected_result_state = expected_result[1][0, :]
+        result = scan(RNN, h, x, dim=dim, reverse=False)
+        result_cmp = [result[0], shift_source_dim_to_target_dim(result[1], 0, dim)]
+        self.assertEqual(result_cmp[0], expected_result_state)
+        self.assertEqual(result_cmp[1], expected_result_out)
 
         if autograd:
             result_flat = pytree.tree_leaves(result)
-            result_exp_flat = pytree.tree_leaves(expected_result)
+            result_exp_flat = [expected_result_state, expected_result_out]
 
-            grad_out = [torch.ones_like(r) for r in result_exp_flat]
-            expected_grads = torch.autograd.grad(result_exp_flat, (h, x), grad_out)
+            grad_out_expected = [torch.ones_like(r) for r in result_exp_flat]
+            expected_grads = torch.autograd.grad(
+                result_exp_flat, (h, x), grad_out_expected
+            )
+
+            grad_out = [torch.ones_like(r) for r in result]
             grads = torch.autograd.grad(result_flat, (h, x), grad_out)
             self.assertEqual(grads, expected_grads)
 

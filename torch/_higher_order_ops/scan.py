@@ -466,17 +466,20 @@ class ScanAutogradOp(torch.autograd.Function):
         dim,
         reverse,
         num_leaves_init,
-        additional_inputs,
+        num_leaves_additional_inputs,
         *ops,
     ):
-        init = list(ops[:num_leaves_init])
-        xs = list(ops[num_leaves_init:])
+        ops_list = list(ops)
+        init = ops_list[:num_leaves_init]
+        xs = ops_list[num_leaves_init : len(ops_list) - num_leaves_additional_inputs]
+        additional_inputs = ops_list[len(ops_list) - num_leaves_additional_inputs :]
 
         ctx._joint_graph = joint_graph
         ctx._dim = dim
         ctx._reverse = reverse
         ctx._num_leaves_init = num_leaves_init
         ctx._num_leaves_xs = len(xs)
+        ctx._num_leaves_additional_inputs = num_leaves_additional_inputs
 
         with torch._C._AutoDispatchBelowAutograd():
             carry, carries_outs = _extract_carry_and_out(
@@ -485,10 +488,12 @@ class ScanAutogradOp(torch.autograd.Function):
             )
 
             # Collect the carries for each time step from the outs
+            # and save them for the backward path
             carries = carries_outs[:num_leaves_init]
             outs = carries_outs[num_leaves_init:]
-
             ctx.save_for_backward(*(init + xs + carries + additional_inputs))
+            ctx._num_leaves_ys = len(outs)
+
             return (*carry, *outs)
 
     @staticmethod
@@ -528,11 +533,15 @@ class ScanAutogradOp(torch.autograd.Function):
 
         """
 
+        # import pdb
+        # pdb.set_trace()
         joint_graph = ctx._joint_graph
         dim = ctx._dim
         num_leaves_init = ctx._num_leaves_init
         num_leaves_xs = ctx._num_leaves_xs
         reverse = ctx._reverse
+        num_leaves_ys = ctx._num_leaves_ys
+        num_leaves_additional_inputs = ctx._num_leaves_additional_inputs
 
         # The results from the forward scan are always stacked on dim 0
         # The gradients though need to be provided with the correct scan dimension dim
@@ -542,7 +551,10 @@ class ScanAutogradOp(torch.autograd.Function):
 
         # Retrieve the forward inputs and the forward outputs
         operands_outs = ctx.saved_tensors
+        # pdb.set_trace()
         init = operands_outs[:num_leaves_init]
+        # The backward scan operates on the 0-th dim and thus the original inputs need to be
+        # permuted accordingly
         xs = [
             shift_source_dim_to_target_dim(o, dim, bwd_scan_dim)
             for o in operands_outs[num_leaves_init : num_leaves_init + num_leaves_xs]
@@ -555,51 +567,70 @@ class ScanAutogradOp(torch.autograd.Function):
         ]
         additional_inputs = list(operands_outs[2 * num_leaves_init + num_leaves_xs :])
 
+        # pdb.set_trace()
         with torch._C._AutoDispatchBelowAutograd():
-            g_c_T = list(flat_grads[:num_leaves_init])
-            g_ys = list(flat_grads[num_leaves_init:])
+            # The flat gradients are a list of g_c_T, g_ys and optionally the gradients for the additional_inputs
+            flat_grads_list = list(flat_grads)
+            g_c_T = flat_grads_list[:num_leaves_init]
+            g_ys = flat_grads_list[num_leaves_init : num_leaves_init + num_leaves_ys]
+            old_g_additional_inputs_T = flat_grads_list[
+                num_leaves_init + num_leaves_ys :
+            ]
 
             # Prepare the inputs for the backward scan.
             # This involves flipping the input xs if needed as well as
             # Prepending the init of the forward scan to the carries
-            xs, carries = prepare_xs_carries_for_bwd(xs, init, carries, bwd_scan_dim, reverse)
+            xs, carries = prepare_xs_carries_for_bwd(
+                xs, init, carries, bwd_scan_dim, reverse
+            )
 
             xs_bwd = [*g_ys, *carries, *xs]
+
+            # pdb.set_trace()
             g_init, g_xs = _extract_carry_and_out(
                 scan_op(
                     joint_graph, g_c_T, xs_bwd, bwd_scan_dim, True, additional_inputs
                 ),
                 num_leaves_init,
             )
+
+            # pdb.set_trace()
+
+            # g_xs may contain the gradients for the additional inputs as well which need to be separated
+            new_g_additional_inputs = g_xs[num_leaves_xs:] + old_g_additional_inputs_T
+            g_xs = g_xs[:num_leaves_xs]
             g_xs = prepare_final_gradients_xs(g_xs, dim, reverse)
-            
-        return None, None, None, None, None, None, *g_init, *g_xs
+
+        # pdb.set_trace()
+
+        # return None, None, None, None, None, None, *g_init, *g_xs
+        # return *[None]*6, *g_init, *g_xs, *[None]*4
+        return *[None] * 6, *g_init, *g_xs, *new_g_additional_inputs
 
 
 @scan_op.py_impl(DispatchKey.Autograd)
-def scan_autograd(combine_fn, init, input, dim, reverse, additional_inputs):
+def scan_autograd(combine_fn, init, xs, dim, reverse, additional_inputs):
     # A shortcut for the case where all inputs don't require gradient,
     # we skip tracing the forward and backward graph.
     if pytree.tree_all_only(
         torch.Tensor,
         lambda t: not t.requires_grad,  # type: ignore[union-attr]
-        (init, input),
+        (init, xs),
     ):
         with torch._C._AutoDispatchBelowAutograd():
-            return scan_op(combine_fn, init, input, dim, reverse, additional_inputs)
+            return scan_op(combine_fn, init, xs, dim, reverse, additional_inputs)
 
     num_leaves_init = len(init)
+    num_leaves_additional_inputs = len(additional_inputs)
 
     if not torch.is_grad_enabled():
-        import pdb
-
-        pdb.set_trace()
         dim = 0
+        return scan_op(combine_fn, init, xs, 0, reverse, additional_inputs)
 
     (
         fw_graph,
         joint_graph,
-    ) = create_fw_bw_graph_combinefn(combine_fn, init, input, dim, additional_inputs)
+    ) = create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs)
 
     flat_out = ScanAutogradOp.apply(
         fw_graph,
@@ -607,8 +638,8 @@ def scan_autograd(combine_fn, init, input, dim, reverse, additional_inputs):
         dim,
         reverse,
         num_leaves_init,
-        additional_inputs,
-        *(init + input),
+        num_leaves_additional_inputs,
+        *(init + xs + additional_inputs),
     )
     return *flat_out[:num_leaves_init], *flat_out[num_leaves_init:]
 
