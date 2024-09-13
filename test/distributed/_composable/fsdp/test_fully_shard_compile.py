@@ -457,7 +457,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
         ), torch._functorch.config.patch(
-            recompute_views=True, cse=False, must_save_ac_output=True
+            recompute_views=True, cse=False,
         ), torch._inductor.config.patch(
             reorder_for_compute_comm_overlap=True,
             reorder_for_compute_comm_overlap_passes=[
