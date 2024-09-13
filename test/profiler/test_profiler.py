@@ -312,6 +312,7 @@ class TestProfiler(TestCase):
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
+    # TODO: No merge. Just test this case with XPU
     @parametrize(
         "name,thread_spec",
         {
