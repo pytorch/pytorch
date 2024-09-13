@@ -100,11 +100,6 @@ def create_onnx_friendly_decomposition_table(
         # not exportable anyways.
         if op_overload in onnx_registered_ops:
             continue
-        # Some CIA ops like (aten.item) has incorrect decomposition in refs, we should prefer
-        # to use the default CIA decomp always. Previously it didn't matter because we would 
-        # always desugar CIA before it gets to python table. 
-        if op_overload in decomposition_table:
-            continue
         # If it is HOP, we filter those out as well.
         if not hasattr(op_overload, "_schema"):
             continue
