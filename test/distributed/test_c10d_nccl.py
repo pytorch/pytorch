@@ -349,7 +349,17 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
         "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
     )
-    @parametrize("type", [torch.float16, torch.float32, torch.float64, torch.bfloat16, torch.float8_e4m3fn, torch.float8_e5m2])
+    @parametrize(
+        "type",
+        [
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        ],
+    )
     @skip_if_rocm
     def test_nan_assert(self, type):
         # Expecting a device-side error when NaN is detected
