@@ -42,6 +42,10 @@ static_weight_shapes = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+# Enable auto_functionalized_v2 (enabled by default)
+enable_auto_functionalized_v2 = (
+    os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "0") == "1"
+)
 
 enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
 
