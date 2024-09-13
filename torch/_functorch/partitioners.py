@@ -796,10 +796,10 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
                 # ```
                 # Here there is a circular dependency:
                 # 1. In backward, grad_input of layer_norm aka. `out_grad` is actually dependent on `out`.
-                # 2. `out` depends on FSDP2 backward hook (which does all-gather for `module` weights)
+                # 2. `out` depends on `out`'s backward hook created by FSDP2 (which does all-gather for `module` weights)
                 #    in order to be recomputed.
-                # 3. FSDP2 backward hook, as is the case for all eager backward hooks,
-                #    depends on `out_grad`  -> circular dependency with (1)!
+                # 3. `out`'s backward hook, as is the case for all eager backward hooks, depends on `out_grad`
+                #    -> circular dependency with (1)!
                 #
                 # Solution: check whether `out` has a backward hook, and if so, intentionally save `out`
                 # in forward graph outputs. With this, we can break the above circular dependency.
