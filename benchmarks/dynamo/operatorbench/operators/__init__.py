@@ -2,7 +2,7 @@ import os
 import pathlib
 import importlib
 from typing import List
-
+from utils.common import BenchmarkConfig
 
 class OperatorNotFoundError(RuntimeError):
     pass
@@ -18,6 +18,10 @@ class BaseOperator:
     """
     name = None
     variant = None
+    benchmark_config = None
+
+    def __init__(self, benchmark_config: BenchmarkConfig):
+        self.benchmark_config = benchmark_config
 
     def forward(self):
         raise NotImplementedError("Subclasses must implement this method.")
@@ -124,5 +128,5 @@ def list_operators():
         operator_name = os.path.basename(operator_path)
         module_path = f"operators.{operator_name}"
         loaded_operators = _load_valid_operators(module_path, operator_name)
-        operators.extend(loaded_operators)  # Collect all loaded operators
+        operators.extend(loaded_operators)
     return operators

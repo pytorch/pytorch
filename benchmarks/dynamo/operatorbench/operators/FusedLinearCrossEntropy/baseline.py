@@ -1,5 +1,7 @@
 import torch
-from . import H, V, dtype, device, FusedLinearCrossEntropyOperator
+from . import FusedLinearCrossEntropyOperator
+from utils.common import BenchmarkConfig
+from . import H, V
 
 # Reference: https://github.com/linkedin/Liger-Kernel/blob/3d0653b035222cbb845435a1994854e4fd219107/benchmark/scripts/benchmark_fused_linear_cross_entropy.py#L17
 class TorchLMHeadCE(torch.nn.Module):
@@ -28,7 +30,8 @@ class TorchLMHeadCE(torch.nn.Module):
 class Operator(FusedLinearCrossEntropyOperator):
     variant = "Baseline"
 
-    def __init__(self):
-        self.operator = TorchLMHeadCE(H=H, V=V, dtype=dtype).to(device)
+    def __init__(self, benchmark_config: BenchmarkConfig):
+        super().__init__(benchmark_config)
+        self.operator = TorchLMHeadCE(H=H, V=V, dtype=self.benchmark_config.dtype).to(self.benchmark_config.device)
 
 

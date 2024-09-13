@@ -1,5 +1,7 @@
 import torch
-from . import H, V, dtype, device, FusedLinearCrossEntropyOperator
+from . import FusedLinearCrossEntropyOperator, H, V
+
+from utils.common import BenchmarkConfig
 from liger_kernel.transformers.fused_linear_cross_entropy import (
     LigerFusedLinearCrossEntropyLoss,
 )
@@ -23,7 +25,6 @@ class LigerLMHeadCE(torch.nn.Module):
 class Operator(FusedLinearCrossEntropyOperator):
     variant = "Liger"
 
-    def __init__(self):
-        self.operator = LigerLMHeadCE(H=H, V=V, dtype=dtype).to(device)
-        self.inputs = self.generate_inputs()
-
+    def __init__(self, benchmark_config: BenchmarkConfig):
+        super().__init__(benchmark_config)
+        self.operator = LigerLMHeadCE(H=H, V=V, dtype=self.benchmark_config.dtype).to(self.benchmark_config.device)

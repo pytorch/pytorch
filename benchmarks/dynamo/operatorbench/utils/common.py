@@ -1,9 +1,8 @@
 
-from operators import load_operator_by_name, OperatorNotFoundError
 from typing import Optional, List, Dict
 import pathlib
 import dataclasses
-
+import torch
 @dataclasses.dataclass
 class OperatorConfig:
     name: str
@@ -19,4 +18,14 @@ class BenchmarkResults:
         self.durations = durations
 
     def median(self) -> float:
-        return np.median(self.durations)
+        # return np.median(self.durations)
+        pass
+    
+@dataclasses.dataclass
+class BenchmarkConfig:
+    device: str
+    dtype: torch.dtype
+    phase: str
+    max_samples: int
+    repeat: int
+    single_run: bool

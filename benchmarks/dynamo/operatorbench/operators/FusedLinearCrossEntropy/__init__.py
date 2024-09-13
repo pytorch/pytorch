@@ -1,9 +1,9 @@
 import torch
 from .. import BaseOperator
+from utils.common import BenchmarkConfig
+
 H = 4096
 V = 128256
-device = "cuda"
-dtype = torch.bfloat16
 # Each file defines an operator variant
 valid_operator_files = ["baseline.py", "custom.py"]
 
@@ -12,24 +12,25 @@ valid_operator_files = ["baseline.py", "custom.py"]
 
 class FusedLinearCrossEntropyOperator(BaseOperator):
     name = "FusedLinearCrossEntropy"
+    variant = None
     example_inputs_list = []
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, benchmark_config: BenchmarkConfig):
+        super().__init__(benchmark_config)
 
     @classmethod
-    def get_inputs(cls):
+    def get_inputs(cls, ):
         if not cls.example_inputs_list:
-            cls.generate_inputs()
+            cls.generate_inputs(cls.benchmark_config)
         return cls.example_inputs_list
 
     @classmethod
-    def generate_inputs(cls):
+    def generate_inputs(cls, benchmark_config: BenchmarkConfig):
         # Need OOM check
         # for BT in [2**i for i in range(12, 16)]:
         for BT in [2**12]:
-            _input = torch.randn(BT, H, requires_grad=True, dtype=dtype, device=device)
-            target = torch.randint(V, (BT, 1), dtype=torch.long, device=device).squeeze(1)
+            _input = torch.randn(BT, H, requires_grad=True, dtype=benchmark_config.dtype, device=benchmark_config.device)
+            target = torch.randint(V, (BT, 1), dtype=torch.long, device=benchmark_config.device).squeeze(1)
             cls.example_inputs_list.append((_input, target))
 
     def forward(self, *input):
