@@ -2146,7 +2146,9 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if config.abi_compatible:
+        if V.graph.aot_mode:
+            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
+            # compared with JIT Inductor which uses TORCH_CHECK
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -4159,9 +4161,9 @@ class CppScheduling(BaseScheduling):
         When one of the indexing_exprs contains a division, we eliminate the division by splitting the loop
         to avoid non-contiguous loads, subject to the following conditions:
             1. No reduction and no mudular index for all nodes.
-            2. Only one node's one indexing_exprs contains a division, according to this indexing_exprs,
-               we can get the dimension that needs to be split, and the split dimension is contiguous
-               in all other indexing_exprs.
+            2. The indexing_exprs of all nodes contain only one (or more, but all the same) division,
+               where the divisor is an integer, the dividend is one of the iter_vars, and this var,
+               i.e. the dimension that needs to be split, is contiguous in all other indexing_exprs.
 
         For example, if the node's var_ranges: {z0: 2, z1: 9216, z2: 960} and indexing_exprs:
         {'index0': 8847360*z0 + 960*z1 + z2, 'index1': 32*z0 + (z2//30), 'index2': z2},
@@ -4183,6 +4185,7 @@ class CppScheduling(BaseScheduling):
         split_var = None
         split_number = None
         num_div = 0
+        div_expr_ = None
         match_div = False
         matched_node = None
 
@@ -4191,7 +4194,11 @@ class CppScheduling(BaseScheduling):
             _, original_body, _ = node.node.get_default_sizes_body()
             for name, expr in original_body.indexing_exprs.items():
                 for div_expr in expr.find(FloorDiv):
-                    if any(div_expr.has(var) for var in original_body.iter_vars):
+                    if (
+                        any(div_expr.has(var) for var in original_body.iter_vars)
+                        and div_expr != div_expr_
+                    ):
+                        div_expr_ = div_expr
                         num_div += 1
                     if num_div > 1:
                         return nodes
@@ -4559,7 +4566,7 @@ class CppScheduling(BaseScheduling):
         compile_wrapper.splice(src_code, strip=True)
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline("''')")
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), cuda=False)
+        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), gpu=False)
         return kernel_name
 
     def flush(self):
@@ -4640,7 +4647,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, cuda=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, arg_types=arg_types
         )
 
 
