@@ -6,6 +6,7 @@
 #include <torch/torch.h>
 #include <algorithm>
 #include <torch/csrc/distributed/c10d/NanCheck.hpp>
+#include <stdint.h>
 
 namespace c10d {
 
@@ -15,7 +16,7 @@ namespace c10d {
 // Using ulong2 as a "byte pack", with 16 bytes, for efficient data load
 union BytePack16 {
   ulong2 ul2;
-  unsigned long ul[2];
+  uint64_t ul[2];
 };
 
 typedef union BytePack16 BytePack;
@@ -86,29 +87,25 @@ struct CheckBytePack<T, /*EltPerPack*/8> {
 // i.e.
 // (x & 0x7f) == 0x7f
 
-// We want to check 8 x FP8 simultaneously, i.e. at size of 8 bytes.
-// The algorithm is as follows:
+// We want to check 8 x FP8 simultaneously. The algorithm is as follows:
 // (1) Mask out the most significant bit with mask 0x7f.
-// (2) If the result is 0x7f (is nan), then the following would be a negative number:
-//     x[i] = 0x7f - (x[i] + 0x01)
-// (3) Only leave the sign bit by masking with 0x80.
-// (4) If any x[i] is negative, then the whole x != 0.
-#define CHECK_8_FLOAT8_E4M3FN(x) \
-do { \
-  x &= 0x7f7f7f7f7f7f7f7f; \
-  x = 0x7f7f7f7f7f7f7f7f - (x + 0x0101010101010101); \
-  if ((x & 0x8080808080808080) != 0) \
-    __trap(); \
-} while (0)
+// (2) If the result is 0x7f (is nan), the following arithmetic would cause the
+//     8th bit to be 1: x[i] = x[i] + 0x01
+// (3) Only leave the 8th bit by masking with 0x80.
+// (4) If any x[i] is nan, then the whole x != 0.
 
 template<>
 struct CheckBytePack<c10::Float8_e4m3fn, /*EltPerPack*/16> {
+  static __device__ __forceinline__ bool hasNanFP8x8(uint64_t fp8x8) {
+    auto t = fp8x8 & 0x7F7F7F7F7F7F7F7FULL;
+    auto incremented = t + 0x0101010101010101ULL;
+    auto overflow = incremented & 0x8080808080808080ULL;
+    return overflow != 0;
+  }
+
   static __device__ __forceinline__ void check(BytePack* tmp) {
-    unsigned long x;
-    x = tmp->ul[0];
-    CHECK_8_FLOAT8_E4M3FN(x);
-    x = tmp->ul[1];
-    CHECK_8_FLOAT8_E4M3FN(x);
+    if (hasNanFP8x8(tmp->ul[0]) || hasNanFP8x8(tmp->ul[1]))
+        __trap();
   }
 };
 
