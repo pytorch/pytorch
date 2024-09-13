@@ -3,6 +3,7 @@ from numbers import Number, Real
 import math
 
 import torch
+from torch import nan
 from torch.distributions import constraints, Distribution
 from torch.distributions.utils import broadcast_all
 
@@ -119,7 +120,7 @@ class GeneralizedPareto(Distribution):
             valid, concentration, torch.tensor(0.5, dtype=dtype)
         )
         result = self.loc + self.scale / (1 - safe_conc)
-        return torch.where(valid, result, torch.full_like(result, float("nan")))
+        return torch.where(valid, result, torch.full_like(result, nan))
 
     @property
     def variance(self):
@@ -133,7 +134,7 @@ class GeneralizedPareto(Distribution):
         result = self.scale**2 / (
             (1 - safe_conc) ** 2 * (1 - 2 * safe_conc)
         ) + torch.zeros_like(self.loc)
-        return torch.where(valid, result, torch.full_like(result, float("nan")))
+        return torch.where(valid, result, torch.full_like(result, nan))
 
     def entropy(self):
         ans = torch.log(self.scale) + self.concentration + 1
