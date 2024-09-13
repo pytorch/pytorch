@@ -748,6 +748,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 8, device="cuda"),
             torch.randn(2, 16, device="cuda"),
         ]
+        torch._dynamo.reset()
         counters.clear()
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
@@ -1446,7 +1447,7 @@ class TestPatternMatcher(TestCase):
             (t, [64, 128, 8, 8]),
             {"dim": 1, "out": [t, t, t, t]},
         )
-        check("call_function", torch.ops.fsdp.set_, (t, t), {})
+        check("call_function", torch.ops.fsdp.copy_, (t, t), {})
         check(
             "call_function", torch.ops.aten.__rshift__.Scalar, (t, 2), {}, expect=False
         )
