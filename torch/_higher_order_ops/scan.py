@@ -65,31 +65,6 @@ def shift_source_dim_to_target_dim(t, from_dim: int, to_dim: int):
     return t.permute(*dims)
 
 
-def prepare_xs_carries_for_bwd(xs, init, carries, dim, reverse):
-    if reverse:
-        return [torch.flip(x, [dim]) for x in xs], [
-            torch.cat([torch.unsqueeze(i, dim), torch.flip(c[1:], [dim])], dim=dim)
-            for i, c in zip(init, carries)
-        ]
-    else:
-        return xs, [
-            torch.cat([torch.unsqueeze(i, dim), c[:-1]], dim=dim)
-            for i, c in zip(init, carries)
-        ]
-
-
-def prepare_final_gradients_xs(g_xs, dim, reverse):
-    # The g_xs coming from the backward scan has the outputs always stacked at dim 0
-    # Thus, first we shift the 0-th dim to the dim of the forward scan
-    g_xs = [shift_source_dim_to_target_dim(g, 0, dim) for g in g_xs]
-
-    # Second, if needed, we flip the g_xs along dim
-    if reverse:
-        g_xs = [torch.flip(g, [dim]) for g in g_xs]
-
-    return g_xs
-
-
 # Internal functions for scan.py
 def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
@@ -112,19 +87,23 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
     # instead of only the last one
     # The gradients of the carries forwarded to the output are
     # detached in order not to raise problems with the function aliasing outputs
-    def wrapper_combine_fn(*args):
-        new_carry, y = _extract_carry_and_out(combine_fn(*args), len(init))
-        return [*new_carry, *[n_c.clone().detach() for n_c in new_carry], *y]
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             num_init = len(init)
+            num_additional_inputs = len(additional_inputs)
 
             fw_init = [pytree.tree_map(_from_fun, x) for x in init]
             fw_xs = [pytree.tree_map(_from_fun, x).select(dim, 0) for x in xs]
+            fw_additional_inputs = [pytree.tree_map(_from_fun, a) for a in additional_inputs]
+
+            # TODO: do less re-computation with min-cut partitioner. 
+            def wrapper_fwd_combine_fn(*args):
+                new_carry, y = _extract_carry_and_out(combine_fn(*args), num_init)
+                return [*new_carry, *[n_c.clone().detach() for n_c in new_carry], *y]
 
             carry, outs = _extract_carry_and_out(
-                wrapper_combine_fn(*fw_init, *fw_xs, *additional_inputs), num_init
+                wrapper_fwd_combine_fn(*fw_init, *fw_xs, *fw_additional_inputs), num_init
             )
             fw_carry, fw_outputs = [pytree.tree_map(_from_fun, c) for c in carry], [
                 pytree.tree_map(_from_fun, o) for o in outs
@@ -145,23 +124,30 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                     f"Got types {[type(out) for out in fw_outputs]}."
                 )
 
-            # TODO: There is a major issue that the create_fw_bw in the higher_order_op is invoked twice:
-            # Once in the forward path (as it should) and once in the backward path, where it shouldn't be called
-            # If we can get rid of the second invokation, it would simplify this function
-
             # The forward graph needs to be constructed from a different combine_fn than the joint_graph
-            fw_graph = _maybe_reenter_make_fx(wrapper_combine_fn)(
-                *fw_init, *fw_xs, *additional_inputs
+            fw_graph = _maybe_reenter_make_fx(wrapper_fwd_combine_fn)(
+                *fw_init, *fw_xs, *fw_additional_inputs
             )
 
             _, joint_graph = create_fw_bw_graph(
                 combine_fn,
                 False,
-                (*fw_init, *fw_xs, *additional_inputs),
+                (*fw_init, *fw_xs, *fw_additional_inputs),
                 (*fw_carry, *fw_outputs[num_init:]),
             )
+            
+            # def wrapper_bwd_combine_fn(*args):
+            #     import pdb
+            #     pdb.set_trace()
+            #     carried_g_additional_input = args[:num_additional_inputs]
+            #     g_c, g_xs = _extract_carry_and_out(joint_graph(*args[num_additional_inputs:]), num_init)
+            #     current_g_additional_inputs = g_xs[len(g_xs) - num_additional_inputs:]
+            #     new_g_additional_inputs = [carr_g + curr_g for carr_g, curr_g in zip(carried_g_additional_input, current_g_additional_inputs)]
+            #     g_xs = g_xs[:len(g_xs) - num_additional_inputs]
+            #     return [*new_g_additional_inputs, *g_c, *g_xs]
 
         return fw_graph, joint_graph
+        # return fw_graph, wrapper_bwd_combine_fn
 
 
 def scan(
@@ -458,6 +444,13 @@ def scan_op_dense(combine_fn, init, xs, dim, reverse, additional_inputs):
 
 class ScanAutogradOp(torch.autograd.Function):
     @staticmethod
+    def extract_init_xs_additional_inputs(flat_args, num_leaves_init, num_leaves_xs):
+        init = flat_args[:num_leaves_init]
+        xs = flat_args[num_leaves_init : num_leaves_init + num_leaves_xs]
+        additional_inputs = flat_args[num_leaves_init + num_leaves_xs:]
+        return init, xs, additional_inputs
+    
+    @staticmethod
     def forward(
         ctx,
         fw_graph,
@@ -465,19 +458,15 @@ class ScanAutogradOp(torch.autograd.Function):
         dim,
         reverse,
         num_leaves_init,
-        num_leaves_additional_inputs,
-        *ops,
+        num_leaves_xs,
+        *flat_args,
     ):
-        ops_list = list(ops)
-        init = ops_list[:num_leaves_init]
-        xs = ops_list[num_leaves_init : len(ops_list) - num_leaves_additional_inputs]
-        additional_inputs = ops_list[len(ops_list) - num_leaves_additional_inputs :]
-
         ctx._joint_graph = joint_graph
         ctx._dim = dim
         ctx._reverse = reverse
         ctx._num_leaves_init = num_leaves_init
-        ctx._num_leaves_xs = len(xs)
+        ctx._num_leaves_xs = num_leaves_xs
+        init, xs, additional_inputs = ScanAutogradOp.extract_init_xs_additional_inputs(list(flat_args), num_leaves_init, num_leaves_xs)
 
         with torch._C._AutoDispatchBelowAutograd():
             carry, carries_outs = _extract_carry_and_out(
@@ -489,9 +478,8 @@ class ScanAutogradOp(torch.autograd.Function):
             # and save them for the backward path
             carries = carries_outs[:num_leaves_init]
             outs = carries_outs[num_leaves_init:]
-            ctx.save_for_backward(*(init + xs + carries + additional_inputs))
+            ctx.save_for_backward(*(init + xs + additional_inputs + carries))
             ctx._num_leaves_ys = len(outs)
-
             return (*carry, *outs)
 
     @staticmethod
@@ -501,19 +489,20 @@ class ScanAutogradOp(torch.autograd.Function):
         It does so by constructing using an additional scan operator with the gradients
 
         Args:
-            flat_grads (torch.Tensor): The tensor of upstream gradients, or a nested pytree of tensors.
+            flat_grads (torch.Tensor): The tensor of flattened upstream gradients.
 
         Example::
 
             The ``fw_graph`` f(.,.), used in the forward function, is the operator used during the scan. For example
             def f(x: torch.Tensor, y: torch.Tensor):
-                next_carry = y = x + y
+                next_carry = y = x * y
                 return next_carry, y
 
-            The ``joint_graph`` g(.,.), used in the backward function, is the gradient of the function f(.,.).
-            It computes the gradients for x and y of f. For example for the function f above
-            def g(x: torch.Tensor, y: torch.Tensor):
-                return 1., 1.
+            The ``joint_graph`` g(.,.), used in the backward function, is the joint function of the function f(.,.).
+            It receives the upstream gradients and the inputs of f and computes the gradients 
+            for x and y of f. For example for the function f above
+            def g(g_new_carry: torch.Tensor, g_y: torch.Tensor, x: torch.Tensor, y: torch.Tensor):
+                return g_y * y + g_new_carry * y, g_y * x + g_new_carry * x
 
             To use a scan operation for the backward path as well, the function f is modified such that it
             returns all carries and not only the last one. In particular:
@@ -530,11 +519,35 @@ class ScanAutogradOp(torch.autograd.Function):
             g_init, g_xs = scan(joint_graph, g_c_T, xs_bwd, dim, True)
 
         """
+        def prepare_xs_carries_for_bwd(xs, init, carries, dim, reverse):
+            if reverse:
+                return [torch.flip(x, [dim]) for x in xs], [
+                    torch.cat([torch.unsqueeze(i, dim), torch.flip(c[1:], [dim])], dim=dim)
+                    for i, c in zip(init, carries)
+                ]
+            else:
+                return xs, [
+                    torch.cat([torch.unsqueeze(i, dim), c[:-1]], dim=dim)
+                    for i, c in zip(init, carries)
+                ]
+
+
+        def prepare_final_gradients_xs(g_xs, dim, reverse):
+            # The g_xs coming from the backward scan has the outputs always stacked at dim 0
+            # Thus, first we shift the 0-th dim to the dim of the forward scan
+            g_xs = [shift_source_dim_to_target_dim(g, 0, dim) for g in g_xs]
+
+            # Second, if needed, we flip the g_xs along dim
+            if reverse:
+                g_xs = [torch.flip(g, [dim]) for g in g_xs]
+
+            return g_xs
+        
         joint_graph = ctx._joint_graph
         dim = ctx._dim
+        reverse = ctx._reverse
         num_leaves_init = ctx._num_leaves_init
         num_leaves_xs = ctx._num_leaves_xs
-        reverse = ctx._reverse
         num_leaves_ys = ctx._num_leaves_ys
 
         # The results from the forward scan are always stacked on dim 0
@@ -544,31 +557,24 @@ class ScanAutogradOp(torch.autograd.Function):
         bwd_scan_dim = 0
 
         # Retrieve the forward inputs and the forward outputs
-        operands_outs = ctx.saved_tensors
-        init = operands_outs[:num_leaves_init]
+        flat_args = ctx.saved_tensors
+        carries = flat_args[-num_leaves_init:]
+        init, xs, additional_inputs = ScanAutogradOp.extract_init_xs_additional_inputs(list(flat_args[:-num_leaves_init]), num_leaves_init, num_leaves_xs)
+        
         # The backward scan operates on the 0-th dim and thus the original inputs need to be
         # permuted accordingly
         xs = [
             shift_source_dim_to_target_dim(o, dim, bwd_scan_dim)
-            for o in operands_outs[num_leaves_init : num_leaves_init + num_leaves_xs]
+            for o in flat_args[num_leaves_init : num_leaves_init + num_leaves_xs]
         ]
-        # The forward path stores init + xs + carries + additional_inputs
-        # Thus carries (of length num_leaves_init) start at positions num_leaves_init + num_leaves_xs
-        # and end with 2 * num_leaves_init + num_leaves_xs
-        carries = operands_outs[
-            num_leaves_init + num_leaves_xs : 2 * num_leaves_init + num_leaves_xs
-        ]
-        additional_inputs = list(operands_outs[2 * num_leaves_init + num_leaves_xs :])
-
+        
         with torch._C._AutoDispatchBelowAutograd():
             # The flat gradients are a list of g_c_T, g_ys and optionally the gradients for the additional_inputs
-            flat_grads_list = list(flat_grads)
-            g_c_T = flat_grads_list[:num_leaves_init]
-            g_ys = flat_grads_list[num_leaves_init : num_leaves_init + num_leaves_ys]
-            old_g_additional_inputs_T = flat_grads_list[
-                num_leaves_init + num_leaves_ys :
-            ]
-
+            g_c_T, g_ys, _ = ScanAutogradOp.extract_init_xs_additional_inputs(list(flat_grads), num_leaves_init, num_leaves_ys)
+            # import pdb
+            # pdb.set_trace()
+            # g_additional_inputs = [torch.zeros_like(ai) for ai in additional_inputs]
+            
             # Prepare the inputs for the backward scan.
             # This involves flipping the input xs if needed as well as
             # Prepending the init of the forward scan to the carries
@@ -583,9 +589,11 @@ class ScanAutogradOp(torch.autograd.Function):
                 ),
                 num_leaves_init,
             )
-
+            # pdb.set_trace()
+            # g_outs = scan_op(joint_graph, [*g_additional_inputs, *g_c_T], xs_bwd, bwd_scan_dim, True, additional_inputs)
+            # pdb.set_trace()
             # g_xs may contain the gradients for the additional inputs as well which need to be separated
-            new_g_additional_inputs = g_xs[num_leaves_xs:] + old_g_additional_inputs_T
+            new_g_additional_inputs = g_xs[num_leaves_xs:]
             g_xs = g_xs[:num_leaves_xs]
             g_xs = prepare_final_gradients_xs(g_xs, dim, reverse)
 
@@ -596,20 +604,29 @@ class ScanAutogradOp(torch.autograd.Function):
 def scan_autograd(combine_fn, init, xs, dim, reverse, additional_inputs):
     # A shortcut for the case where all inputs don't require gradient,
     # we skip tracing the forward and backward graph.
+    # TODO: Figure out how to do this in dispatcher so that we don't have to do this check here
     if pytree.tree_all_only(
         torch.Tensor,
         lambda t: not t.requires_grad,  # type: ignore[union-attr]
-        (init, xs),
+        (init, xs, additional_inputs),
     ):
         with torch._C._AutoDispatchBelowAutograd():
             return scan_op(combine_fn, init, xs, dim, reverse, additional_inputs)
+    
+    # TODO: The create_fw_bw is always invoked twice:
+    # Once in the forward path and 
+    # once in the backward path, where it should only be invoked for the grad grad case.  
+    # We don't support this currently
+    if not torch.is_grad_enabled():
+        # This clause is hit in the case of double backward. 
+        # Currently scan does not support this and thus we just dummy call another scan
+        # The scan dim in the backward backward is always zero, because the 
+        # scan outputs during the forward are always collected at dim=0
+        bwd_dim = 0
+        return scan_op(combine_fn, init, xs, bwd_dim, reverse, additional_inputs)
 
     num_leaves_init = len(init)
-    num_leaves_additional_inputs = len(additional_inputs)
-
-    if not torch.is_grad_enabled():
-        dim = 0
-        return scan_op(combine_fn, init, xs, 0, reverse, additional_inputs)
+    num_leaves_xs = len(xs)
 
     (
         fw_graph,
@@ -622,7 +639,7 @@ def scan_autograd(combine_fn, init, xs, dim, reverse, additional_inputs):
         dim,
         reverse,
         num_leaves_init,
-        num_leaves_additional_inputs,
+        num_leaves_xs,
         *(init + xs + additional_inputs),
     )
     return *flat_out[:num_leaves_init], *flat_out[num_leaves_init:]
