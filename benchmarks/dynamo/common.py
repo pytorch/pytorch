@@ -1338,6 +1338,16 @@ def try_script(model, example_inputs):
         return None
 
 
+def _produce_dynamic_shapes_for_export(path, x):
+    # mark_dynamic() is ignored for export.
+    # use this to produce dynamic_shapes spec instead.
+    from torch.export.dynamic_shapes import Dim
+
+    if not isinstance(x, torch.Tensor):
+        return None
+    return {i: Dim.AUTO for i in getattr(x, "_dynamo_dynamic_indices", {})}
+
+
 class AOTInductorModelCache:
     cache = {}
 
@@ -1345,6 +1355,7 @@ class AOTInductorModelCache:
     def load(cls, model, example_inputs, device):
         import torch._inductor
         import torch.export._trace
+        from torch.export.dynamic_shapes import _tree_map_with_path
 
         key = weakref.ref(model)
         if key not in cls.cache:
@@ -1364,10 +1375,16 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
+            combined_args = tuple(example_args) + tuple(example_kwargs.values())
+            dynamic_shapes = _tree_map_with_path(
+                _produce_dynamic_shapes_for_export, combined_args
+            )
+
             gm = torch.export._trace._export(
                 model,
                 example_args,
                 example_kwargs,
+                dynamic_shapes=dynamic_shapes,
                 pre_dispatch=True,
                 strict=False,
             ).module()
@@ -1382,11 +1399,20 @@ class AOTInductorModelCache:
 
 
 def export(model, example_inputs):
+    from torch.export.dynamic_shapes import _tree_map_with_path
+
     example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
     example_outputs = model(*example_args, **example_kwargs)
     _register_dataclass_output_as_pytree(example_outputs)
 
-    ep = torch.export.export(model, example_args, example_kwargs)
+    combined_args = tuple(example_args) + tuple(example_kwargs.values())
+    dynamic_shapes = _tree_map_with_path(
+        _produce_dynamic_shapes_for_export, combined_args
+    )
+
+    ep = torch.export.export(
+        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
+    )
 
     def opt_export(_, example_inputs):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
