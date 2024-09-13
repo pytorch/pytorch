@@ -37,7 +37,7 @@ class GeneralizedPareto(Distribution):
                        'scale': constraints.positive,
                        'concentration': constraints.real}
     support = constraints.real
-    has_rsample = True
+    has_rsample = False
 
     def __init__(self, loc, scale, concentration, validate_args=None):
         self.loc, self.scale, self.concentration = broadcast_all(loc, scale, concentration)
@@ -135,3 +135,11 @@ class GeneralizedPareto(Distribution):
             torch.distributions.utils.broadcast_all(self.loc, self.scale, self.concentration)
         if self.scale.min() <= 0:
             raise ValueError("scale parameter must be positive")
+
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self):
+        if (self.concentration < 0).any():
+            upper = self.loc + self.scale / self.concentration.abs()
+            return constraints.interval(self.loc, upper)
+        else:
+            return constraints.greater_than_eq(self.loc)
