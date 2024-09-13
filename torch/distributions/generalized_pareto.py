@@ -3,7 +3,7 @@ from numbers import Number, Real
 import math
 
 import torch
-from torch import nan
+from torch import nan, inf
 from torch.distributions import constraints, Distribution
 from torch.distributions.utils import broadcast_all
 
@@ -146,8 +146,11 @@ class GeneralizedPareto(Distribution):
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
-        if (self.concentration < 0).any():
-            upper = self.loc + self.scale / self.concentration.abs()
-            return constraints.interval(self.loc, upper)
-        else:
-            return constraints.greater_than_eq(self.loc)
+        neg_conc = self.concentration < 0
+        upper = torch.where(
+            neg_conc,
+            self.loc + self.scale / self.concentration.abs(),
+            torch.full_like(self.loc, inf),
+        )
+        lower = self.loc
+        return constraints.independent(constraints.interval(lower, upper), 1)

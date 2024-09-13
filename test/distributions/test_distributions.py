@@ -347,9 +347,9 @@ def _get_examples():
             GeneralizedPareto,
             [
                 {
-                    "loc": torch.randn(5, 5, requires_grad=True),
+                    "loc": torch.randn(5, 5, requires_grad=True).mul(10),
                     "scale": torch.randn(5, 5).abs().requires_grad_(),
-                    "concentration": torch.randn(5, 5).requires_grad_(),
+                    "concentration": torch.randn(5, 5).div(10).requires_grad_(),
                 },
             ],
         ),
