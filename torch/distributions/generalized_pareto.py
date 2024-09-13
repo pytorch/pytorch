@@ -149,7 +149,7 @@ class GeneralizedPareto(Distribution):
         neg_conc = self.concentration < 0
         upper = torch.where(
             neg_conc,
-            self.loc + self.scale / self.concentration.abs(),
+            self.loc - self.scale / self.concentration,
             torch.full_like(self.loc, inf),
         )
         lower = self.loc
