@@ -190,24 +190,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
         for node in gmod.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
                 node.meta["ac_graph_id"] = unique_graph_id
-                if node.meta.get("has_backward_hook", False):
-                    # This is to work around circular dependencies in Traceable FSDP2+AC.
-                    # Example:
-                    # ```
-                    # out = fully_shard(utils.checkpoint(module))(x)
-                    # norm_out = layer_norm(out)
-                    # ```
-                    # Here there is a circular dependency:
-                    # 1. In backward, grad_input of layer_norm aka. `out_grad` is actually dependent on `out`.
-                    # 2. `out` depends on FSDP2 backward hook (which does all-gather for `module` weights)
-                    #    in order to be recomputed.
-                    # 3. FSDP2 backward hook, as is the case for all eager backward hooks,
-                    #    depends on `out_grad`  -> circular dependency with (1)!
-                    #
-                    # Solution: check whether `out` has a backward hook, and if so, intentionally save `out`
-                    # in forward graph outputs. With this, we can break the above circular dependency.
-                    node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
-                elif is_sac:
+                if is_sac:
                     # For selective checkpointing, we will populate this tag later in _CachingTorchDispatchMode.
                     node.meta["recompute"] = None
                 else:
