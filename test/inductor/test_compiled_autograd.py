@@ -80,6 +80,14 @@ class TestCompiledAutograd(TestCase):
         config.compiled_autograd = False
         compiled_autograd.reset()
 
+    @classmethod
+    def setUpClass(cls):
+        torch.utils.cpp_extension.remove_default_build_root()
+
+    @classmethod
+    def tearDownClass(cls):
+        torch.utils.cpp_extension.remove_default_build_root()
+
     def check_output_and_recompiles(
         self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
     ):
@@ -1609,7 +1617,6 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
         ), compiled_autograd.enable(compiler_fn):
             fn()
 
-    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
     def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2677,10 +2684,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         inp = torch.rand(10, 10, requires_grad=True)
         out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=True)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"\(e.g. reentrant checkpointing\), this is not supported yet\.",
-        ), torch._dynamo.compiled_autograd.enable(torch.compile):
+        with torch._dynamo.compiled_autograd.enable(torch.compile):
             out.backward()
 
 

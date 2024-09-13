@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import os
-import shutil
 import sys
 import unittest
 
@@ -11,7 +10,7 @@ from torch._C import FileCheck
 
 
 try:
-    from extension_backends.cpp.extension_codegen_backend import (
+    from extension_backends.cpp.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
         ExtensionCppWrapperCodegen,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
@@ -38,7 +37,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -50,12 +49,7 @@ TestCase = test_torchinductor.TestCase
 
 
 def remove_build_path():
-    if sys.platform == "win32":
-        # Not wiping extensions build folder because Windows
-        return
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root, ignore_errors=True)
+    torch.utils.cpp_extension.remove_default_build_root()
 
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")

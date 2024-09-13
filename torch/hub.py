@@ -12,7 +12,7 @@ import uuid
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse  # noqa: F401
@@ -389,7 +389,7 @@ def _load_entry_from_hubconf(m, model):
     return func
 
 
-def get_dir():
+def get_dir() -> str:
     r"""
     Get the Torch Hub cache directory used for storing downloaded models & weights.
 
@@ -408,7 +408,7 @@ def get_dir():
     return os.path.join(_get_torch_home(), "hub")
 
 
-def set_dir(d):
+def set_dir(d: Union[str, os.PathLike]) -> None:
     r"""
     Optionally set the Torch Hub directory used to save downloaded models & weights.
 

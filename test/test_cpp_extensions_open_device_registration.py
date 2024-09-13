@@ -2,8 +2,6 @@
 
 import _codecs
 import os
-import shutil
-import sys
 import tempfile
 import types
 import unittest
@@ -31,12 +29,7 @@ TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not Non
 
 
 def remove_build_path():
-    if sys.platform == "win32":
-        # Not wiping extensions build folder because Windows
-        return
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root, ignore_errors=True)
+    torch.utils.cpp_extension.remove_default_build_root()
 
 
 def generate_faked_module():
