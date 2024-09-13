@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 from queue import SimpleQueue
-from typing import List, Dict, Tuple
-from typing import Optional as _Optional
+from typing import List, Dict, Optional as _Optional, Tuple
 
 import torch.fx
 from torch.fx.graph_module import GraphModule
