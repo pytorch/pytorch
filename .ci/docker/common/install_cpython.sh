@@ -26,7 +26,7 @@ function do_cpython_build {
     local additional_flags=""
     if [ "$py_ver" == "3.13.0t" ]; then
         additional_flags=" --disable-gil"
-        mv mv cpython-3.13/ cpython-3.13t/
+        mv cpython-3.13/ cpython-3.13t/
     fi
 
     pushd $py_folder
