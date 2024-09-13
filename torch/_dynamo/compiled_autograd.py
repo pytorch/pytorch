@@ -182,7 +182,7 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
-    def proxy_call_hook(self, hook, *args, **kwargs):
+    def proxy_call_hook(self, hook, *args):
         return self.fx_tracer.create_proxy(
             "call_function",
             call_hook,
@@ -190,7 +190,7 @@ class AutogradCompilerInstance:
                 hook,
                 *[self.to_proxy(x) for x in args],
             ),
-            kwargs,
+            {},
         )
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):
@@ -199,7 +199,6 @@ class AutogradCompilerInstance:
         proxy = self.proxy_call_hook(
             hook,
             inputs[i],
-            hook_type="tensor_pre_hook",
         )
         with disable_proxy_modes_tracing():
             inputs[i] = maybe_clone(inputs[i])
@@ -212,7 +211,6 @@ class AutogradCompilerInstance:
         proxies = self.proxy_call_hook(
             hook,
             inputs,
-            hook_type="pre_hook",
         )
         with disable_proxy_modes_tracing():
             inputs = [maybe_clone(x) for x in inputs]
@@ -226,7 +224,6 @@ class AutogradCompilerInstance:
             hook,
             outputs,
             inputs,
-            hook_type="post_hook",
         )
         with disable_proxy_modes_tracing():
             outputs = [maybe_clone(x) for x in outputs]
@@ -237,14 +234,13 @@ class AutogradCompilerInstance:
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
-        proxy = self.proxy_call_hook(
+        proxies = self.proxy_call_hook(
             hook,
             input,
-            hook_type="post_acc_grad_hook",
         )
         with disable_proxy_modes_tracing():
             input = [maybe_clone(input)]
-            self.bind_tensors_to_proxies(input, [proxy])
+            self.bind_tensors_to_proxies(input, proxies)
         return input
 
     # Note: [Compiled autograd and cudagraphs]
@@ -517,10 +513,12 @@ class _EnableContext:
             )
             self.set_multithreading_enabled_ctx_mgr.__enter__()
         else:
+            # TODO: insert eager profiling start event here
             pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
+            # TODO: insert eager profiling end event here
             self.warmup_count += 1  # type: ignore[attr-defined]
         else:
             if self.set_multithreading_enabled_ctx_mgr:
