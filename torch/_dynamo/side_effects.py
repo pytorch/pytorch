@@ -17,13 +17,14 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import GlobalSource, LocalSource, Source
-from .utils import nn_module_new, object_new
+from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     is_side_effect_safe,
     MutableLocalBase,
     MutableLocalSource,
     VariableTracker,
 )
+from .variables.user_defined import FrozenDataClassVariable
 
 
 class MutableSideEffects(MutableLocalBase):
@@ -285,6 +286,8 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
+        elif is_frozen_dataclass(user_cls):
+            variable_cls = FrozenDataClassVariable
         else:
             variable_cls = variables.UserDefinedObjectVariable
 
@@ -590,11 +593,22 @@ class SideEffects:
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
             ):
+                # Needed in the finally block for stack restoration
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "get_torch_function_mode_stack"
+                    )
+                )
+                cg.call_function(0, False)
+                name = variables.torch_function.get_prev_stack_var_name()
+                cg.code_options["co_varnames"] += (name,)
+                cg.append_output(create_instruction("STORE_FAST", argval=name))
                 cg.add_push_null(
                     lambda: cg.load_import_from(
                         utils.__name__, "set_torch_function_mode_stack"
                     )
                 )
+
                 cg.foreach(var.symbolic_stack)
                 cg.append_output(
                     create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))

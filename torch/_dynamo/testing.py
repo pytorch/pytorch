@@ -163,6 +163,7 @@ def debug_insert_nops(
         local_scope=locals(),
         global_scope=globals(),
         f_code=frame.f_code,
+        torch_function_mode_stack=[],
     )
 
     return GuardedCode(code, CheckFunctionManager(graph).check_fn, CompileId(0, 0))
@@ -370,6 +371,13 @@ def skipIfPy312(fn):
     if sys.version_info >= (3, 12):
         return unittest.skip(fn)
     return fn
+
+
+def requiresPy310(fn):
+    if sys.version_info >= (3, 10):
+        return fn
+    else:
+        unittest.skip(fn)
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py

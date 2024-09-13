@@ -13,7 +13,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import OP_TO_ANNOTATOR
 from torch.fx import Node
 from torch.testing._internal.common_quantization import QuantizationTestCase
-from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef
 
 
 class TestHelperModules:
@@ -99,10 +99,10 @@ class TestMetaDataPorting(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = torch._export.capture_pre_autograd_graph(
+        m = torch.export.export_for_training(
             m,
             example_inputs,
-        )
+        ).module()
 
         m = prepare_pt2e(m, quantizer)
         # Calibrate
@@ -139,6 +139,8 @@ class TestMetaDataPorting(QuantizationTestCase):
             self.assertEqual(v, node_tags[k])
         return m
 
+    @skipIfCrossRef  # mlazos: retracing FX graph with torch function mode doesn't propagate metadata, because the stack
+    # trace of the mode torch function impl doesn't match the traced graph stored lineno.
     def test_simple_metadata_porting(self):
         """
         Model under test

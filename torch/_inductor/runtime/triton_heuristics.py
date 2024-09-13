@@ -172,7 +172,7 @@ class CachingAutotuner(KernelInterface):
         triton_meta,  # passed directly to triton
         configs,
         save_cache_hook,
-        mutated_arg_names,
+        mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
         heuristic_type,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
@@ -359,7 +359,7 @@ class CachingAutotuner(KernelInterface):
                 if k == "waves_per_eu":
                     compile_meta["waves_per_eu"] = v
                     continue
-            compile_meta["constants"][self.fn.arg_names.index(k)] = v
+            compile_meta["constants"][k] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
@@ -408,7 +408,7 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
-            if self.device_props.type != "hip":
+            if self.device_props.type == "hip":
                 if "waves_per_eu" in compile_meta:
                     options["waves_per_eu"] = compile_meta["waves_per_eu"]
                 if "matrix_instr_nonkdim" in compile_meta:
@@ -672,11 +672,12 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
-        return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
+        return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
 
+        # [Note: clone mutated buffers]
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
         # it leads to increase memory use
@@ -752,6 +753,7 @@ class CachingAutotuner(KernelInterface):
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
+            "r_block": launcher.config.kwargs.get("RBLOCK", None),
             "num_warps": launcher.bin.num_warps
             if hasattr(launcher.bin, "num_warps")
             else launcher.bin.metadata.num_warps,
@@ -1139,10 +1141,10 @@ def _check_max_grid_x(size_hints, x, num_warps):
     while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
         x *= 2  # Scale up XBLOCK if grid exceeds limits
         num_blocks = num_blocks // 2
-        if x >= max_grid_x:
-            raise AssertionError(
-                "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
-            )
+    if (num_blocks * num_warps * warp_size) > max_grid_x:
+        raise AssertionError(
+            "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
+        )
     return x, num_blocks
 
 
