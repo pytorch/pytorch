@@ -6392,6 +6392,14 @@ class TestAgainstScipy(DistributionsTestCase):
                 Gumbel(random_var, positive_var2),
                 scipy.stats.gumbel_r(random_var, positive_var2),
             ),
+            (
+                GeneralizedPareto(
+                    loc=random_var, scale=positive_var, concentration=random_var / 10
+                ),
+                scipy.stats.genpareto(
+                    c=random_var / 10, loc=random_var, scale=positive_var
+                ),
+            ),
             (HalfCauchy(positive_var), scipy.stats.halfcauchy(scale=positive_var)),
             (HalfNormal(positive_var2), scipy.stats.halfnorm(scale=positive_var2)),
             (
