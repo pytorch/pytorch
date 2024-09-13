@@ -1910,7 +1910,6 @@ class DimConstraints:
         # NOTE(avik): We do not need to solve them for symbols that have already been specialized.
         reduced_congruences = self._reduce_congruences()
         for s, congruences in reduced_congruences.items():
-            # break
             for congruence in congruences:
                 # any congruence that cannot be checked becomes a dynamic constraint as well
                 if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):

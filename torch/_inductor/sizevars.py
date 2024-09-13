@@ -20,7 +20,7 @@ import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Mod
+from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
 
