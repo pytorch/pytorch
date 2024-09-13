@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file contains utilities related to functionalization in AOTAutograd:
 1. converting to/from functional tensors
@@ -5,7 +6,9 @@ This file contains utilities related to functionalization in AOTAutograd:
 3. regenerating/replaying views from their base
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
+from __future__ import annotations
 
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -19,7 +22,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
-from .. import config
+
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
@@ -219,10 +222,9 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    # Actual type: Optional[FunctionalTensorMetadataEq]
-    # Can't use it here because it lives inside schemas.py. Importing that class would lead
-    # to an error due to an import cycle.
-    target_functional_tensor=None,
+    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
+    *,
+    replay_views,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -240,13 +242,10 @@ def gen_alias_from_base(
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
     if (
-        config.view_replay_for_aliased_outputs
+        replay_views
         and target_functional_tensor is not None
         and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
     ):
-        from .schemas import FunctionalTensorMetadataEq
-
-        assert isinstance(target_functional_tensor, FunctionalTensorMetadataEq)
         functional_tensor = target_functional_tensor.tensor
 
         out = torch._functionalize_apply_view_metas(
@@ -314,11 +313,38 @@ def gen_alias_from_base(
 def has_same_metadata(t1, t2):
     return (
         definitely_true(sym_eq(t1.size(), t2.size()))
-        and definitely_true(sym_eq(t1.stride(), t2.stride()))
-        and definitely_true(t1.storage_offset() == t2.storage_offset())
+        and definitely_true(t1.layout == t2.layout)
+        and (
+            is_sparse_any(t1)
+            or (
+                definitely_true(sym_eq(t1.stride(), t2.stride()))
+                and definitely_true(t1.storage_offset() == t2.storage_offset())
+            )
+        )
         and t1.is_conj() == t2.is_conj()
         and t1.is_neg() == t2.is_neg()
     )
+
+
+# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
+# after applying all the ViewMeta operations.
+class FunctionalTensorMetadataEq:
+    def __init__(self, tensor: torch.Tensor) -> None:
+        assert torch._is_functional_tensor(tensor)
+        self.tensor = tensor
+
+    def __eq__(self, other: object) -> bool:
+        # If other is None, then it probably means that we weren't able to recreate
+        # the FunctionalTensorMetadataEq. One of this cases is when we update the
+        # view metadata by calling: create_synthetic_base_metadata.
+        if other is None:
+            return True
+
+        # Comparison agains any other type is not implemented.
+        if not isinstance(other, FunctionalTensorMetadataEq):
+            return NotImplemented
+
+        return has_same_metadata(self.tensor, other.tensor)
 
 
 # new_arg and arg here are either:
@@ -375,6 +401,13 @@ def was_tensor_metadata_updated(arg, new_arg):
 
 # Returns the number of detected copy_
 def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+    allowed_mutation_ops = [
+        torch.ops.aten.copy_.default,
+        torch.ops.aten.set_.source_Tensor,
+    ]
+    if hasattr(torch.ops.fsdp, "set_"):
+        allowed_mutation_ops.append(torch.ops.fsdp.set_.default)
+
     placeholders = set()
     mutation_count = 0
     # NB: It would also be nice to verify that the mutations all happen at the
@@ -384,19 +417,15 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target in [
-                torch.ops.aten.copy_.default,
-                torch.ops.aten.set_.source_Tensor,
-            ]:
+            if n.target in allowed_mutation_ops:
                 suffix = True
-                # Can only copy_/set_ into an input, and can only do so once
+                # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
                     assert (
                         n.args[0] in placeholders
                     ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
-                    placeholders.remove(n.args[0])
                 mutation_count += 1
             else:
                 assert (

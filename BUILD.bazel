@@ -332,6 +332,7 @@ intern_build_aten_ops(
         "@fbgemm",
         "@mkl",
         "@sleef",
+        "@mkl_dnn//:mkl-dnn",
     ],
 )
 
@@ -461,15 +462,7 @@ filegroup(
 filegroup(
     name = "caffe2_perfkernels_srcs",
     srcs = [
-        "caffe2/perfkernels/adagrad.cc",
-        "caffe2/perfkernels/embedding_lookup.cc",
         "caffe2/perfkernels/embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_nbit_rowwise_conversion.cc",
-        "caffe2/perfkernels/lstm_unit_cpu_common.cc",
-        "caffe2/perfkernels/math_cpu_base.cc",
-        "caffe2/perfkernels/typed_axpy.cc",
     ],
 )
 
@@ -506,7 +499,6 @@ cc_library(
     hdrs = [
         "caffe2/core/common.h",
         "caffe2/perfkernels/common.h",
-        "caffe2/perfkernels/embedding_lookup.h",
         "caffe2/perfkernels/embedding_lookup_idx.h",
         "caffe2/utils/fixed_divisor.h",
     ] + glob([
@@ -560,13 +552,11 @@ cc_library(
         ":caffe2_headers",
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
-        ":caffe2_perfkernels_avx512",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
         "@fmt",
-        "@foxi",
         "@onnx",
     ] + if_cuda(
         [
@@ -585,7 +575,7 @@ cu_library(
     name = "torch_cuda",
     srcs = [
         "torch/csrc/distributed/c10d/intra_node_comm.cu",
-        "torch/csrc/distributed/c10d/Utils.cu",
+        "torch/csrc/distributed/c10d/NanCheck.cu",
         "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
     ],
     copts = torch_cuda_half_options,
@@ -649,28 +639,6 @@ cc_library(
     ]),
     hdrs = PERF_HEADERS,
     copts = PERF_COPTS + [
-        "-mavx2",
-        "-mfma",
-        "-mavx",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":caffe2_headers",
-        "//c10",
-    ],
-    alwayslink = True,
-)
-
-cc_library(
-    name = "caffe2_perfkernels_avx512",
-    srcs = [
-        "caffe2/perfkernels/common_avx512.cc",
-    ],
-    hdrs = PERF_HEADERS,
-    copts = PERF_COPTS + [
-        "-mavx512f",
-        "-mavx512dq",
-        "-mavx512vl",
         "-mavx2",
         "-mfma",
         "-mavx",
@@ -753,7 +721,9 @@ cc_library(
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/intra_node_comm.cu",
-            "torch/csrc/distributed/c10d/Utils.cu",
+            "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
+            "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
+            "torch/csrc/distributed/c10d/NanCheck.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
     )) + torch_sources,
@@ -770,6 +740,7 @@ cc_library(
         ":torch_headers",
         "@kineto",
         "@cpp-httplib",
+        "@nlohmann",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",

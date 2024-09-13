@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This is a simple interpreter for Sympy expressions that dispatches to
 classes following the torch._inductor.virtualized calling convention.
@@ -8,12 +9,14 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 """
 
 import functools
+import logging
 from typing import Any, Dict, Union
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
+
 from .functions import (
     CeilToInt,
     CleanDiv,
@@ -21,8 +24,11 @@ from .functions import (
     FloatTrueDiv,
     FloorDiv,
     FloorToInt,
+    Identity,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
     PowByNatural,
@@ -34,6 +40,9 @@ from .functions import (
     TruncToInt,
     Where,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -84,9 +93,12 @@ def handlers():
         sympy.exp: "exp",
         sympy.Min: "minimum",
         sympy.Max: "maximum",
+        Min: "minimum",
+        Max: "maximum",
         ModularIndexing: "modular_indexing",
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
+        Identity: "identity",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
         RoundDecimal: "round_decimal",
     }
@@ -99,39 +111,14 @@ def handlers():
 ASSOCIATIVE_OPS = {"minimum", "maximum", "mul", "add", "and_", "or_"}
 
 
-def sympy_interp(
-    analysis,
-    env: Dict[sympy.Symbol, Any],
-    expr: Union[sympy.Expr, SympyBoolean],
-    *,
-    index_dtype=torch.int64,
-):
-    # Handle base cases
-    dtype = None
-    if isinstance(expr, BooleanAtom):
-        dtype = torch.bool
-    elif isinstance(expr, sympy.Integer):
-        dtype = torch.int64
-    elif isinstance(expr, sympy.Number):
-        dtype = torch.double
-
-    if dtype is not None:
-        return analysis.constant(expr, dtype)
-    elif isinstance(expr, sympy.Symbol):
-        return env[expr]
-
+def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
     # Special cases
     if isinstance(expr, sympy.Pow) and isinstance(
         expr.args[1], sympy.core.numbers.Half
     ):
-        return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
+        return analysis.sqrt(args[0])
     if isinstance(expr, ToFloat):
-        return analysis.to_dtype(
-            sympy_interp(analysis, env, expr.args[0]), torch.float64
-        )
-
-    # Recursive case
-    args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
+        return analysis.to_dtype(args[0], torch.float64)
 
     # These handlers are special because they take an extra dtype argument
     # specifying what they should convert to, and we need to appropriately set
@@ -156,11 +143,48 @@ def sympy_interp(
     else:
         handler_name = handlers()[expr.func]
     handler = getattr(analysis, handler_name)
-    if handler_name in ASSOCIATIVE_OPS:
-        assert len(args) > 1
-        acc = handler(args[0], args[1])
-        for i in range(2, len(args)):
-            acc = handler(acc, args[i])
-        return acc
-    else:
-        return handler(*args)
+    try:
+        if handler_name in ASSOCIATIVE_OPS:
+            assert len(args) > 1
+            acc = handler(args[0], args[1])
+            for i in range(2, len(args)):
+                acc = handler(acc, args[i])
+            log.debug("%s(%s) -> %s", handler_name, args, acc)
+            return acc
+        else:
+            r = handler(*args)
+            log.debug("%s(%s) -> %s", handler_name, args, r)
+            return r
+    except Exception:
+        log.warning("failed while executing %s(%s)", handler_name, args)
+        raise
+
+
+def sympy_interp(
+    analysis,
+    env: Dict[sympy.Symbol, Any],
+    expr: Union[sympy.Expr, SympyBoolean],
+    *,
+    index_dtype=torch.int64,
+):
+    # Handle base cases
+    dtype = None
+    if isinstance(expr, BooleanAtom):
+        dtype = torch.bool
+    elif isinstance(expr, sympy.Integer):
+        dtype = torch.int64
+    elif isinstance(expr, sympy.Number):
+        dtype = torch.double
+
+    if dtype is not None:
+        return analysis.constant(expr, dtype)
+    elif isinstance(expr, sympy.Symbol):
+        return env[expr]
+
+    # Recursive case
+    return _run_sympy_handler(
+        analysis,
+        [sympy_interp(analysis, env, arg) for arg in expr.args],  # type: ignore[arg-type]
+        expr,
+        index_dtype=index_dtype,
+    )  # type: ignore[arg-type]

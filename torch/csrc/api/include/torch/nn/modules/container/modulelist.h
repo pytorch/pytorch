@@ -71,7 +71,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// Special cloning function for `ModuleList` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      const optional<Device>& device = nullopt) const override {
+      const std::optional<Device>& device = std::nullopt) const override {
     auto clone = std::make_shared<ModuleListImpl>();
     for (const auto& module : modules_) {
       clone->push_back(module->clone(device));
@@ -91,7 +91,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   void push_back(std::shared_ptr<Module> module) {
     modules_.push_back(std::move(module));
     const auto index = modules_.size() - 1;
-    register_module(c10::to_string(index), modules_[index]);
+    register_module(std::to_string(index), modules_[index]);
   }
 
   /// Adds a new `Module` to the `ModuleList` container, moving or copying
@@ -224,9 +224,9 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
 
       for (const auto i : c10::irange(index, size() - 1)) {
         (void)i; // Suppress unused variable warning
-        replace_module(c10::to_string(index), modules_[index]);
+        replace_module(std::to_string(index), modules_[index]);
       }
-      register_module(c10::to_string(size() - 1), modules_.back());
+      register_module(std::to_string(size() - 1), modules_.back());
     }
   }
 

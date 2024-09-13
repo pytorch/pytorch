@@ -1,4 +1,5 @@
 """Handle the details of subprocess calls and retries for a given benchmark run."""
+# mypy: ignore-errors
 import dataclasses
 import json
 import os
@@ -19,6 +20,7 @@ from worker.main import (
     WorkerTimerArgs,
     WorkerUnpickler,
 )
+
 
 if TYPE_CHECKING:
     PopenType = subprocess.Popen[bytes]

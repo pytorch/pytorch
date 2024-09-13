@@ -512,11 +512,15 @@ inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) c
 template <>
 inline void convert(const float* src, float* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
     _mm256_storeu_ps(dst + i, _mm256_loadu_ps(src + i));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }
@@ -632,6 +636,21 @@ inline void transpose_mxn<float, 8, 8>(
   _mm256_storeu_ps(&dst[7 * ld_dst], th);
 }
 
+template<>
+inline void transpose_mxn<float, 16, 16>(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst) {
+  transpose_mxn<float, 8, 8>(
+          src , ld_src, dst, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8, ld_src, dst + 8 * ld_dst, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8 * ld_src, ld_src, dst + 8, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8 * ld_src + 8, ld_src, dst + 8 * ld_dst + 8, ld_dst);
+}
 #endif
 
 }} // namespace at::vec::CPU_CAPABILITY

@@ -330,7 +330,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->compiled_autograd_symints);
   args.set_default_dyn_type(prior);
 
-  args.collect(f->saved_variables);
+  args.collect(f->saved_variables, true); // always unpacked as output in eager
   args.collect(f->materialize_grads);
   args.collect(f->is_variable_input);
   args.collect(f->needs_input_grad);
@@ -413,8 +413,7 @@ PyObject* PyNode::to_py_args(
     throw_python_error();
   auto& output_info = py_fn->output_info;
   for (const auto i : c10::irange(num_inputs)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject* input;
+    PyObject* input = nullptr;
     if (inputs[i].defined() || !py_fn->materialize_grads ||
         (input_metadata(i).was_default_constructed() &&
          !py_fn->materialize_non_diff_grads)) {
@@ -778,7 +777,7 @@ static void _get_tensors_to_save(
     for (const auto i : c10::irange(num_saved)) {
       PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
       if (obj == Py_None) {
-        tensors_to_save.emplace_back(c10::nullopt);
+        tensors_to_save.emplace_back(std::nullopt);
         continue;
       } else if (THPVariable_Check(obj)) {
         const auto& tensor = THPVariable_Unpack(obj);
@@ -1178,6 +1177,26 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   auto cdata = ((THPFunction*)self)->cdata.lock();
   cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto num_inputs = cdata->num_inputs();
+  THPObjectPtr list(PyTuple_New(num_inputs));
+  if (!list) {
+    return nullptr;
+  }
+  for (size_t i = 0; i < num_inputs; ++i) {
+    const auto& metadata = cdata->input_metadata(i);
+    THPObjectPtr item(py::cast(metadata).release().ptr());
+    if (!item) {
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(list.get(), i, item.release());
+  }
+  return list.release();
   END_HANDLE_TH_ERRORS
 }
 
@@ -1628,8 +1647,8 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
-typedef PyObject* (*getter)(PyObject*, void*);
-typedef int (*setter)(PyObject*, PyObject*, void*);
+using getter = PyObject* (*)(PyObject*, void*);
+using setter = int (*)(PyObject*, PyObject*, void*);
 
 namespace {
 
@@ -1718,11 +1737,16 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr},
     {"needs_input_grad",
      &getObject<&THPFunction::needs_input_grad>,
-     nullptr,
+     &setObject<&THPFunction::needs_input_grad>,
      nullptr,
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
     {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
+    {"_input_metadata",
+     (getter)THPFunction_input_metadata,
+     nullptr,
+     nullptr,
+     nullptr},
     {"materialize_grads",
      nullptr,
      (setter)THPFunction_set_materialize_grads,

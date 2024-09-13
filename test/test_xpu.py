@@ -1,11 +1,13 @@
 # Owner(s): ["module: intel"]
 
+import subprocess
 import sys
 import tempfile
 import unittest
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
+from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyXPU,
@@ -21,6 +23,8 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.utils.checkpoint import checkpoint_sequential
+
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
@@ -105,6 +109,22 @@ class TestXpu(TestCase):
         self.assertEqual(
             device_properties.has_atomic64, device_capability["has_atomic64"]
         )
+        self.assertEqual(
+            device_properties.has_bfloat16_conversions,
+            device_capability["has_bfloat16_conversions"],
+        )
+        self.assertEqual(
+            device_properties.has_subgroup_matrix_multiply_accumulate,
+            device_capability["has_subgroup_matrix_multiply_accumulate"],
+        )
+        self.assertEqual(
+            device_properties.has_subgroup_matrix_multiply_accumulate_tensor_float32,
+            device_capability["has_subgroup_matrix_multiply_accumulate_tensor_float32"],
+        )
+        self.assertEqual(
+            device_properties.has_subgroup_2d_block_io,
+            device_capability["has_subgroup_2d_block_io"],
+        )
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
@@ -127,6 +147,47 @@ if __name__ == "__main__":
 """
         )
         self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
+
+    def test_lazy_init(self):
+        """Validate that no XPU calls are made during `import torch` call"""
+
+        def check_output(script: str) -> str:
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+            )
+
+        test_script = """\
+import torch
+from torch.multiprocessing import Process
+import copy
+
+def run_model(model, input):
+    input_xpu = input.clone().to('xpu')
+    model_xpu = copy.deepcopy(model).to('xpu')
+    loss_xpu = model_xpu(input_xpu).sum()
+    loss = model(input).sum()
+    torch.testing.assert_close(loss_xpu.cpu(), loss)
+
+def test_multi_process(model, input):
+    p = Process(target=run_model, args=(model, input))
+    p.start()
+    p.join()
+    assert p.exitcode == 0
+
+input = torch.rand(32, 3, 224, 224)
+model = torch.nn.Sequential(
+    torch.nn.Conv2d(3, 64, 3, stride=2),
+    torch.nn.ReLU(),
+    torch.nn.MaxPool2d(2, 2),
+)
+test_multi_process(model, input)
+test_multi_process(model, input)
+print(torch.xpu.device_count())
+"""
+        rc = check_output(test_script)
+        self.assertEqual(rc, str(torch.xpu.device_count()))
 
     def test_streams(self):
         s0 = torch.xpu.Stream()
@@ -305,8 +366,125 @@ if __name__ == "__main__":
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), original.get_device())
 
+    def test_out_of_memory(self):
+        tensor = torch.zeros(1024, device="xpu")
 
-instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
+            torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="xpu")
+
+        with self.assertRaisesRegex(RuntimeError, "XPU out of memory."):
+            torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device="xpu")
+
+    def test_raises_oom(self):
+        torch.xpu.memory.empty_cache()
+        with self.assertRaises(torch.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
+
+    def test_memory_allocation(self):
+        torch.xpu.empty_cache()
+        prev = torch.xpu.memory_allocated()
+        a = torch.ones(10, device="xpu")
+        self.assertGreater(torch.xpu.memory_allocated(), prev)
+        self.assertGreater(torch.xpu.memory_reserved(), 0)
+        del a
+        self.assertEqual(torch.xpu.memory_allocated(), prev)
+        torch.xpu.empty_cache()
+        self.assertEqual(torch.xpu.memory_reserved(), 0)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_device_memory_allocated(self):
+        device_count = torch.xpu.device_count()
+        current_alloc = [torch.xpu.memory_allocated(idx) for idx in range(device_count)]
+        x = torch.ones(10, device="xpu:0")
+        self.assertGreater(torch.xpu.memory_allocated(0), current_alloc[0])
+        self.assertTrue(
+            all(
+                torch.xpu.memory_allocated(idx) == current_alloc[idx]
+                for idx in range(1, device_count)
+            )
+        )
+
+
+instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
+
+
+class TestXpuAutocast(TestAutocast):
+    # These operators are not implemented on XPU backend and we can NOT fall back
+    # them to CPU. So we have to skip them at this moment.
+    # TODO: remove these operators from skip list when they are implemented on XPU backend.
+    skip_list = ["gru_cell"]
+
+    def setUp(self):
+        super().setUp()
+        self.autocast_lists = AutocastTestLists(torch.device("xpu"))
+
+    def tearDown(self):
+        del self.autocast_lists
+        super().tearDown()
+
+    def test_autocast_torch_fp16(self):
+        for op_with_args in self.autocast_lists.torch_fp16:
+            skip_test = False
+            op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unimplemented op
+            if len(op_with_args) == 3:
+                skip_test = True  # skip cudnn op
+            if not skip_test:
+                self._run_autocast_outofplace(
+                    op, args, torch.float16, device="xpu", amp_dtype=torch.float16
+                )
+
+    def test_autocast_torch_bf16(self):
+        for op_with_args in self.autocast_lists.torch_fp16:
+            skip_test = False
+            op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unimplemented op
+            if len(op_with_args) == 3:
+                skip_test = True  # skip cudnn op
+            if not skip_test:
+                self._run_autocast_outofplace(op, args, torch.bfloat16, device="xpu")
+
+    def test_autocast_torch_need_autocast_promote(self):
+        for op, args in self.autocast_lists.torch_need_autocast_promote:
+            self._run_autocast_outofplace(
+                op, args, torch.float32, device="xpu", amp_dtype=torch.float16
+            )
+
+    def test_autocast_torch_expect_builtin_promote(self):
+        for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
+            self._run_autocast_outofplace(
+                op,
+                args,
+                torch.float32,
+                device="xpu",
+                out_type=out_type,
+                amp_dtype=torch.float16,
+            )
+
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(8, 8), torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)
+        ).xpu()
+        input = torch.rand(
+            (8, 8), device="xpu", dtype=torch.float16, requires_grad=True
+        )
+        for reentrant in (True, False):
+            with torch.autocast("xpu"):
+                output = checkpoint_sequential(model, 2, input, use_reentrant=reentrant)
+            self.assertTrue(output.requires_grad)
+            self.assertTrue(output.dtype is torch.float16)
+            output.sum().backward()
+
+    def test_xpu_autocast_dtype(self):
+        dtype = torch.get_autocast_dtype("xpu")
+        self.assertEqual(dtype, torch.float16)
+        mat0_fp32 = torch.randn((10, 10), dtype=torch.float32, device="xpu")
+        mat1_fp32 = torch.randn((10, 10), dtype=torch.float32, device="xpu")
+        with torch.amp.autocast("xpu"):
+            result = torch.mm(mat0_fp32, mat1_fp32)
+            self.assertEqual(result.dtype, torch.float16)
 
 
 class TestXpuTrace(TestCase):

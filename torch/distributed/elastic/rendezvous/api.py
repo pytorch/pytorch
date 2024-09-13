@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -5,7 +6,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import socket
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, ClassVar, Dict, Optional
@@ -50,41 +50,60 @@ class RendezvousConnectionError(RendezvousError):
 class RendezvousStateError(RendezvousError):
     """Raised when the state of a rendezvous is corrupt."""
 
+
 class RendezvousGracefulExitError(RendezvousError):
     """Raised when node wasn't not included in rendezvous and gracefully exits.
 
     Exception is a mechanism to exit the stack, however does not mean a failure.
     """
 
+
 @dataclass
 class RendezvousStoreInfo:
     """Store address and port that can be used to bootstrap trainer distributed comms"""
+
     MASTER_ADDR_KEY: ClassVar[str] = "MASTER_ADDR"
     MASTER_PORT_KEY: ClassVar[str] = "MASTER_PORT"
     master_addr: str
     master_port: int
 
     @staticmethod
-    def build(rank: int, store: Store) -> "RendezvousStoreInfo":
+    def build(
+        rank: int, store: Store, local_addr: Optional[str]
+    ) -> "RendezvousStoreInfo":
         """Factory method, finds unused new port on rank0 host and addr/port info with all ranks.
 
         If master_addr/master_port is knowns (useful when sharing existing tcp store server) use the constructor.
+
+        Args:
+            rank: rank of the current node
+            store: store to use for rendezvous
+            local_addr: address of the current node, if not provided will be resolved from hostname
         """
         # TODO swap to collectives comms API
         if rank == 0:
-            addr = socket.getfqdn()
+            addr = local_addr or socket.getfqdn()
             port = _get_free_port()
             store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
             store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
 
         addr = store.get(RendezvousStoreInfo.MASTER_ADDR_KEY).decode(encoding="UTF-8")
-        port = int(store.get(RendezvousStoreInfo.MASTER_PORT_KEY).decode(encoding="UTF-8"))
+        port = int(
+            store.get(RendezvousStoreInfo.MASTER_PORT_KEY).decode(encoding="UTF-8")
+        )
         return RendezvousStoreInfo(master_addr=addr, master_port=port)
 
 
 class RendezvousInfo:
     """Holds the information about the rendezvous."""
-    def __init__(self, store: Store, rank: int, world_size: int, bootstrap_store_info: RendezvousStoreInfo):
+
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        world_size: int,
+        bootstrap_store_info: RendezvousStoreInfo,
+    ):
         self._store = store
         self._rank = rank
         self._world_size = world_size

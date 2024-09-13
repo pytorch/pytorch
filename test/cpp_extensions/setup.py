@@ -13,6 +13,7 @@ from torch.utils.cpp_extension import (
     ROCM_HOME,
 )
 
+
 if sys.platform == "win32":
     vc_version = os.getenv("VCToolsVersion", "")
     if vc_version.startswith("14.16."):
@@ -109,4 +110,9 @@ setup(
     ext_modules=ext_modules,
     include_dirs="self_compiler_include_dirs_test",
     cmdclass={"build_ext": BuildExtension.with_options(use_ninja=USE_NINJA)},
+    entry_points={
+        "torch.backends": [
+            "device_backend = torch_test_cpp_extension:_autoload",
+        ],
+    },
 )

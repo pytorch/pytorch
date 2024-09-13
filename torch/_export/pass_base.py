@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 import traceback
 import typing
@@ -32,6 +33,7 @@ PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 _TORCH_SYM_OPS: Set[Callable] = {
     torch.sym_int,
+    torch.sym_float,
     torch.sym_ite,
     torch.sym_max,
     torch.sym_min,
@@ -66,7 +68,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.fake_tensor_mode: Optional[FakeTensorMode] = None
             self.submodules: Dict[torch.nn.Module, str] = {}
 
-        def trace(self) -> None:
+        def trace(self) -> None:  # type: ignore[override]
             raise ExportPassBaseError("ExportTracer doesn't support trace().")
 
         def create_arg(self, a: Argument) -> torch.fx.Node:
@@ -158,7 +160,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         def placeholder(
             self,
-            target: str,
+            target: str,  # type: ignore[override]
             args: Tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
@@ -216,7 +218,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 raise ExportPassBaseError(f"Unsupported target type: {target}")
 
         def get_attr(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
         ) -> Argument:
             return super().get_attr(target, args, kwargs)
 
@@ -229,7 +231,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             raise ExportPassBaseError("call_module is not supported.")
 
         def call_method(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
         ) -> None:
             raise ExportPassBaseError("call_method is not supported.")
 
@@ -392,7 +394,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
         interpreter = self.ExportInterpreter(self, graph_module)
-        prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(
+        prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(  # type: ignore[assignment]
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         inputs_data = pytree.tree_map_only(ProxyValue, lambda x: x.data, inputs)

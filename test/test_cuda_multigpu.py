@@ -10,9 +10,8 @@ import sys
 import tempfile
 import threading
 import unittest
-
 from itertools import chain, repeat
-from typing import NamedTuple
+from typing import NamedTuple, Union
 
 import torch
 import torch.cuda.comm as comm
@@ -36,6 +35,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TestCase,
 )
+
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (
     torch.cuda.get_allocator_backend() == "cudaMallocAsync"
@@ -1005,22 +1005,32 @@ class TestCudaMultiGPU(TestCase):
 
     # Verifies that mem_get_info works, including when called for a different device
     def test_mem_get_info(self):
-        def _test(idx):
-            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(idx)
+        def _test(device: Union[str, int, torch.device]):
+            # Prevent PyTorch from reusing the allocated memory
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(device)
             # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
-            t = torch.randn(1024 * 1024 * 8, device="cuda:" + str(idx))
+            t = torch.randn(1024 * 1024 * 8, device=device)
             if IS_JETSON:
                 # w/o syncing, mem_get_info will run before memory allocated has actually increased.
                 # This race condition causes consistent failure
                 torch.cuda.synchronize()
-            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
+            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(device)
 
             self.assertLess(after_free_bytes, before_free_bytes)
             self.assertEqual(before_available_bytes, after_available_bytes)
 
+        # Test calls with different device representations
         _test(0)
+        _test(torch.device("cuda"))
+        _test(torch.device("cuda:0"))
+        _test("cuda")
+        _test("cuda:0")
         if TEST_MULTIGPU:
             _test(1)
+            _test(torch.device("cuda:1"))
+            _test("cuda:1")
 
     # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
