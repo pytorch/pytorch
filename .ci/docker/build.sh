@@ -379,6 +379,7 @@ case "$image" in
     GCC_VERSION=11
     CONDA_CMAKE=yes
     HALIDE=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
