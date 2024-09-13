@@ -127,7 +127,7 @@ class BaseUserFunctionVariable(VariableTracker):
         return {}
 
     def export_freevars(self, parent, child):
-        raise NotImplementedError
+        unimplemented("abstract method, must implement")
 
 
 class UserFunctionVariable(BaseUserFunctionVariable):
@@ -359,6 +359,9 @@ class GeneratorFunctionVariable(UserFunctionVariable):
         self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
             tx, self, [*self.self_args(), *args], kwargs
         )
+        # Not ideal!! Flags to the tracer to change the behavior of
+        # YIELD_VALUE/RETURN_VALUE
+        self.inline_tracer.consume_all_items = False
 
         return self
 

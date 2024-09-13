@@ -3366,10 +3366,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
+    # Flag wether or not the InlineGenerator should consume the entire iterator
+    consume_all_items: bool
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
+        self.consume_all_items = True
 
     def YIELD_VALUE(self, inst: Instruction):
         self.generated_items.append(self.pop())
@@ -3379,9 +3382,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
             )
         self.push(ConstantVariable.create(None))
-        self.symbolic_result = self.stack[-1]
-        # Stop tracing
-        raise YieldValueOp
+        if not self.consume_all_items:
+            self.symbolic_result = self.stack[-1]
+            # Stop tracing
+            raise YieldValueOp
 
     def GET_YIELD_FROM_ITER(self, inst):
         tos = self.stack[-1]
@@ -3391,6 +3395,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.push(res)
 
     def RETURN_VALUE(self, inst):
+        if self.consume_all_items:
+            return super().RETURN_VALUE(inst)
         # RETURN_VALUE in a generator raises StopIteration instead of actually
         # returning a value
         exc.raise_observed_exception(StopIteration, self)
