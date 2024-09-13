@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
+
 try:
     from .test_fp8 import _quantize_tensorwise
 except ImportError:
@@ -264,9 +265,10 @@ class TestCKBackend(TestCase):
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("dtype", (torch.bfloat16,))
     @parametrize("use_fast_accum", (True,))
-    def test_max_autotune_scaled_mm(self, max_autotune_gemm_backends, dtype, use_fast_accum):
-
-        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+    def test_max_autotune_scaled_mm(
+        self, max_autotune_gemm_backends, dtype, use_fast_accum
+    ):
+        tensor_options = {"device": "cuda", "dtype": dtype}
 
         x = torch.randn(2240, 256, **tensor_options)
         w = torch.randn(2048, 256, **tensor_options)
@@ -308,12 +310,14 @@ class TestCKBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 2,
-                "rocm.n_max_profiling_configs": 2,
+                "compile_threads": 24,
+                "rocm.n_max_profiling_configs": 24,
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
-            linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+            linear_compiled = torch.compile(
+                linear, backend="inductor", mode="max-autotune"
+            )
             y_compiled = linear_compiled(
                 x_fp8,
                 x_inverse_scale,
@@ -325,7 +329,6 @@ class TestCKBackend(TestCase):
             self.assertEqual(y_compiled.dtype, dtype)
 
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
-
 
 
 if __name__ == "__main__":

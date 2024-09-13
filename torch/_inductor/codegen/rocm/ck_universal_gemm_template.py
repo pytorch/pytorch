@@ -324,8 +324,12 @@ class CKGemmTemplate(CKTemplate):
             bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
             alpha=self.alpha,
             beta=self.beta,
-            a_elementwise_op="Scale { inv_scale_x ? *inv_scale_x : 1.0f }" if scale_x is not None else "PassThrough {}",
-            b_elementwise_op="Scale { inv_scale_w ? *inv_scale_w : 1.0f }" if scale_w is not None else "PassThrough {}",
+            a_elementwise_op="Scale { inv_scale_x ? *inv_scale_x : 1.0f }"
+            if scale_x is not None
+            else "PassThrough {}",
+            b_elementwise_op="Scale { inv_scale_w ? *inv_scale_w : 1.0f }"
+            if scale_w is not None
+            else "PassThrough {}",
             epilogue=f"Bilinear {{ {self.alpha}, {self.beta} }}"
             if Bias is not None
             else "PassThrough {}",
