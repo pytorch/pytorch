@@ -1,13 +1,13 @@
+# mypy: allow-untyped-defs
 from typing import Iterator, List, Sequence, Union
 
-
 from torch.utils.data.datapipes._decorator import functional_datapipe
-
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.iter import IterableWrapper
+from torch.utils.data.datapipes.iter.utils import IterableWrapperIterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
 
-__all__ = ["FileListerIterDataPipe", ]
+
+__all__ = ["FileListerIterDataPipe"]
 
 
 @functional_datapipe("list_files")
@@ -36,19 +36,19 @@ class FileListerIterDataPipe(IterDataPipe[str]):
 
     def __init__(
         self,
-        root: Union[str, Sequence[str], IterDataPipe] = '.',
-        masks: Union[str, List[str]] = '',
+        root: Union[str, Sequence[str], IterDataPipe] = ".",
+        masks: Union[str, List[str]] = "",
         *,
         recursive: bool = False,
         abspath: bool = False,
         non_deterministic: bool = False,
-        length: int = -1
+        length: int = -1,
     ) -> None:
         super().__init__()
         if isinstance(root, str):
-            root = [root, ]
+            root = [root]
         if not isinstance(root, IterDataPipe):
-            root = IterableWrapper(root)
+            root = IterableWrapperIterDataPipe(root)
         self.datapipe: IterDataPipe = root
         self.masks: Union[str, List[str]] = masks
         self.recursive: bool = recursive
@@ -56,9 +56,11 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         self.non_deterministic: bool = non_deterministic
         self.length: int = length
 
-    def __iter__(self) -> Iterator[str] :
+    def __iter__(self) -> Iterator[str]:
         for path in self.datapipe:
-            yield from get_file_pathnames_from_root(path, self.masks, self.recursive, self.abspath, self.non_deterministic)
+            yield from get_file_pathnames_from_root(
+                path, self.masks, self.recursive, self.abspath, self.non_deterministic
+            )
 
     def __len__(self):
         if self.length == -1:

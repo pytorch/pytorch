@@ -50,7 +50,7 @@ RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
 # Install cuda and cudnn
 ARG CUDA_VERSION
-RUN wget -q https://raw.githubusercontent.com/pytorch/builder/main/common/install_cuda.sh -O install_cuda.sh
+COPY ./common/install_cuda.sh install_cuda.sh
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
@@ -154,6 +154,14 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/executorch.txt executorch.txt
 RUN if [ -n "${EXECUTORCH}" ]; then bash ./install_executorch.sh; fi
 RUN rm install_executorch.sh common_utils.sh executorch.txt
+
+ARG HALIDE
+# Build and install halide
+COPY ./common/install_halide.sh install_halide.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/halide.txt halide.txt
+RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
+RUN rm install_halide.sh common_utils.sh halide.txt
 
 ARG ONNX
 # Install ONNX dependencies

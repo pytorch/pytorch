@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 # configurable
 bsz = 64
 imgsz = 64
@@ -43,7 +44,7 @@ class _netG(nn.Module):
             nn.ReLU(True),
             # state size. (ngf) x 32 x 32
             nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
-            nn.Tanh()
+            nn.Tanh(),
             # state size. (nc) x 64 x 64
         )
 

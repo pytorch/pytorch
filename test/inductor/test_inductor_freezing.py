@@ -9,39 +9,29 @@ import unittest
 import weakref
 
 import torch
-
 from torch import nn
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_utils import skipIfRocm
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-)
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
+
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -88,6 +78,17 @@ class ConvBN(torch.nn.Module):
 
     def forward(self, x):
         return self.bn(self.conv(x))
+
+
+class ConvBNHardswish(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, bias=False, **kwargs):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+        self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001, dtype=torch.float)
+        self.hardswish = nn.Hardswish(inplace=True)
+
+    def forward(self, x):
+        return self.hardswish(self.bn(self.conv(x)))
 
 
 class ConvFunctionalBN(torch.nn.Module):
@@ -189,7 +190,7 @@ class ConvMultiFunctionalBN(torch.nn.Module):
 class OptimizeForInferenceTemplate(TestCase):
     def test_mutation(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mutated_param = torch.nn.Parameter(torch.zeros([10, 10]))
 
@@ -216,7 +217,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
     def test_aliased_param_return(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.aliased_param = torch.nn.Parameter(torch.zeros([10, 10]))
 
@@ -259,7 +260,7 @@ class OptimizeForInferenceTemplate(TestCase):
             raise unittest.SkipTest("NYI CPU")
 
         class MM(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.t1 = torch.nn.Parameter(torch.rand(10, 10))
@@ -270,7 +271,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 return x @ self.t1, x @ self.t2, x @ self.t3
 
         class MM2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.t1 = torch.nn.Parameter(torch.rand(10, 10))
@@ -280,7 +281,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 return x @ self.t1, x @ self.t2
 
         class AddMM(MM):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.b1 = torch.nn.Parameter(torch.rand([10]))
@@ -338,6 +339,9 @@ class OptimizeForInferenceTemplate(TestCase):
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
+    # With inlining of inbuilt nn modules, Dynamo traces the innards of inbuilt
+    # module and does not modify the eager module.
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_error_on_eager(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
@@ -445,6 +449,9 @@ class OptimizeForInferenceTemplate(TestCase):
 
             x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
 
+            torch._dynamo.reset()
+            counters.clear()
+
             @torch.compile()
             def foo(mod, x):
                 return mod(x)
@@ -465,6 +472,52 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
+            self.assertEqual(counters["inductor"]["binary_folding"], 4)
+
+    @torch._inductor.config.patch(layout_optimization=False)
+    def test_folded_conv_bn_hardswish(self):
+        for use_bias, dtype in itertools.product(
+            [True, False], [torch.float16, torch.bfloat16, torch.float32]
+        ):
+            if self.device == "cpu" and dtype == torch.float16:
+                continue
+
+            if self.device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+                continue
+
+            mod = (
+                ConvBNHardswish(3, 32, bias=use_bias, kernel_size=3, stride=2)
+                .eval()
+                .to(self.device)
+                .to(dtype)
+            )
+
+            x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
+
+            torch._dynamo.reset()
+            counters.clear()
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            # TODO - bias is separate kernel right now, we should only unfuse it
+            # from conv if it can be fused
+
+            with torch.no_grad():
+                out_eager = mod(x)
+                out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+
+            # we unfuse the conv bias, but it should only have one constant in the kernel
+            if self.device == "cuda":
+                FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
+                    "frozen_param"
+                ).check_not("frozen_param").check_next("return").run(code[0])
+
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+            self.assertEqual(counters["inductor"]["binary_folding"], 4)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_module_sharing(self):
@@ -618,7 +671,7 @@ class OptimizeForInferenceTemplate(TestCase):
             raise unittest.SkipTest("NYI CPU")
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([10, 10]))
 
@@ -643,6 +696,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
+    @skipIfRocm
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self, groups):
@@ -701,7 +755,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
@@ -724,9 +778,10 @@ class OptimizeForInferenceTemplate(TestCase):
             mod_eager = mod(x)
             self.assertEqual(foo(mod, x), mod_eager)
 
+    @skipIfRocm
     def test_conv_weight_layout_convert(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
@@ -783,7 +838,7 @@ class OptimizeForInferenceTemplate(TestCase):
         device = self.device
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = torch.tensor(
                     [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], device=device
@@ -814,9 +869,10 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
 
+    @skipIfRocm
     def test_redundant_clone_for_layout_convert(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False

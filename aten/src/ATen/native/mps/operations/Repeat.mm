@@ -62,14 +62,6 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   auto stream = at::mps::getCurrentMPSStream();
   auto inputDataType = getMPSDataType(expanded_tensor);
   auto outputDataType = getMPSDataType(result);
-  if (!is_macos_13_or_newer()) {
-    if (expanded_tensor.scalar_type() == kBool) {
-      inputDataType = MPSDataTypeInt8;
-    }
-    if (result.scalar_type() == kBool) {
-      outputDataType = MPSDataTypeInt8;
-    }
-  }
 
   @autoreleasepool {
     string key = "repeat_mps:" + getTensorsStringKey(self) + ":" + getArrayRefString(repeats);
@@ -142,22 +134,15 @@ void computeRepeatIndices(const index_t* repeat_ptr,
       [computeEncoder setBuffer:repeatBuffer offset:0 atIndex:0];
       [computeEncoder setBuffer:cumsumBuffer offset:0 atIndex:1];
       [computeEncoder setBuffer:resultBuffer offset:0 atIndex:2];
-      [computeEncoder setBytes:&size length:sizeof(size) atIndex:3];
-      MTLSize gridSize = MTLSizeMake(size, 1, 1);
-      NSUInteger threadsPerThreadgroup_ = pipelineState.maxTotalThreadsPerThreadgroup;
-      if (threadsPerThreadgroup_ > static_cast<NSUInteger>(size)) {
-        threadsPerThreadgroup_ = size;
-      }
-      MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
-
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+      mps::mtl_setBytes(computeEncoder, size, 3);
+      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, size);
 
       getMPSProfiler().endProfileKernel(pipelineState);
     }
   });
 }
 
-Tensor repeat_interleave_mps(const Tensor& repeat_, c10::optional<int64_t> output_size) {
+Tensor repeat_interleave_mps(const Tensor& repeat_, std::optional<int64_t> output_size) {
   Tensor output;
   Tensor repeat = repeat_;
   if (repeat.scalar_type() == kLong && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS)) {

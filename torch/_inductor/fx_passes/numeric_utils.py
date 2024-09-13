@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import gc
 import logging
 import os
@@ -10,6 +11,7 @@ import torch
 import torch.optim as optim
 
 from .. import config
+
 
 logger: logging.Logger = logging.getLogger(__name__)
 

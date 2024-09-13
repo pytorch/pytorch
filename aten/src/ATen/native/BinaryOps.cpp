@@ -1417,7 +1417,7 @@ Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
 
 // We need explicit cast to OutFunc because each *_out func is overloaded twice. Without An explicit cast, merely
 // referring to *_out function is ambiguous.
-using OutFunc = std::add_const<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>::type;
+using OutFunc = std::add_const_t<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>;
 
 // less, alias for torch.lt
 Tensor& less_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::lt_out(result, self, other); }
@@ -1480,23 +1480,14 @@ Tensor& not_equal_(Tensor& self, const Scalar& other) { return self.ne_(other); 
 Tensor& logical_and_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_and_stub); }
 Tensor logical_and(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_and_out)); }
 Tensor& logical_and_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_and_out)); }
-static Tensor& logical_and_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_and_out)); }
-static Tensor logical_and(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_and_out)); }
-static Tensor& logical_and_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_and_out)); }
 
 Tensor& logical_or_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_or_stub); }
 Tensor logical_or(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_or_out)); }
 Tensor& logical_or_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_or_out)); }
-static Tensor& logical_or_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_or_out)); }
-static Tensor logical_or(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_or_out)); }
-static Tensor& logical_or_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_or_out)); }
 
 Tensor& logical_xor_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_xor_stub); }
 Tensor logical_xor(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor& logical_xor_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-static Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-static Tensor logical_xor(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
-static Tensor& logical_xor_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
 // binary max, alias for maximum
 Tensor& max_out(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -1551,12 +1542,23 @@ TORCH_IMPL_FUNC(heaviside_out) (
   heaviside_stub(device_type(), *this);
 }
 
-Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  return at::mul_out(result, self, at::pow(2.0, other));
+static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
+  const auto self_dtype = self.scalar_type();
+  // All integral types are promoted to float32
+  if (isIntegralType(self_dtype, true) || self_dtype == kFloat) {
+      return at::pow(2.0, other);
+  }
+  // For double and reduced floating types do regular type promotion
+  return at::full({}, 2.0, self.options()).pow(other);
 }
 
+Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::mul_out(result, self, _pow2(self, other));
+}
+
+
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  return at::mul(self, at::pow(2.0, other));
+  return at::mul(self, _pow2(self, other));
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {

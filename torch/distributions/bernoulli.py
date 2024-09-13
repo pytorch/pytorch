@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from numbers import Number
 
 import torch
@@ -11,6 +12,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
+
 
 __all__ = ["Bernoulli"]
 

@@ -1,11 +1,12 @@
+import functools
 import math
 from enum import IntEnum
 
 import sympy
 
 import torch
-from . import ir
 
+from . import ir
 from .utils import get_dtype_size, sympy_product
 from .virtualized import V
 
@@ -22,6 +23,7 @@ class NVIDIA_GPU_TYPE(IntEnum):
     HOPPER = 2
 
 
+@functools.lru_cache
 def get_gpu_type() -> NVIDIA_GPU_TYPE:
     gpu_info = torch.utils.collect_env.get_gpu_info(torch.utils.collect_env.run) or ""
     if "V100" in gpu_info:

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from dataclasses import dataclass, field
 from collections import defaultdict
 import copy
@@ -163,7 +164,7 @@ class SubgraphMatcher:
         return True
 
     def _remove_overlapping_matches(self, matches: List[InternalMatch]) -> List[InternalMatch]:
-        non_overlapping_matches: List[InternalMatch] = list()
+        non_overlapping_matches: List[InternalMatch] = []
         nodes_matched: Set[Node] = set()
 
         for match in matches:

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -6,9 +7,10 @@ import multiprocessing
 import os
 import sys
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -20,6 +22,7 @@ from torch._inductor.codecache import (
     CUDACodeCache,
     HalideCodeCache,
     LambdaFuture,
+    ROCmCodeCache,
     TritonCodeCache,
     TritonFuture,
 )
@@ -29,20 +32,41 @@ from torch._inductor.compile_worker.subproc_pool import (
     SubprocPool,
 )
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
-
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
-from torch._inductor.runtime.hints import HalideMeta
-
 from torch.hub import _Faketqdm, tqdm
+from torch.utils._triton import has_triton_package
+
+
+if TYPE_CHECKING:
+    from torch._inductor.runtime.hints import HalideMeta
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
 _t0: Optional[float] = None
 
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+
+
+def pre_fork_setup():
+    """
+    Setup that must be done prior to forking with a process pool.
+    """
+    # ensure properties have been calculated before processes
+    # are forked
+    caching_device_properties()
+
+    # Computing the triton key can be slow. If we call it before fork,
+    # it will be cached for the forked subprocesses.
+    try:
+        from triton.compiler.compiler import triton_key
+
+        triton_key()
+    except ImportError:
+        # Triton might not be installed or might be an old version.
+        pass
 
 
 def caching_device_properties():
@@ -105,6 +129,11 @@ class AsyncCompile:
         return ThreadPoolExecutor(config.compile_threads)
 
     @staticmethod
+    def _get_ready():
+        """No-op function to help mark when the subprocess pool is ready."""
+        return "ready"
+
+    @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
         assert config.compile_threads > 1
@@ -113,9 +142,7 @@ class AsyncCompile:
             # Wrapper around ProcessPoolExecutor forks in a new process we control
             pool = SubprocPool(config.compile_threads)
         else:
-            # ensure properties have been calculated before processes
-            # are forked
-            caching_device_properties()
+            pre_fork_setup()
             ctx = multiprocessing.get_context(config.worker_start_method)
             pool = ProcessPoolExecutor(
                 config.compile_threads,
@@ -128,6 +155,8 @@ class AsyncCompile:
             # kill the worker thread that sends the shutdown message to the workers...
             multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
+        # Set an attribute we can check to see if the pool is ready.
+        pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
         _pool_set.add(pool)
         return pool
 
@@ -145,18 +174,29 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
+    def _use_process_pool(self):
+        return (
+            config.compile_threads > 1
+            and self.process_pool().ready_future.done()  # type: ignore[union-attr]
+        )
+
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         kernel_code_log.info("Triton Kernel:\n%s", source_code)
         _compile_start()
         _set_triton_ptxas_path()
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
-        if config.compile_threads > 1:
+        if self._use_process_pool():
+            # We want to support changing these env vars after (and while) the
+            # process pool is running, so pass them to the subprocess to reset.
+            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
             return TritonFuture(
                 kernel,
                 self.process_pool().submit(
                     _worker_compile_triton,
                     kernel._reload_in_subproc,
+                    extra_env,
                 ),
             )
         else:
@@ -195,6 +235,14 @@ class AsyncCompile:
 
         return self.submit(task)
 
+    def rocm(self, source_code, dst_file_ext):
+        kernel_code_log.info("ROCm Kernel:\n%s", source_code)
+
+        def task():
+            return ROCmCodeCache.load(source_code, dst_file_ext)[0]
+
+        return self.submit(task)
+
     def halide(self, meta: HalideMeta, source_code: str):
         kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
         if config.compile_threads <= 1:
@@ -224,7 +272,15 @@ class AsyncCompile:
                 if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                     pbar.set_postfix_str(key)
                 if isinstance(result, (Future, CodeCacheFuture)):
-                    scope[key] = result.result()
+                    try:
+                        scope[key] = result.result()
+                    except BrokenProcessPool as e:
+                        raise RuntimeError(
+                            "A compilation subprocess exited unexpectedly. This "
+                            "is likely due to a crash. To facilitate debugging, "
+                            "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
+                            "to cause compilation to occur in the main process."
+                        ) from e
                     pbar.update(1)
 
         _compile_end()
@@ -233,6 +289,8 @@ class AsyncCompile:
 if (
     os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
+    # The subprocess pool is only used for the Triton backend
+    or not has_triton_package()
 ):
     pass
 else:
