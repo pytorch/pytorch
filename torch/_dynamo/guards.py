@@ -2663,12 +2663,14 @@ def make_torch_function_mode_stack_guard(intial_stack):
 
     def check_torch_function_mode_stack():
         cur_stack = get_torch_function_mode_stack()
-        if len(cur_stack) != len(types):
+
+        types_ = [ty for ty in types if ty not in IGNORED_MODES]
+        cur_stack_ = [mode for mode in cur_stack if type(mode) not in IGNORED_MODES]
+
+        if len(cur_stack_) != len(types_):
             return False
 
-        for ty, mode in zip(types, cur_stack):
-            if ty in IGNORED_MODES:
-                continue
+        for ty, mode in zip(types_, cur_stack_):
             if ty != type(mode):
                 return False
 
