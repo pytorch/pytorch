@@ -51,7 +51,7 @@ jobs:
     uses: ./.github/workflows/_mac-test-mps.yml
     needs: macos-perf-py3-arm64-build
     with:
-      sync-tag: macos-py3-arm64-mps-test
+      sync-tag: macos-perf-py3-arm64-test
       build-environment: macos-py3-arm64
       # Same as the build job
       python-version: 3.9.12
