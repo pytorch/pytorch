@@ -316,7 +316,7 @@ def dynamo_minifier_backend(
 
 @register_debug_backend  # type: ignore[arg-type]
 def dynamo_accuracy_minifier_backend(
-    gm: fx.GraphModule, example_inputs: list[torch.Tensor], compiler_name: CompiledFn
+    gm: fx.GraphModule, example_inputs: List[torch.Tensor], compiler_name: CompiledFn
 ):
     from functorch.compile import minifier
 
