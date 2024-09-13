@@ -580,13 +580,14 @@ class OptimizeContext(_TorchDynamoContext):
 
         self.compiled_autograd_ctx = None
         if config.compiled_autograd:
-            assert rebuild_ctx is not None
-            self.compiled_autograd_ctx = torch._dynamo.compiled_autograd.enable(
-                rebuild_ctx()
-            )
 
             def call_compiled_autograd():
-                assert self.compiled_autograd_ctx is not None
+                if self.compiled_autograd_ctx is None:
+                    assert rebuild_ctx is not None
+                    compiler_fn = rebuild_ctx()
+                    self.compiled_autograd_ctx = torch._dynamo.compiled_autograd.enable(
+                        compiler_fn
+                    )
                 self.compiled_autograd_ctx.__enter__()
                 return functools.partial(
                     self.compiled_autograd_ctx.__exit__, None, None, None

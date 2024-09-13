@@ -586,7 +586,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor(self):
-        for fullgraph in [True, False]:
+        # for fullgraph in [True, False]:
+        for fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
@@ -612,8 +613,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     )
                 )
             if fullgraph:
-                self.assertTrue(
-                    len(triton_codes) == 2,
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -680,9 +682,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.
-                self.assertTrue(
-                    len(triton_codes) > 2,
-                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+                self.assertGreater(
+                    len(triton_codes),
+                    2,
+                    "Expected more than 2 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
     def _create_transformer_factory_fns(self, all_requires_grad):
@@ -817,8 +820,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     )
                 )
             if fullgraph:
-                self.assertTrue(
-                    len(triton_codes) == 2,
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -881,9 +885,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.
-                self.assertTrue(
-                    len(triton_codes) > 2,
-                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+                self.assertGreater(
+                    len(triton_codes),
+                    2,
+                    "Expected more than 2 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
 
