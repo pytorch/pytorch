@@ -75,7 +75,6 @@ function do_cpython_build {
 
 function build_cpython {
     local py_ver=$1
-    local extra_py_flag=""
     check_var $py_ver
     check_var $PYTHON_DOWNLOAD_URL
     local py_ver_folder=$py_ver
