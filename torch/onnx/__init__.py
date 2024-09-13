@@ -36,8 +36,6 @@ __all__ = [
     "select_model_mode_for_export",
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
-    "disable_log",
-    "enable_log",
     # Base error
     "OnnxExporterError",
     # Dynamo Exporter
@@ -517,37 +515,3 @@ def dynamo_export(
         return dynamo_export(
             model, *model_args, export_options=export_options, **model_kwargs
         )
-
-
-# TODO(justinchuby): Deprecate these logging functions in favor of the new diagnostic module.
-
-# Returns True iff ONNX logging is turned on.
-is_onnx_log_enabled = _C._jit_is_onnx_log_enabled
-
-
-def enable_log() -> None:
-    r"""Enables ONNX logging."""
-    _C._jit_set_onnx_log_enabled(True)
-
-
-def disable_log() -> None:
-    r"""Disables ONNX logging."""
-    _C._jit_set_onnx_log_enabled(False)
-
-
-"""Sets output stream for ONNX logging.
-
-Args:
-    stream_name (str, default "stdout"): Only 'stdout' and 'stderr' are supported
-        as ``stream_name``.
-"""
-set_log_stream = _C._jit_set_onnx_log_output_stream
-
-
-"""A simple logging facility for ONNX exporter.
-
-Args:
-    args: Arguments are converted to string, concatenated together with a newline
-        character appended to the end, and flushed to output stream.
-"""
-log = _C._jit_onnx_log
