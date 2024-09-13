@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import math
 import operator
-
 import sympy
-
 import torch
+
+from typing import Union
 from torch.utils._sympy.functions import (
     _keep_float,
     FloatPow,
