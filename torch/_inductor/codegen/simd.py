@@ -1501,7 +1501,6 @@ class SIMDScheduling(BaseScheduling):
                             )
                 with V.set_kernel_handler(kernel):
                     partial_code.finalize_hook(subgraph_name, strict=False)
-                    breakpoint()
 
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 for node in epilogue_nodes:
