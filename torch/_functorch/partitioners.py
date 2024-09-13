@@ -787,7 +787,7 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
             if node.meta.get("has_backward_hook", False) and not any(
                 must_recompute(user) for user in node.users
             ):
-                # If node is AC region output and has a backward hook on it, we intentionally don't recompute it.
+                # If node is AC region output and has a backward hook on it, we intentionally choose to save it.
                 # This is to work around circular dependencies in Traceable FSDP2+AC.
                 # Example:
                 # ```
