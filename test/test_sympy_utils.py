@@ -457,20 +457,12 @@ class TestSympyInterp(TestCase):
                 continue
 
             with self.subTest(args=args):
-                # Convert arguments to tensors
                 tensor_args = [torch.tensor(a, dtype=torch.double if isinstance(a, float) else torch.int64) for a in args]
 
                 try:
-                    # Get the TensorReferenceAnalysis function
                     tensor_fn = getattr(TensorReferenceAnalysis, fn)
-
-                    # Create the symbolic expression
                     sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
-
-                    # Apply the function directly
                     direct_result = tensor_fn(*tensor_args)
-
-                    # Apply the function using sympy_interp
                     interp_result = sympy_interp(TensorReferenceAnalysis, dict(zip(symbols, tensor_args)), sympy_expr)
 
                     # Ensure both results are of the same dtype for comparison
@@ -482,22 +474,18 @@ class TestSympyInterp(TestCase):
                             direct_result = direct_result.to(torch.double)
                             interp_result = interp_result.to(torch.double)
 
-                    # Compare results
                     self.assertTrue(torch.allclose(direct_result, interp_result, rtol=1e-5, atol=1e-8),
                                     f"Mismatch for {fn}{args}: direct={direct_result}, interp={interp_result}")
 
-                    # For operations that should return boolean tensors, check dtype
                     if fn in UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS:
                         self.assertEqual(direct_result.dtype, torch.bool)
                         self.assertEqual(interp_result.dtype, torch.bool)
 
-                    # For integer operations, check that the result is integer
                     if fn in ("floor_to_int", "ceil_to_int", "round_to_int", "trunc_to_int"):
                         self.assertTrue(direct_result.dtype in (torch.int32, torch.int64))
                         self.assertTrue(interp_result.dtype in (torch.int32, torch.int64))
 
                 except NotImplementedError:
-                    # Some operations might not be implemented for TensorReferenceAnalysis
                     print(f"Operation {fn} not implemented for TensorReferenceAnalysis")
                 except Exception as e:
                     self.fail(f"Unexpected error for {fn}{args}: {str(e)}")
