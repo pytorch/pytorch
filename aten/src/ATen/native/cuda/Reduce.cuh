@@ -1091,14 +1091,16 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[0] = config.split_output(block_width);
   }
 
-  constexpr int min_values_per_thread = 16;
-#ifndef USE_ROCM
-  constexpr int max_values_per_thread = 256;
-#else
+#ifdef USE_ROCM
+  // AMD gpus perform better with fewer thread blocks
+  constexpr int min_values_per_thread = 128;
   constexpr int max_values_per_thread = 1024;
+#else
+  constexpr int min_values_per_thread = 16;
+  constexpr int max_values_per_thread = 256;
 #endif
 
-  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= max_values_per_thread) {
+  if (config.values_per_thread() >= block_height * min_values_per_thread || config.values_per_thread() >= max_values_per_thread) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.
