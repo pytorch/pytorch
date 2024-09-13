@@ -1,4 +1,7 @@
 # mypy: allow-untyped-defs
+from numbers import Number, Real
+import math
+
 import torch
 from torch.distributions import constraints, Distribution
 from torch.distributions.utils import broadcast_all
@@ -15,7 +18,7 @@ class GeneralizedPareto(Distribution):
     Special cases include Exponential (when loc = 0, concentration = 0), Pareto (when concentration > 0,
     loc = scale / concentration), and Uniform (when concentration = -1).
 
-    This distribution is often used to model the tails of other distributions.
+    This distribution is often used to model the tails of other distributions. This implementation is based on the implementation in TensorFlow Probability.
 
     Example::
 
@@ -41,10 +44,11 @@ class GeneralizedPareto(Distribution):
         self.loc, self.scale, self.concentration = broadcast_all(
             loc, scale, concentration
         )
-        batch_shape = self.loc.size()
-        super(GeneralizedPareto, self).__init__(
-            batch_shape, validate_args=validate_args
-        )
+        if isinstance(loc, Number) and isinstance(scale, Number) and isinstance(concentration, Number):
+            batch_shape = torch.Size()
+        else:
+            batch_shape = self.loc.size()
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(GeneralizedPareto, _instance)
@@ -72,7 +76,10 @@ class GeneralizedPareto(Distribution):
         )
         y = 1 / safe_conc + torch.ones_like(z)
         where_nonzero = torch.where(y == 0, y, y * torch.log1p(safe_conc * z))
-        return -torch.log(self.scale) - torch.where(eq_zero, z, where_nonzero)
+        log_scale = (
+            math.log(self.scale) if isinstance(self.scale, Real) else self.scale.log()
+        )
+        return -log_scale - torch.where(eq_zero, z, where_nonzero)
 
     def log_survival_function(self, value):
         if self._validate_args:
