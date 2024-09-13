@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
@@ -37,9 +38,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNotMiopenSuggestNHWC,
     skipCUDAIfRocm,
     skipCUDAIfRocmVersionLessThan,
-    skipMPS,
     skipMeta,
-    expectedFailureMPS,
 )
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -1680,7 +1679,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 )
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_conv1d_same_padding(self, device, dtype):
         # Test padding='same' outputs the correct shape
@@ -1720,7 +1719,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv1d(x, y, padding="same", dilation=3)
         self.assertEqual(expect, actual)
 
-    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     @dtypes(torch.float, torch.cfloat)
     def test_conv2d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
@@ -1831,7 +1830,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     @tf32_on_and_off(0.001)
     def test_conv2d_same_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='same'
@@ -1863,8 +1862,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float, torch.cfloat)  # Double, complex double not supported on MPS
-    @expectedFailureMPS # https://github.com/pytorch/pytorch/issues/107214
+    @dtypesIfMPS(
+        torch.float, torch.cfloat
+    )  # Double, complex double not supported on MPS
+    @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
     def test_conv3d_same_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != "xla"
 
@@ -1925,7 +1926,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             )
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     def test_conv1d_valid_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='valid'
         x = torch.rand(1, 1, 10, dtype=dtype, device=device, requires_grad=True)
@@ -1941,7 +1942,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv1d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 10), device=device, dtype=dtype)
@@ -1981,7 +1982,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv2d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 10), device=device, dtype=dtype)
@@ -2022,7 +2023,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv3d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 5, 10), device=device, dtype=dtype)
@@ -2089,8 +2090,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, gy_actual)
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float, torch.cfloat)  # Double, complex double not supported on MPS
-    @expectedFailureMPS # https://github.com/pytorch/pytorch/issues/107214
+    @dtypesIfMPS(
+        torch.float, torch.cfloat
+    )  # Double, complex double not supported on MPS
+    @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
     def test_conv3d_valid_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != "xla"
 
@@ -3402,7 +3405,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float, torch.cfloat)
-    @expectedFailureMPS # https://github.com/pytorch/pytorch/issues/107214
+    @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
     def test_Conv2d_backward_depthwise(self, device, dtype):
         x = torch.randn(2, 2, 4, 20, device=device, dtype=dtype, requires_grad=True)
         weight = torch.randn(2, 1, 3, 5, device=device, dtype=dtype, requires_grad=True)
