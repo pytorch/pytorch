@@ -366,6 +366,53 @@ print(torch.xpu.device_count())
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), original.get_device())
 
+    def test_out_of_memory(self):
+        tensor = torch.zeros(1024, device="xpu")
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
+            torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="xpu")
+
+        with self.assertRaisesRegex(RuntimeError, "XPU out of memory."):
+            torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device="xpu")
+
+    def test_raises_oom(self):
+        torch.xpu.memory.empty_cache()
+        with self.assertRaises(torch.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
+
+    def test_memory_allocation(self):
+        torch.xpu.empty_cache()
+        prev = torch.xpu.memory_allocated()
+        a = torch.ones(10, device="xpu")
+        self.assertGreater(torch.xpu.memory_allocated(), prev)
+        self.assertGreater(torch.xpu.memory_reserved(), 0)
+        del a
+        self.assertEqual(torch.xpu.memory_allocated(), prev)
+        torch.xpu.empty_cache()
+        self.assertEqual(torch.xpu.memory_reserved(), 0)
+        torch.xpu.reset_accumulated_memory_stats()
+        # Activate 1kB memory
+        a = torch.randn(256, device="xpu")
+        # Detect if the current active memory is 1kB
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 1024)
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 0)
+        del a
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 0)
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 1024)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_device_memory_allocated(self):
+        device_count = torch.xpu.device_count()
+        current_alloc = [torch.xpu.memory_allocated(idx) for idx in range(device_count)]
+        x = torch.ones(10, device="xpu:0")
+        self.assertGreater(torch.xpu.memory_allocated(0), current_alloc[0])
+        self.assertTrue(
+            all(
+                torch.xpu.memory_allocated(idx) == current_alloc[idx]
+                for idx in range(1, device_count)
+            )
+        )
+
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
 
