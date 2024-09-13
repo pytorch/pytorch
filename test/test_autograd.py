@@ -367,6 +367,7 @@ class TestAutograd(TestCase):
         x = torch.ones(1, requires_grad=True)
         torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_set_materialize_non_diff_grads(self):
         class Func(torch.autograd.Function):
             @staticmethod
@@ -1935,6 +1936,50 @@ class TestAutograd(TestCase):
             self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
             self.assertEqual(counter[0], 1)
 
+    def test_node_post_hook_registered_during_unpack_hook(self):
+        """
+        Test that post hooks registered during one of the node's
+        unpack hooks are properly restricted and will run properly.
+        """
+        test_case = self
+
+        class RegisterPostNodeHook(torch.autograd.graph.saved_tensors_hooks):
+            def __init__(self) -> None:
+                def pack_tensor(tensor: torch.Tensor) -> torch.Tensor:
+                    return tensor
+
+                def unpack_tensor(tensor: torch.Tensor) -> torch.Tensor:
+                    node = torch._C._current_autograd_node()
+
+                    def hook(outputs, inputs):
+                        # Assert that inputs passed in are None
+                        test_case.assertTrue(all(i is None for i in inputs))
+                        halved_outputs = tuple(
+                            o / 2.0 if o is not None else None for o in outputs
+                        )
+                        return halved_outputs
+
+                    node.register_hook(hook)
+                    return tensor
+
+                super().__init__(pack_tensor, unpack_tensor)
+
+        a = torch.rand(3, 3, requires_grad=True)
+
+        def model():
+            var, mean = torch.var_mean(a, dim=0)
+            loss = (var + mean).sum()
+            loss.backward()
+
+        model()
+        ref_grad = a.grad.clone()
+
+        with RegisterPostNodeHook():
+            model()
+
+        # Verify that the post hook got called and the grad propagation worked
+        self.assertEqual(ref_grad / 2.0 + ref_grad, a.grad)
+
     def test_hooks_cpp(self):
         # Tests hooks for autograd function implemented in C++
         bn = torch.nn.BatchNorm1d(5, affine=False)
@@ -3307,6 +3352,7 @@ class TestAutograd(TestCase):
         y = x.masked_fill(mask, 0)
         y.sum().backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_mark_non_differentiable_mixed(self):
         class MyFunction(Function):
             @staticmethod
@@ -4097,6 +4143,7 @@ class TestAutograd(TestCase):
             assert_strict_equal(xc, x)
             assert_strict_equal(yc, y)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_dep_nograd(self):
         class F1(Function):
             @staticmethod
@@ -8785,6 +8832,7 @@ for shape in [(1,), ()]:
 
         gradcheck(Func.apply, (a,), check_forward_ad=True)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_autograd_function.py")
     def test_custom_function_forward_mode_non_differentiable(self):
         # returns differentiable type, marked non-differentiable
         class Func(torch.autograd.Function):
@@ -9459,7 +9507,7 @@ for shape in [(1,), ()]:
 
         self.assertTrue(torch._C._autograd._saved_tensors_hooks_is_enabled())
 
-    def test_saved_tensor_hooks_custom_error_propagaation(self):
+    def test_saved_tensor_hooks_custom_error_propagation(self):
         class CustomError(Exception):
             pass
 
@@ -9537,7 +9585,7 @@ for shape in [(1,), ()]:
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 1)
 
-    def test_save_tensor_hook_version_counter_not_shared(self):
+    def test_saved_tensors_hook_version_counter_not_shared(self):
         class Test(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -9634,7 +9682,7 @@ for shape in [(1,), ()]:
                 y.sum().backward()
                 self.assertEqual(2 * a, a.grad)
 
-    def test_default_saved_variable_hooks_double_backward(self):
+    def test_default_saved_tensors_hooks_double_backward(self):
         with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a**3
@@ -9672,7 +9720,7 @@ for shape in [(1,), ()]:
             # note that in that sense, a is saved twice
             self.assertEqual(6 * 8 * a, a.grad)
 
-    def test_wrapped_number_saved_variable_hooks(self):
+    def test_wrapped_number_saved_tensors_hooks(self):
         def err_hook(x):
             raise RuntimeError("this hook should not be called")
 
