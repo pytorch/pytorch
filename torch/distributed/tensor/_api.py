@@ -22,7 +22,7 @@ from torch.distributed.tensor._redistribute import (
 )
 from torch.distributed.tensor._utils import (
     compute_global_tensor_info,
-    compute_local_shape,
+    compute_local_shape_and_global_offset,
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
@@ -931,7 +931,10 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     torch_stride = torch._prims_common.make_contiguous_strides_for(size)
 
     # get local tensor shape
-    local_shape = compute_local_shape(size, device_mesh, placements)
+    local_shape, _ = compute_local_shape_and_global_offset(
+        size, device_mesh, placements
+    )
+
     # initialize the local tensor
     if init_op == torch.full:
         fill_value = kwargs.pop("fill_value", 0)

@@ -1,9 +1,9 @@
 /* Standard C headers */
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
+#include <cstdint>
+
+#include <cstdlib>
+#include <cstring>
+#include <cassert>
 #include <limits>
 
 #ifdef _MSC_VER
@@ -71,8 +71,8 @@ void legacy_pthreadpool_compute_1d_tiled(
 }
 
 struct compute_2d_context {
-  legacy_pthreadpool_function_2d_t function;
-  void* argument;
+  legacy_pthreadpool_function_2d_t function{};
+  void* argument{};
   caffe2::FixedDivisor<int32_t> range_j;
 };
 
@@ -80,8 +80,8 @@ static void compute_2d(void* context_, size_t linear_index) {
   TORCH_DCHECK_LE(linear_index, std::numeric_limits<int32_t>::max());
 
   const struct compute_2d_context* context = static_cast<compute_2d_context*>(context_);
-  int32_t q;
-  int32_t r;
+  int32_t q = 0;
+  int32_t r = 0;
   context->range_j.DivMod(static_cast<int32_t>(linear_index), &q, &r);
   context->function(context->argument, q, r);
 }
@@ -112,18 +112,18 @@ void legacy_pthreadpool_compute_2d(
 }
 
 struct compute_2d_tiled_context {
-  legacy_pthreadpool_function_2d_tiled_t function;
-  void* argument;
+  legacy_pthreadpool_function_2d_tiled_t function{};
+  void* argument{};
   caffe2::FixedDivisor<int32_t> tile_range_j;
-  size_t range_i;
-  size_t range_j;
-  size_t tile_i;
-  size_t tile_j;
+  size_t range_i{};
+  size_t range_j{};
+  size_t tile_i{};
+  size_t tile_j{};
 };
 
 static void compute_2d_tiled(void* context_, size_t linear_index) {
-  int32_t q;
-  int32_t r;
+  int32_t q = 0;
+  int32_t r = 0;
 
   const struct compute_2d_tiled_context* context = static_cast<compute_2d_tiled_context*>(context_);
   context->tile_range_j.DivMod(linear_index, &q, &r);
@@ -172,26 +172,26 @@ void legacy_pthreadpool_compute_2d_tiled(
 }
 
 struct compute_3d_tiled_context {
-  legacy_pthreadpool_function_3d_tiled_t function;
-  void* argument;
+  legacy_pthreadpool_function_3d_tiled_t function{};
+  void* argument{};
   caffe2::FixedDivisor<int32_t> tile_range_j;
   caffe2::FixedDivisor<int32_t> tile_range_k;
-  size_t range_i;
-  size_t range_j;
-  size_t range_k;
-  size_t tile_i;
-  size_t tile_j;
-  size_t tile_k;
+  size_t range_i{};
+  size_t range_j{};
+  size_t range_k{};
+  size_t tile_i{};
+  size_t tile_j{};
+  size_t tile_k{};
 };
 
 static void compute_3d_tiled(
     void* context_,
     size_t linear_index) {
-  int32_t tile_index_ij, tile_index_k;
+  int32_t tile_index_ij = 0, tile_index_k = 0;
   const struct compute_3d_tiled_context* context = static_cast<compute_3d_tiled_context*>(context_);
   context->tile_range_k.DivMod(
       static_cast<int32_t>(linear_index), &tile_index_ij, &tile_index_k);
-  int32_t tile_index_i, tile_index_j;
+  int32_t tile_index_i = 0, tile_index_j = 0;
   context->tile_range_j.DivMod(tile_index_ij, &tile_index_i, &tile_index_j);
   const size_t max_tile_i = context->tile_i;
   const size_t max_tile_j = context->tile_j;
@@ -261,31 +261,31 @@ void legacy_pthreadpool_compute_3d_tiled(
 }
 
 struct compute_4d_tiled_context {
-  legacy_pthreadpool_function_4d_tiled_t function;
-  void* argument;
+  legacy_pthreadpool_function_4d_tiled_t function{};
+  void* argument{};
   caffe2::FixedDivisor<int32_t> tile_range_kl;
   caffe2::FixedDivisor<int32_t> tile_range_j;
   caffe2::FixedDivisor<int32_t> tile_range_l;
-  size_t range_i;
-  size_t range_j;
-  size_t range_k;
-  size_t range_l;
-  size_t tile_i;
-  size_t tile_j;
-  size_t tile_k;
-  size_t tile_l;
+  size_t range_i{};
+  size_t range_j{};
+  size_t range_k{};
+  size_t range_l{};
+  size_t tile_i{};
+  size_t tile_j{};
+  size_t tile_k{};
+  size_t tile_l{};
 };
 
 static void compute_4d_tiled(
     void* context_,
     size_t linear_index) {
-  int32_t tile_index_ij, tile_index_kl;
+  int32_t tile_index_ij = 0, tile_index_kl = 0;
   const struct compute_4d_tiled_context* context = static_cast<compute_4d_tiled_context*>(context_);
   context->tile_range_kl.DivMod(
       static_cast<int32_t>(linear_index), &tile_index_ij, &tile_index_kl);
-  int32_t tile_index_i, tile_index_j;
+  int32_t tile_index_i = 0, tile_index_j = 0;
   context->tile_range_j.DivMod(tile_index_ij, &tile_index_i, &tile_index_j);
-  int32_t tile_index_k, tile_index_l;
+  int32_t tile_index_k = 0, tile_index_l = 0;
   context->tile_range_l.DivMod(tile_index_kl, &tile_index_k, &tile_index_l);
   const size_t max_tile_i = context->tile_i;
   const size_t max_tile_j = context->tile_j;
