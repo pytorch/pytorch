@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
-from functools import partial, wraps
+from functools import lru_cache, partial, wraps
 from itertools import chain
 from typing import (
     Callable,
@@ -299,10 +299,8 @@ def _is_cia_op(op: "OpOverload") -> bool:
     )
 
 
-_ALL_VALID_CIA_OPS_IN_EXPORT: Optional[FrozenSet["OpOverload"]] = None
-
-
-def _collect_all_valid_cia_ops() -> FrozenSet["OpOverload"]:
+@lru_cache(maxsize=1)
+def _collect_all_valid_cia_ops() -> Set["OpOverload"]:
     """
     This is an util function that gets the all CIA functional ops.
 
@@ -315,14 +313,8 @@ def _collect_all_valid_cia_ops() -> FrozenSet["OpOverload"]:
          but not on the C++ side, these can't be caught at the first step.
          So we walk again to get the final list.
 
-    We need a frozenset as output because the set can be modified by user.
+    Note that the output of this function should never be modified
     """
-
-    # This is an expensive operation, so we cache the result
-    global _ALL_VALID_CIA_OPS_IN_EXPORT
-    if _ALL_VALID_CIA_OPS_IN_EXPORT is not None:
-        return _ALL_VALID_CIA_OPS_IN_EXPORT
-
     # First step to lazily populate torch.ops.aten
     cia_ops = torch._C._dispatch_get_registrations_for_dispatch_key(
         "CompositeImplicitAutograd"
@@ -349,10 +341,7 @@ def _collect_all_valid_cia_ops() -> FrozenSet["OpOverload"]:
             op_overload = getattr(op_packet, overload)
             if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
                 cia_ops.add(op_overload)
-    _ALL_VALID_CIA_OPS_IN_EXPORT = frozenset(cia_ops)
-    # For typing purposes :(
-    assert _ALL_VALID_CIA_OPS_IN_EXPORT is not None
-    return _ALL_VALID_CIA_OPS_IN_EXPORT
+    return cia_ops
 
 
 def _get_decomp_for_cia(op):
