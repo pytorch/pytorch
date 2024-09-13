@@ -5969,6 +5969,18 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
+    def test_rrelu(self):
+        def fn(x):
+            return torch.rrelu(x, training=True)
+
+        def fn_(x):
+            torch.rrelu_(x, training=True)
+            return x
+
+        x = torch.randn(4, 4)
+        torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        torch.compile(fn_, backend="inductor", fullgraph=True)(x)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
