@@ -916,57 +916,54 @@ def _get_dtype_from_loopbodies(loop_bodies):
     return dtypes
 
 
-def get_indexes_of_template_buf_read(epilogue_node, template_buf_name):
-    epilogue_reads = epilogue_node.get_reads()
-    indexes_of_template_buf_read = [
-        read.index for read in epilogue_reads if read.name == template_buf_name
+def _get_indexes_of_template_buf_read(epilogue_node, template_buf_name):
+    return [
+        read.index
+        for read in epilogue_node.get_reads()
+        if read.name == template_buf_name
     ]
 
-    return indexes_of_template_buf_read
+
+def _check_supported_and_same_indexes(index_of_template_buf_read, epilogue_writes):
+    num_indexes = len(set(index_of_template_buf_read))
+
+    if num_indexes > 1:
+        same_index = False
+        supported = False  # Different read indexes not supported
+    elif num_indexes == 0:
+        same_index = True
+        supported = True  # No reads, automatically supported
+    elif num_indexes == 1:
+        index_of_template_buf_read = index_of_template_buf_read[0]
+        same_index = all(
+            write.index == index_of_template_buf_read for write in epilogue_writes
+        )
+        # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
+        # in the epilogue node don't have the same index and change supported to True
+        supported = same_index
+    else:
+        raise AssertionError("Should not reach here")
+
+    return supported, same_index
 
 
 def _template_fusion_supported(template_node, epilogue_nodes):
     assert isinstance(template_node, ir.CppTemplateBuffer)
     template_buf_name = template_node.get_name()
-
+    indexes_of_template_buf_reads = [
+        _get_indexes_of_template_buf_read(epilogue_node, template_buf_name)
+        for epilogue_node in epilogue_nodes
+    ]
     epilogue_nodes_writes = [
         epilogue_node.get_read_writes().writes for epilogue_node in epilogue_nodes
     ]
 
-    indexes_of_template_buf_reads = [
-        get_indexes_of_template_buf_read(epilogue_node, template_buf_name)
-        for epilogue_node in epilogue_nodes
+    results = [
+        _check_supported_and_same_indexes(reads, writes)
+        for reads, writes in zip(indexes_of_template_buf_reads, epilogue_nodes_writes)
     ]
-
-    supported = []
-    same_indexes = []
-    for i, index_of_template_buf_read in enumerate(indexes_of_template_buf_reads):
-        epilogue_writes = epilogue_nodes_writes[i]
-        num_indexes_of_template_buf_read = len(list(set(index_of_template_buf_read)))
-
-        if num_indexes_of_template_buf_read > 1:
-            # We don't support different read indexes of template buffer for now.
-            same_indexes.append(False)
-            supported.append(False)
-        elif num_indexes_of_template_buf_read == 0:
-            # No read of template_buffer in the epilogue, thus no need to check if
-            # it's the same as the write index of the epilogue output.
-            same_indexes.append(True)
-            supported.append(True)
-        elif num_indexes_of_template_buf_read == 1:
-            index_of_template_buf_read = index_of_template_buf_read[0]
-            same_index = all(
-                epilogue_write.index == index_of_template_buf_read
-                for epilogue_write in epilogue_writes
-            )
-            same_indexes.append(same_index)
-            # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
-            # in the epilogue node don't have the same index.
-            supported.append(same_index)
-        else:
-            raise AssertionError("Should not reach here")
-
-    return all(item for item in supported), all(item for item in same_indexes)
+    supported, same_indexes = zip(*results)
+    return all(supported), all(same_indexes)
 
 
 def template_fusion_with_epilogues_supported(template, epilogues):
@@ -974,6 +971,5 @@ def template_fusion_with_epilogues_supported(template, epilogues):
     template_node = template.get_template_node()
     assert template_node is not None
 
-    return _template_fusion_supported(
-        template_node, [epilogue.node for epilogue in epilogues]
-    )
+    epilogue_nodes = [epilogue.node for epilogue in epilogues]
+    return _template_fusion_supported(template_node, epilogue_nodes)
