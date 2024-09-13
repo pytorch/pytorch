@@ -36,12 +36,12 @@ if HAS_GPU:
 
     if not TEST_WITH_ROCM:
         if HAS_CUDA:
-            from triton.language.extra.cuda.libdevice import (
+            from triton.language.extra.cuda.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
         elif HAS_XPU:
-            from triton.language.extra.intel.libdevice import (
+            from triton.language.extra.intel.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
@@ -2543,8 +2543,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     def test_capture_triton_disabled_in_triton_op(self):
-        import triton
-        import triton.language as tl
+        import triton  # @manual
+        import triton.language as tl  # @manual
 
         @triton.jit
         def add_kernel(
