@@ -153,4 +153,4 @@ class GeneralizedPareto(Distribution):
             torch.full_like(self.loc, inf),
         )
         lower = self.loc
-        return constraints.independent(constraints.interval(lower, upper), 1)
+        return constraints.interval(lower, upper)
