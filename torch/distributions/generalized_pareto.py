@@ -14,10 +14,10 @@ __all__ = ["GeneralizedPareto"]
 class GeneralizedPareto(Distribution):
     r"""
     Creates a Generalized Pareto distribution parameterized by :attr:`loc`, :attr:`scale`, and :attr:`concentration`.
-    
+
     The Generalized Pareto distribution is a family of continuous probability distributions on the real line.
-    Special cases include Exponential (when loc = 0, concentration = 0), Pareto (when concentration > 0,
-    loc = scale / concentration), and Uniform (when concentration = -1).
+    Special cases include Exponential (when  :attr:`loc` = 0, :attr:`concentration` = 0), Pareto (when :attr:`concentration` > 0,
+     :attr:`loc` = :attr:`scale` / :attr:`concentration`), and Uniform (when :attr:`concentration` = -1).
 
     This distribution is often used to model the tails of other distributions. This implementation is based on the implementation in TensorFlow Probability.
 
@@ -33,6 +33,7 @@ class GeneralizedPareto(Distribution):
         scale (float or Tensor): Scale parameter of the distribution
         concentration (float or Tensor): Concentration parameter of the distribution
     """
+
     arg_constraints = {
         "loc": constraints.real,
         "scale": constraints.positive,
@@ -45,7 +46,11 @@ class GeneralizedPareto(Distribution):
         self.loc, self.scale, self.concentration = broadcast_all(
             loc, scale, concentration
         )
-        if isinstance(loc, Number) and isinstance(scale, Number) and isinstance(concentration, Number):
+        if (
+            isinstance(loc, Number)
+            and isinstance(scale, Number)
+            and isinstance(concentration, Number)
+        ):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
@@ -87,7 +92,9 @@ class GeneralizedPareto(Distribution):
             self._validate_sample(value)
         z = self._z(value)
         eq_zero = torch.isclose(self.concentration, torch.tensor(0.0))
-        safe_conc = torch.where(eq_zero, torch.ones_like(self.concentration), self.concentration)
+        safe_conc = torch.where(
+            eq_zero, torch.ones_like(self.concentration), self.concentration
+        )
         where_nonzero = -torch.log1p(safe_conc * z) / safe_conc
         return torch.where(eq_zero, -z, where_nonzero)
 
@@ -116,9 +123,7 @@ class GeneralizedPareto(Distribution):
         concentration = self.concentration
         dtype = self.concentration.dtype
         valid = concentration < 1
-        safe_conc = torch.where(
-            valid, concentration, torch.tensor(0.5, dtype=dtype)
-        )
+        safe_conc = torch.where(valid, concentration, torch.tensor(0.5, dtype=dtype))
         result = self.loc + self.scale / (1 - safe_conc)
         return torch.where(valid, result, torch.full_like(result, nan))
 
@@ -128,9 +133,7 @@ class GeneralizedPareto(Distribution):
         dtype = self.concentration.dtype
         lim = torch.tensor(0.5, dtype=dtype)
         valid = concentration < lim
-        safe_conc = torch.where(
-            valid, concentration, torch.tensor(0.25, dtype=dtype)
-        )
+        safe_conc = torch.where(valid, concentration, torch.tensor(0.25, dtype=dtype))
         result = self.scale**2 / (
             (1 - safe_conc) ** 2 * (1 - 2 * safe_conc)
         ) + torch.zeros_like(self.loc)

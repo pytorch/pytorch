@@ -3525,43 +3525,47 @@ class TestDistributions(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_generalized_pareto(self):
+        loc = torch.randn(2, 3).requires_grad_()
         scale = torch.randn(2, 3).abs().requires_grad_()
         concentration = torch.randn(2, 3).requires_grad_()
+        loc_1d = torch.randn(1).requires_grad_()
         scale_1d = torch.randn(1).abs().requires_grad_()
         concentration_1d = torch.randn(1).requires_grad_()
-        self.assertEqual(GeneralizedPareto(scale_1d, 0.5).mean, inf)
-        self.assertEqual(GeneralizedPareto(scale_1d, 0.5).variance, inf)
         self.assertEqual(
-            GeneralizedPareto(scale, concentration).sample().size(), (2, 3)
+            GeneralizedPareto(loc, scale, concentration).sample().size(), (2, 3)
         )
         self.assertEqual(
-            GeneralizedPareto(scale, concentration).sample((5,)).size(), (5, 2, 3)
+            GeneralizedPareto(loc, scale, concentration).sample((5,)).size(), (5, 2, 3)
         )
         self.assertEqual(
-            GeneralizedPareto(scale_1d, concentration_1d).sample((1,)).size(), (1, 1)
+            GeneralizedPareto(loc_1d, scale_1d, concentration_1d).sample((1,)).size(),
+            (1, 1),
         )
         self.assertEqual(
-            GeneralizedPareto(scale_1d, concentration_1d).sample().size(), (1,)
+            GeneralizedPareto(loc_1d, scale_1d, concentration_1d).sample().size(), (1,)
         )
-        self.assertEqual(GeneralizedPareto(1.0, 1.0).sample().size(), ())
-        self.assertEqual(GeneralizedPareto(1.0, 1.0).sample((1,)).size(), (1,))
+        self.assertEqual(GeneralizedPareto(1.0, 1.0, 1.0).sample().size(), ())
+        self.assertEqual(GeneralizedPareto(1.0, 1.0, 1.0).sample((1,)).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
+            l = loc.view(-1)[idx].detach()
             s = scale.view(-1)[idx].detach()
             c = concentration.view(-1)[idx].detach()
-            expected = scipy.stats.genpareto.logpdf(x, c, scale=s)
+            expected = scipy.stats.genpareto.logpdf(x, c, loc=l, scale=s)
             self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
-        self._check_log_prob(GeneralizedPareto(scale, concentration), ref_log_prob)
+        self._check_log_prob(GeneralizedPareto(loc, scale, concentration), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_generalized_pareto_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
-        for scale, concentration in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
+        set_rng_seed(1)  # see note [Randomized statistical tests]
+        for loc, scale, concentration in product(
+            [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0], [-0.5, 0.0, 0.5]
+        ):
             self._check_sampler_sampler(
-                GeneralizedPareto(scale, concentration),
-                scipy.stats.genpareto(concentration, scale=scale),
-                f"GeneralizedPareto(scale={scale}, concentration={concentration})",
+                GeneralizedPareto(loc, scale, concentration),
+                scipy.stats.genpareto(c=concentration, loc=loc, scale=scale),
+                f"GeneralizedPareto(loc={loc}, scale={scale}, concentration={concentration})",
             )
 
     def test_gumbel(self):
