@@ -20,7 +20,9 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     expectedFailureMeta,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
@@ -28,8 +30,6 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     skipCUDAIfRocm,
     TEST_WITH_ROCM,
-    dtypesIfMPS,
-    expectedFailureMPS,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_nn import (
@@ -43,7 +43,6 @@ from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
-    skipIfMps,
     skipIfTorchDynamo,
     slowTest,
     subtest,
@@ -1598,14 +1597,12 @@ torch.cuda.synchronize()
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @expectedFailureMPS
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)

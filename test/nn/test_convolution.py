@@ -1782,6 +1782,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     def test_conv2d_valid_padding(self, device, dtype):
         # Test F.conv2d padding='valid' is the same as no padding
         x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype)
@@ -2024,6 +2025,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
+    @expectedFailureMPS  # Fails on MPS - https://github.com/pytorch/pytorch/issues/136031
     @parametrize_test("mode", ("valid", "same"))
     def test_conv3d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 5, 10), device=device, dtype=dtype)
@@ -2076,6 +2078,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_odd, mode)
 
     @dtypes(torch.float, torch.complex64)
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     def test_conv2d_valid_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='valid'
         x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype, requires_grad=True)
@@ -2120,8 +2123,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
             check_fwd_over_rev=check_forward_ad,
         )
 
-    @parametrize_test("N", range(2, 4), name_fn=lambda N: f"ConvTranspose{N}d")
-    @expectedFailureMPS  # ConvTranspose 3D not supported on MPS
+    @parametrize_test(
+        arg_str="N",
+        arg_values=[
+            subtest(arg_values=(2), name="ConvTranspose2d"),
+            subtest(
+                arg_values=(3), name="ConvTranspose3d", decorators=[expectedFailureMPS]
+            ),
+        ],
+    )
     def test_conv_transpose_with_output_size_and_no_batch_dim(self, device, N):
         # For inputs with no batch dim, verify output is the correct shape when output_size is set.
         # See https://github.com/pytorch/pytorch/issues/75889

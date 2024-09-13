@@ -10794,7 +10794,6 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # NotImplementedError: aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("reduction", ['none', 'mean', 'sum'])
     @parametrize_test("use_module_form", [True, False])
-    @expectedFailureMPS
     def test_CTCLoss_no_batch_dim(self, device, reduction, use_module_form):
         input_length = 40
         vocab_size = 3
