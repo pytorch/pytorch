@@ -359,7 +359,7 @@ class CachingAutotuner(KernelInterface):
                 if k == "waves_per_eu":
                     compile_meta["waves_per_eu"] = v
                     continue
-            compile_meta["constants"][self.fn.arg_names.index(k)] = v
+            compile_meta["constants"][k] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
@@ -408,7 +408,7 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
-            if self.device_props.type != "hip":
+            if self.device_props.type == "hip":
                 if "waves_per_eu" in compile_meta:
                     options["waves_per_eu"] = compile_meta["waves_per_eu"]
                 if "matrix_instr_nonkdim" in compile_meta:
@@ -675,7 +675,7 @@ class CachingAutotuner(KernelInterface):
         if self.device_props.type == "cpu":
             return benchmarker.benchmark_cpu(kernel_call)
 
-        return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
+        return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
@@ -756,6 +756,7 @@ class CachingAutotuner(KernelInterface):
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
+            "r_block": launcher.config.kwargs.get("RBLOCK", None),
             "num_warps": launcher.bin.num_warps
             if hasattr(launcher.bin, "num_warps")
             else launcher.bin.metadata.num_warps,
