@@ -17,7 +17,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
@@ -371,7 +371,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @unittest.skipIf(not SM90OrLater, "FP8 requires H100+")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_cast_and_t(self):
         """
         This test repros the not able to fuses issue in
