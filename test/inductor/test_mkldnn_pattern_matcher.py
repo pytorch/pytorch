@@ -2600,7 +2600,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     y = y.reshape(*x.shape[:-1], y.shape[-1])
                     return y
                 else:
-                    return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+                    return (
+                        torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+                    )
 
         x_shape = (1, 1, 256)
         s_shape = 12
@@ -2608,8 +2610,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             (256, 256, 1),  # linear dispatching to mm
             (256, 32, 1),  # linear dispatching to bmm
         ]
-        # is_permutes = [False, True]
-        is_permutes = [True,]
+        is_permutes = [False, True]
         for x_stride, is_permute in itertools.product(x_strides, is_permutes):
             mod = M(is_permute=is_permute).eval()
             x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)

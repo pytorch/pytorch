@@ -1560,6 +1560,7 @@ def _register_woq_mm_int8_pattern3():
     )
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
 
+
 def _register_woq_mm_int8_pattern4():
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
@@ -1579,6 +1580,7 @@ def _register_woq_mm_int8_pattern4():
         KeywordArg("scales"),
     )
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
 
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
