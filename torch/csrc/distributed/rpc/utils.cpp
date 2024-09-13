@@ -477,7 +477,7 @@ void writeWrappedPayload(
   int64_t indexToWrite = originalPayload.size();
   originalPayload.resize(originalPayload.size() + sizeof(int64_t));
   const int64_t additionalPayloadSize = additionalPayload.size();
-  torch::utils::THP_encodeInt64Buffer(
+  torch::utils::THP_encodeBuffer(
       reinterpret_cast<uint8_t*>(originalPayload.data()) + indexToWrite,
       &additionalPayloadSize,
       torch::utils::THPByteOrder::THP_BIG_ENDIAN,
@@ -492,7 +492,7 @@ std::vector<at::IValue> readWrappedPayload(
   int64_t additionalPayloadSize;
   TORCH_INTERNAL_ASSERT(payload.size() >= sizeof(int64_t));
   size_t indexToRead = payload.size() - sizeof(int64_t);
-  torch::utils::THP_decodeInt64Buffer(
+  torch::utils::THP_decodeBuffer(
       &additionalPayloadSize,
       reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
       torch::utils::THPByteOrder::THP_BIG_ENDIAN,

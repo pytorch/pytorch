@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Union
 
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
-    "X": 2048,
+    "X": 4096,
     "Y": 1024,
     "Z": 1024,
     "R": 4096 * 16,  # * 16 is multi-kernel only
@@ -104,24 +104,32 @@ class DeviceProperties(typing.NamedTuple):
     regs_per_multiprocessor: Optional[int] = None
     max_threads_per_multi_processor: Optional[int] = None
     multi_processor_count: Optional[int] = None
+    warp_size: Optional[int] = None
 
     @classmethod
     def create(cls, device):
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
 
-        device_type = device.type if torch.version.hip is None else "hip"
+        device_type = device.type
+
+        if torch.version.hip and device_type == "cuda":
+            device_type = "hip"
+
         device_interface = get_interface_for_device(device)
-        if device_type == "cuda":
+        if device_type in ["cuda", "hip"]:
             props = device_interface.get_device_properties(device)
             return cls(
                 type=device_type,
                 index=device.index,
                 cc=device_interface.get_compute_capability(device),
                 major=props.major,
-                regs_per_multiprocessor=props.regs_per_multiprocessor,
+                regs_per_multiprocessor=props.regs_per_multiprocessor
+                if hasattr(props, "regs_per_multiprocessor")
+                else None,
                 max_threads_per_multi_processor=props.max_threads_per_multi_processor,
                 multi_processor_count=props.multi_processor_count,
+                warp_size=props.warp_size,
             )
         return cls(
             type=device_type,
