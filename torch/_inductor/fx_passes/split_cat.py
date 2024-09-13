@@ -65,7 +65,6 @@ post_grad_pass_names = [
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
     "shape_padding_multiplier",
-    "pad_aten_mm_pass",
 ]
 
 for pass_name in pre_grad_pass_names:
