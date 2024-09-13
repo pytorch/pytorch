@@ -443,7 +443,7 @@ class TestViewOps(TestCase):
     @onlyNativeDeviceTypesAnd("mps")
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     @dtypesIfMPS(
-        *integral_types_and(torch.half, torch.bfloat16, torch.bool, torch.float32)
+        *integral_types_and(torch.half, torch.bool, torch.float32)
     )
     def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)

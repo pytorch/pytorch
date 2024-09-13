@@ -8228,9 +8228,8 @@ class TestNNDeviceType(NNTestCase):
         data = torch.rand(880801, 1, 1, 1, device=device, dtype=dtype)
         out = bn(data).sum().backward()
 
-    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.complex128)
-    @dtypesIfMPS(torch.float, torch.bfloat16, torch.half, torch.complex64)
+    @dtypesIfMPS(torch.float, torch.half, torch.complex64)
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.complex128)
     def test_conv_empty_input(self, device, dtype):
         def help(input, conv, memory_format):

@@ -1680,6 +1680,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 )
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_conv1d_same_padding(self, device, dtype):
         # Test padding='same' outputs the correct shape
@@ -1719,6 +1720,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv1d(x, y, padding="same", dilation=3)
         self.assertEqual(expect, actual)
 
+    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
     @dtypes(torch.float, torch.cfloat)
     def test_conv2d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
@@ -1771,6 +1773,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float)  # Complex not supported on MacOS13
     def test_conv1d_valid_padding(self, device, dtype):
         # Test F.conv1d padding='valid' is the same as no padding
         x = torch.rand(1, 1, 10, device=device, dtype=dtype)
@@ -1798,6 +1801,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float)
     def test_conv1d_same_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='same'
         x = torch.rand(1, 1, 12, dtype=dtype, device=device, requires_grad=True)
@@ -1827,6 +1831,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
     @tf32_on_and_off(0.001)
     def test_conv2d_same_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='same'
@@ -1920,6 +1925,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             )
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
     def test_conv1d_valid_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='valid'
         x = torch.rand(1, 1, 10, dtype=dtype, device=device, requires_grad=True)
@@ -1935,6 +1941,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv1d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 10), device=device, dtype=dtype)
@@ -1974,6 +1981,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv2d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 10), device=device, dtype=dtype)
@@ -2014,6 +2022,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float) # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv3d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 5, 10), device=device, dtype=dtype)
