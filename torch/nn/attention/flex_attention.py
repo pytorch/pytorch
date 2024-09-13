@@ -909,7 +909,7 @@ class PagedCache:
 
         # Mapping from physical page index to logical page index
         self.physical_to_logical = -torch.ones(
-            n_pages, dtype=torch.int64, device=device
+            (max_batch_size, n_pages), dtype=torch.int64, device=device
         )
 
     def update(self, input_pos: Tensor, val: Tensor, cache: Tensor):
@@ -961,34 +961,44 @@ class PagedCache:
                 .to(torch.int32)
             )
 
+        new_mask_mod = self.get_mask_mod(block_mask.mask_mod, MAX_BLOCKS_IN_COL)
+
         return BlockMask.from_kv_blocks(
             new_kv_num_blocks,
             new_kv_indices,
             new_full_kv_num_blocks,
             new_full_kv_indices,
             block_mask.BLOCK_SIZE,
-            block_mask.mask_mod,
+            new_mask_mod,
         )
 
-    def get_mask_mod(self, mask_mod: _mask_mod_signature) -> _mask_mod_signature:
+    def get_mask_mod(
+        self, mask_mod: _mask_mod_signature, max_logical_block_idx: int
+    ) -> _mask_mod_signature:
         def new_mask_mod(b, h, q_idx, physical_kv_idx):
-            logical_kv_idx = (
-                self.physical_to_logical[physical_kv_idx // self.page_size]
-                * self.page_size
-                + physical_kv_idx % self.page_size
+            physical_kv_block = physical_kv_idx // self.page_size
+            physical_kv_offset = physical_kv_idx % self.page_size
+            logical_block_idx = self.physical_to_logical[b, physical_kv_block]
+            logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
+            return torch.where(
+                logical_kv_idx >= 0, mask_mod(b, h, q_idx, logical_kv_idx), False
             )
-            return mask_mod(b, h, q_idx, logical_kv_idx)
 
         return new_mask_mod
 
-    def get_score_mod(self, score_mod: _score_mod_signature) -> _score_mod_signature:
+    def get_score_mod(
+        self, score_mod: _score_mod_signature, max_logical_block_idx: int
+    ) -> _score_mod_signature:
         def new_score_mod(score, b, h, q_idx, physical_kv_idx):
-            logical_kv_idx = (
-                self.physical_to_logical[physical_kv_idx // self.page_size]
-                * self.page_size
-                + physical_kv_idx % self.page_size
+            physical_kv_block = physical_kv_idx // self.page_size
+            physical_kv_offset = physical_kv_idx % self.page_size
+            logical_block_idx = self.physical_to_logical[b, physical_kv_block]
+            logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
+            return torch.where(
+                logical_kv_idx >= 0,
+                score_mod(score, b, h, q_idx, logical_kv_idx),
+                False,
             )
-            return score_mod(score, b, h, q_idx, logical_kv_idx)
 
         return new_score_mod
 
@@ -1025,7 +1035,7 @@ class PagedCache:
         ] = allocated_pages
 
         # update metadata
-        self.physical_to_logical[allocated_pages] = torch.arange(
+        self.physical_to_logical[batch_idx][allocated_pages] = torch.arange(
             start_page_idx, end_page_idx, device=num_pages_to_allocate.device
         )
         self.allocated_seq_len[batch_idx] += num_pages_to_allocate * self.page_size
@@ -1052,7 +1062,7 @@ class PagedCache:
         # clean metadata
         self.allocated_seq_len[batch] = 0
         self.empty_pages += allocated_pages.tolist()
-        self.physical_to_logical[allocated_pages] = -1
+        self.physical_to_logical[batch][allocated_pages] = -1
         self.page_table[batch] = -1
 
 
