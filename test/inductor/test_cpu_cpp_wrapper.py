@@ -87,13 +87,7 @@ if TEST_WITH_ROCM:
         }
     )
 if config.abi_compatible:
-    xfail_list = [
-        *[
-            func
-            for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
-            if func.startswith("test_linear_with_pointwise")
-        ],
-    ]
+    xfail_list = []
     for test_name in xfail_list:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cpp_wrapper",), is_skip=False
@@ -103,6 +97,11 @@ if config.abi_compatible:
         ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
     skip_list = [
         "test_multihead_attention_cpu",
+        *[
+            func
+            for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+            if func.startswith("test_linear_with_pointwise")
+        ],
     ]
     for test_name in skip_list:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
