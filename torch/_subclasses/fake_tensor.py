@@ -1701,7 +1701,6 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object],
     ) -> Optional[FakeTensor]:
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
-        print("_dispatch_impl", func)
 
         # DO NOT PUT LOGIC BEFORE UNRECOGNIZED TYPE CHECKING
         # We must throw NotImplemented in case of unrecognized types to handle subclasses.
@@ -1878,15 +1877,11 @@ class FakeTensorMode(TorchDispatchMode):
                 for a in flat_args
             )
         ):
-            print("did prop")
-            # breakpoint()
             log.debug("propagate_real_tensors %s", func)
             real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
             real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
             real_out = func(*real_args, **real_kwargs)
         elif self.propagate_real_tensors:
-            print("did not prop")
-            # breakpoint()
             # This can happen occasionally legitimately, specifically when you
             # are inside the meta of a data dependent operation and you create
             # a tensor on an unbacked SymInt; at this point in time we don't
@@ -1902,19 +1897,23 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
         def maybe_propagate_real_tensors(fake_out: T) -> T:
-            print("maybe_propagate")
             import sympy
+            log.debug("maybe_propagate_real_tensors %s", func)
+
             log.debug("maybe_propagate_real_tensors %s", func)
 
             def go(t: object, real_t: Tensor) -> None:
                 if isinstance(t, FakeTensor):
                     # NB: unconditionally overwrite
-                    log.debug("maybe_propagate_real_tensors %s -> %s", id(t), id(real_t))
+                    log.debug(
+                        "maybe_propagate_real_tensors %s -> %s", id(t), id(real_t)
+                    )
                     t.real_tensor = real_t
                     for s, real_s in zip(t.size(), real_t.size()):
-                        go(s, real_s)
+                        go(s, real_s)  # type: ignore[arg-type]
                     for s, real_s in zip(t.stride(), real_t.stride()):
-                        go(s, real_s)
+                        go(s, real_s)  # type: ignore[arg-type]
+                    go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
                 elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
                     if isinstance(t.node.expr, sympy.Symbol):
                         assert self.shape_env is not None
@@ -1922,10 +1921,12 @@ class FakeTensorMode(TorchDispatchMode):
 
             if real_out is not nil:
                 if (
-                    not isinstance(fake_out, torch.Tensor)
-                    and not isinstance(real_out, torch.Tensor)
+                    not isinstance(fake_out, Tensor)
+                    and not isinstance(real_out, Tensor)
                     and type(fake_out) != type(real_out)
                 ):
+                    # This can happen when decompositions have different return types,
+                    # e.g. namedtuple vs. tuple vs. list.
                     tree_map_(
                         go,
                         tuple(pytree.tree_flatten(fake_out)),
@@ -1964,8 +1965,9 @@ class FakeTensorMode(TorchDispatchMode):
                 )
             ):
                 with self:
-                    out = decomposition_table[func](*args, **kwargs)
-                    return maybe_propagate_real_tensors(out)
+                    return maybe_propagate_real_tensors(
+                        decomposition_table[func](*args, **kwargs)
+                    )
 
             with self:
                 # Decomposes CompositeImplicitAutograd ops

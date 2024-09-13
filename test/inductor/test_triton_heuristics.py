@@ -9,8 +9,8 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 try:
-    import triton  # noqa: F401
-    import triton.language as tl
+    import triton  # noqa: F401  # @manual
+    import triton.language as tl  # @manual
 except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
@@ -88,7 +88,7 @@ class TestTritonHeuristics(TestCase):
         self._test_artificial_zgrid()
 
     def _get_cos_kernel_caching_autotuner_args(self):
-        from triton.compiler.compiler import AttrsDescriptor
+        from triton.compiler.compiler import AttrsDescriptor  # @manual
 
         @triton.jit
         def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
@@ -102,7 +102,7 @@ class TestTritonHeuristics(TestCase):
             tl.store(out_ptr0 + (x0), tmp1, xmask)
 
         triton_meta = {
-            "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+            "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
             "device": DeviceProperties.create(torch.device("cuda")),
             "constants": {},
             "configs": [AttrsDescriptor(divisible_by_16=(0, 1, 2), equal_to_1=())],

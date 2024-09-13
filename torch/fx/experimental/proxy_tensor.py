@@ -610,9 +610,7 @@ def track_tensor_tree(
     # observed that some extra unbacked bindings were needed to handle some
     # higher order operator code.  But actually it looks like this was
     # just an unrelated bug that needed to be fixed separately.
-    fake_mode = torch._guards.detect_fake_mode()
-    if fake_mode and (shape_env := fake_mode.shape_env):
-        shape_env.pending_fresh_unbacked_symbols.clear()
+    _set_unbacked_bindings(inner_res, proxy_res)
 
     def wrap_with_proxy(
         e: object, proxy: _NestedProxys, constant: Optional[_NestedTensors]
