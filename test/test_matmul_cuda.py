@@ -560,6 +560,7 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not SM90OrLater, "rowwise implementation is currently sm90 specific")
     @skipIfRocm()
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
