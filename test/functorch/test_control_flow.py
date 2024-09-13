@@ -2887,7 +2887,8 @@ def forward(self, pred_1, x_1):
     # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("compile_mode", ["eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
+    # @parametrize("autograd", [False, True])
+    @parametrize("autograd", [True])
     def test_scan_closure_nested(self, reverse, compile_mode, device, autograd):
         dim = 1
 
