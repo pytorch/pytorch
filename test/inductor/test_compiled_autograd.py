@@ -1617,7 +1617,6 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
         ), compiled_autograd.enable(compiler_fn):
             fn()
 
-    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
     def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
