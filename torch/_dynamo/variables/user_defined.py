@@ -415,6 +415,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             # import here to avoid an unfortunate circular dependency.
             from .ctx_manager import GenericContextWrappingVariable
+            from .functions import GeneratorFunctionVariable, UserFunctionVariable
+
+            if self.value is contextlib._GeneratorContextManager:
+                assert isinstance(args[0], UserFunctionVariable)
+                args[0] = GeneratorFunctionVariable(
+                    args[0].get_function(), source=self.source
+                )
 
             cm_obj = tx.output.side_effects.track_object_new(
                 self.source, self.value, GenericContextWrappingVariable, {}
