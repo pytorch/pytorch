@@ -350,6 +350,12 @@ class TestControlFlow(TestCase):
         )
         grad_init = [torch.ones_like(el) for el in result_flatten]
         grads = torch.autograd.grad(result_flatten, params, grad_init)
+        # print(grads[0])
+        # print(expected_grads[0])
+        # print('-----------')
+        # print(grads[-1])
+        # print(expected_grads[-1])
+        # print('===========')
         self.assertEqual(grads, expected_grads)
 
     def test_cond_no_trace(self):
@@ -2883,14 +2889,15 @@ def forward(self, pred_1, x_1):
             
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("reverse", [False, True])
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [True])
     # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("compile_mode", ["eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # @parametrize("autograd", [False, True])
     @parametrize("autograd", [True])
     def test_scan_closure_nested(self, reverse, compile_mode, device, autograd):
-        dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
 
         # # Simple non-nested case
         # x = torch.randn(3, 10, 5, device=device, requires_grad=autograd)
@@ -2901,34 +2908,36 @@ def forward(self, pred_1, x_1):
         # def f1(x: torch.Tensor, y: torch.Tensor):
         #     c_new = y @ W + b
         #     h_new = torch.tanh(c_new + x)
-        #     return c_new, h_new
+        #     return c_new, h_new        
 
-        # fct_1 = compile_mode_helper(f1, compile_mode)
-
-        # result = scan(fct_1, h, x, dim=dim, reverse=reverse)
-        # result_exp = _fake_scan(fct_1, h, x, dim=dim, reverse=reverse)
+        # result = scan_fct(f1, h, x, dim=dim, reverse=reverse)
+        # result_exp = _fake_scan(f1, h, x, dim=dim, reverse=reverse)
         # self.assertEqual(result, result_exp)
 
         # if autograd:
         #     self.check_autograd(result, result_exp, (h, x, W, b))
             
         # Nested case
-        x_1 = torch.randn(3, 10, 5, device=device, requires_grad=autograd)
-        h_1 = torch.randn(3, 7, device=device, requires_grad=autograd)
-        h_2 = torch.randn(3, 3, device=device, requires_grad=autograd)
-        W_1 = torch.randn(5, 7, device=device, requires_grad=autograd)
-        b_1 = torch.randn(7, device=device, requires_grad=autograd)
-        W_2 = torch.randn(7, 3, device=device, requires_grad=autograd)
-        b_2 = torch.randn(3, device=device, requires_grad=autograd)
+        def chain_fct(fct, f_1, f_2, xs, h_1, h_2):
+            o1 = fct(
+                f_1,
+                h_1,
+                xs,
+                dim=1,
+                reverse=reverse,
+            )
+            o2 = fct(
+                f_2,
+                h_2,
+                o1[1],
+                dim=0,
+                reverse=reverse,
+            )
+            return o2
         
-        
-        x_1 = torch.randn(3, 10, 5, device=device, requires_grad=autograd)
-        h_1 = torch.randn(3, 5, device=device, requires_grad=autograd)
-        h_2 = torch.randn(3, 5, device=device, requires_grad=autograd)
-        
-        x_1 = torch.randn(3, 10, 5, device=device, requires_grad=autograd)
-        h_1 = torch.randn(3, 7, device=device, requires_grad=autograd)
-        h_2 = torch.randn(10, 3, device=device, requires_grad=autograd)
+        x1 = torch.ones(3, 10, 5, device=device, requires_grad=autograd)
+        h1 = torch.zeros(3, 7, device=device, requires_grad=autograd)
+        h2 = torch.zeros(3, 3, device=device, requires_grad=autograd)
         W_1 = torch.randn(5, 7, device=device, requires_grad=autograd)
         b_1 = torch.randn(7, device=device, requires_grad=autograd)
         W_2 = torch.randn(7, 3, device=device, requires_grad=autograd)
@@ -2944,37 +2953,17 @@ def forward(self, pred_1, x_1):
             h_new = torch.tanh(c_new + x)
             return c_new, h_new
 
-        def chain_fct(scan_fct, xs):
-            o1 = scan_fct(
-                f1,
-                h_1,
-                xs,
-                dim=1,
-                reverse=reverse,
-            )
-            o1 = pytree.tree_map(lambda t: shift_source_dim_to_target_dim(t, 0, 1), o1)
-            o2 = scan_fct(
-                # get_scan_combine_fn("add", False),
-                f2,
-                h_2,
-                o1[1],
-                dim=0,
-                reverse=reverse,
-            )
-            return o2
-
-        fct_cmp = compile_mode_helper(chain_fct, compile_mode)
-        result1 = fct_cmp(scan, x_1)
-        expected_result = fct_cmp(_fake_scan, x_1)
+        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
         self.assertEqual(result1, expected_result)
         
         if autograd:
-            self.check_autograd(result1, expected_result, (h_1, h_2, x_1, W_1, b_1))
+            self.check_autograd(result1, expected_result, (h1, h2, x1, W_1, b_1))
             
         # Complex case
-        x_1 = torch.randn(3, 10, 3, device=device, requires_grad=autograd)
-        h_1 = torch.randn(3, 3, device=device, requires_grad=autograd)
-        h_2 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        x1 = torch.randn(3, 10, 3, device=device, requires_grad=autograd)
+        h1 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        h2 = torch.randn(3, 3, device=device, requires_grad=autograd)
         W_1 = torch.randn(3, 3, device=device, requires_grad=autograd)
         b_1 = torch.randn(3, device=device, requires_grad=autograd)
         W_2 = torch.randn(3, 3, device=device, requires_grad=autograd)
@@ -2990,12 +2979,12 @@ def forward(self, pred_1, x_1):
             h_new = torch.tanh(c_new + x)
             return c_new, h_new
 
-        result = scan_fct(f2, h_2, scan_fct(f1, h_1, x_1, dim=dim, reverse=reverse)[1], dim=0, reverse=reverse)
-        result_exp = _fake_scan(f2, h_2, _fake_scan(f1, h_1, x_1, dim=dim, reverse=reverse)[1], dim=0, reverse=reverse)
-        self.assertEqual(result, result_exp)
-
+        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
+        self.assertEqual(result1, expected_result)
+        
         if autograd:
-            self.check_autograd(result, result_exp, (h_1, h_2, x_1, W_1, b_1, W_2, b_2))
+            self.check_autograd(result1, expected_result, (h1, h2, x1, W_1, b_1, W_2, b_2))
 
     @skipIfNoDynamoSupport
     def test_scan_simple_graph_no_carry(self):

@@ -96,6 +96,7 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
             fw_init = [pytree.tree_map(_from_fun, x) for x in init]
             fw_xs = [pytree.tree_map(_from_fun, x).select(dim, 0) for x in xs]
             fw_additional_inputs = [pytree.tree_map(_from_fun, a) for a in additional_inputs]
+            bw_additional_inputs = [pytree.tree_map(_from_fun, a) for a in additional_inputs]
 
             # TODO: do less re-computation with min-cut partitioner. 
             def wrapper_fwd_combine_fn(*args):
@@ -144,9 +145,8 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                 g_xs = g_xs[:len(g_xs) - num_additional_inputs]
                 return [*new_g_additional_inputs, *g_c, *g_xs]
 
-        # return fw_graph, joint_graph
         new_joint_graph = _maybe_reenter_make_fx(wrapper_bwd_combine_fn)(
-                *fw_additional_inputs, *fw_carry, *fw_outputs[num_init:], *fw_init, *fw_xs, *fw_additional_inputs)
+                *bw_additional_inputs, *fw_carry, *fw_outputs[num_init:], *fw_init, *fw_xs, *fw_additional_inputs)
         return fw_graph, new_joint_graph
 
 
@@ -573,8 +573,6 @@ class ScanAutogradOp(torch.autograd.Function):
         with torch._C._AutoDispatchBelowAutograd():
             # The flat gradients are a list of g_c_T, g_ys and optionally the gradients for the additional_inputs
             g_c_T, g_ys, _ = ScanAutogradOp.extract_init_xs_additional_inputs(list(flat_grads), num_leaves_init, num_leaves_ys)
-            # import pdb
-            # pdb.set_trace()
             g_additional_inputs = [torch.zeros_like(ai) for ai in additional_inputs]
             
             # Prepare the inputs for the backward scan.
@@ -585,22 +583,11 @@ class ScanAutogradOp(torch.autograd.Function):
             )
             xs_bwd = [*g_ys, *carries, *xs]
 
-            # g_init, g_xs = _extract_carry_and_out(
-            #     scan_op(
-            #         joint_graph, g_c_T, xs_bwd, bwd_scan_dim, True, additional_inputs
-            #     ),
-            #     num_leaves_init,
-            # )
-            # pdb.set_trace()
             g_outs = scan_op(joint_graph, [*g_additional_inputs, *g_c_T], xs_bwd, bwd_scan_dim, True, additional_inputs)
-            # pdb.set_trace()
-            
-            # g_xs may contain the gradients for the additional inputs as well which need to be separated
             new_g_additional_inputs = g_outs[:num_leaves_additional_inputs]
             g_init = g_outs[num_leaves_additional_inputs:num_leaves_additional_inputs+num_leaves_init]
             g_xs = g_outs[-num_leaves_xs:]
             g_xs = prepare_final_gradients_xs(g_xs, dim, reverse)
-            # pdb.set_trace()
 
         return *[None] * 6, *g_init, *g_xs, *new_g_additional_inputs
 
