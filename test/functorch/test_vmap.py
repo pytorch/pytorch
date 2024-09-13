@@ -4427,10 +4427,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("histogram"),
-                xfail("scatter_reduce", "sum"),
-                xfail("scatter_reduce", "mean"),
-                xfail("scatter_reduce", "amax"),
-                xfail("scatter_reduce", "amin"),
                 # `index_put` OpInfo in pytorch/pytorch has
                 # masked index as input which is not supported
                 xfail("index_put", ""),
@@ -4446,6 +4442,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("resize_as_"),
                 xfail("take"),
                 xfail("tensor_split"),
+                xfail("transpose_copy"),
                 xfail("to_sparse"),
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
@@ -4501,20 +4498,15 @@ class TestVmapOperatorsOpInfo(TestCase):
                 ),  # Batching rule not implemented for aten::narrow.Tensor
                 xfail("nn.functional.triplet_margin_loss", ""),
                 xfail("nn.functional.pdist", ""),
-                xfail("scatter_reduce", "sum"),
-                xfail("scatter_reduce", "amax"),
                 xfail("nn.functional.max_unpool1d", "grad"),
                 xfail("nn.functional.multi_margin_loss", ""),
-                xfail("scatter_reduce", "prod"),
                 xfail("nn.functional.multilabel_margin_loss", ""),
-                xfail("scatter_reduce", "amin"),
                 xfail("nn.functional.max_unpool3d", "grad"),
                 xfail("nn.functional.max_unpool2d", ""),
                 xfail("nn.functional.max_unpool2d", "grad"),
                 xfail("nn.functional.margin_ranking_loss", ""),
                 xfail("nn.functional.max_unpool1d", ""),
                 xfail("nn.functional.soft_margin_loss", ""),
-                xfail("scatter_reduce", "mean"),
                 xfail("nn.functional.max_unpool3d", ""),
                 xfail("linalg.ldl_solve", "", device_type="cpu"),
                 xfail("chalf", ""),

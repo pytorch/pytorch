@@ -74,7 +74,7 @@ custom_op_default_layout_constraint = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
-triton_kernel_default_layout_constraint = "flexible_layout"
+triton_kernel_default_layout_constraint = "needs_fixed_stride_order"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -198,14 +198,7 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
-    "batch_linear": {},
-    "batch_linear_lhs": {},
-    "batch_layernorm": {},
-    "batch_tanh": {},
-    "batch_relu": {},
-    "batch_sigmoid": {},
-}
+pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
@@ -330,8 +323,8 @@ autotune_fallback_to_aten = (
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
 
-# DEPRECATED, DO NOT USE
-search_autotune_cache = False
+# enable searching global and local cache regardless of `max_autotune`
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
