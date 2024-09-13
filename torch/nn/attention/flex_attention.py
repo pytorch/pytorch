@@ -961,7 +961,7 @@ class PagedCache:
                 .to(torch.int32)
             )
 
-        new_mask_mod = self.get_mask_mod(block_mask.mask_mod, MAX_BLOCKS_IN_COL)
+        new_mask_mod = self.get_mask_mod(block_mask.mask_mod)
 
         return BlockMask.from_kv_blocks(
             new_kv_num_blocks,
@@ -972,9 +972,7 @@ class PagedCache:
             new_mask_mod,
         )
 
-    def get_mask_mod(
-        self, mask_mod: _mask_mod_signature, max_logical_block_idx: int
-    ) -> _mask_mod_signature:
+    def get_mask_mod(self, mask_mod: _mask_mod_signature) -> _mask_mod_signature:
         def new_mask_mod(b, h, q_idx, physical_kv_idx):
             physical_kv_block = physical_kv_idx // self.page_size
             physical_kv_offset = physical_kv_idx % self.page_size
@@ -986,9 +984,7 @@ class PagedCache:
 
         return new_mask_mod
 
-    def get_score_mod(
-        self, score_mod: _score_mod_signature, max_logical_block_idx: int
-    ) -> _score_mod_signature:
+    def get_score_mod(self, score_mod: _score_mod_signature) -> _score_mod_signature:
         def new_score_mod(score, b, h, q_idx, physical_kv_idx):
             physical_kv_block = physical_kv_idx // self.page_size
             physical_kv_offset = physical_kv_idx % self.page_size

@@ -2531,6 +2531,47 @@ class TestPagedCache(InductorTestCase):
         # TODO: check q_indices
 
     @supported_platform
+    def test_convert_mask_mod(self):
+        n_pages, page_size, max_batch_size, max_seq_len = 9, 128, 2, 512
+        paged_cache = PagedCache(n_pages, page_size, max_batch_size, max_seq_len)
+
+        paged_cache.allocate_until_length(torch.tensor([100, 200], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([150, 300], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([300, 512], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([512, 512], device="cuda"))
+
+        expected_page_table = torch.tensor(
+            [[0, 3, 5, 7], [2, 1, 4, 6]],
+            device="cuda",
+        )
+        self.assertEqual(
+            paged_cache.allocated_seq_len,
+            torch.tensor([512, 512], device="cuda"),
+        )
+        self.assertEqual(paged_cache.page_table, expected_page_table)
+
+        expected_physical_to_logical = torch.tensor(
+            [[0, -1, -1, 1, -1, 2, -1, 3, -1], [-1, 1, 0, -1, 3, -1, 4, -1, -1]],
+            device="cuda",
+        )
+        self.assertEqual(paged_cache.physical_to_logical, expected_physical_to_logical)
+
+        # Get a block mask
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        converted_causal_mask = paged_cache.get_mask_mod(causal_mask)
+
+        # Equivalent to: causal_mask(0, 0, 256, 128)
+        self.assertEqual(converted_causal_mask(0, 0, 256, 384), True)
+        # Equivalent to: causal_mask(0, 1, 256, 128)
+        self.assertEqual(converted_causal_mask(0, 1, 256, 384), True)
+        # Not found corresponding logical block
+        self.assertEqual(converted_causal_mask(1, 0, 256, 384), False)
+        # Equivalent to: causal_mask(1, 0, 64, 14)
+        self.assertEqual(converted_causal_mask(1, 0, 64, 270), True)
+
+    @supported_platform
     def test_update(self):
         dtype = torch.float32
 
@@ -2628,8 +2669,8 @@ class TestPagedCache(InductorTestCase):
         block_mask = create_block_mask(
             causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
         )
-        compiled_flex_attention = flex_attention
-        # compiled_flex_attention = torch.compile(flex_attention)
+        # compiled_flex_attention = flex_attention
+        compiled_flex_attention = torch.compile(flex_attention)
 
         """
         page_table = tensor([
@@ -2640,7 +2681,7 @@ class TestPagedCache(InductorTestCase):
         """
 
         # Get q, k, v. Compute expected out, q_grad, k_grad, v_grad
-        q = torch.randn(
+        q = torch.ones(
             max_batch_size,
             n_heads,
             max_seq_len,
@@ -2649,7 +2690,7 @@ class TestPagedCache(InductorTestCase):
             dtype=torch.float16,
             requires_grad=True,
         )
-        k = torch.randn(
+        k = torch.ones(
             max_batch_size,
             n_heads,
             max_seq_len,
@@ -2658,7 +2699,7 @@ class TestPagedCache(InductorTestCase):
             dtype=torch.float16,
             requires_grad=True,
         )
-        v = torch.randn(
+        v = torch.ones(
             max_batch_size,
             n_heads,
             max_seq_len,
@@ -2863,6 +2904,7 @@ class TestPagedCache(InductorTestCase):
         paged_out = compiled_flex_attention(
             q_ref, k_cache, v_cache, block_mask=new_block_mask
         )
+        breakpoint()
         self.assertEqual(out, paged_out)
 
     """
