@@ -760,6 +760,7 @@ def is_triton_cpu_backend(device):
 
 def skip_if_triton_cpu(fn):
     import types
+
     reason = "Triton CPU not supported"
 
     def decorator(fn):
@@ -768,6 +769,7 @@ def skip_if_triton_cpu(fn):
             if is_triton_cpu_backend(self.device):
                 raise unittest.SkipTest(reason)
             return fn(self)
+
         return wrapper
 
     if isinstance(fn, types.FunctionType):
