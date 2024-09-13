@@ -326,7 +326,7 @@ case "$image" in
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
-    TRITON=yes
+    TRITON_CPU=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
