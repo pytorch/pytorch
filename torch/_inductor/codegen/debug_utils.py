@@ -82,7 +82,7 @@ class DebugPrinterManager:
     ) -> None:
         for i, arg in enumerate(args_to_print):
             if arg_signatures is not None and not isinstance(
-                arg_signatures[i], TensorArg
+                arg_signatures[i], torch_dtype
             ):
                 continue
             if (
