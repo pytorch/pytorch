@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
 import dataclasses
@@ -66,6 +65,9 @@ def capture_pre_autograd_graph_warning():
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
     log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
+    log.warning("Please switch to use torch.export.export_for_training instead.")
+    if config.is_fbcode():
+        log.warning("For unittest, capture_pre_autograd_graph() will fallback to torch.export.export_for_training.")  # noqa: B950
 
 
 @compatibility(is_backward_compatible=False)
@@ -107,7 +109,7 @@ def capture_pre_autograd_graph(
 
     """
     from torch.export._trace import _extract_fake_inputs, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
-    from torch._utils_internal import export_api_rollout_check
+    from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
     from torch._export.non_strict_utils import make_constraints
     from torch._subclasses.functional_tensor import FunctionalTensor
     from torch.export._unlift import _create_stateful_graph_module
@@ -123,12 +125,12 @@ def capture_pre_autograd_graph(
     if kwargs is None:
         kwargs = {}
 
-    if export_api_rollout_check():
+    if capture_pre_autograd_graph_using_training_ir():
         @lru_cache
         def print_export_warning():
-            log.warning("Using torch.export._trace._export")
+            log.warning("Using torch.export.export_for_training(...,strict=True)")
         print_export_warning()
-        module = torch.export._trace._export(f, args, kwargs, dynamic_shapes=dynamic_shapes, pre_dispatch=True).module()
+        module = torch.export.export_for_training(f, args, kwargs, dynamic_shapes=dynamic_shapes, strict=True).module()
     else:
         log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
 
@@ -182,20 +184,20 @@ def capture_pre_autograd_graph(
                 range_constraints=range_constraints,
             )
 
-        error_message = \
-            """
-            Calling train() or eval() is not supported for exported models.
-            Alternatively, you may override these methods to do custom user behavior as follows:
+    error_message = \
+        """
+        Calling train() or eval() is not supported for exported models.
+        Alternatively, you may override these methods to do custom user behavior as follows:
 
-                def _my_train(self, mode: bool = True):
-                    ...
+            def _my_train(self, mode: bool = True):
+                ...
 
-                def _my_eval(self):
-                    ...
+            def _my_eval(self):
+                ...
 
-                model.train = types.MethodType(_my_train, model)
-                model.eval = types.MethodType(_my_eval, model)
-            """
+            model.train = types.MethodType(_my_train, model)
+            model.eval = types.MethodType(_my_eval, model)
+        """
 
     def _train(self, mode: bool = True):
         raise NotImplementedError(error_message)

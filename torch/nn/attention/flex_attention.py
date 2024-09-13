@@ -21,7 +21,7 @@ from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
-from torch.nn.attention._utils import _validate_sdpa_input
+from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
@@ -51,7 +51,6 @@ class _ModificationType(Enum):
     UNKNOWN = 3
 
 
-@torch._dynamo.assume_constant_result
 def _get_mod_type(fn: Callable) -> _ModificationType:
     """Get the type of modification function.
     This function inspects the number of positional arguments of the function to determine
@@ -141,6 +140,7 @@ def noop_mask(
 
 
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
+_LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
 def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
@@ -391,12 +391,59 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
-        mapped_attributes = tree_map_only(
-            torch.Tensor,
-            lambda x: x[index],
-            self.as_tuple(flatten=False),
+        """
+        Returns a new BlockMask instance by getting the mask for the given index position.
+
+        Args:
+            index: Index to apply to all attributes.
+
+        Example Usage:
+            .. code-block:: python
+
+                def causal_mask(b, h, q_idx, kv_idx):
+                    return q_idx >= kv_idx
+
+                block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device="cuda")
+                assert block_mask.kv_num_blocks.shape == (4,2,4)
+                assert block_mask.kv_indices.shape == (4,2,4,4)
+
+                # Index on batch dimension
+                new_block_mask = block_mask[0]
+                assert new_block_mask.kv_num_blocks.shape == (2,4)
+                assert new_block_mask.kv_indices.shape == (2,4,4)
+
+                # Index on batch and head dimension
+                new_block_mask = block_mask[0, 1]
+                assert new_block_mask.kv_num_blocks.shape == (4,)
+                assert new_block_mask.kv_indices.shape == (4,4)
+
+                # slicing on batch and head dimension
+                new_block_mask = block_mask[0:2, 1:2]
+                assert new_block_mask.kv_num_blocks.shape == (2,1,4)
+                assert new_block_mask.kv_indices.shape == (2,1,4,4)
+
+                # slicing on batch, head, and query dimension
+                new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
+                assert new_block_mask.kv_num_blocks.shape == (2,1,1)
+                assert new_block_mask.kv_indices.shape == (2,1,1,4)
+        """
+        new_kv_num_blocks = self.kv_num_blocks[index]
+        new_kv_indices = self.kv_indices[index]
+        if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
+            new_full_kv_num_blocks = self.full_kv_num_blocks[index]
+            new_full_kv_indices = self.full_kv_indices[index]
+        else:
+            new_full_kv_num_blocks = None
+            new_full_kv_indices = None
+        return BlockMask.from_kv_blocks(
+            new_kv_num_blocks,
+            new_kv_indices,
+            new_full_kv_num_blocks,
+            new_full_kv_indices,
+            BLOCK_SIZE=self.BLOCK_SIZE,
+            mask_mod=None,
         )
-        return BlockMask(*mapped_attributes)
 
     def __repr__(self):
         def shape_or_none(x: Optional[torch.Tensor]):
@@ -816,37 +863,54 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     of the query and key tensors.
     """
     device = query.device
-    kv_len = _round_up_to_multiple(key.size()[-2], 128)
-    q_len = _round_up_to_multiple(query.size()[-2], 128)
     return BlockMask.from_kv_blocks(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
-        BLOCK_SIZE=(kv_len, q_len),
+        BLOCK_SIZE=_LARGE_SPARSE_BLOCK_SIZE,
     )
 
 
-def _apply_kernel_options(query, key, value, kernel_options):
+def _apply_kernel_options(
+    query: Tensor, key: Tensor, value: Tensor, return_lse: bool, kernel_options
+):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
-    if "ROWS_GUARANTEED_SAFE" not in kernel_options:
-        kernel_options["ROWS_GUARANTEED_SAFE"] = False
-    if "PRESCALE_QK" not in kernel_options:
-        kernel_options["PRESCALE_QK"] = False
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("PRESCALE_QK", False)
 
     # If foward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
-    any_inputs_require_grad = (
-        query.requires_grad or key.requires_grad or value.requires_grad
-    )
-    output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
-    kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
-
-    if query.size(-2) >= 128 and (query.size(-2) % 128 != 0 or key.size(-2) % 128 != 0):
-        kernel_options["IS_DIVISIBLE"] = False
-    else:
-        kernel_options["IS_DIVISIBLE"] = True
+    kernel_options["OUTPUT_LOGSUMEXP"] = True
+    if not return_lse:
+        any_inputs_require_grad = (
+            query.requires_grad or key.requires_grad or value.requires_grad
+        )
+        output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
+        kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
 
     return kernel_options
+
+
+def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
+    if query.size(-1) != key.size(-1):
+        raise ValueError(
+            f"Expect query and key/value to have the same embedding dimension "
+            f"but got E={query.size(-1)} and E={key.size(-1)}."
+        )
+    # TODO this config segfaults with Triton without:
+    # https://github.com/triton-lang/triton/pull/4540
+    if not (
+        _supported_head_dim(query.size(-1)) and _supported_head_dim(value.size(-1))
+    ):
+        raise ValueError(
+            f"NYI: Currently non power of 2 embedding dimension are not supported. "
+            f"Got E={query.size(-1)} and Ev={value.size(-1)}."
+        )
+    if value.size(-1) > query.size(-1):
+        raise ValueError(
+            f"NYI: Currently value embedding dimension must be less than or equal to query embedding dimension. "
+            f"Got Ev={value.size(-1)} and E={query.size(-1)}."
+        )
 
 
 def flex_attention(
@@ -914,6 +978,7 @@ def flex_attention(
     """
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
+    _validate_embed_dim(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
@@ -938,10 +1003,17 @@ def flex_attention(
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
 
+    if query.device != block_mask.kv_num_blocks.device:
+        raise RuntimeError(
+            f"Expect q/k/v and block_mask to be on the same device "
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."
+        )
+
     kernel_options = _apply_kernel_options(
         query,
         key,
         value,
+        return_lse,
         kernel_options,
     )
 

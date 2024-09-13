@@ -44,10 +44,48 @@ struct VecConvert<BFloat16, 1, float, 1> {
 };
 
 template <>
+struct VecConvert<BFloat16, 1, float, 2> {
+  static inline VectorizedN<BFloat16, 1> apply(
+      const VectorizedN<float, 2>& src) {
+    VectorizedN<BFloat16, 1> result;
+    result[0] = convert_float_bfloat16(src[0], src[1]);
+    return result;
+  }
+};
+
+template <>
+struct VecConvert<float, 2, BFloat16, 1> {
+  static inline VectorizedN<float, 2> apply(
+      const VectorizedN<BFloat16, 1>& src) {
+    VectorizedN<float, 2> result;
+    std::tie(result[0], result[1]) = convert_bfloat16_float(src[0]);
+    return result;
+  }
+};
+
+template <>
 struct VecConvert<Half, 1, float, 1> {
   static inline VectorizedN<Half, 1> apply(const VectorizedN<float, 1>& src) {
     VectorizedN<Half, 1> result;
     result[0] = _mm256_castsi128_si256(cvtfp32_fp16(src[0]));
+    return result;
+  }
+};
+
+template <>
+struct VecConvert<Half, 1, float, 2> {
+  static inline VectorizedN<Half, 1> apply(const VectorizedN<float, 2>& src) {
+    VectorizedN<Half, 1> result;
+    result[0] = convert_float_half(src[0], src[1]);
+    return result;
+  }
+};
+
+template <>
+struct VecConvert<float, 2, Half, 1> {
+  static inline VectorizedN<float, 2> apply(const VectorizedN<Half, 1>& src) {
+    VectorizedN<float, 2> result;
+    std::tie(result[0], result[1]) = convert_half_float(src[0]);
     return result;
   }
 };
@@ -219,6 +257,24 @@ struct VecConvert<
         void>> {
   static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
     return convert_int8_to_float<src_t>(src[0]);
+  }
+};
+#endif
+
+#if defined(CPU_CAPABILITY_NEON)
+template <>
+struct VecConvert<float, 1, BFloat16, 1> {
+  static inline VectorizedN<float, 1> apply(
+      const VectorizedN<BFloat16, 1>& src) {
+    VectorizedN<float, 1> result;
+    uint16x8_t u16_8 = vld1q_u16(reinterpret_cast<const uint16_t*>(&src[0]));
+    int32x4_t shift = vdupq_n_s32(16);
+    auto u16_low1 = vget_low_u16(u16_8);
+    auto u16_high1 = vget_high_u16(u16_8);
+    float32x4_t f32x4_0 = vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16_low1), shift));
+    float32x4_t f32x4_1 = vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16_high1), shift));
+    result[0] = {f32x4_0, f32x4_1};
+    return result;
   }
 };
 #endif

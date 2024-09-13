@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
-from typing import Any, Callable, Dict, Tuple, Union
+from typing import Any, Callable, Dict, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -21,6 +21,53 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.graph_module import GraphModule
 from torch.overrides import TorchFunctionMode
+
+
+# Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
+def _construct_strides(
+    sizes: Sequence[int],
+    fill_order: Sequence[int],
+) -> Sequence[int]:
+    """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
+    # Initialize strides
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
+    strides = [0] * len(sizes)
+
+    # Start with stride 1 for the innermost dimension
+    current_stride = 1
+
+    # Iterate through the fill order populating strides
+    for dim in fill_order:
+        strides[dim] = current_stride
+        current_stride *= sizes[dim]
+
+    return strides
+
+
+def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch.Tensor:
+    """
+    Create a new tensor with the same data and shape as the input,
+    but with strides permuted based on the input tensor's stride order.
+
+    Args:
+        out (torch.Tensor): The output tensor of attention.
+        query_strides (List[int]): The stride order of the input query tensor
+
+    Returns:
+        torch.Tensor: A new tensor with same shape and data as the input,
+        but with strides permuted based on the query tensor's stride order.
+    """
+    from torch._inductor.ir import get_stride_order, stride_order2fill_order
+
+    stride_order = get_stride_order(query_strides)
+    fill_order = stride_order2fill_order(stride_order)
+    assert out.storage_offset() == 0, "Only support storage_offset == 0"
+    out_strides = _construct_strides(out.shape, fill_order)
+    new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
+    new_out.copy_(out)
+    return new_out
 
 
 class TransformGetItemToIndex(TorchFunctionMode):
@@ -192,6 +239,13 @@ def math_attention(
     value = torch.repeat_interleave(value, G, dim=1)
     key = torch.repeat_interleave(key, G, dim=1)
 
+    Bq, Bkv = query.size(0), key.size(0)
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
+
+    key = key.expand((Bq, *key.size()[1:]))
+    value = value.expand((Bq, *value.size()[1:]))
+
     _, post_mod_scores = _math_attention_inner(
         query,
         key,
@@ -204,11 +258,12 @@ def math_attention(
         mask_mod_other_buffers,
     )
 
-    # TODO Unconditionally return logsumexp for backwards
-    # if any(t.requires_grad for t in (query, key, value)):
+    # Set fully masked rows' sumexp to 0.0
     logsumexp = post_mod_scores.logsumexp(dim=-1)
+    masked_rows = torch.all(post_mod_scores == -float("inf"), dim=-1)
+    logsumexp = torch.where(masked_rows, -float("inf"), logsumexp)
 
-    post_mod_scores = post_mod_scores.softmax(dim=-1)
+    post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
 
     return post_mod_scores.to(query.dtype) @ value, logsumexp / math.log(2)
 
@@ -236,7 +291,7 @@ def sdpa_dense(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
-    out = out.contiguous()
+    out = _permute_strides(out, query.stride())
     return out, lse
 
 
@@ -418,11 +473,15 @@ def flex_attention_fake_tensor_mode(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     with mode:
-        batch_size, num_heads, seq_len_q, head_dim = query.shape
+        v_head_dim = value.size(-1)
+        batch_size, num_heads, seq_len_q, q_head_dim = query.shape
         logsumexp = query.new_empty(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
-        return torch.empty_like(query), logsumexp
+        out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
+        out = query.new_empty(out_shape)
+        out = _permute_strides(out, query.stride())
+        return out, logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------
@@ -683,6 +742,18 @@ def sdpa_dense_backward(
     score_mod_other_buffers: Tuple,
     mask_mod_other_buffers: Tuple,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Get outputs before calling repeat interleave
+    actual_grad_query = torch.empty_like(query)
+    actual_grad_key = torch.empty_like(key)
+    actual_grad_value = torch.empty_like(value)
+
+    Bq, Bkv = query.size(0), key.size(0)
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
+
+    key = key.expand((Bq, *key.size()[1:]))
+    value = value.expand((Bq, *value.size()[1:]))
+
     G = query.size(1) // key.size(1)
     key = torch.repeat_interleave(key, G, dim=1)
     value = torch.repeat_interleave(value, G, dim=1)
@@ -702,7 +773,9 @@ def sdpa_dense_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    masked_out_rows = logsumexp == -float("inf")
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
+    softmax_scores = torch.where(masked_out_rows.unsqueeze(-1), 0, softmax_scores)
 
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 
@@ -762,7 +835,20 @@ def sdpa_dense_backward(
     grad_key = torch.sum(grad_key, 2, keepdim=False)
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
-    return grad_query.contiguous(), grad_key.contiguous(), grad_value.contiguous()
+    if Bq != Bkv:
+        assert (
+            Bq > 1 and Bkv == 1
+        ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
+
+        # Reduce DK, DV along broadcasted batches.
+        grad_key = torch.sum(grad_key, 0, keepdim=True)
+        grad_value = torch.sum(grad_value, 0, keepdim=True)
+
+    actual_grad_query.copy_(grad_query)
+    actual_grad_key.copy_(grad_key)
+    actual_grad_value.copy_(grad_value)
+
+    return actual_grad_query, actual_grad_key, actual_grad_value
 
 
 def trace_flex_attention_backward(
@@ -816,7 +902,7 @@ def trace_flex_attention_backward(
         )
     assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     block_mask = block_mask[:-1] + (mask_graph,)
-    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
+    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)  # type: ignore[arg-type]
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     proxy_mode.tracer.root.register_module("mask_graph", mask_graph)
     node_args = (

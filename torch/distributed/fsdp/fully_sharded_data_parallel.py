@@ -25,7 +25,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
@@ -84,6 +83,7 @@ from torch.distributed.fsdp.api import (
     StateDictSettings,
     StateDictType,
 )
+from torch.distributed.tensor import DeviceMesh
 from torch.distributed.utils import _p_assert
 
 from ._flat_param import FlatParameter, FlatParamHandle
@@ -522,6 +522,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
         _register_all_state_dict_hooks(self)
+        self._zero_scalar = None
 
     @property
     def module(self) -> nn.Module:
@@ -1113,6 +1114,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             raise RuntimeError(
                 "`clip_grad_norm_()` should only be called on the root FSDP instance"
             )
+        if self._zero_scalar is None:
+            self._zero_scalar = torch.tensor(0.0, device=self.compute_device)
         self._assert_state(TrainingState.IDLE)
         # If every FSDP instance uses `NO_SHARD`, then we can directly use
         # the normal `nn.utils` one targeting local gradients
@@ -1127,36 +1130,50 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # where sharded and non-sharded parameters must be handled separately
         max_norm = float(max_norm)
         norm_type = float(norm_type)
-        sharded_params = set()
-        nonsharded_params = set()  # `NO_SHARD` or not FSDP-managed
+        sharded_params_set = set()
+        nonsharded_params_set = set()  # `NO_SHARD` or not FSDP-managed
+        # Make sure to compute the local norm using lists for deterministic
+        # iteration order and hence deterministic total norm computation
+        sharded_params = []
+        nonsharded_params = []
         grads: List[torch.Tensor] = []
         for handle in self._all_handles:
-            target_set = (
-                sharded_params if handle.uses_sharded_strategy else nonsharded_params
-            )
+            if handle.uses_sharded_strategy:
+                target_set = sharded_params_set
+                target_list = sharded_params
+            else:
+                target_set = nonsharded_params_set
+                target_list = nonsharded_params
             if handle._use_orig_params:
                 for param in handle.flat_param._params:
-                    target_set.add(param)
-                    if param.grad is not None:
-                        grads.append(param.grad)
+                    if param not in target_set:
+                        target_set.add(param)
+                        target_list.append(param)
+                        if param.grad is not None:
+                            grads.append(param.grad)
             else:
-                target_set.add(handle.flat_param)
-                if handle.flat_param.grad is not None:
-                    grads.append(handle.flat_param.grad)
+                if handle.flat_param not in target_set:
+                    target_set.add(handle.flat_param)
+                    target_list.append(handle.flat_param)
+                    if handle.flat_param.grad is not None:
+                        grads.append(handle.flat_param.grad)
         for param in self.parameters():
             not_fsdp_managed = (
-                param not in sharded_params and param not in nonsharded_params
+                param not in sharded_params_set and param not in nonsharded_params_set
             )
             if not_fsdp_managed:
-                nonsharded_params.add(param)
+                nonsharded_params_set.add(param)
+                nonsharded_params.append(param)
                 if param.grad is not None:
                     grads.append(param.grad)
         # Compute local norms (forced to be in FP32)
-        local_sharded_norm = _get_grad_norm(sharded_params, norm_type).to(
-            self.compute_device
+        local_sharded_norm = _get_grad_norm(
+            sharded_params, norm_type, self._zero_scalar, self.compute_device
         )
         local_nonsharded_norm = (
-            _get_grad_norm(nonsharded_params, norm_type).to(self.compute_device)
+            _get_grad_norm(
+                nonsharded_params, norm_type, self._zero_scalar, self.compute_device
+            )
             if nonsharded_params
             else None
         )
@@ -2039,7 +2056,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             def __init__(
                 self,
                 flat_param_handle: Optional[FlatParamHandle],
-                unshard_event: torch.cuda.Event,
+                unshard_event: torch.Event,
             ):
                 self._flat_param_handle = flat_param_handle
                 self._unshard_event = unshard_event
@@ -2094,6 +2111,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 def _get_grad_norm(
     params: Iterable[nn.Parameter],
     norm_type: float,
+    zero: torch.Tensor,
+    device: torch.device,
 ) -> torch.Tensor:
     """
     Return the gradient norm of parameters ``param`` s, where the gradients are viewed as a single vector.
@@ -2103,7 +2122,8 @@ def _get_grad_norm(
     """
     params_with_grad = [param for param in params if param.grad is not None]
     if len(params_with_grad) == 0:
-        return torch.tensor(0.0)
+        # Reuse a tensor for zero to avoid a GPU sync
+        return zero
     grads = [param.grad for param in params_with_grad]
     grad_dtypes = {grad.dtype for grad in grads}
     if len(grad_dtypes) != 1:
@@ -2122,7 +2142,7 @@ def _get_grad_norm(
         norm_type,
         dtype=torch.float32,
     )
-    return grad_norm
+    return grad_norm.to(device=device)
 
 
 def _get_param_to_fqn(

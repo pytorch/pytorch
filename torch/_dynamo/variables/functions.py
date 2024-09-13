@@ -5,18 +5,20 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
+    check_unspec_or_constant_args,
     identity,
+    is_function,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -34,6 +36,9 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._guards import Source
+
+
+_F = TypeVar("_F", bound=Callable)
 
 
 def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
@@ -134,10 +139,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
     def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -150,6 +152,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert isinstance(
             fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
+        # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
+        # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
@@ -624,9 +628,6 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
-    def python_type(self):
-        return type(self.value)
-
     def as_python_constant(self):
         return self.value
 
@@ -637,10 +638,7 @@ class SkipFunctionVariable(VariableTracker):
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
             install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -764,7 +762,9 @@ class WrapperUserFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        return variables.UserFunctionVariable(polyfill.getattr_and_trace).call_function(
+        return variables.UserFunctionVariable(
+            polyfills.getattr_and_trace
+        ).call_function(
             tx, [self, variables.ConstantVariable(self.attr_to_trace), *args], kwargs
         )
 
@@ -925,6 +925,105 @@ class FunctoolsPartialVariable(VariableTracker):
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
+
+
+class PolyfilledFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "fn",
+        "wrapped_fn",
+        "traceable_fn",
+        *VariableTracker._nonvar_fields,
+    }
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _get_polyfill_handlers(cls) -> Dict[Callable[..., Any], types.FunctionType]:
+        return {}
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+
+        return cls(value, source=source)
+
+    def __init__(self, fn: _F, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fn: _F = fn
+
+        handler = self._get_polyfill_handlers().get(fn, fn)
+        assert callable(handler), f"Polyfill handler {handler} is not callable for {fn}"
+        for candidate_attr in (
+            "__torch_dynamo_polyfill__",  # registered polyfill
+            "__python_implementation__",  # self handler from third-party libraries
+        ):
+            candidate = getattr(handler, candidate_attr, None)
+            if candidate:
+                assert callable(candidate)
+                traceable_fn = candidate
+                break
+        else:
+            raise RuntimeError(
+                f"Polyfill handler {handler} does not have a traceable function"
+            )
+
+        self.wrapped_fn: _F = handler
+        self.traceable_fn: _F = traceable_fn
+
+    @property
+    def polyfill_fn(self) -> _F:
+        return self.traceable_fn
+
+    def can_constant_fold_through(self):
+        return getattr(
+            self.wrapped_fn, "__torch_dynamo_can_constant_fold_through__", False
+        )
+
+    def get_function(self):
+        return self.as_python_constant()
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._dynamo.variables.builder import SourcelessBuilder
+
+        if self.can_constant_fold_through() and check_unspec_or_constant_args(
+            args, kwargs
+        ):
+            result = (
+                self.fn(  # use the original function which is faster than the polyfill
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            )
+            return SourcelessBuilder.create(tx, result)
+
+        traceable_function_variable = SourcelessBuilder.create(tx, self.traceable_fn)
+        return traceable_function_variable.call_function(tx, args, kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__call__":
+            return self.call_function(tx, args, kwargs)
+
+        method = getattr(self.fn, name, None)
+        assert method is not None, f"Member {name} not found in {self.fn}"
+        assert is_function(method), f"Member {name} is not callable in {self.fn}"
+        options = {}
+        if self.source:
+            options["source"] = AttrSource(self.source, name)
+        polyfilled_method_variable = PolyfilledFunctionVariable(method, **options)
+        return polyfilled_method_variable.call_function(tx, args, kwargs)
+
+    def as_python_constant(self):
+        return self.fn
 
 
 from torch._higher_order_ops.triton_kernel_wrap import TritonHOPifier

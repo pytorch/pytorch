@@ -22,6 +22,7 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..codegen.common import BackendFeature, has_backend_feature
+from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -42,7 +43,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
-from ..utils import decode_device, is_pointwise_use
+from ..utils import decode_device, get_gpu_type, is_pointwise_use
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
@@ -76,6 +77,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     The IR here has been normalized and functionalized.
     """
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
+
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
@@ -132,7 +136,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     stable_topological_sort(gm.graph)
 
-    move_constructors_to_cuda(gm.graph)
+    move_constructors_to_gpu(gm.graph)
 
     fake_tensor_updater.incremental_update()
 
@@ -668,7 +672,11 @@ def register_noop_decomp(targets, nop_arg=0):
 def slice_noop(self, dim=0, start=None, end=None, step=1):
     if start is None or end is None:
         return False
-    if start == 0 and end >= 2**63 - 1 and step == 1:
+    if (
+        statically_known_true(sym_eq(start, 0))
+        and statically_known_true(end >= 2**63 - 1)
+        and statically_known_true(sym_eq(step, 1))
+    ):
         return True
     return False
 
@@ -794,13 +802,20 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
 
 def decompose_auto_functionalized(graph):
+    """Decomposes auto_functionalized and triton_kernel_wrapper_functional
+    nodes into clones and the underlying mutation node.
+
+    We assume that the reinplacing pass runs before this; the reinplacing pass
+    tells us (via rewriting the arguments or .meta to those nodes) which
+    Tensors we should clone and which Tensors are safe to reinplace.
+    """
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
         pass_dict=graph_pass,
     )
-    def replacement(match: Match, *args, **kwargs):
+    def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
         only_clone_these_tensors = tuple(
@@ -816,13 +831,69 @@ def decompose_auto_functionalized(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
-        match.replace_by_example(decomp, flat_args, run_dce=False)
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional_dense,
+        )
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
+
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.auto_functionalize import (
+            auto_functionalized_v2_dense,
+        )
+
+        only_clone_these_bases = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return auto_functionalized_v2_dense(*args, only_clone_these_bases, **kwargs)
+
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
+
     for node in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
     ):
         raise AssertionError("auto_functionalized was not removed")
+
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        raise AssertionError("auto_functionalized_v2 was not removed")
+
+    for node in graph.find_nodes(
+        op="call_function",
+        target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+    ):
+        raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
 @register_lowering_pattern(
@@ -1018,7 +1089,7 @@ def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
     return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)
 
 
-def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
+def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     from torch.fx.operator_schemas import normalize_function
 
     if node.target not in [
@@ -1032,8 +1103,8 @@ def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
     # However, it will short-circuit this H2D sync and run mask_fill_
     # if the value we are putting is a cpu scalar.
     # Therefore, when inductor sees an index_put_ with byte tensor indices,
-    # it should *not* convert the cpu scalar value into a cuda tensor.
-    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)
+    # it should *not* convert the cpu scalar value into a gpu tensor.
+    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)  # type: ignore[misc]
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:
@@ -1043,7 +1114,7 @@ def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
     val = args_[2].meta["val"]
     val_is_cpu_scalar = val.device.type == "cpu" and val.numel() == 1
     # If both these conditions hold, then converting the val
-    # to a cuda tensor will incur a H2D sync when inductor calls aten.index_put_
+    # to a gpu tensor will incur a H2D sync when inductor calls aten.index_put_
     return any_byte_bool_indices and val_is_cpu_scalar
 
 
@@ -1100,7 +1171,7 @@ class ConstructorMoverPass:
             and node.target.namespace in ("prims", "aten")
         ):
             return True
-        if is_index_put_and_requires_h2d_sync_for_cuda_value(node):
+        if is_index_put_and_requires_h2d_sync_for_gpu_value(node):
             return True
 
         return False
@@ -1176,14 +1247,14 @@ class ConstructorMoverPass:
         """
         cpu_indeg: Dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
 
-        # which constructors cannot be moved to cuda
-        cannot_move_to_cuda: Set[fx.Node] = set()
+        # which constructors cannot be moved to gpu
+        cannot_move_to_gpu: Set[fx.Node] = set()
 
         # For any node in the graph, which constructors does it have a dependency on
         constructor_dependencies: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
 
         # if a cpu node has a dependency on two different cpu constructors,
-        # then if either constructor cannot be moved to cuda, the other cannot as well.
+        # then if either constructor cannot be moved to gpu, the other cannot as well.
         # In this case any node with a dependency on one will have a dependency on the other
         equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {
             c: {c} for c in constructors
@@ -1209,11 +1280,11 @@ class ConstructorMoverPass:
 
             for user in node.users:
                 if self.cannot_be_moved(user):
-                    cannot_move_to_cuda.update(dependencies)
+                    cannot_move_to_gpu.update(dependencies)
                     break
 
-                # this node was used on a op which takes in multiple devices and output a cuda
-                # tensor. we can convert its cpu input to cuda without making further changes
+                # this node was used on a op which takes in multiple devices and output a gpu
+                # tensor. we can convert its cpu input to gpu without making further changes
                 node_device = self.get_node_device(user)
                 if (
                     self.allow_cpu_device(user)
@@ -1235,17 +1306,17 @@ class ConstructorMoverPass:
 
         for node in cpu_indeg:
             if constructor_dependencies[node]:
-                cannot_move_to_cuda.update(constructor_dependencies[node])
+                cannot_move_to_gpu.update(constructor_dependencies[node])
 
-        all_cannot_move_to_cuda = cannot_move_to_cuda.copy()
-        for constructor in cannot_move_to_cuda:
-            all_cannot_move_to_cuda.update(equal_constructor_sets[constructor])
+        all_cannot_move_to_gpu = cannot_move_to_gpu.copy()
+        for constructor in cannot_move_to_gpu:
+            all_cannot_move_to_gpu.update(equal_constructor_sets[constructor])
 
-        return set(constructors) - all_cannot_move_to_cuda
+        return set(constructors) - all_cannot_move_to_gpu
 
 
-def move_constructors_to_cuda(graph: fx.Graph) -> None:
+def move_constructors_to_gpu(graph: fx.Graph) -> None:
     """
-    Moves intermediary tensors which are constructed on the cpu to cuda when safe
+    Moves intermediary tensors which are constructed on the cpu to gpu when safe
     """
-    ConstructorMoverPass("cuda")(graph)
+    ConstructorMoverPass(get_gpu_type())(graph)
