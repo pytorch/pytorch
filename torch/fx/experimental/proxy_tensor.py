@@ -596,6 +596,21 @@ def track_tensor_tree(
     constant: Optional[_NestedTensors],
     tracer: _ProxyTracer,
 ) -> T:
+    # NB: We call set_unbacked_bindings only on the *topmost* call to
+    # track_tensor_tree, not recursive calls.  This is because there must
+    # be only ONE unbacked_binding proxy call, and it should be the one
+    # where all of the unbacked SymInts actually first come into existence.
+    # If you call this again on the inner proxies for the tuple projections,
+    # you will have multiple unbacked_bindings for the same symbol, but
+    # they're not going to show up anywhere.
+    #
+    # I was briefly deceived into setting unbacked bindings recursively when
+    # working on https://github.com/pytorch/pytorch/pull/133585 because I
+    # observed that some extra unbacked bindings were needed to handle some
+    # higher order operator code.  But actually it looks like this was
+    # just an unrelated bug that needed to be fixed separately.
+    _set_unbacked_bindings(inner_res, proxy_res)
+
     def wrap_with_proxy(
         e: object, proxy: _NestedProxys, constant: Optional[_NestedTensors]
     ) -> None:
@@ -604,13 +619,11 @@ def track_tensor_tree(
             assert constant is None or isinstance(constant, Tensor)
             track_tensor(e, proxy, tracer=tracer, constant=constant)
             set_meta(proxy, e)
-            _set_unbacked_bindings(e, proxy)
         elif isinstance(e, py_sym_types):
             assert isinstance(proxy, Proxy)
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, thunkify(tracer, lambda: proxy))
-            _set_unbacked_bindings(e, proxy)
         elif isinstance(e, _AnyScriptObject):
             assert isinstance(proxy, Proxy)
             set_proxy_slot(e, tracer, proxy)
@@ -2187,8 +2200,6 @@ def get_isolated_graphmodule(
 def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     """A helper function for setting up unbacked_bindings on the destination FX graph."""
     from .symbolic_shapes import compute_unbacked_bindings
-
-    log.debug("_set_unbacked_bindings %s", out_proxy)
 
     # Can't use detect_fake_mode here,
     #
