@@ -22,6 +22,13 @@ function do_cpython_build {
     check_var $py_ver
     check_var $py_folder
     tar -xzf Python-$py_ver.tgz
+
+    local additional_flags=""
+    if [ "$py_ver" == "3.13.0t" ]; then
+        additional_flags=" --disable-gil"
+        mv mv cpython-3.13/ cpython-3.13t/
+    fi
+
     pushd $py_folder
 
     local prefix="/opt/_internal/cpython-${py_ver}"
@@ -37,10 +44,7 @@ function do_cpython_build {
         local openssl_flags="--with-openssl=${WITH_OPENSSL} --with-openssl-rpath=auto"
     fi
 
-    local additional_flags=""
-    if [ "$py_ver" == "3.13.0t" ]; then
-        additional_flags=" --disable-gil"
-    fi
+
 
     # -Wformat added for https://bugs.python.org/issue17547 on Python 2.6
     CFLAGS="-Wformat" ./configure --prefix=${prefix} ${openssl_flags} ${shared_flags} ${additional_flags} > /dev/null
