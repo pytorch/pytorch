@@ -248,11 +248,14 @@ def _override_decomp_aten_to_variants():
 def _split_decomp_table_to_cia_and_python_decomp(
     decomp_table: Dict[torch._ops.OperatorBase, Callable]
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
-    from torch._decomp import _collect_all_valid_cia_ops
+    from torch._decomp import (
+        _collect_all_valid_cia_ops,
+        _get_decomp_for_cia,
+        decomposition_table as whole_python_decomp_table,
+    )
 
-    all_preservable_cia_ops = _collect_all_valid_cia_ops()
+    all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
     cia_ops_to_callable = {}
-    handled_cia_ops = set()
 
     for op in list(decomp_table.keys()):
         # TODO we are silently allowing non-safe(non-functional) ops through a crack
@@ -273,15 +276,20 @@ def _split_decomp_table_to_cia_and_python_decomp(
         # In both cases, we want to remove this CIA op from the decomp_table as it is special
         # handled.
         if op in all_preservable_cia_ops:
-            cia_ops_to_callable[op] = decomp_table[op]
-            handled_cia_ops.add(op)
+            # TODO this is annpying case where aten.item has
+            # prim decomposition which later calls into aten.item
+            # and recurses infinitely. (https://github.com/pytorch/pytorch/issues/136050)
+            if op in whole_python_decomp_table:
+                cia_ops_to_callable[op] = _get_decomp_for_cia(op)
+            else:
+                cia_ops_to_callable[op] = decomp_table[op]
+            all_preservable_cia_ops.remove(op)
             del decomp_table[op]
 
     # If we reached here, it means user intentionally deleted these CIA ops from
     # decomp table.
     for k in all_preservable_cia_ops:
-        if k not in handled_cia_ops:
-            cia_ops_to_callable[k] = _special_op_to_preserve_cia
+        cia_ops_to_callable[k] = _special_op_to_preserve_cia
 
     return cia_ops_to_callable, decomp_table
 
