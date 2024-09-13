@@ -100,7 +100,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -188,6 +188,7 @@ if RUN_CUDA:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_unspec_inputs"),
+        BaseTest("test_consecutive_split_cumprod"),
         BaseTest("test_pointwise_hermite_polynomial_he"),
         BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
