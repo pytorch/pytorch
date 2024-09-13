@@ -204,8 +204,8 @@ class TagActivationCheckpoint(HigherOrderOperator):
                     # 3. FSDP2 backward hook, as is the case for all eager backward hooks,
                     #    depends on `out_grad`  -> circular dependency with (1)!
                     #
-                    # Solution: detect that `out` has a backward hook, and then intentionally save `out`
-                    # in forward graph outputs, in order to break the above circular dependency.
+                    # Solution: detect that `out` has a backward hook, and if so, intentionally save `out`
+                    # in forward graph outputs. With this, we can break the above circular dependency.
                     node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
                 elif is_sac:
                     # For selective checkpointing, we will populate this tag later in _CachingTorchDispatchMode.
