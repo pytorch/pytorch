@@ -49,8 +49,8 @@ class Conv1d(nnq.Conv1d):
     """
 
     _FLOAT_MODULE: ClassVar = nn.Conv1d
-    _NNIQAT_CONV_BN_MODULE = None  # type: ignore[assignment]
-    _NNI_CONV_RELU_MODULE = None  # type: ignore[assignment]
+    _NNIQAT_CONV_BN_MODULE : ClassVar = None
+    _NNI_CONV_RELU_MODULE : ClassVar = None
 
     def __init__(
         self,
