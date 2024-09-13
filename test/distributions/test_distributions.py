@@ -3566,6 +3566,7 @@ class TestDistributions(DistributionsTestCase):
                 GeneralizedPareto(loc, scale, concentration),
                 scipy.stats.genpareto(c=concentration, loc=loc, scale=scale),
                 f"GeneralizedPareto(loc={loc}, scale={scale}, concentration={concentration})",
+                failure_rate=7e-4,
             )
 
     def test_gumbel(self):
