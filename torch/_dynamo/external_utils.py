@@ -54,6 +54,13 @@ def call_hook(hook, *args, **kwargs):
     return result
 
 
+def call_lambda(inputs: List[torch.tensor], idx: int, **kwargs):
+    grads = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
+    # gradient layout contract doesn't enforce output strides to match input strides
+    grads = [grad.contiguous() for grad in grads]
+    return grads
+
+
 def wrap_numpy(f):
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
     from ``torch.Tensor``s to ``torch.Tensor``s.

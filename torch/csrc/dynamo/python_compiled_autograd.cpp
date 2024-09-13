@@ -1,8 +1,10 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
+#include <torch/csrc/Size.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -349,12 +351,162 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+struct ClosingTHPObjectPtr : public THPObjectPtr {
+  ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
+  ~ClosingTHPObjectPtr() {
+    if (PyErr_Occurred()) {
+      // do nothing, do not attempt to close
+      return;
+    }
+    static PyObject* method_name = PyUnicode_InternFromString("close");
+    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
+      PyErr_WriteUnraisable(get());
+      PyErr_Clear();
+    }
+  }
+};
+
+// refactor and simplify this into some struct
+static std::vector<std::function<variable_list(variable_list)>> lambdas;
+static std::vector<at::IValue> lambda_idxs;
+static std::vector<std::vector<std::optional<VariableInfo>>>
+    lambda_output_infos;
+static size_t next_lambdas_idx = 0;
+static size_t offset_lambdas_idx = 0;
+static std::unordered_map<size_t, std::shared_ptr<Node>> lifted_nodes; // deferred free
+static std::unordered_map<std::shared_ptr<Node>, size_t> reverse_lifted_nodes; // deferred free
+
+static at::IValue* lambda_collect(
+    CompiledNodeArgs& args,
+    Node* fn,
+    std::function<variable_list(variable_list)>&& lambda,
+    const std::vector<bool>& is_variable_input,
+    const std::vector<VariableInfo>& output_info) {
+  lambdas.emplace_back(std::move(lambda));
+  std::vector<std::optional<VariableInfo>> output_info_for_vars;
+  for (auto i : c10::irange(is_variable_input.size())) {
+    if (!is_variable_input[i]) {
+      output_info_for_vars.emplace_back(std::nullopt);
+    } else {
+      output_info_for_vars.emplace_back(output_info[i]);
+    }
+  }
+  lambda_output_infos.emplace_back(std::move(output_info_for_vars));
+  size_t idx = lambdas.size() - 1;
+  std::shared_ptr<Node> node = args.get_node_call()->node;
+  TORCH_INTERNAL_ASSERT(lifted_nodes.find(idx) == lifted_nodes.end())
+  lifted_nodes[idx] = node;
+  TORCH_INTERNAL_ASSERT(reverse_lifted_nodes.find(node) == reverse_lifted_nodes.end())
+  reverse_lifted_nodes[node] = idx;
+  lambda_idxs.emplace_back(at::IValue(static_cast<int64_t>(idx)));
+  for (auto i : c10::irange(output_info.size())) {
+    if (is_variable_input[i]) {
+      args.collect(output_info[i].layout);
+      args.collect(output_info[i].device);
+      args.collect(output_info[i].scalar_type);
+      args.collect(output_info[i].size);
+    }
+  }
+  return &lambda_idxs[idx];
+}
+
+PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
+  c10::SymIntArrayRef sym_sizes(size);
+
+  auto ret = THPObjectPtr(THPSizeType.tp_alloc(
+      &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
+  if (!ret)
+    throw python_error();
+
+  for (auto i : c10::irange(sym_sizes.size())) {
+    auto symint = sym_sizes[i];
+    if (auto maybe_int = symint.maybe_as_int(); maybe_int.has_value()) {
+      PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(*maybe_int));
+    } else {
+      auto py_symint = py::cast(symint).release().ptr();
+      PyTuple_SET_ITEM(ret.get(), i, py_symint);
+    }
+  }
+  return ret.release();
+}
+
+static variable_list lambda_lift(
+    SwapSavedVariables& ssv,
+    PyObject* py_compiler,
+    variable_list&& inputs) {
+  // c10::SymInt idx = lambda_idxs[next_lambdas_idx++].toSymInt();
+  // need to before(at::IValue) but with the proper next_proxy idx.
+  at::IValue& idx = lambda_idxs[next_lambdas_idx++];
+  int hackidx = idx.toInt();
+  ssv.before(idx);
+  static PyObject* method_name =
+      PyUnicode_InternFromString("proxy_call_lambda");
+  THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
+  auto lambda_output_info = lambda_output_infos[hackidx];
+  THPObjectPtr pyoutputmetas(
+      PyTuple_New(static_cast<Py_ssize_t>(lambda_output_info.size())));
+  for (auto i : c10::irange(lambda_output_info.size())) {
+    if (!lambda_output_info[i].has_value()) {
+      PyTuple_SET_ITEM(pyoutputmetas.get(), i, Py_None);
+      continue;
+    }
+    THPObjectPtr pyoutputmeta(PyTuple_Pack(
+        4,
+        autograd::utils::wrap(lambda_output_info[i]->layout),
+        THPDevice_New(lambda_output_info[i]->device),
+        autograd::utils::wrap(lambda_output_info[i]->scalar_type),
+        to_py_size(lambda_output_info[i]->size)));
+    if (!pyoutputmeta)
+      throw python_error();
+    PyTuple_SET_ITEM(pyoutputmetas.get(), i, pyoutputmeta.release());
+  }
+  THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
+      py_compiler,
+      method_name,
+      PyLong_FromSsize_t(
+          hackidx - offset_lambdas_idx), // doesnt work when there's 2 lifted in
+                                         // same graph
+      pyinputs.get(),
+      pyoutputmetas.get(),
+      nullptr)));
+  ssv.after(idx);
+  return THPVariable_UnpackList(pyresult.get());
+}
+
+static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  PyObject* inputs = nullptr;
+  PyObject* idx = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &inputs, &idx)) {
+    python_error err;
+    err.persist();
+    // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
+    throw err;
+  }
+  TORCH_INTERNAL_ASSERT(PyList_Check(inputs));
+  // TODO: clear the list
+  variable_list cppinputs = THPVariable_UnpackList(inputs);
+  TORCH_INTERNAL_ASSERT(PyLong_Check(idx));
+  size_t cppidx = PyLong_AsSize_t(idx);
+  variable_list outs = lambdas[cppidx](std::move(cppinputs));
+  auto it = lifted_nodes.find(cppidx);
+  TORCH_INTERNAL_ASSERT(it != lifted_nodes.end());
+  std::shared_ptr<Node> node = it->second;
+  auto it2 = reverse_lifted_nodes.find(node);
+  TORCH_INTERNAL_ASSERT(it2 != reverse_lifted_nodes.end());
+  lifted_nodes.erase(it);
+  reverse_lifted_nodes.erase(it2);
+  return THPVariable_WrapList(outs);
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
     {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
+    {"call_lambda", call_lambda, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -448,21 +600,6 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
 }
 
-struct ClosingTHPObjectPtr : public THPObjectPtr {
-  ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
-  ~ClosingTHPObjectPtr() {
-    if (PyErr_Occurred()) {
-      // do nothing, do not attempt to close
-      return;
-    }
-    static PyObject* method_name = PyUnicode_InternFromString("close");
-    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
-      PyErr_WriteUnraisable(get());
-      PyErr_Clear();
-    }
-  }
-};
-
 // Only call this function while holding GIL
 CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
@@ -473,9 +610,13 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
+  next_lambdas_idx = lambdas.size(); // cache hit will not lift
+  offset_lambdas_idx = lambdas.size();
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
+  compiler_call.collect = lambda_collect;
+  compiler_call.lift = lambda_lift;
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls
@@ -673,7 +814,9 @@ CacheNode* _compiled_autograd_impl(
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
     for (auto& call : calls) {
-      call->node->release_variables();
+      if (reverse_lifted_nodes.find(call->node) == reverse_lifted_nodes.end()) {
+        call->node->release_variables();
+      }
     }
   }
 

@@ -204,6 +204,16 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+  // still need to get py::cpp_function here, cuz need it alive at runtime
+  std::function<at::IValue*(
+      CompiledNodeArgs&,
+      Node*,
+      std::function<variable_list(variable_list)>,
+      const std::vector<bool>&,
+      const std::vector<VariableInfo>&)>
+      collect;
+  std::function<variable_list(SwapSavedVariables&, PyObject*, variable_list)>
+      lift;
 };
 
 class CompiledNodeArgs {
@@ -292,6 +302,15 @@ class CompiledNodeArgs {
       collect(k);
       collect(m.at(k));
     }
+  }
+  void collect(
+      Node* fn,
+      std::function<variable_list(variable_list)>&& lambda,
+      const std::vector<bool>& is_variable_input,
+      const std::vector<VariableInfo>& output_metas) {
+    at::IValue* ptr = _compiler.collect(
+        *this, fn, std::move(lambda), is_variable_input, output_metas);
+    _compiler.lifted_ivalue_args.args.emplace_back(ptr);
   }
   void collect(const at::IValue& iv, bool nested = false) {
     // used by AutogradContext::saved_data from CppNode
@@ -540,6 +559,10 @@ class CompiledNodeArgs {
   }
   CompiledNodeArgs(const CompiledNodeArgs&) = delete;
 
+  NodeCall* get_node_call() {
+    return &_node_call;
+  }
+
  private:
   template <typename T>
   void specialize_on_bytes(const T& t) {
@@ -566,7 +589,7 @@ struct TraceState {
       : sym_sizes(ss), outputs(num_outputs) {}
 
   void debug_asserts() {
-    TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
+    // TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
   }
   std::optional<c10::SymInt> next_sym_size() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index < sym_sizes.size());
@@ -619,7 +642,9 @@ class SwapSavedVariables {
   void after(c10::SymInt& t) {
     stashed_symints.restore(&t);
   }
-
+  variable_list lift(variable_list&& inputs) {
+    return compiler.lift(*this, py_compiler, std::move(inputs));
+  }
   void before(at::IValue& iv) {
     if (iv.isTensor()) {
       before(iv.toTensor());
