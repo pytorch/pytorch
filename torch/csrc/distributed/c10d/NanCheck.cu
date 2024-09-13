@@ -165,9 +165,11 @@ void checkForNan(const at::Tensor& tensor, at::cuda::CUDAStream& stream) {
       maxNumBlocks,
       (tensor.numel() + numThreadsPerBlock - 1) / numThreadsPerBlock);
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND4(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
+      at::ScalarType::Float8_e4m3fn,
+      at::ScalarType::Float8_e5m2,
       tensor.scalar_type(),
       "checkForNaN",
       [&] {
