@@ -1898,6 +1898,7 @@ coverage_ignore_functions = [
     "check_compiler_ok_for_platform",
     "get_cxx_compiler",
     "get_default_build_root",
+    "remove_default_build_root",
     "library_paths",
     "remove_extension_h_precompiler_headers",
     # torch.utils.data.backward_compatibility
