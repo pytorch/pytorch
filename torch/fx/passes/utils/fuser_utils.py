@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import copy
 from queue import SimpleQueue
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
+from typing import Optional as _Optional
 
 import torch.fx
 from torch.fx.graph_module import GraphModule
@@ -90,10 +91,12 @@ def validate_partition(partition: NodeList) -> bool:
 
 
 @compatibility(is_backward_compatible=False)
-def fuse_as_graphmodule(gm: GraphModule,
-                        nodes: NodeList,
-                        module_name: str,
-                        partition_lookup_table: Optional[Dict[Node, None]] = None) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
+def fuse_as_graphmodule(
+    gm: GraphModule,
+    nodes: NodeList,
+    module_name: str,
+    partition_lookup_table: _Optional[Dict[Node, None]] = None,
+) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
 
     """
     Fuse nodes in graph_module into a GraphModule.
