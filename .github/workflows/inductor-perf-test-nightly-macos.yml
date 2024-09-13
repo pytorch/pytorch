@@ -4,7 +4,7 @@ name: perf-nightly-macos
 on:
   push:
     tags:
-      - ciflow/mps/*
+      - ciflow/mps/* # TODO: This is supposed to be a nightly job, making it on push for debugging purposes only
   # NB: GitHub has an upper limit of 10 inputs here
   workflow_dispatch:
     inputs:
