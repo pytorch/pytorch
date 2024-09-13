@@ -7,14 +7,12 @@ import itertools
 import math
 import operator
 import warnings
-
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
 from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
-
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
@@ -50,6 +48,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -261,6 +260,7 @@ __all__ = [
     "dstack",
     "expand",
     "expand_as",
+    "expand_copy",
     "flatten",
     "flip",
     "fliplr",
@@ -290,9 +290,11 @@ __all__ = [
     "take_along_dim",
     "tensor_split",
     "transpose",
+    "transpose_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
+    "unsqueeze_copy",
     "view",
     "view_as",
     "view_copy",
@@ -445,6 +447,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
 
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
+
 
 #
 # Elementwise unary references
@@ -802,7 +805,7 @@ def logsumexp(
         dim = (dim,)
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.amax(torch.real(self), dim, keepdim=True)
     maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
     maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
@@ -2778,7 +2781,17 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             assert tensor.ndim == 1  # we've already checked this above
             # Don't suggest the legacy behavior in the error message
             torch._check(
-                tensor.shape[0] == 0,
+                # NB: it is not enough to simply assert that tensor.shape[0] == 0;
+                # this MUST be true even under guard size oblivious.
+                # Effectively, we must actually know that the shape is zero,
+                # passing an unbacked SymInt which we will defer a runtime
+                # assert on won't cut it.  This is a policy decision (size
+                # oblivious semantics say that u0 tensors never are inferred
+                # to be zero size, even if they must be that for the cat to go
+                # through), and is load bearing for our Inductor lowerings
+                # (which assume that size oblivious tests are OK to determine
+                # if a shape is permissibly zero.)
+                guard_size_oblivious(tensor.shape[0] == 0),
                 lambda: f"Number of dimensions of tensors must match.  "
                 f"Expected {example.ndim}-D tensors, but got 1-D for "
                 f"tensor number {tensor_idx} in the list",
@@ -2870,8 +2883,16 @@ def constant_pad_nd(
         if pad[pad_idx + 1] < 0:
             c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
 
-    # if none of the pads are positive we can just return the result
-    if builtins.all(p <= 0 for p in pad):
+    # If all the pads are negative we can return the result.
+    # Avoid early exiting if all pads = 0 to prevent specialization on export.
+    # During export, raw if statements are specialized on the input, meaning
+    # that we lose a branch depending on the example input used to export.
+    # Here, this is either the case where all pads = 0, or the case where at
+    # least one pad > 0 and the rest are >= 0.
+    # Avoiding the early exit when all pads = 0 ensures we can export
+    # constant_pad_nd for cases when all pads >= 0.
+    # Note: if any pads are negative, this code specializes due to the if statements above.
+    if builtins.all(p < 0 for p in pad):
         return c_input.clone()
 
     new_shape = list(input_sizes[:l_diff])
@@ -2904,11 +2925,11 @@ def constant_pad_nd(
     c_output = output
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] > 0:
+        if pad[pad_idx] >= 0:
             c_output = c_output.narrow(
                 i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
             )
-        if pad[pad_idx + 1] > 0:
+        if pad[pad_idx + 1] >= 0:
             c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
 
     prims.copy_to(c_output, c_input)
@@ -3528,12 +3549,6 @@ def istft(
     length = max(0, end - start)
     y = y.narrow(dim=1, start=start, length=length)
     window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
-
-    window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
-    torch._check(
-        not window_envelop_lowest.item(),
-        lambda: "window overlap add min less than 1e-11",
-    )
 
     y = y / window_envelop
     if original_ndim == 2:
@@ -4969,14 +4984,14 @@ def arange(
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
     is_integer = utils.is_integer_dtype(dtype)
-    if is_integer:
+    if is_integer or integer_args:
         xstart = sym_int(start)
         xend = sym_int(end)
         xstep = sym_int(step)
 
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64:
+    if dtype == torch.int64 or integer_args:
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
@@ -5897,7 +5912,7 @@ def triu_indices(
 @register_decomposition(aten.bucketize)
 @out_wrapper(exact_dtype=True)
 def bucketize(
-    a: TensorLikeType,
+    a: TensorOrNumberLikeType,
     boundaries: TensorLikeType,
     *,
     out_int32: bool = False,
@@ -5908,6 +5923,7 @@ def bucketize(
         lambda: f"boundaries tensor must be 1 dimension but got dim({boundaries.dim()})",
     )
 
+    a = a if isinstance(a, torch.Tensor) else torch.tensor(a)
     out_dtype = torch.int32 if out_int32 else torch.int64
     n_boundaries = boundaries.shape[-1]
     if n_boundaries == 0:
@@ -6315,10 +6331,13 @@ zero_ = _make_inplace(zero)
 alias_copy = _make_copy_from_view(aten.alias)
 as_strided_copy = _make_copy_from_view(aten.as_strided)
 diagonal_copy = _make_copy_from_view(aten.diagonal)
+expand_copy = _make_copy_from_view(aten.expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
 t_copy = _make_copy_from_view(aten.t)
+transpose_copy = _make_copy_from_view(aten.transpose)
+unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 
 

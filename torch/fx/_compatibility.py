@@ -6,7 +6,7 @@ _MARKED_WITH_COMPATIBILITY : Dict[Any, None] = {}
 
 _T = TypeVar("_T")
 
-def compatibility(is_backward_compatible : bool) -> Callable[[_T], _T]:
+def compatibility(is_backward_compatible: bool) -> Callable[[_T], _T]:
     if is_backward_compatible:
 
         def mark_back_compat(fn: _T) -> _T:

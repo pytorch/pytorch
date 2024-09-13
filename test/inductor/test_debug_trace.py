@@ -18,7 +18,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -216,7 +216,7 @@ op2.node.kernel = extern_kernels.mm""",
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_debug_multi_tempalte(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(100, 100)
                 self.relu = torch.nn.ReLU()

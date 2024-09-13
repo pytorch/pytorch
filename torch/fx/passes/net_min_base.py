@@ -36,7 +36,6 @@ class FxNetMinimizerBadModuleError(Exception):
     Raised if failed to split out a minimize module
     """
 
-    pass
 
 
 @compatibility(is_backward_compatible=False)
@@ -45,7 +44,6 @@ class FxNetMinimizerRunFuncError(Exception):
     Raised if error occurs during run_a or run_b functions
     """
 
-    pass
 
 
 @compatibility(is_backward_compatible=False)
@@ -54,7 +52,6 @@ class FxNetMinimizerResultMismatchError(Exception):
     Raised if comparing function thinks the results are mismatching.
     """
 
-    pass
 
 
 @dataclass
@@ -493,7 +490,10 @@ class _MinimizerBase:
                 if len(node_list) == 0:
                     report.append(f"User exclusion : {node.name}")
                     self.print_report(report)
-                    return culprits
+                    if not self.settings.find_all:
+                        return culprits
+                    else:
+                        continue
 
             cur_nodes: NodeSet = {node}
 

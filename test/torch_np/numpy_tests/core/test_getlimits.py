@@ -5,13 +5,9 @@
 """
 import functools
 import warnings
-
-# from numpy.core.getlimits import _discovered_machar, _float_ma
-
 from unittest import expectedFailure as xfail, skipIf
 
 import numpy
-
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
@@ -23,6 +19,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -218,7 +215,15 @@ class TestMisc(TestCase):
     @xpassIfTorchDynamo  # (reason="None of nmant, minexp, maxexp is implemented.")
     def test_plausible_finfo(self):
         # Assert that finfo returns reasonable results for all types
-        for ftype in np.sctypes["float"] + np.sctypes["complex"]:
+        for ftype in (
+            [np.float16, np.float32, np.float64, np.longdouble]
+            + [
+                np.complex64,
+                np.complex128,
+            ]
+            # no complex256 in torch._numpy
+            + ([np.clongdouble] if hasattr(np, "clongdouble") else [])
+        ):
             info = np.finfo(ftype)
             assert_(info.nmant > 1)
             assert_(info.minexp < -1)

@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 import torch
 from torch._streambase import _EventBase, _StreamBase
 
+
 get_cuda_stream: Optional[Callable[[int], int]]
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
@@ -103,7 +104,7 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
         raise NotImplementedError
 
     @staticmethod
-    def get_raw_stream():
+    def get_raw_stream(device_idx: int) -> int:
         raise NotImplementedError
 
     @staticmethod
@@ -118,6 +119,10 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
     def get_compute_capability(device: _device_t = None):
         raise NotImplementedError
 
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False):
+        raise NotImplementedError
+
 
 class DeviceGuard:
     """
@@ -129,7 +134,9 @@ class DeviceGuard:
     The device is switched using the provided device interface.
     """
 
-    def __init__(self, device_interface: Type[DeviceInterface], index: Optional[int]):
+    def __init__(
+        self, device_interface: Type[DeviceInterface], index: Optional[int]
+    ) -> None:
         self.device_interface = device_interface
         self.idx = index
         self.prev_idx = -1
@@ -192,9 +199,10 @@ class CudaInterface(DeviceInterface):
     _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
     synchronize = staticmethod(torch.cuda.synchronize)
     get_device_properties = staticmethod(torch.cuda.get_device_properties)  # type: ignore[assignment]
-    get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[arg-type]
+    get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[assignment, arg-type]
     exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type]
     maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type]
+    is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -262,7 +270,7 @@ class XpuInterface(DeviceInterface):
     _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)  # type: ignore[assignment]
     synchronize = staticmethod(torch.xpu.synchronize)
     get_device_properties = staticmethod(torch.xpu.get_device_properties)  # type: ignore[assignment]
-    get_raw_stream = staticmethod(get_xpu_stream)  # type: ignore[arg-type]
+    get_raw_stream = staticmethod(get_xpu_stream)  # type: ignore[assignment, arg-type]
     exchange_device = staticmethod(torch.xpu._exchange_device)  # type: ignore[arg-type]
     maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type]
 
@@ -275,6 +283,10 @@ class XpuInterface(DeviceInterface):
     def get_compute_capability(device: _device_t = None):
         cc = torch.xpu.get_device_capability(device)
         return cc
+
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
+        return torch.xpu.is_bf16_supported()
 
 
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}

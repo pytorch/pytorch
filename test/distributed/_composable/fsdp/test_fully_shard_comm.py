@@ -32,9 +32,9 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 from torch.distributed._composable.fsdp._fsdp_param import ShardedState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed._tensor.experimental import implicit_replication
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -892,7 +892,7 @@ class TestFullyShardPrefetch(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_multi_module_unused_module(self):
         class ModuleWithUnusedLinear(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.unused_lin = nn.Linear(1, 1)
                 self.lin = nn.Linear(16, 16)

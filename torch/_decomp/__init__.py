@@ -12,6 +12,7 @@ from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
 from torch.utils import _pytree as pytree
 
+
 __all__ = [
     "decomposition_table",
     "pre_autograd_decomposition_table",
@@ -301,6 +302,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.empty_like,
             aten._euclidean_dist.default,
             aten.expand_as,
+            aten.expand_copy,
             aten.eye,
             aten.fill,
             aten.fill_,
@@ -376,6 +378,8 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.new_full,
             aten.new_ones,
             aten.new_zeros,
+            aten.nll_loss2d_forward,
+            aten.nll_loss2d_backward,
             aten.nll_loss_backward,
             aten.nll_loss_forward,
             aten.norm,
@@ -406,6 +410,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.rrelu_with_noise,
             aten.rrelu_with_noise_,
             aten.rsub,
+            aten._safe_softmax,
             aten._scaled_dot_product_flash_attention_for_cpu.default,
             aten.select_backward,
             aten.select_scatter,
@@ -447,6 +452,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.threshold_backward,
             aten.trace,
             aten.transpose.int,
+            aten.transpose_copy,
             aten.tril,
             aten.tril_,
             aten.triu,
@@ -455,10 +461,12 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.unfold_backward,
             aten.unfold_copy,
             aten._unsafe_index,
+            aten._unsafe_index_put,
             aten._unsafe_masked_index,
             aten._unsafe_masked_index_put_accumulate,
             aten.unsafe_split.Tensor,
             aten.unsafe_split_with_sizes,
+            aten.unsqueeze_copy,
             aten._unsafe_view,
             aten.upsample_linear1d,
             aten.upsample_bilinear2d,

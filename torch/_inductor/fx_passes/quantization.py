@@ -705,7 +705,9 @@ def _register_quantization_unary_fusion():
     )
 
     class UnaryAttr:
-        def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+        def __init__(
+            self, op_name: str, scalars_attr=None, algorithm_attr=None
+        ) -> None:
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
@@ -901,7 +903,7 @@ def _register_quantization_binary_fusion():
             unary_op_name: str = "none",
             scalars_attr=None,
             algorithm_attr=None,
-        ):
+        ) -> None:
             self.binary_op_name = binary_op_name
             self.alpha = alpha if alpha else 1.0
             self.unary_op_name = unary_op_name

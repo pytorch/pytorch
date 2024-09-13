@@ -73,7 +73,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       std::function<FreeFuncType> free_fn);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
-  CUDAPluggableAllocator& operator==(CUDAPluggableAllocator& other) = delete;
+  CUDAPluggableAllocator& operator=(CUDAPluggableAllocator& other) = delete;
 
   void set_init_fn(std::function<void(int)> init_fn);
 
@@ -115,7 +115,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
 
   void recordStream(const c10::DataPtr&, streamType stream) override;
 
-  c10::cuda::CUDACachingAllocator::DeviceStats getDeviceStats(
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) override;
   void resetAccumulatedStats(c10::DeviceIndex device) override;
   void resetPeakStats(c10::DeviceIndex device) override;
