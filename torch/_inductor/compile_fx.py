@@ -262,7 +262,7 @@ def _recursive_pre_grad_passes(gm, example_inputs):
 
 
 def _recursive_joint_graph_passes(gm):
-    for subgraphs in _get_subgraph(gm):
+    for subgraph in _get_subgraph(gm):
         _recursive_joint_graph_passes(subgraph)
     joint_graph_passes(gm)
 
