@@ -71,13 +71,10 @@ def safe_map(f, *args):
 
 class AssociativeScanOp(HigherOrderOperator):
     def __init__(self):
-        super().__init__("associative_scan")
+        super().__init__("associative_scan", cacheable=True)
 
     def __call__(self, combine_fn, xs, dim):
         return super().__call__(combine_fn, xs, dim)
-
-    def pure(self):
-        return True
 
 
 associative_scan_op = AssociativeScanOp()

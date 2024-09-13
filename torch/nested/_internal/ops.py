@@ -1554,6 +1554,98 @@ def all_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
+    torch.ops.aten.to_padded_tensor.default, "self: jt, padding: any, output_size: any?"
+)
+def to_padded_tensor_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    # TODO: Handle the rest of output_size
+    output_size = new_kwargs["output_size"]
+    if output_size is not None:
+        max_seq_len = output_size[inp._ragged_idx]
+    else:
+        max_seq_len = inp._max_seqlen
+
+    # only 2D values is supported by the underlying FBGEMM kernel so do shape
+    # gymnastics if needed
+    values = inp.values()
+    values_shape = values.shape
+    if values.dim() > 2:
+        values = values.flatten(start_dim=1)
+    elif values.dim() == 1:
+        values = values.unsqueeze(-1)
+
+    padded_out = torch.ops.aten._jagged_to_padded_dense_forward(
+        values,
+        [inp._offsets],
+        [max_seq_len],
+        new_kwargs["padding"],
+    )
+
+    # shape gymnastics part 2
+    if len(values_shape) > 2:
+        padded_out = padded_out.unflatten(-1, values_shape[1:])
+    elif len(values_shape) == 1:
+        padded_out = padded_out.squeeze(-1)
+
+    return padded_out
+
+
+@register_jagged_func(
+    torch.ops.aten._nested_from_padded_tensor.default,
+    "padded: t, offsets: t, dummy: jt, ragged_idx: any?, min_seqlen: any?, max_seqlen: any?, sum_S: any?",
+)
+def _nested_from_padded_tensor_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    if new_kwargs["ragged_idx"] != 1:
+        raise RuntimeError(
+            "_nested_from_padded_tensor(): only ragged_idx=1 supported for jagged layout"
+        )
+
+    padded, offsets = new_kwargs["padded"], new_kwargs["offsets"]
+
+    # non-3D padded is not supported by the underlying FBGEMM kernel so do shape gymnastics
+    padded_shape = padded.shape
+    if padded.dim() > 3:
+        padded = padded.flatten(start_dim=2)
+    elif padded.dim() < 3:
+        padded = padded.unsqueeze(-1)
+
+    values = torch.ops.aten._padded_dense_to_jagged_forward(
+        padded, [offsets], new_kwargs["sum_S"]
+    )
+
+    # shape gymnastics part 2
+    if len(padded_shape) > 3:
+        values = values.unflatten(-1, padded_shape[2:])
+    elif len(padded_shape) < 3:
+        values = values.squeeze(-1)
+
+    ragged_idx = new_kwargs["ragged_idx"]
+    min_seqlen = new_kwargs["min_seqlen"]
+    max_seqlen = new_kwargs["max_seqlen"]
+    metadata_cache = {}
+    if min_seqlen is not None:
+        metadata_cache["min_seqlen"] = min_seqlen
+    if max_seqlen is not None:
+        metadata_cache["max_seqlen"] = max_seqlen
+
+    return NestedTensor(
+        values,
+        offsets,
+        _ragged_idx=ragged_idx,
+        _metadata_cache=metadata_cache,
+    )
+
+
+@register_jagged_func(
     torch.ops.aten._nested_view_from_jagged.default,
     "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?, min_seqlen: t?, max_seqlen: t?",
 )

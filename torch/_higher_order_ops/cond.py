@@ -49,13 +49,10 @@ In order to do this, we need implementations for each of the dispatch keys.
 
 class CondOp(HigherOrderOperator):
     def __init__(self):
-        super().__init__("cond")
+        super().__init__("cond", cacheable=True)
 
     def __call__(self, pred, true_fn, false_fn, operands):
         return super().__call__(pred, true_fn, false_fn, operands)
-
-    def pure(self):
-        return True
 
 
 cond_op = CondOp()
