@@ -13,7 +13,6 @@ on:
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
-      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
   pull_request:
     paths:
@@ -21,7 +20,6 @@ on:
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
-      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
 
 concurrency:
@@ -29,9 +27,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   build-wheel:
     name: "Build Triton Wheel"
-    runs-on: [self-hosted, linux.2xlarge]
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     strategy:
       fail-fast: false
       matrix:
@@ -120,7 +128,7 @@ jobs:
           fi
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
@@ -157,7 +165,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           # Download all available artifacts
           path: ${{ runner.temp }}/artifacts-all
@@ -201,7 +209,8 @@ jobs:
 
   build-conda:
     name: "Build Triton Conda"
-    runs-on: [self-hosted, linux.2xlarge]
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
     strategy:
       fail-fast: false
       matrix:
@@ -253,7 +262,7 @@ jobs:
           docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}" $RELEASE
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         with:
           name: pytorch-triton-conda-${{ matrix.py_vers }}
           if-no-files-found: error
@@ -273,7 +282,7 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           # Download all available artifacts
           path: ${{ runner.temp }}/artifacts-all

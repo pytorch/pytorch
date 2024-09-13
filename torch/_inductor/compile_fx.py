@@ -17,6 +17,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch.fx
 import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import (
     compiled_autograd,
     config as dynamo_config,
@@ -62,6 +63,7 @@ from torch._ops import OpOverload
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
+from torch.utils._ordered_set import OrderedSet
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module  # type: ignore[attr-defined]
@@ -382,7 +384,7 @@ def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
         is_gpu(t.device.type) for t in example_inputs if isinstance(t, torch.Tensor)
     )
 
-    if config.comprehensive_padding and not has_gpu:
+    if config.disable_padding_cpu and config.comprehensive_padding and not has_gpu:
         perf_hint_log.info("Skip comprehensive padding on CPU")
         return config.patch(comprehensive_padding=False)
     else:
@@ -399,20 +401,22 @@ def fake_tensor_prop(
 
     The created fake mode will be returned.
     """
-    fake_mode = detect_fake_mode(example_inputs)
-    if not fake_mode:
-        fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-        FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
-    else:
-        ctx = (
-            contextlib.nullcontext()
-            if not force_allow_non_fake_inputs
-            else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-        )
-        with ctx:  # type: ignore[attr-defined]
-            FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
-                *example_inputs
+    # Ensure that decomps that support symbolic shapes are used
+    with enable_python_dispatcher():
+        fake_mode = detect_fake_mode(example_inputs)
+        if not fake_mode:
+            fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+            FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+        else:
+            ctx = (
+                contextlib.nullcontext()
+                if not force_allow_non_fake_inputs
+                else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
             )
+            with ctx:  # type: ignore[attr-defined]
+                FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
+                    *example_inputs
+                )
 
     return fake_mode
 
@@ -1037,7 +1041,9 @@ def cudagraphify_impl(
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
-    static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
+    static_input_idxs: OrderedSet[int] = OrderedSet(
+        remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
+    )
     copy_misaligned_inputs(inputs, check_input_idxs)  # type: ignore[arg-type]
 
     assert isinstance(inputs, list)
@@ -1129,6 +1135,7 @@ def compile_fx_aot(
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
     )
+
     if (
         "aot_inductor.output_path" not in config_patches
         and not config.aot_inductor.output_path

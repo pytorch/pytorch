@@ -25,6 +25,8 @@ _GUARD_SOURCE_SPECIALIZED_NN_MODULE = {
     GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
     GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
     GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 # represents nn.Modules tracked with UnspecializedNNModuleVariable
@@ -39,6 +41,8 @@ _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE = {
     # Just to ensure that guard_source() works
     GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
     GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 # represents nn.Modules tracked with UnspecializedBuiltinNNModuleVariable
@@ -52,6 +56,8 @@ _GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE = {
     # Just to ensure that guard_source() works
     GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
     GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 _GUARD_SOURCE_FSDP_MODULE = {
@@ -183,6 +189,11 @@ class WeakRefCallSource(ChainedSource):
 
     def name(self):
         return f"{self.base.name()}()"
+
+
+@dataclasses.dataclass(frozen=True)
+class CallFunctionNoArgsSource(WeakRefCallSource):
+    pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -380,6 +391,17 @@ class ScriptObjectQualifiedNameSource(ChainedSource):
 
     def name(self):
         return f"{self.base.name()}._type().qualified_name()"
+
+
+class AttrProxySource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.get_base()"
 
 
 @dataclasses.dataclass(frozen=True)
