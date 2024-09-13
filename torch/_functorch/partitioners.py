@@ -1272,6 +1272,7 @@ def get_default_op_list() -> OpTypes:
         aten.expand,
         aten.as_strided,
         aten.permute,
+        aten.select,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [
