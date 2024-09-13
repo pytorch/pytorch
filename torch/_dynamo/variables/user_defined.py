@@ -82,6 +82,11 @@ def is_forbidden_context_manager(ctx):
         from _pytest.python_api import RaisesContext
         from _pytest.recwarn import WarningsChecker
 
+        # TODO mlazos: Temporary to get this stack to pass
+        # remove in subsequent PR
+        from torch.overrides import BaseTorchFunctionMode
+
+        f_ctxs.append(BaseTorchFunctionMode)
         f_ctxs.append(RaisesContext)
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -408,6 +413,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
+            # import here to avoid an unfortunate circular dependency.
             from .ctx_manager import GenericContextWrappingVariable
 
             cm_obj = tx.output.side_effects.track_object_new(
@@ -415,6 +421,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
+
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
