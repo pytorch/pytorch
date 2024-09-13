@@ -537,9 +537,11 @@
 
 - func: avg_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   tags: core
+  autogen: avg_pool1d.out
 
 - func: adaptive_avg_pool1d(Tensor self, int[1] output_size) -> Tensor
   tags: core
+  autogen: adaptive_avg_pool1d.out
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool1d(Tensor self, int[1] output_size) -> (Tensor, Tensor)
@@ -3398,6 +3400,10 @@
 
 - func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
 
+- func: _wrapped_linear_prepack(Tensor weight, Tensor weight_scale, Tensor weight_zero_point, Tensor bias) -> Tensor
+
+- func: _wrapped_quantized_linear_prepacked(Tensor input, Tensor input_scale, Tensor input_zero_point, Tensor packed_weight, Tensor output_scale, Tensor output_zero_point, int out_channel) -> Tensor
+
 - func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
 
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
@@ -3916,11 +3922,10 @@
   tags: core
 
 # For normal naming convention this should be `mean.out`. However since we already have `mean.out` we have to rename this.
-# FIXME: fix CI jobs and re-enable this
-#- func: mean.dtype_out(Tensor self, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-#  device_check: NoCheck   # TensorIterator
-#  dispatch:
-#    CompositeExplicitAutograd: mean_dtype_out
+- func: mean.dtype_out(Tensor self, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CompositeExplicitAutograd: mean_dtype_out
 
 - func: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: mean.out
@@ -8549,7 +8554,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __rshift__
+    CPU, CUDA, MPS: __rshift__
   tags: pointwise
 
 - func: __irshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -14216,6 +14221,11 @@
 - func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
   python_module: linalg
 
+- func: _spsolve(Tensor A, Tensor B, *, bool left=True) -> Tensor
+  python_module: sparse
+  dispatch:
+    SparseCsrCUDA: _sparse_csr_linear_solve
+
 - func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
@@ -14696,6 +14706,11 @@
     CUDA: _fbgemm_dense_to_jagged_forward_symint
     CPU: _padded_dense_to_jagged_forward_cpu
 
+- func: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None, SymInt? sum_S=None) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
     NestedTensorCPU: NestedTensor_softmax_dropout
@@ -14755,7 +14770,7 @@
     CPU: _scaled_dot_product_flash_attention_cpu
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias=None, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable
   tags: nondeterministic_seeded

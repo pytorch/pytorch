@@ -30,9 +30,14 @@ dill==0.3.7
 #Pinned versions: 0.3.7
 #test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
 
-expecttest==0.1.6
+expecttest==0.2.1
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
+#Pinned versions: 0.2.1
+#test that import:
+
+fbscribelogger==0.1.6
+#Description: write to scribe from authenticated jobs on CI
 #Pinned versions: 0.1.6
 #test that import:
 
@@ -104,7 +109,7 @@ networkx==2.8.8
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
 numba==0.49.0 ; python_version < "3.9"
-numba==0.54.1 ; python_version == "3.9"
+numba==0.55.2 ; python_version == "3.9"
 numba==0.55.2 ; python_version == "3.10"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.54.1, 0.49.0, <=0.49.1
@@ -330,5 +335,10 @@ onnx==1.16.1
 
 onnxscript==0.1.0.dev20240817
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
+#Pinned versions:
+#test that import:
+
+parameterized==0.8.1
+#Description: Parameterizes unittests, both the tests themselves and the entire testing class
 #Pinned versions:
 #test that import:

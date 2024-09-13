@@ -69,6 +69,7 @@
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
+#include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/jit/python/init.h>
@@ -170,7 +171,7 @@ static PyObject* THPModule_initExtension(
     PyObject* _unused,
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
-#if !defined(FBCODE_CAFFE2)
+#if !defined(FBCODE_CAFFE2) && !defined(__aarch64__)
   if (torch::get_cpp_stacktraces_enabled()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
@@ -212,11 +213,6 @@ static PyObject* THPModule_initExtension(
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
-
-  // The main thread usually launches CPU/GPU/Accelerator kernels and therefore
-  // becomes latency sensitive. If the thread is named, we can debug performance
-  // issues easier.
-  c10::setThreadName("pt_main_thread");
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module)
@@ -1692,6 +1688,7 @@ PyObject* initModule() {
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
   torch::inductor::initAOTIRunnerBindings(module);
+  torch::inductor::initAOTIPackageBindings(module);
 #ifdef USE_ITT
   torch::profiler::initIttBindings(module);
 #endif
@@ -1744,6 +1741,13 @@ PyObject* initModule() {
   PyObject* has_cudnn = Py_False;
 #endif
   ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
+
+#if defined(USE_CUSPARSELT)
+  PyObject* has_cusparselt = Py_True;
+#else
+  PyObject* has_cusparselt = Py_False;
+#endif
+  ASSERT_TRUE(set_module_attr("_has_cusparselt", has_cusparselt));
 
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;
