@@ -105,15 +105,15 @@ class GeneralizedPareto(Distribution):
         return torch.exp(self.log_cdf(value))
 
     def icdf(self, value):
-        k = self.concentration
-        m = self.loc
-        s = self.scale
-        is_k_zero = torch.isclose(k, torch.zeros_like(k))
-        safe_k = torch.where(is_k_zero, torch.ones_like(k), k)
-        neglog1mp = -torch.log1p(-value)
-        return m + s * torch.where(
-            is_k_zero, neglog1mp, torch.expm1(k * neglog1mp) / safe_k
-        )
+        loc = self.loc
+        scale = self.scale
+        concentration = self.concentration
+        eq_zero = torch.isclose(concentration, torch.zeros_like(concentration))
+        safe_conc = torch.where(eq_zero, torch.ones_like(concentration), concentration)
+        logu = torch.log1p(-value)
+        where_nonzero = loc + scale / safe_conc * torch.expm1(-safe_conc * logu)
+        where_zero = loc - scale * logu
+        return torch.where(eq_zero, where_zero, where_nonzero)
 
     def _z(self, x):
         return (x - self.loc) / self.scale
