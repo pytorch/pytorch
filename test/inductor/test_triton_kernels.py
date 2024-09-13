@@ -36,12 +36,12 @@ if HAS_GPU:
 
     if not TEST_WITH_ROCM:
         if HAS_CUDA:
-            from triton.language.extra.cuda.libdevice import (
+            from triton.language.extra.cuda.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
         elif HAS_XPU:
-            from triton.language.extra.intel.libdevice import (
+            from triton.language.extra.intel.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
@@ -1035,7 +1035,7 @@ def forward(self, x_1, output_1):
         @register_lowering(torch.ops.mylib.weird_op_with_lowering)
         def _(x):
             return empty_strided(
-                x.shape, (2, 1), dtype=x.dtype, device=torch.device("cuda:0")
+                x.shape, (2, 1), dtype=x.dtype, device=torch.device(GPU_TYPE, 0)
             )
 
         # Triton kernel that has different behavior depending on the input strides.
@@ -1068,7 +1068,7 @@ def forward(self, x_1, output_1):
             arange_out(x, y)
             return x + y
 
-        x = torch.randn(2, 2, device="cuda")
+        x = torch.randn(2, 2, device=GPU_TYPE)
         eager_out = f(x)
 
         compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
@@ -2543,8 +2543,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     def test_capture_triton_disabled_in_triton_op(self):
-        import triton
-        import triton.language as tl
+        import triton  # @manual
+        import triton.language as tl  # @manual
 
         @triton.jit
         def add_kernel(
