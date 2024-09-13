@@ -1239,6 +1239,18 @@ def fw_compiler_freezing(
     return wrapper
 
 
+def get_cpp_wrapper_config():
+    return {
+        # Set autotune_at_compile_time to True as default if the option is not explicitly set
+        "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
+        if config.triton.autotune_at_compile_time is not None
+        else True,
+        "triton.autotune_cublasLt": False,
+        "triton.cudagraphs": False,  # TODO: to be removed
+        "triton.store_cubin": True,
+    }
+
+
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -1261,18 +1273,8 @@ def compile_fx(
         if config.cpp_wrapper:
             with config.patch(
                 {
-                    "cpp_wrapper": False,
-                    # For triton.autotune_at_compile_time, disable by default for
-                    # FBCode, but enabled by default for OSS.
-                    "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
-                    if config.is_fbcode()
-                    else os.environ.get(
-                        "TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "1"
-                    )
-                    == "1",
-                    "triton.autotune_cublasLt": False,
-                    "triton.cudagraphs": False,
-                    "triton.store_cubin": True,
+                    "cpp_wrapper": False,  # reset to break recursive call to compile_fx
+                    **get_cpp_wrapper_config(),
                 }
             ), V.set_real_inputs(example_inputs_):
                 inputs_ = example_inputs_
@@ -1453,7 +1455,11 @@ def compile_fx(
         def bw_compiler(
             model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
         ):
-            with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
+            with dynamo_utils.dynamo_timed(
+                "compile_fx.<locals>.bw_compiler"
+            ), config.patch(
+                get_cpp_wrapper_config()
+            ) if config.cpp_wrapper else contextlib.nullcontext:
                 user_visible_outputs = {}
 
                 if config.bw_outputs_user_visible:
