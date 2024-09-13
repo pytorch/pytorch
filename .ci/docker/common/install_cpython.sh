@@ -38,7 +38,7 @@ function do_cpython_build {
     fi
 
     local additional_flags=""
-    if [[ ${py_ver} == "3.13.0t" ]]; then
+    if [[ "$py_ver"== "3.13.0t" ]]; then
         additional_flags=" --disable-gil"
     fi
 
@@ -78,9 +78,10 @@ function build_cpython {
 
     if [ "$py_ver" = "3.13.0t" ]; then
         PY_VER_SHORT="3.13"
+        PYT_VER_SHORT="3.13t"
         check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
         wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
-        do_cpython_build $py_ver cpython-${PY_VER_SHORT}t
+        do_cpython_build $py_ver cpython-$PYT_VER_SHORT
     else if [ "$py_ver" = "3.13.0" ]; then
         PY_VER_SHORT="3.13"
         check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
