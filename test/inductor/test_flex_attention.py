@@ -1661,6 +1661,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = func(query, key, value, block_mask=block_mask)
         out.sum().backward()
 
+    @supported_platform
     @common_utils.parametrize("mode", ["eager", "inductor"])
     @common_utils.parametrize(
         "permute_order",
