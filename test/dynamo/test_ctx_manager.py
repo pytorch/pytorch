@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import unittest
 
 import torch
@@ -1643,6 +1644,43 @@ class GraphModule(torch.nn.Module):
 
         opt_f = torch.compile(f, backend="eager")
         opt_f(torch.randn(2, 2))
+
+    def test_contextlib_contextmanager(self):
+        @contextlib.contextmanager
+        def set_default_dtype(dtype):
+            old_dtype = torch.get_default_dtype()
+            try:
+                torch.set_default_dtype(dtype)
+                yield
+            finally:
+                torch.set_default_dtype(old_dtype)
+
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=True)
+        def fn():
+            with set_default_dtype(torch.float64):
+                x = torch.tensor([3.0, 3.0 + 5.0j])
+            return x
+
+        y = fn()
+        self.assertEqual(y.dtype, torch.complex128)
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        set_default_dtype = torch.set_default_dtype(torch.float64);  set_default_dtype = None
+
+        x: "c128[2]" = torch.tensor([3.0, (3+5j)])
+
+        set_default_dtype_1 = torch.set_default_dtype(torch.float32);  set_default_dtype_1 = None
+        return (x,)
+""",
+        )
 
 
 if __name__ == "__main__":

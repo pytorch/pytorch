@@ -415,6 +415,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             # import here to avoid an unfortunate circular dependency.
             from .ctx_manager import GenericContextWrappingVariable
+            from .functions import GeneratorFunctionVariable, UserFunctionVariable
+
+            if self.value is contextlib._GeneratorContextManager:
+                # Replace UserFunctionVariable by GeneratorFunction if the function
+                # was annotated with @contextlib.contextmanager
+                # This shouldn't be necessary once generator functions is fully
+                # supported in dynamo
+                assert isinstance(args[0], UserFunctionVariable)
+                args[0] = GeneratorFunctionVariable(
+                    args[0].get_function(), source=self.source
+                )
 
             cm_obj = tx.output.side_effects.track_object_new(
                 self.source, self.value, GenericContextWrappingVariable, {}
@@ -994,7 +1005,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                raise_observed_exception(AttributeError, tx, self)
+                raise_observed_exception(AttributeError, tx)
             return result
 
         if name == "__dict__":
@@ -1174,7 +1185,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(AttributeError, tx, self)
+        raise_observed_exception(AttributeError, tx)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self._check_for_getattribute():
