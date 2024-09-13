@@ -980,3 +980,38 @@ def forward(self, x):
             return len(replacement_nodes_in_graph)
 
         self.assertEqual(check_replacement_nodes(self, traced, matches), 2)
+
+    def test_replace_pattern_with_callback(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.add(x, y)
+
+        def pattern(x, y):
+            return torch.add(x, y)
+
+        def replacement(x, y):
+            return torch.sub(torch.mul(x, y), y)
+
+        traced = symbolic_trace(M())
+        # Return the same replacement graph for all matches, but have it be a unique
+        # object each time.
+        matches = subgraph_rewriter.replace_pattern_with_filters(
+            traced,
+            pattern,
+            replacement_callback=lambda *args: symbolic_trace(replacement).graph,
+        )
+
+        def check_replacement_nodes(self, traced, matches):
+            replacement_nodes_in_graph = [
+                node
+                for node in traced.graph.nodes
+                if node.target in {torch.sub, torch.mul}
+            ]
+            replacement_nodes_in_res = [r for m in matches for r in m.replacements]
+            self.assertEqual(
+                len(replacement_nodes_in_graph), len(replacement_nodes_in_res)
+            )
+            self.assertEqual(replacement_nodes_in_graph, replacement_nodes_in_res)
+            return len(replacement_nodes_in_graph)
+
+        self.assertEqual(check_replacement_nodes(self, traced, matches), 2)
