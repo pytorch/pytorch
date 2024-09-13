@@ -1638,7 +1638,7 @@ class HalideKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            cuda=False,  # grid/stream is handled internally in halide
+            gpu=False,  # grid/stream is handled internally in halide
         )
 
     def generate_assert(self, check):
