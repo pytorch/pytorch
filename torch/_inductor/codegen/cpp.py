@@ -1660,7 +1660,7 @@ class CppVecOverrides(CppOverrides):
                 with code.indent():
                     code.writeline(f"tmpbuf_out[i] = {res};")
                 if output_mask:
-                    load_args = "tmpbuf_out.data()"
+                    load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
                     load_fn = f"at::vec::VecMask<{cdtype},{n_vec}>::from"
                 else:
                     load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
@@ -2137,7 +2137,9 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if config.abi_compatible:
+        if V.graph.aot_mode:
+            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
+            # compared with JIT Inductor which uses TORCH_CHECK
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -2284,7 +2286,7 @@ class CppVecKernel(CppKernel):
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
         if dtype == torch.bool:
             # TODO: should we consider load mask here?
-            line = f"{self._get_mask_type()}::from({loadbuf})"
+            line = f"{self._get_mask_type()}::from({loadbuf}, {cexpr_index(self.num_elems)})"
         else:
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
@@ -4553,7 +4555,7 @@ class CppScheduling(BaseScheduling):
         compile_wrapper.splice(src_code, strip=True)
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline("''')")
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), cuda=False)
+        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), gpu=False)
         return kernel_name
 
     def flush(self):
@@ -4634,7 +4636,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, cuda=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, arg_types=arg_types
         )
 
 
