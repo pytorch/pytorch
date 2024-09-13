@@ -1770,9 +1770,12 @@ class Kernel(CodeGen):
         self,
         values: CSEVariable,
         offsets_name: str,
+        num_bucket_boundaries: sympy.Expr,
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
+        offsets_indices: CSEVariable,
+        sorter_name: Optional[str] = None,
     ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
@@ -2025,26 +2028,56 @@ class Kernel(CodeGen):
             def bucketize(
                 values: CSEVariable,
                 offsets_name: str,
+                num_bucket_boundaries: sympy.Expr,
                 offsets_size: sympy.Expr,
                 indexing_dtype: torch.dtype,
                 right: bool,
+                offsets_indices: CSEVariable,
+                sorter_name: Optional[str] = None,
             ) -> CSEVariable:
                 """
                 [Note: Inductor bucketize op]
 
-                Given values (tensor) and offsets_name (reference to the name of a 1D
-                tensor), calculate the bucket that each value belongs to.
+                Given values (tensor) and offsets_name (reference to the name of a
+                tensor), calculate the bucket that each value belongs to.  This works
+                differently in the 1-D and N-D cases.
 
-                e.g. for values [-1, 0, 1, 2, 3, 4, 5, 9], offsets [0, 4, 4, 8], right=True
-                return =        [ 0, 1, 1, 1, 1, 3, 3, 4].
+                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], offsets [0, 4, 4, 8], right=True
+                return =   [[ 0, 1, 1, 1], [1, 3, 3, 4]].
+
+                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], offsets [[0, 4], [4, 8]], right=True
+                return =   [[ 0, 1, 1, 1], [0, 1, 1, 2]]
+
+                Note that the dimensionality of values and offsets must match in every
+                dimension _except_ the last in the N-D case, while the 1-D case does not
+                have this restriction.
 
                 When right == False, bucket i refers to range (offsets[i], offsets[i+1]].
                 When right == True,  bucket i refers to range [offsets[i], offsets[i+1]).
 
-                Offsets must be non-decreasing or the result is undefined.
+                Offsets must be non-decreasing, or a sorter must be provided which
+                would re-index offsets in a non-decreasing order (e.g. the second output
+                of torch.sort(offsets)).  Otherwise, the result is undefined.
+
+                Since the underlying op implementation treats offsets as a flattened
+                tensor, num_bucket_boundaries describes the length of a single,
+                independent set of offsets (4 and 2 in the examples above,
+                respectively).  offsets_size represents torch.numel(offsets).  For a 1-D
+                sequence of offsets, these values are identical.
+
+                offsets_indices is a tensor of the same size as values, containing the
+                index within offsets of the *start* of the set of offsets used for each
+                corresponding value.
                 """
                 return self.bucketize(
-                    values, offsets_name, offsets_size, indexing_dtype, right
+                    values,
+                    offsets_name,
+                    num_bucket_boundaries,
+                    offsets_size,
+                    indexing_dtype,
+                    right,
+                    offsets_indices,
+                    sorter_name,
                 )
 
         # Use mypy to check protocol implemented correctly

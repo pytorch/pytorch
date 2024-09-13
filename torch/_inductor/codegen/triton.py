@@ -1866,9 +1866,12 @@ class TritonKernel(SIMDKernel):
         self,
         values: CSEVariable,
         offsets_name: str,
+        num_bucket_boundaries: sympy.Expr,
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
+        offsets_indices: CSEVariable,
+        sorter_name: Optional[str] = None,
     ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
@@ -1882,7 +1885,9 @@ class TritonKernel(SIMDKernel):
 
         offsets_ptr = self.args.input(offsets_name)
         block_size = self.dense_size_str()
+        num_buckets_str = self.index_to_str(num_bucket_boundaries)
         offsets_size_str = self.index_to_str(offsets_size)
+        sorter_ptr = self.args.input(sorter_name) if sorter_name else "None"
 
         if indexing_dtype == torch.int32:
             triton_dtype = "tl.int32"
@@ -1895,7 +1900,7 @@ class TritonKernel(SIMDKernel):
 
         result = self.cse.generate(
             self.compute,
-            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size_str}, {block_size})",  # noqa: B950 line too long
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {sorter_ptr}, {triton_dtype}, {right}, {offsets_indices}, {offsets_size_str}, {num_buckets_str}, {block_size})",  # noqa: B950 line too long
         )
 
         return result

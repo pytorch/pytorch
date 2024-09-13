@@ -295,9 +295,12 @@ class OpsHandler(Protocol[T]):
         self,
         values: T,
         offsets_name: str,
+        num_bucket_boundaries: sympy.Expr,
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
+        offsets_indices: T,
+        sorter_name: Optional[str] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
         ...
@@ -1016,18 +1019,30 @@ class OpCounterCSE:
 
     def bucketize(
         self,
-        values,
+        values: T,
         offsets_name: str,
+        num_bucket_boundaries: sympy.Expr,
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
-    ):
+        offsets_indices: T,
+        sorter_name: Optional[str] = None,
+    ) -> T:
         val = self.parent_handler.bucketize(
-            values, offsets_name, offsets_size, indexing_dtype, right
+            values,
+            offsets_name,
+            num_bucket_boundaries,
+            offsets_size,
+            indexing_dtype,
+            right,
+            offsets_indices,
+            sorter_name,
         )
         if val not in self.var_names:
             self._used_ops.add("bucketize")
             self._read_names.append(offsets_name)
+            if sorter_name is not None:
+                self._read_names.append(sorter_name)
         return self._update_count(val)
 
     def getvalue(self):

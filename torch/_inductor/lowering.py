@@ -2039,6 +2039,108 @@ def inductor_randint(
     )
 
 
+@register_lowering(
+    inductor_prims._searchsorted_with_positional_sorter, type_promotion_kind=None
+)
+def _searchsorted_with_positional_sorter(
+    sorted_sequence: TensorBox,
+    values: TensorBox,
+    sorter: Optional[TensorBox],
+    out_int32: bool = False,
+    right: bool = False,
+    side: Optional[str] = None,
+) -> TensorBox:
+    validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
+        tb, BackendFeature.BUCKETIZE
+    )
+    validate_strides = lambda tb: tb.get_stride()[-1] == 1  # noqa: E731
+    # sorted_sequence and sorter must both be contiguous in the last dimension for our
+    # assumptions in ops.bucketize to work.
+    if (
+        not (validate_strides(sorted_sequence) and validate_bucketize(sorted_sequence))
+        or not validate_bucketize(values)
+        or (
+            sorter is not None
+            and not (validate_strides(sorter) and validate_bucketize(sorter))
+        )
+    ):
+        return fallback_handler(aten.searchsorted.Tensor, add_to_fallback_set=False)(
+            sorted_sequence,
+            values,
+            out_int32=out_int32,
+            right=right,
+            side=side,
+            sorter=sorter,
+        )
+
+    # If side is present, override the value of right if needed.  This assumes that
+    # validation of the two options being non-contradictory is already done by the
+    # searchsorted meta-function.
+    if side is not None and side == "right":
+        right = True
+
+    index_dtype = torch.int32 if out_int32 else torch.int64
+    values_loader = values.make_loader()
+
+    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
+    # realize it into global memory; or in other words, we can't guarantee that
+    # sorted_sequence.get_name() (used below) will exist unless we call
+    # sorted_sequence.realize().
+    sorted_sequence.realize()
+    sequence_size = sorted_sequence.get_numel()
+    num_bucket_boundaries = sorted_sequence.get_size()[-1]
+
+    if sorter is not None:
+        sorter.realize()
+
+    if len(sorted_sequence.get_size()) == 1:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+            return ops.bucketize(
+                val,
+                sorted_sequence.get_name(),
+                num_bucket_boundaries,
+                sequence_size,
+                index_dtype,
+                right,
+                0,
+                sorter_name=sorter.get_name() if sorter is not None else None,
+            )
+
+    else:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+            # Get index to the beginning of the sorted sequence within a flattened
+            # version of the array.
+            strides = sorted_sequence.get_stride()
+            subsequence_index = ops.index_expr(
+                functools.reduce(
+                    operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
+                ),
+                index_dtype,
+            )
+            return ops.bucketize(
+                val,
+                sorted_sequence.get_name(),
+                num_bucket_boundaries,
+                sequence_size,
+                index_dtype,
+                right,
+                subsequence_index,
+                sorter_name=sorter.get_name() if sorter is not None else None,
+            )
+
+    device = values.get_device()
+    return Pointwise.create(
+        device=device,
+        dtype=index_dtype,
+        inner_fn=inner_fn,
+        ranges=values.shape,
+    )
+
+
 @register_lowering(aten.bucketize, type_promotion_kind=None)
 def bucketize(
     input: TensorBox,
@@ -2074,8 +2176,10 @@ def bucketize(
             val,
             boundaries.get_name(),
             boundaries_size,
+            boundaries_size,
             index_dtype,
             right,
+            0,
         )
 
         return indices
@@ -2207,7 +2311,6 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
-make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 
 
 # 1.5) Easy or Impossible

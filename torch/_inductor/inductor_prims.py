@@ -177,3 +177,19 @@ _low_memory_max_pool2d_offsets_to_indices = make_prim(
     _low_memory_max_pool2d_offsets_to_indices_aten,
     doc="Convert small int offsets to regular indices.",
 )
+
+
+# Custom prim used to transform searchsorted into a lowering that doesn't have keyword
+# argument tensors (disallowed by the current inductor lowering schema).
+_searchsorted_with_positional_sorter = make_prim(
+    "_searchsorted_with_positional_sorter(Tensor sorted_sequence, Tensor values, Tensor? sorter, bool out_int32, bool right, str? side) -> Tensor",  # noqa: B950
+    lambda sorted_sequence, values, sorter, out_int32, right, side: torch.ops.aten.searchsorted(
+        sorted_sequence,
+        values,
+        out_int32=out_int32,
+        right=right,
+        side=side,
+        sorter=sorter,
+    ),
+    doc="searchsorted with a positional sorter argument",
+)
