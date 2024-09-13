@@ -379,7 +379,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         ):
             torch.manual_seed(42)
             losses = []
-            if fwd_fullgraph or compiled_autograd_backend is None:
+            # if fwd_fullgraph or compiled_autograd_backend is None:
+            if compiled_autograd_backend is None:
                 # NOTE: When fwd_fullgraph=True, we use torch._dynamo.config.compiled_autograd=True
                 # to enable compiled autograd.
                 maybe_compiled_autograd_ctx = contextlib.nullcontext()
@@ -425,7 +426,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             # since the fwd and bwd compile options will be the same.
             # When fwd_fullgraph=False, fwd compile allows graph-break while bwd compile must still be fullgraph,
             # so we must create a compiled autograd ctx manager to customize the bwd compile options in that case.
-            compiled_autograd=fwd_fullgraph,
+            compiled_autograd=False,
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
             warmup_runs=1,
