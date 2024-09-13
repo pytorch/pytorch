@@ -85,7 +85,7 @@ def create_onnx_friendly_decomposition_table(
     decomposition_table: dict[torch._ops.OperatorBase, Callable] = (
         torch._decomp._decomp_table_to_post_autograd_aten()
     )
-    can_preserve = get_preserve_ops()
+    can_preserve = get_preserve_ops().intersection(onnx_registered_ops)
     for op in list(decomposition_table.keys()):
         if op in can_preserve:
             del decomposition_table[op]
@@ -100,6 +100,7 @@ def create_onnx_friendly_decomposition_table(
         # not exportable anyways.
         if op_overload in onnx_registered_ops:
             continue
+        # If it is HOP, we filter those out as well.
         if not hasattr(op_overload, "_schema"):
             continue
         decomposition_table[op_overload] = decomp_fn
