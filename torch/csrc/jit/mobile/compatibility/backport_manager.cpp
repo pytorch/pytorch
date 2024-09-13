@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/istream_adapter.h>
 #include <torch/csrc/jit/mobile/compatibility/backport_manager.h>
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
 #include <torch/csrc/jit/mobile/import.h>

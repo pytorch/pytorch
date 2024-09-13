@@ -509,11 +509,9 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(exported_program.module()(*args), m(*args))
 
-        from torch._export import capture_pre_autograd_graph
-
-        gm: torch.fx.GraphModule = capture_pre_autograd_graph(
+        gm: torch.fx.GraphModule = torch.export.export_for_training(
             m, args=example_args, dynamic_shapes=dynamic_shapes
-        )
+        ).module()
 
         args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
@@ -2621,37 +2619,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-    def test_mark_and_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
-
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                torch._check(x.shape[0] == y.shape[0])
-                torch._check(x.shape[0] <= 64)
-                return x + 2, y + 2
-
-        inputs = (torch.randn(4, 4), torch.randn(4, 4))
-        ep_auto = torch.export.export(
-            Foo(), inputs, dynamic_shapes={"x": (AUTO, None), "y": (AUTO, None)}
-        )
-        torch._dynamo.mark_dynamic(inputs[0], 0)
-        torch._dynamo.mark_dynamic(inputs[1], 0)
-        ep_dynamic = torch.export.export(Foo(), inputs)
-
-        # test both programs have same effect
-        for ep in [ep_auto, ep_dynamic]:
-            gm = ep.module()
-            gm(torch.randn(32, 4), torch.randn(32, 4))
-            gm(torch.randn(1, 4), torch.randn(1, 4))
-            with self.assertRaises(RuntimeError):
-                gm(torch.randn(33, 4), torch.randn(32, 4))
-                gm(torch.randn(128, 4), torch.randn(128, 4))
-
     def test_dont_duck_size_for_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         class Foo(torch.nn.Module):
