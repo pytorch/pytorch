@@ -412,7 +412,7 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
-                # Special build building to use on Colab. PyThon 3.10 for 12.1 CUDA
+                # Special build building to use on Colab. Python 3.11 for 12.1 CUDA
                 if python_version == "3.11" and arch_version == "12.1":
                     ret.append(
                         {
