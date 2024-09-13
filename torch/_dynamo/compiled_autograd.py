@@ -517,12 +517,10 @@ class _EnableContext:
             )
             self.set_multithreading_enabled_ctx_mgr.__enter__()
         else:
-            # TODO: insert eager profiling start event here
             pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
-            # TODO: insert eager profiling end event here
             self.warmup_count += 1  # type: ignore[attr-defined]
         else:
             if self.set_multithreading_enabled_ctx_mgr:
