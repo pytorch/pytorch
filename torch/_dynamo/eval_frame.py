@@ -19,10 +19,8 @@ import sys
 import textwrap
 import traceback
 import types
-import uuid
 import warnings
 import weakref
-from collections import defaultdict
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -57,7 +55,11 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
-from torch.export.dynamic_shapes import _combine_args, _process_dynamic_shapes
+from torch.export.dynamic_shapes import (
+    _check_dynamic_shapes,
+    _combine_args,
+    _process_dynamic_shapes,
+)
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -100,37 +102,41 @@ cached_backends: Dict[int, CompilerFn] = {}
 unset = Unset.token
 
 
-context_id_to_warmup_count: Dict[str, int] = defaultdict(int)
+context_id_to_warmup_count: Dict[int, int] = {}
 
 
-def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str):
+def _maybe_set_eval_frame(callback: DynamoCallback, context_id: int, state: str):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
     # Users can disable torchDynamo by setting the JK to False.
     from torch._C._dynamo.eval_frame import set_eval_frame
 
-    assert state in ["enter", "exit"]
     if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
-        torch._dynamo.utils.warn_once(
+        log.warning(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
         )
         return callback
     else:
-        if (
-            config.warmup_runs > 0
-            # NOTE: Warmup for compiled autograd Dynamo tracing is handled in compiled_autograd.py _EnableContext.
-            and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
-        ):
+        assert state in ["enter", "exit"]
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            # NOTE: Compiled Autograd graph cannot be executed in eager mode and must be Dynamo traced through
+            return set_eval_frame(callback)
+        else:
+            if context_id not in context_id_to_warmup_count:
+                context_id_to_warmup_count[context_id] = 0
             if state == "enter":
                 if context_id_to_warmup_count[context_id] < config.warmup_runs:
+                    # TODO: insert eager profiling start event here
+                    # TODO: maybe kick off Remote Execution of torch.compile here
                     return set_eval_frame(None)
                 else:
                     return set_eval_frame(callback)
             elif state == "exit":
                 if context_id_to_warmup_count[context_id] < config.warmup_runs:
+                    # TODO: insert eager profiling end event here
                     context_id_to_warmup_count[context_id] += 1
-                return set_eval_frame(callback)
-        else:
-            return set_eval_frame(callback)
+                    return set_eval_frame(callback)
+                else:
+                    return set_eval_frame(callback)
 
 
 def _reset_guarded_backend_cache():
@@ -338,7 +344,6 @@ class _TorchDynamoContext:
         self.compiler_config = compiler_config
         self.cleanup_fns: List[Callable[[], Any]] = []
         self.enter_exit_hooks = []
-        self.context_id = str(uuid.uuid4())
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -373,11 +378,11 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
-        self.prior = _maybe_set_eval_frame(self.callback, self.context_id, "enter")
+        self.prior = _maybe_set_eval_frame(self.callback, id(self), "enter")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
-        _maybe_set_eval_frame(self.prior, self.context_id, "exit")
+        _maybe_set_eval_frame(self.prior, id(self), "exit")
         self.prior = unset
         for cleanup in self.cleanup_fns:
             cleanup()
@@ -471,8 +476,7 @@ class _TorchDynamoContext:
                     return fn(*args, **kwargs)
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
-            context_id = str(uuid.uuid4())
-            prior = _maybe_set_eval_frame(callback, context_id, "enter")
+            prior = _maybe_set_eval_frame(callback, id(fn), "enter")
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -492,7 +496,7 @@ class _TorchDynamoContext:
                     saved_dynamic_layer_stack_depth
                 )
 
-                _maybe_set_eval_frame(prior, context_id, "exit")
+                _maybe_set_eval_frame(prior, id(fn), "exit")
                 for cleanup in cleanups:
                     cleanup()
 
@@ -578,21 +582,6 @@ class OptimizeContext(_TorchDynamoContext):
             compiler_config=compiler_config,
         )
 
-        # self.compiled_autograd_ctx = None
-        # if config.compiled_autograd:
-
-        #     def call_compiled_autograd():
-        #         if self.compiled_autograd_ctx is None:
-        #             assert rebuild_ctx is not None
-        #             compiler_fn = rebuild_ctx()
-        #             self.compiled_autograd_ctx = torch._dynamo.compiled_autograd.enable(
-        #                 compiler_fn
-        #             )
-        #         self.compiled_autograd_ctx.__enter__()
-        #         return functools.partial(
-        #             self.compiled_autograd_ctx.__exit__, None, None, None
-        #         )
-
         if config.compiled_autograd:
 
             def call_compiled_autograd():
@@ -665,12 +654,11 @@ class DisableContext(_TorchDynamoContext):
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            context_id = str(uuid.uuid4())
-            prior = _maybe_set_eval_frame(callback, context_id, "enter")
+            prior = _maybe_set_eval_frame(callback, id(fn), "enter")
             try:
                 return fn(*args, **kwargs)
             finally:
-                _maybe_set_eval_frame(prior, context_id, "exit")
+                _maybe_set_eval_frame(prior, id(fn), "exit")
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
@@ -1342,6 +1330,7 @@ def export(
 
     def inner(*args, **kwargs):
         combined_args = _combine_args(_f, args, kwargs)
+        _check_dynamic_shapes(combined_args, dynamic_shapes)
         constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
         f = _f
         assume_static_by_default = _assume_static_by_default
@@ -1483,6 +1472,7 @@ def export(
             and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
+            dim_constraints.remove_redundant_dynamic_results()
             forced_specializations = dim_constraints.forced_specializations()
             msg = dim_constraints.prettify_results(
                 original_signature,
@@ -1601,14 +1591,7 @@ def export(
 
         if same_signature:
             flat_args_dynamic_dims = [
-                {
-                    c.dim
-                    for c in (constraints or ())
-                    if (
-                        c.t_id == id(x)
-                        and c.constraint_range.vr.lower != c.constraint_range.vr.upper
-                    )
-                }
+                {c.dim for c in (constraints or ()) if c.t_id == id(x)}
                 for x in flat_args
             ]
             graph = rewrite_signature(
@@ -1623,7 +1606,15 @@ def export(
                 result_traced,  # type: ignore[possibly-undefined]
                 flat_args_dynamic_dims,
             )
-        return ExportResult(graph, out_guards)  # type: ignore[arg-type]
+        # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
+        assert graph is not None
+        graph.meta["input_shape_constraints"] = (
+            [constraint.serializable_spec for constraint in constraints]
+            if constraints
+            else []
+        )
+
+        return ExportResult(graph, out_guards)
 
     if extra_args or extra_kwargs:
         warnings.warn(

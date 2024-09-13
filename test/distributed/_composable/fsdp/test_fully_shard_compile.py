@@ -359,7 +359,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         return file_check
 
     def _test_traceable_fsdp(
-        self, model_init_fn, input_creation_fn, backend, fwd_fullgraph
+        self, model_init_fn, input_creation_fn, backend, fullgraph
     ):
         def compiler_fn(compiled_autograd_backend):
             def _fn(gm):
@@ -379,17 +379,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         ):
             torch.manual_seed(42)
             losses = []
-            # if fwd_fullgraph or compiled_autograd_backend is None:
-            if compiled_autograd_backend is None:
-                # NOTE: When fwd_fullgraph=True, we use torch._dynamo.config.compiled_autograd=True
-                # to enable compiled autograd.
-                maybe_compiled_autograd_ctx = contextlib.nullcontext()
-            elif compiled_autograd_backend is not None:
+            if compiled_autograd_backend is not None:
                 # Compiled autograd context must be reused across iterations
                 # in order to track # of warmup runs.
                 maybe_compiled_autograd_ctx = compiled_autograd.enable(
                     compiler_fn(compiled_autograd_backend)
                 )
+            else:
+                maybe_compiled_autograd_ctx = contextlib.nullcontext()
             for i in range(n_iter):
                 inp = input_creation_fn()
                 with maybe_compiled_autograd_ctx:
@@ -403,9 +400,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def test_compiled():
             model, optim = model_init_fn()
-            model_compiled = torch.compile(
-                model, backend=backend, fullgraph=fwd_fullgraph
-            )
+            model_compiled = torch.compile(model, backend=backend, fullgraph=fullgraph)
             res = run_iters(
                 model_compiled,
                 optim,
@@ -422,11 +417,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         torch._dynamo.compiled_autograd.reset()
         losses_eager = test_eager()
         with torch._dynamo.config.patch(
-            # NOTE: When fwd_fullgraph=True, we can directly use config.compiled_autograd
-            # since the fwd and bwd compile options will be the same.
-            # When fwd_fullgraph=False, fwd compile allows graph-break while bwd compile must still be fullgraph,
-            # so we must create a compiled autograd ctx manager to customize the bwd compile options in that case.
-            compiled_autograd=False,
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
             warmup_runs=1,
@@ -440,7 +430,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 "reorder_compute_for_overlap",
             ],
             post_grad_custom_pre_pass=self._assert_no_aliased_graph_inputs
-            if fwd_fullgraph
+            if fullgraph
             else None,
         ):
             losses_compiled = test_compiled()
@@ -484,7 +474,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "aot_eager", fwd_fullgraph=True
+            *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
@@ -493,14 +483,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
             "aot_eager_decomp_partition",
-            fwd_fullgraph=True,
+            fullgraph=True,
         )
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "inductor", fwd_fullgraph=True
+            *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
         )
 
     def _create_nested_fully_shard_factory_fns(self, fullgraph):
@@ -571,7 +561,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(fullgraph=fullgraph),
                 "aot_eager",
-                fwd_fullgraph=fullgraph,
+                fullgraph=fullgraph,
             )
 
     @skipIfRocm
@@ -581,14 +571,13 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(fullgraph=fullgraph),
                 "aot_eager_decomp_partition",
-                fwd_fullgraph=fullgraph,
+                fullgraph=fullgraph,
             )
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor(self):
-        # for fullgraph in [True, False]:
-        for fullgraph in [True]:
+        for fullgraph in [True, False]:
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
@@ -610,13 +599,12 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             fullgraph=fullgraph
                         ),
                         "inductor",
-                        fwd_fullgraph=fullgraph,
+                        fullgraph=fullgraph,
                     )
                 )
             if fullgraph:
-                self.assertEqual(
-                    len(triton_codes),
-                    2,
+                self.assertTrue(
+                    len(triton_codes) == 2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -683,10 +671,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.
-                self.assertGreater(
-                    len(triton_codes),
-                    2,
-                    "Expected more than 2 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+                self.assertTrue(
+                    len(triton_codes) > 2,
+                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
     def _create_transformer_factory_fns(self, all_requires_grad):
@@ -761,7 +748,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         all_requires_grad=all_requires_grad
                     ),
                     "aot_eager",
-                    fwd_fullgraph=fullgraph,
+                    fullgraph=fullgraph,
                 )
 
     @skipIfRocm
@@ -778,7 +765,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         all_requires_grad=all_requires_grad
                     ),
                     "aot_eager_decomp_partition",
-                    fwd_fullgraph=fullgraph,
+                    fullgraph=fullgraph,
                 )
 
     @skipIfRocm
@@ -817,13 +804,12 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             all_requires_grad=all_requires_grad
                         ),
                         "inductor",
-                        fwd_fullgraph=fullgraph,
+                        fullgraph=fullgraph,
                     )
                 )
             if fullgraph:
-                self.assertEqual(
-                    len(triton_codes),
-                    2,
+                self.assertTrue(
+                    len(triton_codes) == 2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -886,10 +872,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             else:
                 # TODO: when fullgraph=False and there is graph break in FWD graph,
                 # there are several recompiles, need to figure out why.
-                self.assertGreater(
-                    len(triton_codes),
-                    2,
-                    "Expected more than 2 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+                self.assertTrue(
+                    len(triton_codes) > 2,
+                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
 
