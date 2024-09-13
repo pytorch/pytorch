@@ -2523,7 +2523,8 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
-      this->_ref_stack.push_back(Py_TYPE(mode));
+      auto type = Py_TYPE(mode);
+      this->_ref_stack.push_back(type);
     }
 
     len = PyList_Size(ignored_types.ptr());
@@ -2543,29 +2544,56 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
   bool check_nopybind(PyObject* value) override {
     // Ignore value arg, only used to satisfy the interface
     size_t ref_ind = 0;
-    int64_t len = at::impl::PythonTorchFunctionTLS::stack_len();
+    const int64_t len = at::impl::PythonTorchFunctionTLS::stack_len();
     const size_t ref_stack_size = this->_ref_stack.size();
 
-    for (int64_t idx = 0; idx < len; idx++) {
+    int64_t idx = 0;
+    while ((idx < len) && (ref_ind < ref_stack_size)) {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+      bool act_ignored = this->_ignored_types.count(mode_type) > 0;
+      bool ref_ignored =
+          this->_ignored_types.count(this->_ref_stack.at(ref_ind)) > 0;
       // skip ignored types
-      if (this->_ignored_types.count(mode_type) > 0) {
+      if (act_ignored && ref_ignored) {
+        idx++;
+        ref_ind++;
+        continue;
+      } else if (ref_ignored) {
+        ref_ind++;
+        continue;
+      } else if (act_ignored) {
+        idx++;
         continue;
       }
       // if we already have more non-ignored modes than the ref stack
       // or if the mode doesn't match at the current index, return false
-      else if (
-          (ref_stack_size == 0) || (ref_ind > ref_stack_size - 1) ||
-          mode_type != _ref_stack[ref_ind]) {
+      else if (mode_type != _ref_stack.at(ref_ind)) {
         return false;
       }
       ref_ind++;
+      idx++;
     }
 
-    return ref_ind == this->_ref_stack.size();
+    for (; ref_ind < ref_stack_size; ref_ind++) {
+      if (!(this->_ignored_types.count(this->_ref_stack.at(ref_ind)) > 0)) {
+        return false;
+      }
+    }
+
+    for (; idx < len; idx++) {
+      std::shared_ptr<c10::SafePyObject> mode =
+          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+
+      PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+      if (!(this->_ignored_types.count(mode_type) > 0)) {
+        return false;
+      }
+    }
+
+    return ref_ind == ref_stack_size && idx == len;
   }
 
  private:
