@@ -9,14 +9,10 @@ import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import DTensor, Replicate, Shard
-from torch.distributed._tensor.device_mesh import _mesh_resources
-from torch.distributed._tensor.placement_types import (
-    _StridedShard,
-    DTensorSpec,
-    Placement,
-    TensorMeta,
-)
+from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor.device_mesh import _mesh_resources
+from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
@@ -80,20 +76,20 @@ def copy_(tensor, data):
 
 
 """
-[Note: Avoiding functionalization for fsdp.copy_ and inductor.resize_storage_bytes_(0)]
+[Note: Avoiding functionalization for fsdp.copy_ and inductor.resize_storage_bytes_]
 
-Currently we don't functionalize `fsdp.copy_` op or `inductor.resize_storage_bytes_(0)` op
+Currently we don't functionalize `fsdp.copy_` op or `inductor.resize_storage_bytes_` op
 (i.e. they show up as a mutation op in the middle of the AOT joint graph).
 
 Reason:
 Traceable FSDP2 compiled autograd BWD graph have the following traits:
 (1) Two inputs of the graph were aliased to each other (one from hook closed-over tensors, one from FWD saved tensors).
-(2) One of them is mutated (copy_ and resize_(0) to handle the all-gathered param).
+(2) One of them is mutated (copy_ and resize_ to handle the all-gathered param).
 (3) They are both subclasses.
 The combination of these traits is not supported by AOTAutograd (it's difficult to reason about subclass aliasing).
 So this doesn't work at all for Traceable FSDP2.
 
-The compromise we use is to avoid functionalization for the FSDP2 copy_ and resize_(0) ops.
+The compromise we use is to avoid functionalization for the FSDP2 copy_ and resize_ ops.
 This avoids the problem above, because from AOTAutograd point-of-view there are no mutations
 that functionalization needs to handle. (Although we need to be careful not to DCE those mutable ops.)
 
@@ -103,6 +99,27 @@ so it's safe to call .copy_() in the middle of the graph to update its content a
 (2) We always re-allocate the buffer for nn.Parameter to store the AllGather output and to be used in downstream user ops.
 So calling resize-to-0 in the middle of the graph to free nn.Parameter memory after use should always be okay
 (since we always allocate anew next time we need it, we strictly don't need to keep the old tensor storage around anymore).
+
+Q: Wouldn't the extra resize_ and copy_ ops hurt both memory usage and performance?
+A: Yes it would. As an optimization, we have an Inductor post-grad FX pass to remove those resize_ and copy_ ops
+for unsharded params that have this pattern: resize_(full) -> copy_ -> resize_(0).
+
+TODO:
+Now that we are maintaining the invariant of "no aliased + mutated graph inputs" in both the forward and backward,
+it is now more feasible to functionalize all of the mutable FSDP ops. Some of the pros and cons are:
+
+Cons (of functionalizing those ops):
+(1) By not functionalizing them as we are today, we are making it more likely that they will run at the "correct" time
+in the generated code. If we start to functionalize them, we will need to make sure that Inductor reinplaces them
+in a way where it properly moves the mutations back to exactly where they should have run, or we risk suffering worse
+peak memory than eager. (We probably already need to do something similar in Inductor's reinplacing for copy_:
+https://github.com/pytorch/pytorch/issues/135305#issuecomment-2334888089)
+
+Pros (of functionalizing):
+(1) Better safety, we don't need to worry about the graph passes in inductor/partitioning handling input mutations
+mid-graph quite as much (to be fair we've already done some amount of auditing, but we might have to do some more).
+(2) Better perf: each mutation midway through the graph prevents Inductor from pattern matching across it.
+But maybe there are few enough mutations induced by FSDP for this to matter.
 """
 
 
@@ -462,9 +479,11 @@ class FSDPParam:
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
                 self._unsharded_param
             ):
-                size = self._unsharded_param.numel() * self._unsharded_param.itemsize
-                if (storage := self._unsharded_param.untyped_storage()).size() != size:
-                    storage.resize_(size)
+                # NOTE: Under compile, if an unsharded param goes through
+                # resize_(full) -> copy_ -> resize_(0) pattern, we will remove those
+                # resize_ and copy_ ops in a compiler graph pass
+                # `remove_fsdp2_unsharded_param_graph_input_usage` to recover performance.
+                alloc_storage(self._unsharded_param)
                 torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
@@ -599,13 +618,15 @@ class FSDPParam:
             """
             Assumptions under compile:
             - `self._unsharded_param` is NOT an alias of `self.all_gather_outputs`.
-            Instead, we explicitly *copy* the data from `self.all_gather_outputs`
-            to `self._unsharded_param` in `init_unsharded_param()`.
+            Instead, we resize `self._unsharded_param` storage size to full and then
+            explicitly *copy* the data from `self.all_gather_outputs` to `self._unsharded_param`
+            in `init_unsharded_param()`. (For full-graph FSDP2 case, we will then remove
+            the resize_ and copy_ ops in a compiler graph pass to recover performance.)
             - `self.all_gather_outputs` and `self._unsharded_inner_tensors` are NOT
             graph inputs. They are created within the graph and is guaranteed to be freed
             by the end of the graph. They don't leak outside of the graph.
             """
-            free_storage(self._unsharded_param)
+            self._unsharded_param.untyped_storage().resize_(0)
             self.all_gather_outputs = []
             self._unsharded_inner_tensors = []
         else:
