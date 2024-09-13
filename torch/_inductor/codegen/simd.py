@@ -997,7 +997,9 @@ class SIMDScheduling(BaseScheduling):
                 if n.is_template():
                     # Only allow fusion for TritonTemplates for now.
                     # Fusion for CUDATemplates are not supported.
-                    is_triton_template = isinstance(n.node, TritonTemplateBuffer)
+                    is_triton_template = isinstance(
+                        n.get_template_node(), TritonTemplateBuffer
+                    )
                     if not is_triton_template:
                         why(f"{node_name} is not TritonTemplateBuffer")
                     return is_triton_template
@@ -1480,22 +1482,30 @@ class SIMDScheduling(BaseScheduling):
                 kernel.prologue_replaced_args.append(buf_name)
 
             partial_code = render()
-            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                for node in epilogue_nodes:
-                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
+            # NB: the kernel has state that is added to written to when
+            # we codegen prologue and epilogue. we immediately finalize
+            # the hook subsequent to codegen which writes out the code
+            # and also clears shared state.
             for input_name, buffer in kernel.named_input_nodes.items():
+                subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 if prologue_node := buf_name_to_prologue_node.get(
                     buffer.get_name(), None
                 ):
-                    subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                    # TODO - need better solution before turning on by default
-                    # this doesnt work with libdevice calls, potentially other bugs
+                    # TODO - this doesnt work with libdevice calls, potentially other bugs
+                    # upcasting to fp32 and downcasting gives large slowdown
                     with config.patch("triton.codegen_upcast_to_fp32", False):
                         with kernel.set_subgraph_body(subgraph_name):
                             prologue_node.codegen(
                                 kernel.split_and_set_ranges(prologue_node.get_ranges())
                             )
+                with V.set_kernel_handler(kernel):
+                    partial_code.finalize_hook(subgraph_name, strict=False)
+                    breakpoint()
+
+            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                for node in epilogue_nodes:
+                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
@@ -1504,9 +1514,9 @@ class SIMDScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
 
-            for input_name in kernel.named_input_nodes.keys():
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                partial_code.finalize_hook(subgraph_name, strict=False)
+            # for input_name in kernel.named_input_nodes.keys():
+            #     subgraph_name = f"<LOAD_INPUT_{input_name}>"
+            #     partial_code.finalize_hook(subgraph_name, strict=False)
 
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 if isinstance(partial_code, str):

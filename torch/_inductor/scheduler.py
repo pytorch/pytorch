@@ -520,7 +520,9 @@ class BaseSchedulerNode:
             include_reads=False, include_writes=True
         )
 
-    def get_read_write_buffers_sizes_impl(self, include_reads, include_writes) -> int:
+    def get_read_write_buffers_sizes_impl(
+        self, include_reads: bool, include_writes: bool
+    ) -> int:
         """
         Counting the number of bytes accessed for a kernel is
         surprisingly tricky. In particular, there is a differentiation
@@ -730,6 +732,11 @@ class BaseSchedulerNode:
 
     def get_template_node(self) -> Optional[ir.TemplateBuffer]:
         return None
+
+    def get_template_node_or_throw(self) -> ir.TemplateBuffer:
+        template = self.get_template_node()
+        assert template is not None
+        return template
 
 
 class WhyNoFuse:
@@ -2489,12 +2496,14 @@ class Scheduler:
             epilogue_fusion = node1.get_template_node() is not None
 
             multi_node = node1.node if epilogue_fusion else node2.node
+            assert isinstance(multi_node, ir.MultiTemplateBuffer)
             choice_timings = multi_node.choice_timings
             _, ms1 = multi_node.get_min_choice()
 
             non_template_nodes = node_list_2 if epilogue_fusion else node_list_1
 
             ms2, path2 = self.benchmark_fused_nodes(non_template_nodes)
+            # breakpoint()
 
             min_ms_fused = float("inf")
             ms_fused_choice = None
@@ -2528,7 +2537,7 @@ class Scheduler:
             # after we do a fusion, we finalize a triton template.
             # TODO - could preserve multi template and choices for subsequent fusions
             if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                multi_node.node.finalize_as_triton_caller(ms_fused_choice)
+                multi_node.finalize_as_triton_caller(ms_fused_choice)
                 return True
             else:
                 return False
@@ -2956,7 +2965,7 @@ class Scheduler:
                 why("prologue fusion turned off")
                 return False
 
-            template = node2.get_template_node()
+            template = node2.get_template_node_or_throw()
             allowed_prologue_inps = template.allowed_prologue_inps
 
             unsupported_prologue_args = (
@@ -3212,9 +3221,10 @@ class Scheduler:
         if node2.is_template():
             template_score = 0
         else:
-            template_score = (
-                1 + node1.is_template() == config.epilogue_fusion_first
-            ) and memory_score > 0
+            template_score = 1 + (
+                (node1.is_template() == config.epilogue_fusion_first)
+                and memory_score > 0
+            )
 
         return (
             template_score,

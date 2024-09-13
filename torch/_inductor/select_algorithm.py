@@ -511,8 +511,6 @@ class TritonTemplateKernel(TritonKernel):
             self.named_input_nodes[input_name].data.freeze_layout()
             self.cse.invalidate(set())
 
-            from torch._inductor.codegen.triton import triton_store_type
-
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
                 self.name = name
 
@@ -525,10 +523,7 @@ class TritonTemplateKernel(TritonKernel):
                 ):
                     nonlocal prologue_called
                     prologue_called = True
-                    # TODO - use exact dtypes, not fp32, in kernel
-                    V.kernel.compute.writeline(
-                        f"{output_name} = {value}.to({triton_store_type(input_node.dtype)})"
-                    )
+                    V.kernel.compute.writeline(f"{output_name} = {value})")
 
             self.ops_handler = StoreOutputSubstitution
 
@@ -541,7 +536,6 @@ class TritonTemplateKernel(TritonKernel):
 
             # Generate load code
             load_code = f"{output_name} = tl.load({input_name} + ({output_index})"
-            # load_code = f"{output_name} = tl.load({input_name} + {texpr(input_index)}"
             if mask:
                 load_code += f", mask={mask}, other={other})"
             else:
@@ -550,6 +544,19 @@ class TritonTemplateKernel(TritonKernel):
 
         def hook():
             with self.set_subgraph_body(hook_key):
+                # theres only one shared compute, etc,
+                # Body is separate right now..... but not self.compute, etc
+                #  self.indexing_code
+                #    or self.loads
+                #    or self.stores
+                #    or self.compute
+                #    or self.suffix
+                #
+                #
+                #
+                #
+                if self.compute:
+                    breakpoint()
                 self.codegen_body()
                 if not prologue_called:
                     self.body.writeline(load_code)
