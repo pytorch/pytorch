@@ -336,6 +336,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(linalg_vecdot, lower_precision_fp)
   KERNEL_CPU(baddbmm, lower_precision_fp)
   KERNEL_CPU(addmm, lower_precision_fp)
+  KERNEL_CPU(_addmm_activation, lower_precision_fp)
   KERNEL_CPU(addbmm, lower_precision_fp)
   KERNEL_CPU(linear, lower_precision_fp)
   KERNEL_CPU(_convolution, deprecated, lower_precision_fp)
