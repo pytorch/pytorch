@@ -7,6 +7,7 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import io
+import math
 import tempfile
 import unittest
 import zipfile
@@ -807,6 +808,26 @@ class TestDeserialize(TestCase):
                 return cond(x[0][0] > 4, t, f, [x, y])
 
         self.check_graph(M(), inputs)
+
+    def test_arg_from(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("compress_weight", torch.ones((10, 10)))
+                self.register_buffer("compress_bias", torch.ones(10))
+
+            def forward(self) -> None:
+                if self.compress_weight is None or self.compress_bias is None:
+                    return
+                torch.nn.init.kaiming_uniform_(self.compress_weight, a=math.sqrt(5))
+                fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(
+                    self.compress_weight
+                )
+                bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                torch.nn.init.uniform_(self.compress_bias, -bound, bound)
+
+        with torch.no_grad():
+            self.check_graph(M(), ())
 
     def test_map(self):
         from functorch.experimental import control_flow
