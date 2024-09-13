@@ -595,6 +595,7 @@ class WrapperCodeGen(CodeGen):
 
                 async_compile = AsyncCompile()
                 generate_example_value = AlgorithmSelectorCache.generate_example_value
+                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
             """
         )
 
@@ -787,8 +788,12 @@ class WrapperCodeGen(CodeGen):
     def generate_extern_kernel_out(
         self, kernel: str, out: str, out_view: Optional[str], args: List[str]
     ):
+        # add debug printer code for triton kernel calls at (jit) inductor level
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         args.append(f"out={out_view if out_view else out}")
-        self.writeline(f"{kernel}({', '.join(args)})")
+        with debug_printer_manager:
+            self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
         self,
@@ -1252,7 +1257,7 @@ class WrapperCodeGen(CodeGen):
             )
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
+        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         body = f"\n\n{metadata_comment}{name} = {kernel}"
@@ -1270,15 +1275,15 @@ class WrapperCodeGen(CodeGen):
         from .common import KernelArgType, SizeArg, TensorArg
 
         signature: List[KernelArgType] = []
-        constants: Dict[int, Any] = {}
+        constants: Dict[str, Any] = {}
         non_constant_indices = []
-        equal_to_1_arg_idx: List[int] = []
+        equal_to_1_args: List[str] = []
         for idx, key in enumerate(kernel.arg_names):
             if key not in kwargs:
                 continue
             arg = kwargs[key]
             if idx in kernel.constexprs:
-                constants[idx] = arg
+                constants[key] = arg
             else:
                 non_constant_indices.append(idx)
                 if isinstance(arg, ir.Buffer):
@@ -1308,13 +1313,14 @@ class WrapperCodeGen(CodeGen):
                     ) and V.graph.sizevars.statically_known_equals(
                         arg, 1  # type: ignore[arg-type]
                     ):
-                        equal_to_1_arg_idx.append(idx)
+                        equal_to_1_args.append(key)
         index_dtype = "tl.int32"
         triton_meta = {
             "signature": signature_to_meta(
                 signature,
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
+                argdefs=kernel.arg_names,
             ),
             "device": DeviceProperties.create(
                 V.graph.scheduler.get_current_device_or_throw()
@@ -1328,7 +1334,7 @@ class WrapperCodeGen(CodeGen):
             # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
-                **dict.fromkeys(equal_to_1_arg_idx, 1),
+                **dict.fromkeys(equal_to_1_args, 1),
             },
             "configs": [
                 config_of(
@@ -1492,12 +1498,18 @@ class WrapperCodeGen(CodeGen):
         return SymbolicCallArg(expr, tree.numel)
 
     def generate_workspace_allocation(self, nbytes, device, zero_fill):
+        if isinstance(nbytes, sympy.Expr):
+            nbytes = V.graph.sizevars.size_hint(nbytes)
         line = self.make_allocation(
             "workspace", device, torch.uint8, shape=(nbytes,), stride=(1,)
         )
         self.writeline(line)
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.writeline(line)
         if zero_fill:
             self.writeline(f"workspace.zero_(){self.ending}")
+            if config.triton.autotune_at_compile_time:
+                self.kernel_autotune_calls.writeline(f"workspace.zero_(){self.ending}")
 
     def wrap_kernel_call(self, name, call_args):
         return f"{name}({', '.join(call_args)}){self.ending}"
@@ -1554,7 +1566,7 @@ class WrapperCodeGen(CodeGen):
         self,
         kernel_name: str,
         grid: List[Any],
-        cuda: bool = True,
+        gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = None,
         **grid_extra_kwags,
     ):
@@ -1646,7 +1658,7 @@ class WrapperCodeGen(CodeGen):
         call_args,
         grid=None,
         device_index=None,
-        cuda=True,
+        gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
@@ -1658,12 +1670,13 @@ class WrapperCodeGen(CodeGen):
         """
         Generates kernel call code.
 
-        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
+                Only valid when gpu == True.
         """
-        if not (triton or cuda):
+        if not (triton or gpu):
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             return
 
@@ -1688,9 +1701,15 @@ class WrapperCodeGen(CodeGen):
             if grid_extra_kwargs:
                 grid_str = f"{grid_str}, {grid_extra_kwargs}"
             grid_str = f"{grid_fn}({grid_str})"
-        self.writeline(
-            f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+        # add debug printer code for triton kernel calls at (jit) inductor level
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_types, None
         )
+        with debug_printer_manager:
+            self.writeline(
+                f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+            )
         if (
             config.triton.autotune_at_compile_time
             and kernel_name not in self.kernel_autotune_names
@@ -1719,7 +1738,12 @@ class WrapperCodeGen(CodeGen):
                     key, arg = arg.split("=")
 
                 if isinstance(arg_type, torch_dtype):
-                    if arg not in tensor_args:
+                    # workspace allocation is already generated by `generate_workspace_allocation()`
+                    # in `TritonKernel.call_kernel()`.
+                    if arg == "workspace":
+                        arg_str = "workspace"
+                        tensor_args[arg] = arg_str
+                    elif arg not in tensor_args:
                         arg_str = self.generate_example_arg_value(
                             arg, arg_type, raw_arg, i
                         )
@@ -1727,7 +1751,9 @@ class WrapperCodeGen(CodeGen):
                     else:
                         arg_str = tensor_args[arg]
                 else:
-                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
+                    arg_str = self.generate_example_arg_value(
+                        arg, arg_type, raw_arg, i
+                    )
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             if grid is None:
