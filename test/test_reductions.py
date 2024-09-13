@@ -851,6 +851,21 @@ class TestReductions(TestCase):
             use_complex=True)
 
     @onlyCPU
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    def test_mean_out_correctness(self, dtype, device):
+        x = torch.tensor(
+            [[[1.0, 1.0, 1.0, 1.0]], [[2.0, 2.0, 2.0, 2.0]], [[3.0, 3.0, 3.0, 3.0]]],
+            dtype=dtype,
+            device=device
+        )
+        y = torch.empty((1, 1, 4), dtype=dtype, device=device)
+        torch.mean(x, dim=0, keepdim=True, out=y)
+        res = torch.rand_like(y)
+        res.fill_(2.0)
+        self.assertEqual(y, res)
+
+
+    @onlyCPU
     def test_std_dim(self, device):
         for unbiased in [False, True]:
             self._test_dim_ops(
