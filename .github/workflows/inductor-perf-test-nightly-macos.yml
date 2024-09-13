@@ -32,7 +32,7 @@ permissions: read-all
 
 jobs:
   macos-perf-py3-arm64-build:
-    name: macos-py3-arm64
+    name: macos-perf-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
       sync-tag: macos-perf-py3-arm64-build
@@ -47,7 +47,7 @@ jobs:
         ]}
 
   macos-py3-arm64-mps-test:
-    name: macos-py3-arm64-mps
+    name: macos-perf-py3-arm64-mps
     uses: ./.github/workflows/_mac-test-mps.yml
     needs: macos-perf-py3-arm64-build
     with:
