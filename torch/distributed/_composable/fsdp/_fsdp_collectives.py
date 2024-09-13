@@ -442,6 +442,8 @@ def _get_all_gather_input_metadatas(
             input_numels.append(all_gather_input.numel())
         param_all_gather_input_dtypes.append(input_dtypes)
         param_all_gather_input_numels.append(input_numels)
+    if all_gather_dtype is torch.float8_e4m3fn:
+        all_gather_dtype = torch.uint8
     return (
         param_all_gather_input_dtypes,
         param_all_gather_input_numels,
