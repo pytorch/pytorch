@@ -1088,8 +1088,7 @@ def _save(
     # Write the pickle data for `obj`
     data_buf = io.BytesIO()
 
-    # type: ignore[name-defined]
-    class PyTorchPickler(pickle_module.Pickler):
+    class PyTorchPickler(pickle_module.Pickler):  # type: ignore[name-defined]
         def persistent_id(self, obj):
             return persistent_id(obj)
 
