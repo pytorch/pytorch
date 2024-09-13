@@ -251,6 +251,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
 
     all_preservable_cia_ops = _collect_all_valid_cia_ops()
     cia_ops_to_callable = {}
+    handled_cia_ops = set()
 
     for op in list(decomp_table.keys()):
         # TODO we are silently allowing non-safe(non-functional) ops through a crack
@@ -272,13 +273,14 @@ def _split_decomp_table_to_cia_and_python_decomp(
         # handled.
         if op in all_preservable_cia_ops:
             cia_ops_to_callable[op] = decomp_table[op]
-            all_preservable_cia_ops.remove(op)
+            handled_cia_ops.add(op)
             del decomp_table[op]
 
     # If we reached here, it means user intentionally deleted these CIA ops from
     # decomp table.
     for k in all_preservable_cia_ops:
-        cia_ops_to_callable[k] = _special_op_to_preserve_cia
+        if k not in handled_cia_ops:
+            cia_ops_to_callable[k] = _special_op_to_preserve_cia
 
     return cia_ops_to_callable, decomp_table
 
