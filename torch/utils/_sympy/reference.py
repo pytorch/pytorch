@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 import math
 import operator
-import sympy
-import torch
-
 from typing import Union
+
+import sympy
+
+import torch
 from torch.utils._sympy.functions import (
     _keep_float,
     FloatPow,
@@ -285,6 +286,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
 
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     return torch.ops.aten._to_copy(x, dtype=dtype)
+
 
 # Suppose we have some int/float arguments.  This diagram commutes:
 #
