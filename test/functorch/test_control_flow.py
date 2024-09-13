@@ -2857,43 +2857,6 @@ def forward(self, pred_1, x_1):
 
     @parametrize("autograd", [False, True])
     def test_scan_RNN(self, autograd):
-        # dim = 0
-        # device = torch.device("cpu")
-
-        # rnn = torch.nn.RNN(
-        #     input_size=5,
-        #     hidden_size=7,
-        # )
-        # rnn = rnn.to(device=device)
-        # x = torch.randn(2, 1, 5, device=device, requires_grad=autograd)
-        # h = torch.randn(1, 7, device=device, requires_grad=autograd)
-
-        # W_ih = rnn.weight_ih_l0.T.clone()
-        # b_ih = rnn.bias_ih_l0.clone()
-        # W_hh = rnn.weight_hh_l0.T.clone()
-        # b_hh = rnn.bias_hh_l0.clone()
-
-        # def RNN(x: torch.Tensor, y: torch.Tensor):
-        #     c_new = y @ W_ih + b_ih
-        #     h_new = torch.tanh(c_new + x @ W_hh + b_hh)
-        #     return h_new, h_new
-
-        # expected_result = rnn(x, torch.unsqueeze(h, 0))
-        # expected_result_out = expected_result[0]
-        # expected_result_state = expected_result[1][0, :]
-        # result = scan(RNN, h, x, dim=dim, reverse=False)
-        # self.assertEqual(result[0], expected_result_state)
-        # self.assertEqual(result[1], expected_result_out)
-
-        # if autograd:
-        #     result_flat = pytree.tree_leaves(result)
-        #     result_exp_flat = [expected_result_state, expected_result_out]
-
-        #     grad_out = [torch.ones_like(r) for r in result_exp_flat]
-        #     expected_grads = torch.autograd.grad(result_exp_flat, (h, x), grad_out)
-        #     grads = torch.autograd.grad(result_flat, (h, x), grad_out)
-        #     self.assertEqual(grads, expected_grads)
-
         dim = 1
         device = torch.device("cpu")
 
@@ -2903,8 +2866,8 @@ def forward(self, pred_1, x_1):
             batch_first=True,
         )
         rnn = rnn.to(device=device)
-        x = torch.randn(1, 2, 5, device=device, requires_grad=autograd)
-        h = torch.randn(1, 7, device=device, requires_grad=autograd)
+        x = torch.randn(3, 10, 5, device=device, requires_grad=autograd)
+        h = torch.randn(3, 7, device=device, requires_grad=autograd)
 
         W_ih = rnn.weight_ih_l0.T.clone()
         b_ih = rnn.bias_ih_l0.clone()
@@ -2930,12 +2893,30 @@ def forward(self, pred_1, x_1):
 
             grad_out_expected = [torch.ones_like(r) for r in result_exp_flat]
             expected_grads = torch.autograd.grad(
-                result_exp_flat, (h, x), grad_out_expected
+                result_exp_flat,
+                (
+                    h,
+                    x,
+                    rnn.weight_ih_l0,
+                    rnn.bias_ih_l0,
+                    rnn.weight_hh_l0,
+                    rnn.bias_hh_l0,
+                ),
+                grad_out_expected,
             )
+            expected_add_input_grads = list(expected_grads[2:])
+            expected_grads = expected_grads[:2]
 
             grad_out = [torch.ones_like(r) for r in result]
-            grads = torch.autograd.grad(result_flat, (h, x), grad_out)
+            grads = torch.autograd.grad(
+                result_flat, (h, x, W_ih, b_ih, W_hh, b_hh), grad_out
+            )
+            add_input_grads = list(grads[2:])
+            add_input_grads[0] = add_input_grads[0].T
+            add_input_grads[2] = add_input_grads[2].T
+            grads = grads[:2]
             self.assertEqual(grads, expected_grads)
+            self.assertEqual(add_input_grads, expected_add_input_grads)
 
     @skipIfNoDynamoSupport
     def test_scan_simple_graph_no_carry(self):
