@@ -605,10 +605,6 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
-    tf_mode_stack: List[
-        torch.overrides.TorchFunctionMode
-    ] = torch.overrides._get_current_function_mode_stack()
-
     @preserve_global_state
     def transform(
         instructions: List[Instruction], code_options: Dict[str, object]
@@ -622,7 +618,6 @@ def _compile(
             locals,
             globals,
             builtins,
-            tf_mode_stack,
             code_options,
             compiler_fn,
             one_graph,
@@ -934,6 +929,15 @@ def _compile(
             # NB: e's msg is mutated here to add user stack, but we DON'T want
             # that stack in the Scuba logged fail_reason
             exception_handler(e, code, frame, export=export)
+            # NB: this is the post-mutation exception
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "dynamo_error",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: traceback.format_exc(),
+            )
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
