@@ -26,7 +26,7 @@ def is_fbcode():
 
 
 if is_fbcode():
-    import caffe2.test.profiler_test_cpp_thread_lib as cpp
+    import caffe2.test.profiler_test_cpp_thread_lib as cpp  # @manual=//caffe2/test:profiler_test_cpp_thread_lib
 else:
     # cpp extensions use relative paths. Those paths are relative to
     # this file, so we'll change the working directory temporarily

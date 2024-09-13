@@ -4,13 +4,8 @@ from __future__ import annotations
 
 
 __all__ = [
-    "ConversionError",
-    "DispatchError",
-    "GraphConstructionError",
-    "OnnxExporterError",
     "OnnxExporterWarning",
     "SymbolicValueError",
-    "TorchExportError",
     "UnsupportedOperatorError",
 ]
 
@@ -28,22 +23,6 @@ class OnnxExporterWarning(UserWarning):
 
 class OnnxExporterError(RuntimeError):
     """Errors raised by the ONNX exporter. This is the base class for all exporter errors."""
-
-
-class TorchExportError(OnnxExporterError):
-    """Error during graph capturing using torch.export."""
-
-
-class ConversionError(OnnxExporterError):
-    """Error during ExportedProgram to ONNX conversion."""
-
-
-class DispatchError(ConversionError):
-    """Error during ONNX Function dispatching."""
-
-
-class GraphConstructionError(ConversionError):
-    """Error during ONNX graph construction."""
 
 
 class UnsupportedOperatorError(OnnxExporterError):
