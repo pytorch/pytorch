@@ -131,10 +131,10 @@ static void im2col_out_cuda_template(
           output_n.mutable_data_ptr<scalar_t>());
     }
 
-    if (!batched_input) {
-      output.resize_({n_output_plane, output_length});
-    }
   });
+  if (!batched_input) {
+    output.resize_({n_output_plane, output_length});
+  }
 }
 
 } // namespace
