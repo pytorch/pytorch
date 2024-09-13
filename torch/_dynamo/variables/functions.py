@@ -343,7 +343,7 @@ class GeneratorFunctionVariable(UserFunctionVariable):
         This is only used when the function is annotated with @contextlib.contextmanager
     """
 
-    def __init__(self, fn, is_constant=False, **kwargs) -> types.NoneType:
+    def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(fn, is_constant, **kwargs)
         self.inline_tracer = None
 
