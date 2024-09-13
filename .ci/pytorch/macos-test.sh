@@ -148,6 +148,55 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
+
+test_torchbench_perf() {
+  print_cmake_info
+
+  echo "Launching torchbench setup"
+  make -C $(pwd)/benchmarks/dynamo clone-deps
+  make -C $(pwd)/benchmarks/dynamo pull-deps
+  make -C $(pwd)/benchmarks/dynamo build-deps
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir $TEST_REPORTS_DIR
+
+  echo "Setup complete, launching torchbench training perf run"
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/torchbench_training.csv
+
+  echo "Launching torchbench inference perf run"
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --inference --output=$(TEST_REPORTS_DIR)/torchbench_inference.csv
+
+  echo "Pytorch benchmark on mps device completed"
+}
+
+test_hf_perf() {
+  print_cmake_info
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir $TEST_REPORTS_DIR
+
+  echo "Launching HuggingFace training perf run"
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/hf_training.csv
+
+  echo "Launching HuggingFace inference perf run"
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/hf_inference.csv
+
+  echo "HuggingFace benchmark on mps device completed"
+}
+
+test_timm_perf() {
+  print_cmake_info
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir $TEST_REPORTS_DIR
+
+  echo "Launching timm training perf run"
+  python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/timm_training.csv
+
+  echo "Launching timm inference perf run"
+  python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/timm_inference.csv
+
+  echo "timm benchmark on mps device completed"
+}
+
 install_tlparse
 
 if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
