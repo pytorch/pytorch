@@ -437,8 +437,6 @@ static variable_list lambda_lift(
     SwapSavedVariables& ssv,
     PyObject* py_compiler,
     variable_list&& inputs) {
-  // c10::SymInt idx = lambda_idxs[next_lambdas_idx++].toSymInt();
-  // need to before(at::IValue) but with the proper next_proxy idx.
   at::IValue& idx = lambda_idxs[next_lambdas_idx++];
   int64_t hackidx = idx.toInt();
   ssv.before(idx);

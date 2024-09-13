@@ -327,7 +327,7 @@ def get_default_build_root() -> str:
 
 def remove_default_build_root():
     """
-    Removes the root folder under which extensions are built
+    Removes the default root folder under which extensions are built.
     """
     default_build_root = get_default_build_root()
     if os.path.exists(default_build_root):
