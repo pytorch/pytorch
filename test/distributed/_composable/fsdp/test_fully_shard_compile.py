@@ -359,7 +359,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         return file_check
 
     def _test_traceable_fsdp(
-        self, model_init_fn, input_creation_fn, backend, fullgraph
+        self, model_init_fn, input_creation_fn, backend, fwd_fullgraph
     ):
         def compiler_fn(compiled_autograd_backend):
             def _fn(gm):
@@ -379,14 +379,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         ):
             torch.manual_seed(42)
             losses = []
-            if compiled_autograd_backend is not None:
+            if fwd_fullgraph or compiled_autograd_backend is None:
+                # NOTE: When fwd_fullgraph=True, we use torch._dynamo.config.compiled_autograd=True
+                # to enable compiled autograd.
+                maybe_compiled_autograd_ctx = contextlib.nullcontext()
+            elif compiled_autograd_backend is not None:
                 # Compiled autograd context must be reused across iterations
                 # in order to track # of warmup runs.
                 maybe_compiled_autograd_ctx = compiled_autograd.enable(
                     compiler_fn(compiled_autograd_backend)
                 )
-            else:
-                maybe_compiled_autograd_ctx = contextlib.nullcontext()
             for i in range(n_iter):
                 inp = input_creation_fn()
                 with maybe_compiled_autograd_ctx:
@@ -400,7 +402,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def test_compiled():
             model, optim = model_init_fn()
-            model_compiled = torch.compile(model, backend=backend, fullgraph=fullgraph)
+            model_compiled = torch.compile(
+                model, backend=backend, fullgraph=fwd_fullgraph
+            )
             res = run_iters(
                 model_compiled,
                 optim,
@@ -417,6 +421,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         torch._dynamo.compiled_autograd.reset()
         losses_eager = test_eager()
         with torch._dynamo.config.patch(
+            # NOTE: When fwd_fullgraph=True, we can directly use config.compiled_autograd
+            # since the fwd and bwd compile options will be the same.
+            # When fwd_fullgraph=False, fwd compile allows graph-break while bwd compile must still be fullgraph,
+            # so we must create a compiled autograd ctx manager to customize the bwd compile options in that case.
+            compiled_autograd=fwd_fullgraph,
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
             warmup_runs=1,
@@ -430,7 +439,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 "reorder_compute_for_overlap",
             ],
             post_grad_custom_pre_pass=self._assert_no_aliased_graph_inputs
-            if fullgraph
+            if fwd_fullgraph
             else None,
         ):
             losses_compiled = test_compiled()
@@ -474,7 +483,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
+            *self._create_simple_mlp_factory_fns(), "aot_eager", fwd_fullgraph=True
         )
 
     @skipIfRocm
@@ -483,14 +492,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
             "aot_eager_decomp_partition",
-            fullgraph=True,
+            fwd_fullgraph=True,
         )
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
-            *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
+            *self._create_simple_mlp_factory_fns(), "inductor", fwd_fullgraph=True
         )
 
     def _create_nested_fully_shard_factory_fns(self, fullgraph):
@@ -561,7 +570,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(fullgraph=fullgraph),
                 "aot_eager",
-                fullgraph=fullgraph,
+                fwd_fullgraph=fullgraph,
             )
 
     @skipIfRocm
@@ -571,7 +580,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(fullgraph=fullgraph),
                 "aot_eager_decomp_partition",
-                fullgraph=fullgraph,
+                fwd_fullgraph=fullgraph,
             )
 
     @skipIfRocm
@@ -599,7 +608,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             fullgraph=fullgraph
                         ),
                         "inductor",
-                        fullgraph=fullgraph,
+                        fwd_fullgraph=fullgraph,
                     )
                 )
             if fullgraph:
@@ -748,7 +757,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         all_requires_grad=all_requires_grad
                     ),
                     "aot_eager",
-                    fullgraph=fullgraph,
+                    fwd_fullgraph=fullgraph,
                 )
 
     @skipIfRocm
@@ -765,7 +774,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         all_requires_grad=all_requires_grad
                     ),
                     "aot_eager_decomp_partition",
-                    fullgraph=fullgraph,
+                    fwd_fullgraph=fullgraph,
                 )
 
     @skipIfRocm
@@ -804,7 +813,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             all_requires_grad=all_requires_grad
                         ),
                         "inductor",
-                        fullgraph=fullgraph,
+                        fwd_fullgraph=fullgraph,
                     )
                 )
             if fullgraph:
