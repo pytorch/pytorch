@@ -6,7 +6,7 @@ import torch
 
 
 def is_fbcode() -> bool:
-    return not hasattr(torch.version, "git_version")
+    return hasattr(torch, "version") and not hasattr(torch.version, "git_version")
 
 
 def fx_graph_remote_cache_default() -> Optional[bool]:
@@ -387,7 +387,7 @@ autoheuristic_log_path = os.environ.get(
 )
 
 # Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
-layout_opt_default = "1" if not torch.version.hip else "0"
+layout_opt_default = "1" if hasattr(torch, "version") and torch.version.hip else "0"
 layout_optimization = (
     os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", layout_opt_default) == "1"
 )
