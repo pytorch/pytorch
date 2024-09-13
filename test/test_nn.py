@@ -8970,11 +8970,11 @@ class TestNNDeviceType(NNTestCase):
                     else:
                         self.assertEqual(hx.grad, hx_device.grad)
 
-    @dtypesIfMPS(torch.float)
     @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
     def test_BatchNorm_empty(self, device, dtype):
         mod = torch.nn.BatchNorm2d(3).to(device)
-        inp = torch.randn(0, 3, 2, 2, device=device)
+        inp = torch.randn(0, 3, 2, 2, device=device, dtype=dtype)
         _test_module_empty_input(self, mod, inp)
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
