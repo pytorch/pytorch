@@ -40,7 +40,7 @@ Now we have all the required packages installed and environment activated. Use t
 
 .. code-block::
 
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 
 
 Platform Windows
@@ -50,7 +50,7 @@ Now we have all the required packages installed and environment activated. Use t
 
 .. code-block::
 
-    pip3 install torch --index-url https://download.pytorch.org/whl/xpu
+    pip3 install torch --index-url https://download.pytorch.org/whl/nightly/xpu
 
 From Source
 ^^^^^^^^^^^
