@@ -94,7 +94,12 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             # For int8_weight -> dq -> bf16_weight
             return True
-        if node.target in [
+
+        quant_registered = (
+            getattr(torch.ops.quantized_decomposed, "dequantize_per_channel", None)
+            is not None
+        )
+        if quant_registered and node.target in [
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
