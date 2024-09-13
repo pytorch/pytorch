@@ -2726,6 +2726,7 @@ class ShapeEnv:
     def set_unbacked_var_to_val(self, k: sympy.Symbol, v: int) -> None:
         """Used only when propagate_real_tensors; registers a value for an
         unbacked symbol, which can be used last resort to resolve hints."""
+        log.info("set_unbacked_var_to_val %s = %s", k, v)
         self.unbacked_var_to_val[k] = sympy.sympify(v)
 
     # Unlike set_replacement, this records a shapeenv event
