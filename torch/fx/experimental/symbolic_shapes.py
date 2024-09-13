@@ -1414,13 +1414,64 @@ def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool
 
 IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
+
+def _expandsums(args: List[sympy.Expr]) -> Tuple[sympy.Expr, bool]:
+    adds, other = [], []
+    for arg in args:
+        if arg.is_Add:
+            adds.append(arg)
+        else:
+            other.append(arg)
+
+    result = [sympy.Mul(*other)]
+    for add in adds:
+        result = [a * b for a, b in itertools.product(result, add.args)]
+
+    result = sympy.Add(*result)
+    return result, len(adds) > 1 or (len(adds) > 0 and len(other) > 0)
+
+
+def _fast_expand(expr: sympy.Expr) -> sympy.Expr:
+    # The expand algorithm in sympy is slow due to all the features is supports
+    # For eg: e^(-x)*(x-1)/(x+1) is expanded to (x-1)/(e^x + e^x*x) if x is
+    # positive and (e^(-x)*x-e^(-x))/(x+1) if x is negative. We do not implement
+    # such features here to avoid expensive checks. We also make sure that we
+    # only re-create the objects if any of the args changed to avoid expensive
+    # checks when re-creating objects.
+    new_args = [_fast_expand(arg) for arg in expr.args]
+    if any(arg is not new_arg for arg, new_arg in zip(expr.args, new_args)):
+        return _fast_expand(expr.func(*new_args))
+
+    if expr.is_Pow:
+        base, exp = expr.args
+        if exp.is_Integer:
+            if exp > 1:
+                return sympy.expand_multinomial(expr, deep=False)
+            elif exp < 0:
+                return 1 / sympy.expand_multinomial(1 / expr, deep=False)
+    elif expr.is_Mul:
+        num, den = [], []
+        for arg in expr.args:
+            if arg.is_Pow and arg.args[1] == -1:
+                den.append(1 / arg)
+            else:
+                num.append(arg)
+
+        num, num_changed = _expandsums(num)
+        den, den_changed = _expandsums(den)
+        if num_changed or den_changed:
+            return num / den
+
+    return expr
+
+
 @lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
         try:
-            return sympy.expand(r)
+            return _fast_expand(r)
         except RecursionError:
-            log.warning("RecursionError in sympy.expand(%s)", r)
+            log.warning("RecursionError in _fast_expand(%s)", r)
             return r
     else:
         return r
