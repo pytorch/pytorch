@@ -102,6 +102,7 @@ class DebugPrinterManager:
         kernel_name: str,
         arg_signatures: Optional[List[type]],
         kernel,
+        kernel_type=None,
     ):
         # Note: MultiKernel debug printing is not supported for now
         if isinstance(kernel, MultiKernel):
@@ -109,7 +110,17 @@ class DebugPrinterManager:
                 "MultiKernel type is not supported in AOTI debug printer tool yet."
             )
             self.debug_printer_level = IntermediateValueDebuggingLevel.OFF
-        self.args_to_print_or_save = args_to_print_or_save
+
+        # Note: if the kernel type is an extern kernel, we do a special handling to get the list of args_to_print_or_save
+        # TODO: Find a more reliable way to detect kernel args types to print for extern kernel calls
+        if kernel_type == "extern":
+            args_to_print_or_save_extern = []
+            for arg in args_to_print_or_save:
+                if arg.startswith(("buf", "arg")):
+                    args_to_print_or_save_extern.append(arg)
+            self.args_to_print_or_save = args_to_print_or_save_extern
+        else:
+            self.args_to_print_or_save = args_to_print_or_save
         self.kernel_name = kernel_name
         self.arg_signatures = arg_signatures
         self.kernel = kernel
@@ -187,6 +198,7 @@ class DebugPrinterManager:
                     # TODO: add non-abi compatible mode debug printing info
                     pass
             else:
+                # TODO: add mean/min/max instead of naively print the tensor value
                 line = (
                     f"print('inductor: {launch_prefix} - {kernel_name} - {arg}', {arg})"
                 )
