@@ -1426,6 +1426,12 @@ def _expandsums(args):
 
 
 def fast_expand(expr):
+    # The expand algorithm in sympy is slow due to all the features is supports
+    # For eg: e^(-x)*(x-1)/(x+1) is expanded to (x-1)/(e^x + e^x*x) if x is
+    # positive and (e^(-x)*x-e^(-x))/(x+1) if x is negative. We do not implement
+    # such features here to avoid expensive checks. We also make sure that we
+    # only re-create the objects if any of the args changed to avoid expensive
+    # checks when re-creating objects.
     new_args = [fast_expand(arg) for arg in expr.args]
     if any(arg is not new_arg for arg, new_arg in zip(expr.args, new_args)):
         return fast_expand(expr.func(*new_args))
