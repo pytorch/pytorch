@@ -385,6 +385,12 @@ class TritonPrinter(PythonPrinter):
             f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
+    def _print_Float(self, expr):
+        # Use a tensor here to get float64. Otherwise the constant is
+        # truncated to float32.
+        ret = f"tl.full([1], {expr}, tl.float64)"
+        return ret
+
     def _print_ToFloat(self, expr):
         assert len(expr.args) == 1
         return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
@@ -539,7 +545,10 @@ def triton_compute_type(dtype):
     triton_type_name = str(dtype).split(".")[-1]
     if triton_type_name == "bool":
         triton_type_name = "int1"
-    elif triton_type_name in ("float16", "bfloat16"):
+    elif (
+        triton_type_name in ("float16", "bfloat16")
+        and config.triton.codegen_upcast_to_fp32
+    ):
         # float16 math is done in float32 inside the kernel
         triton_type_name = "float32"
     elif triton_type_name == "float8_e4m3fn":
@@ -557,7 +566,10 @@ def _get_primitive_bitwidth(dtype):
     if hasattr(dtype, "is_floating_point"):
         if dtype.is_floating_point:
             # triton_compute_type changes the bitwidth
-            if dtype in [torch.bfloat16, torch.float16]:
+            if (
+                dtype in [torch.bfloat16, torch.float16]
+                and config.triton.codegen_upcast_to_fp32
+            ):
                 return 32
             return torch.finfo(dtype).bits
         else:
@@ -669,7 +681,10 @@ class TritonOverrides(OpOverrides):
         # In such as case, we will have to convert the input tensor to
         # its src_type, perform bitcast, and then convert the bit-casted
         # tensor back to float to ensure we use values with the right precision.
-        if src_dtype in (torch.float16, torch.bfloat16):
+        if (
+            src_dtype in (torch.float16, torch.bfloat16)
+            and config.triton.codegen_upcast_to_fp32
+        ):
             triton_src_dtype = str(src_dtype).split(".")[-1]
             cast_x = f"{x}.to(tl.{triton_src_dtype})"
             if dtype in (torch.float16, torch.bfloat16):
@@ -1778,7 +1793,10 @@ class TritonKernel(SIMDKernel):
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
 
             dtype = V.graph.get_dtype(name)
-            if dtype in (torch.float16, torch.bfloat16):
+            if (
+                dtype in (torch.float16, torch.bfloat16)
+                and config.triton.codegen_upcast_to_fp32
+            ):
                 line += ".to(tl.float32)"
             if dtype == torch.bool and torch.version.hip is None:
                 # Workaround for https://github.com/openai/triton/issues/2151
@@ -2484,7 +2502,7 @@ class TritonKernel(SIMDKernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -2612,10 +2630,24 @@ class TritonKernel(SIMDKernel):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
+
+        # workspace arguments are mutated, but are not marked as mutations in self.mutations
+        # because their buffers are added during codegen, and aren't tracked during
+        # lowering/scheduling. So we add them as mutated_args explicitly below.
+        #
+        # In the logic below, we only mark the workspaces a mutated if they are marked with
+        # zero_fill: that's because, if we don't expect the buffer to be pre-filled with
+        # zeros, then, although we still mutate the data, we don't care about those
+        # mutations because we don't make any assumptions about the contents of the
+        # workspace buffer.
+        for argname, arg in zip(argdefs, signature):
+            if isinstance(arg, WorkspaceArg) and arg.zero_fill:
+                mutated_args.add(argname)
+
         mutated_args = sorted(mutated_args)
 
         triton_meta_signature = signature_to_meta(
-            signature, size_dtype=self.index_dtype
+            signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
         triton_meta = {
             "signature": triton_meta_signature,
@@ -2643,7 +2675,7 @@ class TritonKernel(SIMDKernel):
         for tree in self.active_range_trees():
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
             signature.append(sizearg)
-            triton_meta_signature[len(argdefs)] = signature_of(
+            triton_meta_signature[sizearg.name] = signature_of(
                 sizearg, size_dtype=self.index_dtype
             )
             argdefs.append(f"{tree.prefix}numel")
@@ -2661,7 +2693,7 @@ class TritonKernel(SIMDKernel):
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
         # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
 
         self.triton_meta = triton_meta
 
@@ -2802,7 +2834,7 @@ class TritonKernel(SIMDKernel):
             call_args,
             grid,
             current_device.index,
-            cuda=True,
+            gpu=True,
             triton=True,
             arg_types=arg_types,
             grid_fn=self._get_grid_fn(),
@@ -3034,7 +3066,9 @@ class TritonScheduling(SIMDScheduling):
         return kernel_name
 
     def benchmark_fused_nodes(self, nodes):
-        with preserve_rng_state():
+        with preserve_rng_state(), torch.cuda.device(
+            self.scheduler.get_current_device_or_throw()
+        ):
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
@@ -3098,9 +3132,10 @@ class TritonScheduling(SIMDScheduling):
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
                 # the input values between benchmarking
-                ms = ms - benchmarker.benchmark_gpu(
-                    lambda: wrapped_jit_function.clone_args(*args)
-                )
+                if len(wrapped_jit_function.mutated_arg_names) > 0:
+                    ms = ms - benchmarker.benchmark_gpu(
+                        lambda: wrapped_jit_function.clone_args(*args)
+                    )
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run",

@@ -1994,9 +1994,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             mod = Mod()
             opt_mod(torch.randn(5, 5), mod)
 
-        # fn compiles twice, and forward twice
-        # (since forward is inlined when fn is compiled)
-        self.assertEqual(cnts.frame_count, 4)
+        # fn compiles twice
+        self.assertEqual(cnts.frame_count, 2)
 
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
@@ -2772,6 +2771,49 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(num_compiles, 1)
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_nn_module_tensor(self):
+        # This test verifies that dynamo will mark
+        # the nn module tensor attributes as static
+        num_compiles = 0
+
+        def debug_compiler(gm, _):
+            nonlocal num_compiles
+            num_compiles += 1
+
+            input_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "placeholder" and n.name == "l_mod_buf"
+            ]
+
+            self.assertGreater(len(input_nodes), 0)
+            for input_node in input_nodes:
+                self.assertEqual(
+                    input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
+                    "unguarded",
+                )
+
+            return gm
+
+        class TestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buf = torch.ones(2, 2)
+
+            def forward(self, x):
+                return self.buf * x
+
+        mod = TestModule()
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x):
+            return x * mod(x)
+
+        inp = torch.ones(2)
+        fn(inp)
+        self.assertEqual(num_compiles, 1)
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @torch._inductor.config.patch("freezing", True)
     @torch.no_grad()
     def test_mark_static_with_freezing(self):
@@ -2969,6 +3011,40 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         helper()
         with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
             helper()
+
+    def test_user_defined_nn_module_dynamic(self):
+        class Conv2d(torch.nn.Conv2d):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def forward(self, x):
+                x = torch.nn.functional.conv2d(
+                    x,
+                    self.weight,
+                    self.bias,
+                    self.stride,
+                    self.padding,
+                    self.dilation,
+                    self.groups,
+                )
+                return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod1 = Conv2d(64, 64, kernel_size=(2, 2), stride=(1, 1))
+        mod2 = Conv2d(64, 64, kernel_size=(2, 2), stride=(2, 2))
+        mod3 = Conv2d(64, 64, kernel_size=(2, 2), stride=(3, 3))
+
+        opt_mod1 = torch.compile(mod1, backend=cnts, fullgraph=True)
+        opt_mod2 = torch.compile(mod2, backend=cnts, fullgraph=True)
+        opt_mod3 = torch.compile(mod3, backend=cnts, fullgraph=True)
+
+        x = torch.randn(1, 64, 64, 64)
+        opt_mod1(x)
+        opt_mod2(x)
+        opt_mod3(x)
+
+        # Must be 3 compilations. If not marked static there would be 2, because strides would be converted to symints.
+        self.assertEqual(cnts.frame_count, 3)
 
 
 if __name__ == "__main__":

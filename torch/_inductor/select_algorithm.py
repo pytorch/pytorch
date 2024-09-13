@@ -203,7 +203,7 @@ class TritonTemplateKernel(TritonKernel):
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
             size = V.graph.sizevars.size_hints(inp.get_size())
-            numel = functools.reduce(operator.mul, size)
+            numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
@@ -214,13 +214,15 @@ class TritonTemplateKernel(TritonKernel):
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
+            "signature": signature_to_meta(
+                signature, size_dtype=self.index_dtype, argdefs=argdefs
+            ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
         if matrix_instr_nonkdim != 0:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
@@ -1256,6 +1258,11 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             if timings:
+                return no_op
+
+            if config.search_autotune_cache and not (
+                config.max_autotune or config.max_autotune_gemm
+            ):
                 return no_op
 
             precompile_key = create_precompile_key(name, inputs_key, choices)

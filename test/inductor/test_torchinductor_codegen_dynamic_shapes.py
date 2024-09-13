@@ -2,17 +2,11 @@
 import importlib
 import os
 import sys
-import unittest
 
 import torch
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     GPU_TYPE,
@@ -21,27 +15,19 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor_codegen_dynamic_shapes yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 importlib.import_module("filelock")
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import (
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     CommonTemplate,
     copy_tests,
     run_and_get_cpp_code,
     run_and_get_triton_code,
     TestFailure,
 )
-from inductor.test_torchinductor_dynamic_shapes import (
+from inductor.test_torchinductor_dynamic_shapes import (  # @manual
     make_dynamic_cls,
     test_failures as dynamic_shapes_test_failures,
 )
@@ -124,6 +110,7 @@ test_failures = {
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
+    "test_mutable_custom_op_fixed_layout2_dynamic_shapes": TestFailure(("cpu",)),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
     "test_full_boolean_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
