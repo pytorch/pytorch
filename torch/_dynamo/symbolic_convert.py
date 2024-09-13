@@ -3372,6 +3372,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             res = BuiltinVariable(iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
 
+    def RETURN_VALUE(self, inst):
+        # RETURN_VALUE in a generator raises StopIteration instead of actually
+        # returning a value
+        exc.raise_observed_exception(StopIteration, self)
+
     def YIELD_FROM(self, inst):
         assert len(self.stack) >= 2
         val = self.pop()
