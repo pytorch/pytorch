@@ -193,6 +193,7 @@ class TestFullyShardCompile(FSDPTest):
             zero_size_unsharded_param_graph_inputs
             | full_size_unsharded_param_graph_inputs
         )
+        assert len(unsharded_param_graph_inputs) > 0
         no_aliased_unsharded_params_in_graph_inputs = True
         err_msg = ""
         for aliased_graph_inputs in storage_id_to_graph_inputs.values():
