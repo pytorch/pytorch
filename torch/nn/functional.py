@@ -3720,7 +3720,8 @@ def huber_loss(
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
-            huber_loss(input, target, weights),
+            huber_loss,
+            (input, target, weights),
             input,
             target,
             reduction=reduction,
