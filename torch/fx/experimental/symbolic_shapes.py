@@ -447,14 +447,20 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         if x.is_Integer:
             return x / factor
         elif x.is_Mul:
-            return sympy.Mul._from_args((x.args[0] / factor, *x.args[1:]), is_commutative=x.is_commutative)
+            if x.args[0] != factor:
+                args = (x.args[0] / factor, *x.args[1:])
+            else:
+                # Mul._from_args require a canonical list of args
+                # so we remove the first arg (x.args[0] / factor) if it was 1
+                args = x.args[1:]
+            return sympy.Mul._from_args(args, is_commutative=x.is_commutative)
 
     if expr.is_Add:
         atoms = expr.args
         factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
         if factor == 1:
             return expr
-        atoms = [x / factor for x in atoms]
+        atoms = [div_by_factor(x, factor) for x in atoms]
         return sympy.Add._from_args(atoms)
     elif expr.is_Integer:
         return sympy.One
