@@ -25,8 +25,9 @@ setup_test_python() {
   echo "Ninja version: $(ninja --version)"
   echo "Python version: $(which python) ($(python --version))"
 
-  # Increase default limit on open file handles from 256 to 1024
-  ulimit -n 1024
+  # Set the limit on open file handles to 16384
+  # might help with intermittent compiler test failures
+  ulimit -n 16384
 }
 
 test_python_all() {
