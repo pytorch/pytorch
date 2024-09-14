@@ -13056,7 +13056,7 @@ class TestUtils(TestCase):
         self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
 
 
-instantiate_device_type_tests(TestNNDeviceType, globals())
+instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
 
 if __name__ == '__main__':
