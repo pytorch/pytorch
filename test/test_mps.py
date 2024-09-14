@@ -2167,6 +2167,7 @@ class TestMPS(TestCaseMPS):
     def test_linear3D_no_bias_backward(self):
         self._linear_helper(in_features=2, out_features=3, shape=((4, 5, 2)), bias=True, backward_pass=True)
 
+    @xfailIf(product_version < 14.0)
     def test_linear_large(self):
         x_cpu = torch.randn(9, 1024, 1, device='cpu')
         w_cpu = torch.randn(50304, 1, device='cpu')
