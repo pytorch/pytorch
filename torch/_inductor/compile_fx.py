@@ -3,7 +3,6 @@
 import contextlib
 import functools
 import io
-import itertools
 import logging
 import os
 import sys
@@ -257,12 +256,12 @@ def _recursive_pre_grad_passes(gm, example_inputs):
     for subgraph in _get_subgraphs(gm):
         # as we don't have recursive example inputs, passing None here
         new_subgraph = _recursive_pre_grad_passes(subgraph, example_inputs=None)
-        setattr(gm, subgraph_name, new_subgraph)
+        setattr(gm, subgraph.name, new_subgraph)
     return pre_grad_passes(gm, example_inputs)
 
 
 def _recursive_joint_graph_passes(gm):
-    for subgraph in _get_subgraph(gm):
+    for subgraph in _get_subgraphs(gm):
         _recursive_joint_graph_passes(subgraph)
     joint_graph_passes(gm)
 
