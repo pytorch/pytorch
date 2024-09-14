@@ -825,10 +825,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     def test_transformer_backend_inductor(self):
         # TODO: enable fullgraph=False case
         for fullgraph, all_requires_grad, activation_checkpoint in itertools.product(
-            # [True], [True, False], [True, False]
-            [True],
-            [True],
-            [True],
+            [True], [True, False], [True, False]
         ):
             log.warning(
                 f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
