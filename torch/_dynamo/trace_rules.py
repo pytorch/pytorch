@@ -304,6 +304,7 @@ manual_torch_name_rule_map = {
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
+    "torch.set_default_device": UserFunctionVariable,
     "torch.sparse_bsc_tensor": SkipFunctionVariable,
     "torch.sparse_bsr_tensor": SkipFunctionVariable,
     "torch.sparse_csc_tensor": SkipFunctionVariable,
@@ -2797,7 +2798,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.random.initial_seed",
         "torch.random.seed",
         "torch.return_types.pytree_register_structseq",
-        "torch.set_default_device",
         "torch.set_default_dtype",
         "torch.set_default_tensor_type",
         "torch.set_deterministic_debug_mode",
@@ -3258,6 +3258,7 @@ MOD_INLINELIST = [
     "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
+    "torch.utils._device",
     "torch.utils._foreach_utils",
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
@@ -3592,7 +3593,9 @@ def lookup_inner(
             if reasons is not None:
                 reasons.add("func name is patched_init")
             return SkipFunctionVariable
-        elif name == "__torch_function__":
+        elif name == "__torch_function__" or (
+            obj and obj.__name__ == "__torch_function__"
+        ):
             if reasons is not None:
                 reasons.add("func name is __torch_function__")
             return UserFunctionVariable
