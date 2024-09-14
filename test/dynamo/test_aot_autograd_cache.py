@@ -159,6 +159,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         def fn(a, b):
             out = a.cos() + b
             loss = out.sum()
+            # pylint: disable-next=unused-variable
             ga, gb = torch.autograd.grad(loss, inputs=[a, b])
 
         a = torch.randn(25, requires_grad=True)
@@ -619,7 +620,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         config2.aot_id = 1
 
         c1 = self.gen_cache_key(fn, config)
-        c2 = self.gen_cache_key(fn, config2)
+        c2 = self.gen_cache_key(fn2, config2)
         self.assertEqual(c1, c2)
 
     def test_different_graphs(self):

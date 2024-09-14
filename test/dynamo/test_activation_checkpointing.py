@@ -1149,7 +1149,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 super().__init__()
 
             def forward(self, x, ys):
-                a = torch.sin(x)
+                a = torch.sin(x)  # pylint: disable=unused-variable
                 b = torch.cos(ys[0])
                 c = torch.cos(ys[1])
                 return (x, [b, c])

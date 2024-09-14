@@ -152,12 +152,14 @@ class DTensorTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard0_spec = [Shard(0)]
         local_tensor = torch.randn(4, 8)
+        global_shape = torch.Size([self.world_size * 4, 8])
         dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard0_spec)
         # won't affect stride
         self.assertEqual(dist_tensor.stride(), (8, 1))
 
         shard1_spec = [Shard(1)]
         local_tensor = torch.randn(8, 4)
+        global_shape = torch.Size([8, self.world_size * 4])
         dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard1_spec)
         # will affect stride after DT initialized
         self.assertEqual(dist_tensor.stride(), (4 * self.world_size, 1))
@@ -165,7 +167,6 @@ class DTensorTest(DTensorTestBase):
         # if initialized from a transposed mat
         local_tensor = torch.randn(8, 4, 8)
         local_tensor_t = local_tensor.permute(1, 2, 0)
-        global_shape = torch.Size([4, self.world_size * 8, 8])
         self.assertEqual(local_tensor_t.stride(), (8, 1, 32))
         dist_tensor = DTensor.from_local(local_tensor_t, device_mesh, shard1_spec)
         global_stride = (8 * self.world_size, 1, 32 * self.world_size)
@@ -252,7 +253,7 @@ class DTensorTest(DTensorTestBase):
         with self.assertRaisesRegex(
             RuntimeError, "Please pass both shape and stride at the same time."
         ):
-            DTensor.from_local(
+            dtensor = DTensor.from_local(
                 tensor_list[self.rank],
                 device_mesh,
                 (Shard(0),),
@@ -262,7 +263,7 @@ class DTensorTest(DTensorTestBase):
         with self.assertRaisesRegex(
             RuntimeError, "Please pass both shape and stride at the same time."
         ):
-            DTensor.from_local(
+            dtensor = DTensor.from_local(
                 tensor_list[self.rank],
                 device_mesh,
                 (Shard(0),),
@@ -972,7 +973,7 @@ class DTensorLogTest(LoggingTestCase):
         env["MASTER_PORT"] = "12345"
         env["MASTER_ADDR"] = "localhost"
 
-        _, stderr = self.run_process_no_exception(
+        stdout, stderr = self.run_process_no_exception(
             """\
 import logging
 import torch

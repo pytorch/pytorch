@@ -53,7 +53,12 @@ from typing_extensions import TypeAlias
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.utils import counters, dynamo_timed, get_chromium_event_logger
+from torch._dynamo.utils import (
+    add_remote_cache_time_saved,
+    counters,
+    dynamo_timed,
+    get_chromium_event_logger,
+)
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -1348,6 +1353,7 @@ class FxGraphCache:
                 cache_event_time = time_ns()
                 if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                     cache_info["time_saved_ns"] = time_saved_ns
+                    add_remote_cache_time_saved(time_saved_ns, fx_kwargs["is_backward"])
                     if (
                         ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                             time_saved_ns

@@ -269,14 +269,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             cur_stream.wait_stream(new_stream)
 
             x = torch.add(x, 4)
-            is_idle = cur_stream.query()
+            cur_stream.query()
             cur_stream.synchronize()
 
             with torch.cuda.stream(new_stream):
                 x = torch.add(x, 5)
             new_stream.synchronize()
-
-            is_equal = cur_stream == new_stream
 
             x = torch.relu(x)
             x = torch.cos(x)
@@ -440,7 +438,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 3)
 
             event = cur_stream.record_event()
-            is_idle = event.query()
+            event.query()
 
             new_stream.wait_event(event)
             with torch.cuda.stream(new_stream):
@@ -482,7 +480,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 3)
 
             event = cur_stream.record_event()
-            is_idle = event.query()
+            event.query()
 
             new_stream.wait_event(event)
             with torch.cuda.stream(new_stream):
@@ -568,7 +566,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -677,7 +675,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -851,7 +849,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -877,7 +875,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -1298,7 +1296,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         torch.compile(fn, backend=eager, fullgraph=False)(torch.randn(()))
 
-        def check_graph(actual, expected):
+        def check_graph(actual, expected):  # pylint: disable=unused-variable
             self.assertExpectedInline(actual, expected)
 
         graph = eager.graphs[0]
@@ -1343,7 +1341,7 @@ class GraphModule(torch.nn.Module):
             for i in range(2):
                 torch._dynamo.reset()
 
-                ctx_wrapper, mode = ctx_wrappers[i]
+                ctx_wrapper, _ = ctx_wrappers[i]
                 ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
                 def fn(x):
@@ -1374,7 +1372,7 @@ class GraphModule(torch.nn.Module):
             for i in range(2):
                 torch._dynamo.reset()
 
-                ctx_wrapper, mode = ctx_wrappers[i]
+                ctx_wrapper, _ = ctx_wrappers[i]
                 ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
                 def fn(x):
@@ -1532,6 +1530,117 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_sdpa_kernel_ctx_manager1(self):
+        modified_backend_state = [torch.nn.attention.SDPBackend.MATH]
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_modified():
+            self.assertEqual(
+                torch.nn.attention._cur_sdpa_kernel_backends(), modified_backend_state
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(
+                # pyre-fixme[16]: Module `torch.nn.attention` has no attribute `SDPBackend`.
+                [torch.nn.attention.SDPBackend.MATH]
+            ):
+                output = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
+                    torch.float32
+                )
+                check_backend_state_is_modified()
+
+            return output
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
+
+    def test_sdpa_kernel_ctx_manager2(self):
+        original_backend_state = set(torch.nn.attention._cur_sdpa_kernel_backends())
+        modified_backend_state = [torch.nn.attention.SDPBackend.MATH]
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_original():
+            self.assertEqual(
+                set(torch.nn.attention._cur_sdpa_kernel_backends()),
+                original_backend_state,
+            )
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_modified():
+            self.assertEqual(
+                torch.nn.attention._cur_sdpa_kernel_backends(), modified_backend_state
+            )
+
+        def g(x):
+            torch._dynamo.graph_break()
+            output = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
+                torch.float32
+            )
+            check_backend_state_is_modified()
+            return output
+
+        def f(x):
+            check_backend_state_is_original()
+            with torch.nn.attention.sdpa_kernel(
+                # pyre-fixme[16]: Module `torch.nn.attention` has no attribute `SDPBackend`.
+                [torch.nn.attention.SDPBackend.MATH]
+            ):
+                output1 = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
+                    torch.float32
+                )
+                check_backend_state_is_modified()
+
+                # graph break
+                output2 = g(x)
+
+                output3 = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
+                    torch.float32
+                )
+                check_backend_state_is_modified()
+
+            check_backend_state_is_original()
+
+            return output1 + output2 + output3
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnts)
+        opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
+        self.assertEqual(cnts.frame_count, 3)
+
+    # test sdpa_kernel graph break with 2 arguments
+    def test_sdpa_kernel_ctx_manager3(self):
+        modified_backend_state = {
+            torch.nn.attention.SDPBackend.MATH,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+        }
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_modified():
+            self.assertEqual(
+                set(torch.nn.attention._cur_sdpa_kernel_backends()),
+                modified_backend_state,
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(
+                # pyre-fixme[16]: Module `torch.nn.attention` has no attribute `SDPBackend`.
+                [
+                    torch.nn.attention.SDPBackend.MATH,
+                    torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                ]
+            ):
+                # FLASH_ATTENTION may not be supported, but we're not actually
+                # doing any sdpa
+                x = x + 1
+                torch._dynamo.graph_break()
+                check_backend_state_is_modified()
+                x = x + 1
+
+            return x
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f(torch.randn(2, 2))
 
 
 if __name__ == "__main__":

@@ -269,7 +269,6 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
     def test_lookup_backend(self):
         from torch._dynamo import list_backends, lookup_backend
 
-        backends = list_backends()
         backend_run = False
 
         def my_compiler(gm, example_inputs):

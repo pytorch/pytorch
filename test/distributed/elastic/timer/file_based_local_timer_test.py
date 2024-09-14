@@ -113,7 +113,7 @@ if not (IS_WINDOWS or IS_MACOS):
             num_clients = 10
             num_requests_per_client = 10
             processes = []
-            for _ in range(num_clients):
+            for i in range(num_clients):
                 p = mp.Process(
                     target=func, args=(num_requests_per_client, self.file_path)
                 )

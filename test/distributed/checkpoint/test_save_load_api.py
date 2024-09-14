@@ -62,7 +62,7 @@ class TestSaveAndLoadAPI(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Cannot detect"):
             dcp.save(model.state_dict(), checkpoint_id="abc://abc.abc")
         with self.assertRaisesRegex(RuntimeError, "Cannot detect"):
-            dcp.load(model.state_dict(), checkpoint_id="abc://abc.abc")
+            sd = dcp.load(model.state_dict(), checkpoint_id="abc://abc.abc")
 
 
 if __name__ == "__main__":
