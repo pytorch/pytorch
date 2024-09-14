@@ -18,7 +18,6 @@ def benchmark_operator(OperatorClass: BaseOperator, device, dtype, phase, max_sa
         single_run=single_run,
     )
     operator = OperatorClass(benchmark_config)
-    operator.generate_inputs(benchmark_config)
     if phase == Phase.FORWARD:
         phase_fn = operator.forward
     elif phase == Phase.BACKWARD:
@@ -28,14 +27,14 @@ def benchmark_operator(OperatorClass: BaseOperator, device, dtype, phase, max_sa
     if single_run:
         input_count = 1
     else:
-        input_count = len(operator.get_inputs())
+        input_count = len(operator.get_inputs(benchmark_config))
 
     durations = []
 
     for sample in range(max_samples):
         for _ in range(repeat):
             for i in range(input_count):
-                input, target = operator.get_inputs()[i]
+                input, target = operator.get_inputs(benchmark_config)[i]
                 if phase == Phase.BACKWARD:
                     grad_to_none = [input]
                 else:
@@ -51,11 +50,11 @@ def benchmark_operator(OperatorClass: BaseOperator, device, dtype, phase, max_sa
 @click.option("--op", help="operator overload to benchmark. split by ','.")
 @click.option("--dtype", help="dtype to benchmark. [bfloat16, float16, float32]", default="bfloat16")
 @click.option("--max-samples", help="max samples per op", default=1)
-@click.option("--device", help=f"device to benchmark, {[device.value for device in Device]}. ", default=Device.CUDA.value)
-@click.option("--phase", help="phase to benchmark", default="forward")
+@click.option("--device", help=f"device to benchmark, {[device.value.lower() for device in Device]}. ", default=Device.CUDA.value)
+@click.option("--phase", help=f"phase to benchmark. {[phase.value.lower() for phase in Phase]}. ", default="forward")
 @click.option("--repeat", help="repeat", default=1)
 @click.option("--single-run", help="run with the first input size", default=False)
-@click.option("--metrics", help=f"metrics to benchmark. {[metric.value for metric in Metrics]}. split by ','", default=Metrics.EXECUTION_TIME.value)
+@click.option("--metrics", help=f"metrics to benchmark. {[metric.value.lower() for metric in Metrics]}. split by ','", default=Metrics.EXECUTION_TIME.value)
 @click.option("--skip-variants", help="variants to be skipped, [liger, baseline, inductor]", default="")
 def run_benchmarks(
     op,

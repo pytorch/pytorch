@@ -1,7 +1,7 @@
 import torch
 from .. import BaseOperator
 from utils.common import BenchmarkConfig
-
+from typing import Optional
 H = 4096
 V = 128256
 # Each file defines an operator variant
@@ -19,9 +19,10 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
         super().__init__(benchmark_config)
 
     @classmethod
-    def get_inputs(cls, ):
+    def get_inputs(cls, benchmark_config: Optional[BenchmarkConfig] = None):
         if not cls.example_inputs_list:
-            cls.generate_inputs(cls.benchmark_config)
+            assert benchmark_config is not None, "Benchmark config is required to generate inputs"
+            cls.generate_inputs(benchmark_config)
         return cls.example_inputs_list
 
     @classmethod
@@ -43,8 +44,8 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
     def full(self, *input):
         def f():
             y = self.forward(*input)
-            y.backward(retain_graph=True)
-        return f
+            y.backward()
+        return f()
 
     def single_run(self, fn, *inputs):
         fn(*inputs)
