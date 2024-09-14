@@ -1,0 +1,69 @@
+name: weekly
+
+on:
+  schedule:
+    # Mondays at 7:37am UTC = 12:27am PST
+    # Choose a random time near midnight PST because it may be delayed if there are high loads
+    # See https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule
+    - cron: 37 7 * * 1
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  update-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: update-xla-commit-hash
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        with:
+          repo-name: xla
+          branch: master
+          pin-folder: .github/ci_commit_pins
+          test-infra-ref: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+      - name: update-triton-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        with:
+          repo-owner: openai
+          repo-name: triton
+          branch: main
+          pin-folder: .ci/docker/ci_commit_pins
+          test-infra-ref: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-slow-tests:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.UPDATEBOT_TOKEN }}
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      - name: Install requirements
+        shell: bash
+        run: |
+          pip install rockset==1.0.3 requests==2.32.2
+      - name: Update slow test file
+        shell: bash
+        env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+          UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
+        run: |
+          git config --global user.name "PyTorch UpdateBot"
+          git config --global user.email "pytorchupdatebot@users.noreply.github.com"
+          python tools/testing/update_slow_tests.py
