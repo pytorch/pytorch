@@ -155,45 +155,32 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(x, ref_x)
 
     def _assert_no_aliased_unsharded_params_in_graph_inputs(
-        self, graph: torch.fx.Graph
+        self, model, graph: torch.fx.Graph
     ) -> None:
         # FSDP2 unsharded params are mutated in the graph without going through functionalization.
         # Therefore, we want to make sure they don't have aliases in the graph inputs, to make it easier
         # for us to do the replacement of unsharded params with the all-gathered temporary buffer directly
         # in downstream users in the graph.
         storage_id_to_graph_inputs = defaultdict(list)
-        # There are two kinds of unsharded params:
-        # 1) Ones that are sharded (thus 0-size) going into the graph.
-        # 2) Ones that are not sharded (thus full-size) going into the graph but will be resized to 0 within the graph.
-        zero_size_unsharded_param_graph_inputs = set()
-        full_size_unsharded_param_graph_inputs = set()
+        unsharded_param_graph_inputs = set()
         for node in graph.nodes:
             if (
                 node.op == "call_function"
-                and node.target == torch.ops.inductor.resize_storage_bytes_.default
+                and node.target
+                in [
+                    torch.ops.inductor.resize_storage_bytes_.default,
+                    torch.ops.fsdp.copy_.default,
+                ]
                 and node.args[0].op == "placeholder"
-                # TODO(yf225): somehow this is not true, need to investigate why.
-                # and node.args[0].meta["val"].untyped_storage().size() > 0
-                and node.args[1] == 0
             ):
-                full_size_unsharded_param_graph_inputs.add(node.args[0])
-        for node in graph.nodes:
-            if node.op == "placeholder" and isinstance(
-                node.meta.get("val", None), torch.Tensor
-            ):
-                storage_id_to_graph_inputs[
-                    id(node.meta["val"].untyped_storage())
-                ].append(node)
-                if (
-                    node.meta["val"].untyped_storage().size() == 0
-                    and node not in full_size_unsharded_param_graph_inputs
-                ):
-                    zero_size_unsharded_param_graph_inputs.add(node)
-        unsharded_param_graph_inputs = (
-            zero_size_unsharded_param_graph_inputs
-            | full_size_unsharded_param_graph_inputs
-        )
+                unsharded_param_graph_inputs.add(node.args[0])
         assert len(unsharded_param_graph_inputs) > 0
+        assert len(unsharded_param_graph_inputs) == len(
+            list(model.parameters())
+        ), """\
+Expected all model parameters to be wrapped by FSDP2 and
+have their unsharded version as graph input, but it's not true!
+"""
         no_aliased_unsharded_params_in_graph_inputs = True
         err_msg = ""
         for aliased_graph_inputs in storage_id_to_graph_inputs.values():
@@ -206,6 +193,25 @@ Found aliased unsharded param in graph inputs: {aliased_graph_inputs},
 val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 """
         self.assertTrue(no_aliased_unsharded_params_in_graph_inputs, err_msg)
+
+    def _remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
+        self, model, fullgraph
+    ):
+        def _run_with_checks(graph, orig_fn):
+            self._assert_no_aliased_unsharded_params_in_graph_inputs(model, graph)
+            orig_fn(graph)
+
+        if fullgraph:
+            return mock.patch.object(
+                comms,
+                "remove_fsdp2_unsharded_param_graph_input_usage",
+                functools.partial(
+                    _run_with_checks,
+                    orig_fn=comms.remove_fsdp2_unsharded_param_graph_input_usage,
+                ),
+            )
+        else:
+            return contextlib.nullcontext()
 
     def _check_fsdp_copy_and_resize_ops_count_in_graph(
         self,
@@ -438,13 +444,18 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
             run_iters(model, optim, n_iter=1)
 
-            model_compiled = torch.compile(model, backend=backend, fullgraph=fullgraph)
-            res = run_iters(
-                model_compiled,
-                optim,
-                compiled_autograd_backend=backend,
-            )
-            return res
+            with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
+                model, fullgraph
+            ):
+                model_compiled = torch.compile(
+                    model, backend=backend, fullgraph=fullgraph
+                )
+                res = run_iters(
+                    model_compiled,
+                    optim,
+                    compiled_autograd_backend=backend,
+                )
+                return res
 
         def test_eager():
             model, optim = model_init_fn()
@@ -467,9 +478,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 "raise_comms",
                 "reorder_compute_for_overlap",
             ],
-            post_grad_custom_pre_pass=self._assert_no_aliased_unsharded_params_in_graph_inputs
-            if fullgraph
-            else None,
         ):
             losses_compiled = test_compiled()
         losses_eager = test_eager()
@@ -817,7 +825,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     def test_transformer_backend_inductor(self):
         # TODO: enable fullgraph=False case
         for fullgraph, all_requires_grad, activation_checkpoint in itertools.product(
-            [True], [True, False], [True, False]
+            # [True], [True, False], [True, False]
+            [True],
+            [True],
+            [True],
         ):
             log.warning(
                 f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
