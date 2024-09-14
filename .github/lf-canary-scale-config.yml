@@ -7,10 +7,14 @@
 #   runners. Runners listed here will be available as self hosted
 #   runners, configuration is directly pulled from the main branch.
 #
-# NOTE (Apr, 5, 2021): Linux runners are currently all an amazonlinux2
 #
-# NOTE (Jan 5, 2021): Linux runners are all non-ephemeral to reduce the amount of CreateInstaces calls
-#                     to avoid RequestLimitExceeded issues
+# NOTES:
+#  - Linux runners are by default non-ephemeral to reduce the amount of CreateInstaces calls
+#    to avoid RequestLimitExceeded issues
+#  - When updating this file, run the following command to validate the YAML and to generate
+#    corresponding versions of scale-config for the pytorch/pytorch repo and merge the
+#    pytorch/pytorch changes before merging these changes.
+#    `python .github/scripts/validate_scale_config.py --test-infra-repo-root [path_to_test-infra_root] --pytorch-repo-root [path_to_pytorch_root]``
 #
 # TODO: Add some documentation on how the auto-scaling works
 #
@@ -35,8 +39,6 @@ runner_types:
     variants:
       amz2023:
         ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.10xlarge.avx2:
     disk_size: 200
     instance_type: m4.10xlarge
@@ -44,11 +46,6 @@ runner_types:
     max_available: 450
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.24xl.spr-metal:
     disk_size: 200
     instance_type: c7i.metal-24xl
@@ -56,11 +53,6 @@ runner_types:
     max_available: 150
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.16xlarge.spr:
     disk_size: 200
     instance_type: c7i.16xlarge
@@ -68,11 +60,6 @@ runner_types:
     max_available: 150
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.9xlarge.ephemeral:
     disk_size: 200
     instance_type: c5.9xlarge
@@ -81,8 +68,6 @@ runner_types:
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
     variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
       am2:
         ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.12xlarge.ephemeral:
@@ -92,11 +77,6 @@ runner_types:
     max_available: 300
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.16xlarge.nvidia.gpu:
     disk_size: 150
     instance_type: g3.16xlarge
@@ -104,11 +84,6 @@ runner_types:
     max_available: 150
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.24xlarge:
     disk_size: 150
     instance_type: c5.24xlarge
@@ -116,11 +91,6 @@ runner_types:
     max_available: 500
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.24xlarge.ephemeral:
     disk_size: 150
     instance_type: c5.24xlarge
@@ -128,11 +98,6 @@ runner_types:
     max_available: 200
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.2xlarge:
     disk_size: 150
     instance_type: c5.2xlarge
@@ -140,11 +105,6 @@ runner_types:
     max_available: 3120
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.4xlarge:
     disk_size: 150
     instance_type: c5.4xlarge
@@ -155,8 +115,6 @@ runner_types:
     variants:
       amz2023:
         ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.4xlarge.nvidia.gpu:
     disk_size: 150
     instance_type: g3.4xlarge
@@ -164,11 +122,6 @@ runner_types:
     max_available: 1000
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.8xlarge.nvidia.gpu:
     disk_size: 150
     instance_type: g3.8xlarge
@@ -179,8 +132,6 @@ runner_types:
     variants:
       amz2023:
         ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.g4dn.12xlarge.nvidia.gpu:
     disk_size: 150
     instance_type: g4dn.12xlarge
@@ -188,11 +139,6 @@ runner_types:
     max_available: 250
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.g4dn.metal.nvidia.gpu:
     disk_size: 150
     instance_type: g4dn.metal
@@ -200,11 +146,6 @@ runner_types:
     max_available: 300
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.g5.48xlarge.nvidia.gpu:
     disk_size: 150
     instance_type: g5.48xlarge
@@ -212,11 +153,6 @@ runner_types:
     max_available: 200
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.g5.12xlarge.nvidia.gpu:
     disk_size: 150
     instance_type: g5.12xlarge
@@ -224,11 +160,6 @@ runner_types:
     max_available: 150
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.g5.4xlarge.nvidia.gpu:
     disk_size: 150
     instance_type: g5.4xlarge
@@ -236,11 +167,6 @@ runner_types:
     max_available: 2400
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.g6.4xlarge.experimental.nvidia.gpu:
     disk_size: 150
     instance_type: g6.4xlarge
@@ -251,8 +177,6 @@ runner_types:
     variants:
       amz2023:
         ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.large:
     max_available: 1200
     disk_size: 15
@@ -260,11 +184,6 @@ runner_types:
     is_ephemeral: false
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.arm64.2xlarge:
     disk_size: 256
     instance_type: t4g.2xlarge
@@ -272,11 +191,6 @@ runner_types:
     max_available: 200
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
   lf.c.linux.arm64.m7g.4xlarge:
     disk_size: 256
     instance_type: m7g.4xlarge
@@ -284,11 +198,6 @@ runner_types:
     max_available: 200
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
   lf.c.linux.arm64.2xlarge.ephemeral:
     disk_size: 256
     instance_type: t4g.2xlarge
@@ -296,11 +205,6 @@ runner_types:
     max_available: 200
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
   lf.c.linux.arm64.m7g.4xlarge.ephemeral:
     disk_size: 256
     instance_type: m7g.4xlarge
@@ -308,11 +212,6 @@ runner_types:
     max_available: 200
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
   lf.c.linux.arm64.m7g.metal:
     disk_size: 256
     instance_type: m7g.metal
@@ -320,11 +219,6 @@ runner_types:
     max_available: 100
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-    variants:
-      amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-arm64-gp2
   lf.c.windows.g4dn.xlarge:
     disk_size: 256
     instance_type: g4dn.xlarge
