@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 
 from ..bytecode_transformation import create_call_function
 from ..exc import Unsupported
-from .base import build_variable, VariableTracker
+from ..source import AttrSource
+from .base import VariableTracker
 
 
 if TYPE_CHECKING:
@@ -24,7 +25,10 @@ class SDPAParamsVariable(VariableTracker):
 
         from .torch import TorchInGraphFunctionVariable
 
-        params = [build_variable(tx, getattr(value, p), source, p) for p in PARAM_NAMES]
+        params = [
+            VariableTracker.create(tx, getattr(value, p), AttrSource(source, p))
+            for p in PARAM_NAMES
+        ]
         return TorchInGraphFunctionVariable(SDPAParams).call_function(tx, params, {})
 
     def __init__(self, proxy, param_vars, **kwargs) -> None:
@@ -47,7 +51,6 @@ class SDPAParamsVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         import torch._C
 
-        from ..source import AttrSource
         from .builder import wrap_fx_proxy
         from .misc import GetAttrVariable
 

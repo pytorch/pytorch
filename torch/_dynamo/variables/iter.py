@@ -14,7 +14,7 @@ from ..exc import (
     unimplemented,
     UserError,
 )
-from .base import build_variable, MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -173,7 +173,7 @@ class ItertoolsVariable(VariableTracker):
                 )
 
             return tx.inline_user_function_return(
-                build_variable(tx, polyfills.repeat), args, kwargs
+                VariableTracker.create(tx, polyfills.repeat), args, kwargs
             )
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())

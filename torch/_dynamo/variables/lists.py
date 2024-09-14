@@ -26,7 +26,7 @@ from ..utils import (
     odict_values,
     set_example_value,
 )
-from .base import build_variable, MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
@@ -135,7 +135,7 @@ class BaseListVariable(VariableTracker):
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
             return tx.inline_user_function_return(
-                build_variable(tx, polyfills.index),
+                VariableTracker.create(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )

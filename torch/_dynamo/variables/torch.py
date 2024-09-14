@@ -37,7 +37,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import build_variable, VariableTracker
+from .base import VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     NullContextVariable,
@@ -89,6 +89,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.graph.disable_saved_tensors_hooks,
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
+        torch.nn.attention.sdpa_kernel,
+        torch.nn.attention._sdpa_kernel_variadic,
     ]
 )
 
@@ -229,6 +231,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradModeVariable,
             InferenceModeVariable,
             JvpIncrementNestingCtxManagerVariable,
+            SDPAKernelVariable,
             SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
@@ -329,6 +332,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return FSDPParamGroupUseTrainingStateVariable.create(
                 tx, args[0], args[1].as_python_constant()
             )
+        elif self.value is torch.nn.attention.sdpa_kernel:
+            assert len(args) == 1 or (len(kwargs) == 1 and "backends" in kwargs)
+            backends = args[0] if len(args) == 1 else kwargs["backends"]
+            return SDPAKernelVariable.create(tx, backends.as_python_constant())
+        elif self.value is torch.nn.attention._sdpa_kernel_variadic:
+            return SDPAKernelVariable.create(
+                tx, [arg.as_python_constant() for arg in args]
+            )
 
         return super().call_function(tx, args, kwargs)
 
@@ -395,12 +406,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
             # some variable types to track and compare tensor getset descriptors
-            return build_variable(tx, torch.overrides.get_default_nowrap_functions())
+            return VariableTracker.create(
+                tx, torch.overrides.get_default_nowrap_functions()
+            )
 
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx: "InstructionTranslator", *args, **kwargs):
             return tx.inline_user_function_return(
-                build_variable(tx, polyfills.accumulate_grad), args, kwargs
+                VariableTracker.create(tx, polyfills.accumulate_grad), args, kwargs
             )
 
         @register(math.radians)
@@ -408,7 +421,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    build_variable(tx, polyfills.radians), args, kwargs
+                    VariableTracker.create(tx, polyfills.radians), args, kwargs
                 )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
@@ -443,6 +456,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(input, TensorVariable):
                 # Workaround dynamic shapes issue
                 return input.call_method(tx, "numel", [], {})
+
+        @register(torch.compile)
+        def handle_torch_compile(self, tx: "InstructionTranslator", *args, **kwargs):
+            if len(args) == 1:
+                # torch.compile is a no-op in dynamo
+                return args[0]
+
+            unimplemented("torch.compile is used as a decorator in the compiled frame")
 
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx: "InstructionTranslator", input):
@@ -585,7 +606,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
-                    build_variable(tx, polyfills.foreach_lerp_inplace),
+                    VariableTracker.create(tx, polyfills.foreach_lerp_inplace),
                     args,
                     kwargs,
                 )
@@ -598,7 +619,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
                 return tx.inline_user_function_return(
-                    build_variable(tx, polyfills.foreach_pow_scalar),
+                    VariableTracker.create(tx, polyfills.foreach_pow_scalar),
                     args,
                     kwargs,
                 )
@@ -667,7 +688,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
                 # guard propagation via options is the best we can do.
-                return build_variable(tx, invocation_result)
+                return VariableTracker.create(tx, invocation_result)
 
             @register(DTensor.from_local)
             def handle_from_local(self, tx: "InstructionTranslator", *args, **kwargs):
@@ -1116,7 +1137,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         example_value = torch.nn.Parameter(
             tx.output.example_value_from_input_node(data.as_proxy().node)
         )
-        result = build_variable(tx, example_value, source)
+        result = VariableTracker.create(tx, example_value, source)
         # No need to guard on this since we already guarded on `data`.
         # These guards would fail since varname doesn't exist until after the function starts
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(

@@ -3,7 +3,7 @@ import collections
 import functools
 from typing import Optional
 
-from .base import build_variable, VariableTracker
+from .base import VariableTracker
 from .tensor import SymNodeVariable
 
 
@@ -23,11 +23,12 @@ class LazyCache:
 
         tx = InstructionTranslator.current_tx()
 
-        source = self.source
         if isinstance(self.value, LazySymNodeFormatString):
             source = None
+        else:
+            source = self.source
 
-        self.vt = build_variable(tx, self.value, source)
+        self.vt = VariableTracker.create(tx, self.value, source)
         del self.value
         del self.source
 
@@ -37,7 +38,7 @@ class LazyVariableTracker(VariableTracker):
     A structure that defers the creation of the actual VariableTracker
     for a given underlying value until it is accessed.
 
-    The `realize` function invokes build_variable() to produce the real object.
+    The `realize` function invokes VariableTracker.create() to produce the real object.
     Once a LazyVariableTracker has been realized, internal bookkeeping will
     prevent double realization.
 

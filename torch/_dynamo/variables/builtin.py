@@ -42,7 +42,7 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import build_variable, MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
@@ -806,7 +806,7 @@ class BuiltinVariable(VariableTracker):
                         )
                     except Exception as exc:
                         unimplemented(f"constant fold exception: {repr(exc)}")
-                    return build_variable(tx, res)
+                    return VariableTracker.create(tx, res)
 
             else:
 
@@ -822,7 +822,7 @@ class BuiltinVariable(VariableTracker):
                             )
                         except Exception as exc:
                             unimplemented(f"constant fold exception: {repr(exc)}")
-                        return build_variable(tx, res)
+                        return VariableTracker.create(tx, res)
 
             handlers.append(constant_fold_handler)
 
@@ -1361,7 +1361,7 @@ class BuiltinVariable(VariableTracker):
                         )
 
                     new_dict = dict(arg.value.items())
-                    return build_variable(tx, new_dict)
+                    return VariableTracker.create(tx, new_dict)
                 else:
                     func_var = arg.var_getattr(tx, "items")
                     if not isinstance(func_var, variables.UserFunctionVariable):
@@ -1672,19 +1672,20 @@ class BuiltinVariable(VariableTracker):
                 return default
 
         source = obj.source and AttrSource(obj.source, name)
-
         if name in {"__bases__", "__base__", "__flags__"}:
             try:
                 value = obj.as_python_constant()
                 if isinstance(value, type):
                     if name == "__bases__":
                         tuple_args = [
-                            build_variable(tx, b, source and GetItemSource(source, i))
+                            VariableTracker.create(
+                                tx, b, source and GetItemSource(source, i)
+                            )
                             for i, b in enumerate(value.__bases__)
                         ]
                         return variables.TupleVariable(tuple_args, source=source)
                     if name == "__base__":
-                        return build_variable(tx, value.__base__, source)
+                        return VariableTracker.create(tx, value.__base__, source)
                     if name == "__flags__":
                         return ConstantVariable.create(value.__flags__)
             except NotImplementedError:
@@ -1723,7 +1724,7 @@ class BuiltinVariable(VariableTracker):
 
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
-            return build_variable(tx, member, source)
+            return VariableTracker.create(tx, member, source)
 
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
@@ -1877,7 +1878,7 @@ class BuiltinVariable(VariableTracker):
             ) from None
 
         source = obj.source and TypeSource(obj.source)
-        return build_variable(tx, py_type, source)
+        return VariableTracker.create(tx, py_type, source)
 
     def call_reversed(self, tx: "InstructionTranslator", obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):

@@ -121,6 +121,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     VariableTracker instances are immutable and should be copied in
     order to change them.
+
+    Prefer the factory function VariableTracker.create() over VariableTracker.__init__().
     """
 
     # fields to leave unmodified in apply()
@@ -251,7 +253,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         try:
             value = self.const_getattr(tx, name)
             if not is_function_or_wrapper(value):
-                return build_variable(tx, value, source)
+                return VariableTracker.create(tx, value, source)
         except (NotImplementedError, Unsupported):
             pass
         return GetAttrVariable(self, name, source=source)
@@ -370,6 +372,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase",
+        value: Any,
+        source: Optional[Source] = None,
+    ) -> Any:
+        from . import builder
+
+        if source is None:
+            return builder.SourcelessBuilder.create(tx, value)
+        else:
+            return builder.VariableBuilder(tx, source)(value)
+
     def __init__(
         self,
         *,
@@ -390,18 +405,3 @@ def typestr(*objs):
             return type(obj).__name__
     else:
         return " ".join(map(typestr, objs))
-
-
-def build_variable(
-    tx: "InstructionTranslatorBase",
-    value: Any,
-    source: Optional[Source] = None,
-    attr: Optional[str] = None,
-) -> Any:
-    from . import builder
-
-    if source is None:
-        return builder.SourcelessBuilder.create(tx, value)
-    if attr:
-        source = AttrSource(source, attr)
-    return builder.VariableBuilder(tx, source)(value)

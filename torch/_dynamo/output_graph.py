@@ -87,7 +87,7 @@ from .utils import (
     same,
     set_example_value,
 )
-from .variables.base import build_variable, VariableTracker
+from .variables.base import VariableTracker
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
@@ -497,7 +497,7 @@ class OutputGraph:
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
-        result = build_variable(self.root_tx, example_value, source)
+        result = VariableTracker.create(self.root_tx, example_value, source)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
             source
         )
@@ -765,8 +765,8 @@ class OutputGraph:
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
             # Instead of returning UnspecializedNNModuleVariable, call
-            # build_variable so that it is tracked for mutation.
-            return build_variable(self.current_tx, target, **options)
+            # VariableTracker.create so that it is tracked for mutation.
+            return VariableTracker.create(self.current_tx, target, **options)
 
         options = dict(options)
         assert "source" in options
@@ -858,9 +858,9 @@ class OutputGraph:
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
-                source = ConstantSource(source_name=module_key)
-                tx: Any = self
-                return build_variable(tx, target, source)
+                return VariableTracker.create(
+                    self, target, ConstantSource(source_name=module_key)
+                )
 
         for k, v in self.nn_modules.items():
             if v is target:
@@ -1461,7 +1461,9 @@ class OutputGraph:
             # aborting execution.
             raise e
         except Exception as e:
-            raise BackendCompilerFailed(self.compiler_fn, e) from e
+            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
+                e.__traceback__
+            ) from None
 
         signpost_event(
             "dynamo",

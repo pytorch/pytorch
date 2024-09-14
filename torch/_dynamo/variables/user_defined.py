@@ -52,7 +52,7 @@ from ..utils import (
     tensortype_to_dtype,
     unpatched_nn_module_getattr,
 )
-from .base import build_variable, MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -187,26 +187,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
         obj = inspect.getattr_static(self.value, name, None)
 
         if isinstance(obj, staticmethod):
-            value = obj.__get__(self.value)
-            return build_variable(tx, value, source)
+            return VariableTracker.create(tx, obj.__get__(self.value), source)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
             #       inspect.getattr_static(itertools.chain, "from_iterable")
             value = obj.__get__(None, self.value)
-            return build_variable(tx, value, source)
+            return VariableTracker.create(tx, value, source)
         elif source:
             # __mro__ is a member in < 3.12, an attribute in >= 3.12
             if inspect.ismemberdescriptor(obj) or (
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
-                value = obj.__get__(self.value)
-                return build_variable(tx, value, source)
+                return VariableTracker.create(tx, obj.__get__(self.value), source)
 
         if inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
-            value = getattr(self.value, name)
-            return build_variable(tx, value, source)
+            return VariableTracker.create(tx, getattr(self.value, name), source)
 
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
@@ -217,14 +214,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             or self.value.__module__ == "torch"
         ):
             if source:
-                return build_variable(tx, obj, source)
+                return VariableTracker.create(tx, obj, source)
 
         if (
             source
             and not inspect.ismethoddescriptor(obj)
             and not is_wrapper_or_member_descriptor(obj)
         ):
-            return build_variable(tx, obj, source)
+            return VariableTracker.create(tx, obj, source)
 
         return super().var_getattr(tx, name)
 
@@ -437,7 +434,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         field_var = kwargs[field_name]
                     else:
                         assert field_name in field_defaults
-                        field_var = build_variable(tx, field_defaults[field_name])
+                        field_var = VariableTracker.create(
+                            tx, field_defaults[field_name]
+                        )
                     var_tracker_kwargs[field_name] = field_var
 
             for name, value in var_tracker_kwargs.items():
@@ -461,9 +460,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             continue
 
                         if field.default is not dataclasses.MISSING:
-                            var_tracker = build_variable(tx, field.default)
+                            var_tracker = VariableTracker.create(tx, field.default)
                         elif field.default_factory is not dataclasses.MISSING:
-                            factory_fn = build_variable(tx, field.default_factory)
+                            factory_fn = VariableTracker.create(
+                                tx, field.default_factory
+                            )
                             var_tracker = factory_fn.call_function(tx, [], {})
                         else:
                             # if we are subclass, the constructor could possibly
@@ -551,7 +552,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
         ):
             return tx.inline_user_function_return(
-                build_variable(tx, polyfills.instantiate_user_defined_class_object),
+                VariableTracker.create(
+                    tx, polyfills.instantiate_user_defined_class_object
+                ),
                 [self, *args],
                 kwargs,
             )
@@ -594,7 +597,6 @@ def call_random_fn(tx, fn, args, kwargs):
     # TODO: arguably, this should route to wrap_symint/wrap_symfloat
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
-
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
 
 
@@ -869,8 +871,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 unimplemented(
                     "Sourceless UserDefinedObjectVariable method not supported"
                 )
-            func_var = build_variable(tx, func, self.source, "__func__")
-            obj_var = build_variable(tx, obj, self.source, "__self__")
+            func_src = AttrSource(self.source, "__func__")
+            func_var = VariableTracker.create(tx, func, func_src)
+            obj_src = AttrSource(self.source, "__self__")
+            obj_var = VariableTracker.create(tx, obj, obj_src)
             return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif (
             istype(self.value, functools.partial)
@@ -1058,7 +1062,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif isinstance(subobj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static({}, "fromkeys")
             func = subobj.__get__(self.value, None)
-            return build_variable(tx, func, source)
+            return VariableTracker.create(tx, func, source)
         elif inspect.ismethoddescriptor(subobj) and not is_wrapper_or_member_descriptor(
             subobj.__get__
         ):
@@ -1153,7 +1157,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             subobj_from_class, src_from_class
                         )
 
-                return build_variable(tx, subobj)
+                return VariableTracker.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
         raise_observed_exception(AttributeError, tx, self)
@@ -1187,20 +1191,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             else key.as_python_constant()
         )
 
-        return build_variable(
-            tx,
-            collections.OrderedDict.__getitem__(self.value, key.as_python_constant()),
-            ODictGetItemSource(self.source, index),
+        value = collections.OrderedDict.__getitem__(
+            self.value, key.as_python_constant()
         )
+        source = ODictGetItemSource(self.source, index)
+        return VariableTracker.create(tx, value, source)
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
     @staticmethod
     def create(tx, value, source):
+        from dataclasses import fields
+
         assert is_frozen_dataclass(value)
 
-        fields = ((f.name, getattr(value, f.name)) for f in dataclasses.fields(value))
-        field_map = {k: build_variable(tx, v, source, k) for k, v in fields}
+        field_map = {}
+        for field in fields(value):
+            try:
+                attr = getattr(value, field.name)
+            except AttributeError:
+                pass
+            else:
+                field_map[field.name] = VariableTracker.create(
+                    tx, attr, source, field.name
+                )
 
         return FrozenDataClassVariable(value, fields=field_map, source=source)
 
@@ -1273,7 +1287,7 @@ class WeakRefVariable(UserDefinedObjectVariable):
         call_source = None
         referent = self.value()
         source = self.source and WeakRefCallSource(self.source)
-        return build_variable(tx, referent, source)
+        return VariableTracker.create(tx, referent, source)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):

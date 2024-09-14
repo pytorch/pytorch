@@ -23,7 +23,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import build_variable, MutableLocal, typestr, VariableTracker
+from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -46,7 +46,7 @@ def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
     if isinstance(val, VariableTracker):
         return val
     elif not source:
-        return build_variable(tx, val)
+        return VariableTracker.create(tx, val)
     else:
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
@@ -151,6 +151,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             fn,
             (types.BuiltinFunctionType, types.FunctionType, torch.jit.ScriptFunction),
         ), f"expected FunctionType found {typestr(fn)} {fn}"
+        # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
+        # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
@@ -248,7 +250,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             closure_cell, "cell_contents"
                         )
                         try:
-                            contents_var = build_variable(
+                            contents_var = VariableTracker.create(
                                 parent, cell.cell_contents, closure_cell_contents
                             )
                         except ValueError:
@@ -281,7 +283,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     result[name] = out
 
                 else:
-                    result[name] = build_variable(tx, cell.cell_contents)
+                    result[name] = VariableTracker.create(tx, cell.cell_contents)
 
         return result, closure_cells
 
@@ -297,7 +299,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return variables.GetAttrVariable(self, name, **options)
         if source:
             return variables.LazyVariableTracker.create(subobj, source)
-        return build_variable(tx, subobj)
+        return VariableTracker.create(tx, subobj)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         result = hasattr(self.fn, name)
@@ -736,7 +738,7 @@ class WrapperUserFunctionVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name == self.attr_to_trace:
             val = getattr(self.wrapper_obj, self.attr_to_trace)
-            return build_variable(tx, val, self.source, name)
+            return VariableTracker.create(tx, val, AttrSource(self.source, name))
 
         return super().var_getattr(tx, name)
 
@@ -980,9 +982,9 @@ class PolyfilledFunctionVariable(VariableTracker):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
             )
-            return build_variable(tx, result)
+            return VariableTracker.create(tx, result)
 
-        traceable_function_variable = build_variable(tx, self.traceable_fn)
+        traceable_function_variable = VariableTracker.create(tx, self.traceable_fn)
         return traceable_function_variable.call_function(tx, args, kwargs)
 
     def call_method(

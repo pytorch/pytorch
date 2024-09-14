@@ -14,7 +14,6 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
-from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
@@ -32,7 +31,7 @@ from ..exc import (
 )
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
-from .base import build_variable
+from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
@@ -1043,7 +1042,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 tx,
                 "new_empty",
                 args=(
-                    build_variable(
+                    VariableTracker.create(
                         tx,
                         leaf.size
                         if leaf.size is not None
@@ -1053,8 +1052,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ),
                 ),
                 kwargs={
-                    "dtype": build_variable(tx, leaf.dtype),
-                    "requires_grad": build_variable(tx, leaf.requires_grad),
+                    "dtype": VariableTracker.create(tx, leaf.dtype),
+                    "requires_grad": VariableTracker.create(tx, leaf.requires_grad),
                 },
             )
             for leaf in itertools.chain(xs.items, xs.items)
@@ -1176,7 +1175,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 tx,
                 "new_empty",
                 args=(
-                    build_variable(
+                    VariableTracker.create(
                         tx,
                         ini.size
                         if ini.size is not None
@@ -1190,9 +1189,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ),
                 ),
                 kwargs={
-                    "dtype": build_variable(tx, ini.dtype),
-                    "device": build_variable(tx, ini.device),
-                    "requires_grad": build_variable(tx, ini.requires_grad),
+                    "dtype": VariableTracker.create(tx, ini.dtype),
+                    "device": VariableTracker.create(tx, ini.device),
+                    "requires_grad": VariableTracker.create(tx, ini.requires_grad),
                 },
             )
             for ini in init.items
@@ -1214,11 +1213,11 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             inp.call_method(
                 tx,
                 "new_empty",
-                args=(build_variable(tx, inp_sh),),
+                args=(VariableTracker.create(tx, inp_sh),),
                 kwargs={
-                    "dtype": build_variable(tx, inp.dtype),
-                    "device": build_variable(tx, inp.device),
-                    "requires_grad": build_variable(tx, inp.requires_grad),
+                    "dtype": VariableTracker.create(tx, inp.dtype),
+                    "device": VariableTracker.create(tx, inp.device),
+                    "requires_grad": VariableTracker.create(tx, inp.requires_grad),
                 },
             )
             for inp, inp_sh in zip(xs.items, sub_args_inp_shapes)
@@ -1998,9 +1997,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             return query.call_method(
                 tx,
                 "new_empty",
-                (build_variable(tx, []),),
+                (VariableTracker.create(tx, []),),
                 {
-                    "dtype": build_variable(tx, torch.int32),
+                    "dtype": VariableTracker.create(tx, torch.int32),
                 },
             )
 
@@ -2010,8 +2009,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             score = query.call_method(
                 tx,
                 "new_empty",
-                (build_variable(tx, []),),
-                {"requires_grad": build_variable(tx, scores_require_grad)},
+                (VariableTracker.create(tx, []),),
+                {"requires_grad": VariableTracker.create(tx, scores_require_grad)},
             )
             new_args = [score, *bhmn]
         else:

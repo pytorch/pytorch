@@ -12,7 +12,6 @@ from sympy import Expr
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
-from torch._inductor.codegen.debug_utils import IntermediateValueDebuggingLevel
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
@@ -75,7 +74,7 @@ class CppWrapperCpu(WrapperCodeGen):
         call_args,
         grid=None,
         device_index=None,
-        cuda=True,
+        gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
@@ -87,19 +86,19 @@ class CppWrapperCpu(WrapperCodeGen):
         """
         Generates kernel call code.
 
-        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        if cuda:
+        if gpu:
             return super().generate_kernel_call(
                 kernel_name,
                 call_args,
                 grid,
                 device_index,
-                cuda,
+                gpu,
                 triton,
                 arg_types,
                 raw_args,
@@ -920,7 +919,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.prefix = cached_dtypes_buffer
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
+        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=False
     ):
         self.header.splice(f"\n{kernel}\n")
 
@@ -1214,14 +1213,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.allow_stack_allocation = False
 
         wrapped_args = []
-
-        args_to_print_or_save = None
         debug_printer_manager = V.graph.wrapper_code.debug_printer
-        if (
-            debug_printer_manager.debug_printer_level
-            != IntermediateValueDebuggingLevel.OFF
-        ):
-            args_to_print_or_save = []
 
         for x in args:
             pieces = x.split(", ")
@@ -1235,20 +1227,10 @@ class CppWrapperCpu(WrapperCodeGen):
                 if isinstance(piece, str) and piece.startswith(
                     ("buf", "arg", "wrap_with_raii_handle_if_needed")
                 ):
-                    # TODO: The current way to find a 'tensor' type arg is hacky also as mentioned above
-                    # Find a more reliable way to detect tensor kernel args for extern kernel calls
-                    if (
-                        debug_printer_manager.debug_printer_level
-                        != IntermediateValueDebuggingLevel.OFF
-                    ):
-                        if piece.startswith(("buf", "arg")):
-                            args_to_print_or_save.append(piece)
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 
-        debug_printer_manager.set_printer_args(
-            args_to_print_or_save, kernel, None, None
-        )
+        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel)
             self.writeline(

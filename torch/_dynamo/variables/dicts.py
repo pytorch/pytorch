@@ -16,7 +16,7 @@ from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
-from .base import build_variable, MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -957,7 +957,7 @@ class HFPretrainedConfigVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         try:
             attr_value = getattr(self.obj, name)
-            return build_variable(tx, attr_value, self.source, name)
+            return VariableTracker.create(tx, attr_value, AttrSource(self.source, name))
 
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
@@ -1024,7 +1024,8 @@ class PythonSysModulesVariable(VariableTracker):
         k, has_key = self._contains_helper(tx, key)
 
         if has_key:
-            return build_variable(tx, sys.modules[k], GetItemSource(self.source, k))
+            source = GetItemSource(self.source, k)
+            return VariableTracker.create(tx, sys.modules[k], source)
 
         if default is not None:
             return default
@@ -1033,4 +1034,4 @@ class PythonSysModulesVariable(VariableTracker):
 
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
         k, has_key = self._contains_helper(tx, key)
-        return build_variable(tx, sys.modules[k], GetItemSource(self.source, k))
+        return VariableTracker.create(tx, sys.modules[k], GetItemSource(self.source, k))

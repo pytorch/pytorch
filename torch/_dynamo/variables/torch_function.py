@@ -12,7 +12,7 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
 from ..utils import get_safe_global_name, has_torch_function, is_tensor_base_attr_getter
-from .base import build_variable, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
 from .lists import TupleVariable
@@ -181,7 +181,7 @@ def _get_subclass_type_var(tx: "InstructionTranslator", var):
         return var.class_type_var(tx)
     elif isinstance(var, UserDefinedObjectVariable):
         source = var.source and TypeSource(var.source)
-        return build_variable(tx, var.python_type(), source)
+        return VariableTracker.create(tx, var.python_type(), source)
 
 
 def _is_attr_overidden(tx: "InstructionTranslator", var, name):
@@ -206,17 +206,15 @@ def call_torch_function(
         torch_function_type,
         fn,
         types,
-        build_variable(tx, tuple(args)),
-        build_variable(tx, kwargs),
+        VariableTracker.create(tx, tuple(args)),
+        VariableTracker.create(tx, kwargs),
     )
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
 
 def build_torch_function_fn(tx: "InstructionTranslator", value, source):
-    if source is not None:
-        source = AttrSource(AttrSource(source, "__torch_function__"), "__func__")
-
-    return build_variable(tx, value.__torch_function__.__func__, source)
+    source = source and AttrSource(AttrSource(source, "__torch_function__"), "__func__")
+    return VariableTracker.create(tx, value.__torch_function__.__func__, source)
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
@@ -318,7 +316,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                         GuardBuilder.FUNCTION_MATCH
                     )
                 )
-            get_fn = build_variable(tx, getattr(torch.Tensor, name).__get__)
+            get_fn = VariableTracker.create(tx, getattr(torch.Tensor, name).__get__)
 
             return self.call_torch_function(
                 tx,
@@ -363,14 +361,13 @@ class TensorWithTFOverrideVariable(TensorVariable):
             # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
             # We've established with the above check that the method is not overridden, so we guard that the method is the same
             # as the impl defined on tensor and retrieve it
-            source = self.source and AttrSource(
-                AttrSource(self.source, "__class__"), name
-            )
-            if source:
+            if self.source:
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
                 value = inspect.getattr_static(self.python_type(), name)
             else:
+                source = None
                 value = getattr(torch.Tensor, name)
-            func_var = build_variable(tx, value, source)
+            func_var = VariableTracker.create(tx, value, source)
             return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
         else:
             return super().call_method(tx, name, args, kwargs)
