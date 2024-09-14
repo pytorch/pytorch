@@ -6,6 +6,8 @@ import unittest
 from typing import Callable, List, Optional
 from unittest import mock
 
+from test_aot_inductor_utils import AOTIRunnerUtil
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -22,12 +24,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-
-
-try:
-    from .test_aot_inductor import AOTIRunnerUtil
-except ImportError:
-    from test_aot_inductor import AOTIRunnerUtil
 
 
 torch.set_float32_matmul_precision("high")
